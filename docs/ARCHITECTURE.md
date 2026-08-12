@@ -14,7 +14,7 @@ Growth from junior to staff doesn't happen because someone hands you a "senior" 
 
 Nowhere does a document say "you are now senior." The reader infers their own growth from the fact that the problems they can now reason about used to be out of reach.
 
-## The nine tracks
+## The ten tracks
 
 - **`web/`** — how the web actually works, from a single HTTP request to systems serving millions of users.
 - **`systems/`** — operating systems, distributed systems, databases, reliability — the substrate everything else runs on.
@@ -25,10 +25,11 @@ Nowhere does a document say "you are now senior." The reader infers their own gr
 - **`infra-delivery/`** — the operational side of shipping software: containers, CI/CD, orchestration, Infrastructure as Code, progressive delivery, release engineering.
 - **`career-craft/`** — the mechanics of growing as an individual contributor: mentoring, interviewing, feedback, calibration, and what staff scope actually means day to day.
 - **`product-domain/`** — understanding what to build and why: domain modeling, requirements, and the commercial side of technical work — speaking the buyer's language well enough that value is not just understood but appreciated, funded, and closed.
+- **`corporate-politics/`** — power and influence as they actually operate inside an organization: legitimate ("white") influence-building, the gray zone of narrative and timing, what "black" politics (sabotage, credit-stealing, scapegoating) looks like in practice, and how to defend against it without becoming it.
 
-These are not silos. A staff-level problem in `web/` (e.g. architecting a system migration) leans on `systems/` (distributed consistency), `git-teamwork/` (incremental rollout via branching strategy), `infra-delivery/` (how the migration actually ships), `security/` (whether the new architecture is secure by design), `product-domain/` (whether the migration is worth funding to the business), and `business-communication/` (selling the migration to stakeholders) all at once. The tracks are a storage convenience, not a claim that the skills are separable.
+These are not silos. A staff-level problem in `web/` (e.g. architecting a system migration) leans on `systems/` (distributed consistency), `git-teamwork/` (incremental rollout via branching strategy), `infra-delivery/` (how the migration actually ships), `security/` (whether the new architecture is secure by design), `product-domain/` (whether the migration is worth funding to the business), `corporate-politics/` (whether it survives the org's power dynamics), and `business-communication/` (selling the migration to stakeholders) all at once. The tracks are a storage convenience, not a claim that the skills are separable.
 
-`product-domain/` and `business-communication/` are closely related but distinct: `business-communication/` is about communicating and negotiating *inside* the organization (stakeholders, peers, leadership); `product-domain/` is about understanding the domain well enough to build the right thing, and — at its later units — communicating and negotiating value *outward*, toward a paying client or partner.
+Three tracks sit close together but stay distinct: `business-communication/` is about communicating and negotiating *inside* the organization through legitimate, above-board channels (stakeholders, peers, leadership). `product-domain/` is about understanding the domain well enough to build the right thing, and — at its later units — communicating and negotiating value *outward*, toward a paying client or partner. `corporate-politics/` is about the layer underneath both: how power, credit, and influence actually move through an organization — including the parts that aren't said out loud — and how to operate there effectively and defensively without losing integrity.
 
 ## The three levels, and why they exist
 
@@ -65,6 +66,7 @@ systems-mastery/
   infra-delivery/ ...
   career-craft/ ...
   product-domain/ ...
+  corporate-politics/ ...
 ```
 
 ## How the roadmap and reality stay in sync

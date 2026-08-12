@@ -174,8 +174,27 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 12 | How do I turn one client win into a repeatable opportunity? (case studies, referrals, compounding momentum) | planned |
 | 13 | How does a staff engineer use technical credibility to close a strategic deal or partnership? (presales engineering, executive-level pitching, exploiting the opportunity, not just describing it) | planned |
 
+## corporate-politics/
+
+| # | Problem | Status |
+|---|---|---|
+| 01 | Why doesn't technical merit alone decide who wins in an organization? (power as a real resource, not a dirty word) | planned |
+| 02 | How does legitimate ("white") influence actually work? (reciprocity, alliance-building, being visibly useful) | planned |
+| 03 | How do I read the informal org chart, not just the official one? (who actually holds influence, real decision networks) | planned |
+| 04 | How do I bank goodwill before I need to spend it? (the favor economy, relationship capital) | planned |
+| 05 | What is "gray" politics, and where's the line before it turns dishonest? (strategic ambiguity, selective disclosure, timing information) | planned |
+| 06 | How do I control the narrative around my own work without lying? (framing, emphasis, owning the story honestly) | planned |
+| 07 | How do I read a room or meeting for what's not being said? (subtext, unstated agendas, silence as signal) | planned |
+| 08 | What does "black" politics actually look like in practice? (credit-stealing, scapegoating, sabotage, weaponized rumors, manufactured urgency) | planned |
+| 09 | How do I recognize I'm being set up to fail? (warning signs: shifting goalposts, exclusion from key threads, sudden isolation) | planned |
+| 10 | How do I protect myself with a paper trail without looking paranoid? (documentation discipline, written confirmations, CYA done well) | planned |
+| 11 | How do I respond when someone takes credit for my work? (calibrated confrontation, escalating correctly) | planned |
+| 12 | How do I build alliances that protect me before I need protecting? (coalition-building as defense, sponsors vs. mentors) | planned |
+| 13 | How do I stay effective in a highly political org without becoming what I dislike? (staying principled, choosing battles, knowing when to exit) | planned |
+| 14 | How does a staff engineer wield influence ethically at scale without playing dirty? (influence as a tool for the org's good, not personal power accumulation) | planned |
+
 ## Notes on ordering
 
 - Numbers reflect complexity ordering *within* a track, not a global session order.
 - Track choice per session is decided live (see `CLAUDE.md`), so it's normal and expected to jump between tracks rather than clearing one top-to-bottom.
-- Late-track units (e.g. `web/17`, `systems/17`, `git-teamwork/16`, `business-communication/14`, `logic/12`, `security/13`, `infra-delivery/12`, `career-craft/11`, `product-domain/13`) are intentionally where the tracks start blending into each other — that's the point at which staff-level judgment lives, and cross-references between tracks are expected there.
+- Late-track units (e.g. `web/17`, `systems/17`, `git-teamwork/16`, `business-communication/14`, `logic/12`, `security/13`, `infra-delivery/12`, `career-craft/11`, `product-domain/13`, `corporate-politics/14`) are intentionally where the tracks start blending into each other — that's the point at which staff-level judgment lives, and cross-references between tracks are expected there.
