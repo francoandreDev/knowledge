@@ -1,0 +1,70 @@
+# Architecture, essence, and structure
+
+## Why this project exists
+
+A personal reference built session by session to go from junior engineer to a genuinely solid staff-level engineer — not just breadth, but depth: the kind of understanding that survives being asked "why" three times in a row.
+
+## The essence: problems, not levels
+
+Growth from junior to staff doesn't happen because someone hands you a "senior" badge. It happens because the *problems you're trusted to solve* get harder, more ambiguous, and higher-stakes. So instead of organizing content by seniority label, every track is a sequence of real problems ordered by increasing complexity:
+
+- Early units: "how does X work at all" — mechanics, definitions, first principles.
+- Mid units: "how do I make X reliable / correct / not fall over" — trade-offs start to matter.
+- Late units: "how do I decide between two defensible answers with incomplete information, at scale, with other people involved" — this is what staff work actually looks like.
+
+Nowhere does a document say "you are now senior." The reader infers their own growth from the fact that the problems they can now reason about used to be out of reach.
+
+## The five tracks
+
+- **`web/`** — how the web actually works, from a single HTTP request to systems serving millions of users.
+- **`systems/`** — operating systems, distributed systems, databases, reliability — the substrate everything else runs on.
+- **`git-teamwork/`** — version control as a tool for collaborating with other humans over time, and the collaboration mechanics (review, conflict, ownership) built on top of it.
+- **`business-communication/`** — how technical work gets communicated, sold, negotiated, and defended inside an organization. Corporate language, stakeholder management, upward disagreement.
+- **`logic/`** — the reasoning substrate underneath all the others: formal and informal logic, decomposition, estimation under uncertainty.
+
+These are not silos. A staff-level problem in `web/` (e.g. architecting a system migration) leans on `systems/` (distributed consistency), `git-teamwork/` (incremental rollout via branching strategy), and `business-communication/` (selling the migration to stakeholders) all at once. The tracks are a storage convenience, not a claim that the skills are separable.
+
+## The three levels, and why they exist
+
+Each unit (a single problem→solution pair) is documented at three levels, because "understanding" a topic is really three different skills that get conflated:
+
+1. **L1 — Summary.** Can you name the shape of the problem and its key vocabulary? This is recall and orientation. It's what you skim before a meeting or interview to reload context fast.
+2. **L2 — Concept.** Can you explain the idea to another engineer at a whiteboard — the architecture, the pseudocode, the semantics — without writing production code? This is the mental model. Most technical discussions happen at this level.
+3. **L3 — Deep dive.** Can you actually build it, defend the trade-offs, and handle the edge cases in real code? This is where theory earns its keep.
+
+Skipping straight to L3 without L1/L2 tends to produce people who can write code but can't explain why, or explain trade-offs on a whiteboard. Stopping at L1/L2 produces people who sound right but haven't been tested by implementation. All three are required for a unit to be "done."
+
+## Structure on disk
+
+```
+systems-mastery/
+  CLAUDE.md              # generation/evolution rules (binding)
+  README.md              # human-facing overview
+  ROADMAP.md             # full topic list per track, source of truth for scope
+  PROGRESS.md            # session-by-session log of what's been written
+  docs/
+    ARCHITECTURE.md       # this file
+  web/
+    01-<slug>/
+      L1-summary.md
+      L2-concept.md
+      L3-deep-dive.md (or L3-deep-dive/ folder)
+    02-<slug>/
+      ...
+  systems/ ...
+  git-teamwork/ ...
+  business-communication/ ...
+  logic/ ...
+```
+
+## How the roadmap and reality stay in sync
+
+`ROADMAP.md` is the plan; it is written and approved once up front but is expected to drift as understanding deepens (a unit turns out to need splitting, a problem was misordered, a new problem becomes obviously necessary). Whenever a session changes the plan, `ROADMAP.md` is updated in the same session — it should always be readable as "what's actually true," not "what we guessed at the start."
+
+`PROGRESS.md` is the log — append-only, one entry per session, never rewritten retroactively except to fix factual errors.
+
+## Session cadence
+
+One unit per session, by design (see `CLAUDE.md` rule 2). This is deliberate: the goal is depth and retention, not coverage speed. A rushed L3 with copy-pasted code isn't worth more than a well-reasoned L1.
+
+Track order is not fixed in advance. The roadmap groups problems by track for clarity, but which track gets attention in a given session is a live decision — see `CLAUDE.md` session workflow.
