@@ -14,7 +14,7 @@ Growth from junior to staff doesn't happen because someone hands you a "senior" 
 
 Nowhere does a document say "you are now senior." The reader infers their own growth from the fact that the problems they can now reason about used to be out of reach.
 
-## The fifteen tracks
+## The sixteen tracks
 
 - **`web/`** — how the web actually works, from a single HTTP request to systems serving millions of users.
 - **`systems/`** — operating systems, distributed systems, databases, reliability — the substrate everything else runs on.
@@ -31,12 +31,15 @@ Nowhere does a document say "you are now senior." The reader infers their own gr
 - **`testing-quality/`** — the craft of testing itself: the test pyramid, TDD/BDD, test doubles, flaky tests, mutation and property-based testing, contract testing, and building a culture where quality isn't someone else's job.
 - **`software-design/`** — the craft of designing maintainable code: cohesion/coupling, SOLID, OOP vs. functional trade-offs, design patterns (and their misuse), refactoring, technical debt, API design, evolutionary design.
 - **`sustainable-performance/`** — the personal sustainability layer: energy and attention management, recognizing and recovering from burnout, boundary-setting, and pacing a career over a decade rather than a good quarter.
+- **`people-management/`** — the mechanics of formally managing people: 1:1s, delegation, feedback, hiring, performance management, terminations, org design, and eventually managing managers. Added specifically because the user plans to lead teams — it's the one track scoped to a management path rather than a pure individual-contributor one, and is not a prerequisite for the "staff engineer" framing the rest of the roadmap uses.
 
 `learning-craft/` is transversal in the same sense `logic/` is (see below) — it doesn't sit "above" the other tracks so much as run through all of them: every unit in this project is, itself, an exercise in the skills `learning-craft/` documents. `applied-math/` is transversal in a narrower, more concrete sense: `logic/` is about reasoning correctly in general; `applied-math/` is about reasoning *quantitatively* — putting a real number on a claim instead of a hunch — and its later units point back explicitly at `systems/` and `web/` units where the same math is load-bearing (capacity planning, latency/throughput trade-offs, statistical significance in an A/B test, cost modeling for infrastructure).
 
 `testing-quality/` and `software-design/` sit in a similar relationship to `web/` and `systems/` as `applied-math/` does: they document crafts that get *used* throughout implementation-heavy units in those tracks but are general enough (language- and domain-agnostic) to deserve their own sequence rather than being repeated piecemeal inside every unit that needs them.
 
 `sustainable-performance/` is distinct from `career-craft/`: `career-craft/` is about the mechanics of growing and being recognized (mentoring, interviewing, calibration, negotiation); `sustainable-performance/` is about the personal capacity that makes any of that possible to sustain — energy, attention, recovery, boundaries. A staff engineer who burns out is not solving the problems `career-craft/` describes.
+
+`people-management/` is also distinct from three tracks it might look adjacent to: `career-craft/` is about growing yourself as an IC (and does include light mentoring/interviewing), while `people-management/` is about the ongoing formal responsibility for other people's work, growth, and employment. `corporate-politics/` is about power and influence as they actually move through an org, largely informally; `people-management/` is about the formal authority and processes of managing a team. `business-communication/` is about communicating and negotiating with peers and stakeholders; `people-management/` is specifically about the manager-report relationship.
 
 These are not silos. A staff-level problem in `web/` (e.g. architecting a system migration) leans on `systems/` (distributed consistency), `git-teamwork/` (incremental rollout via branching strategy), `infra-delivery/` (how the migration actually ships), `security/` (whether the new architecture is secure by design), `product-domain/` (whether the migration is worth funding to the business), `corporate-politics/` (whether it survives the org's power dynamics), and `business-communication/` (selling the migration to stakeholders) all at once. The tracks are a storage convenience, not a claim that the skills are separable.
 
@@ -83,6 +86,7 @@ systems-mastery/
   testing-quality/ ...
   software-design/ ...
   sustainable-performance/ ...
+  people-management/ ...
 ```
 
 ## How the roadmap and reality stay in sync

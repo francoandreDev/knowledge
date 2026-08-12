@@ -2,7 +2,7 @@
 
 A self-study reference for growing from junior engineer to a solid staff-level engineer, built session by session.
 
-Covers fifteen tracks:
+Covers sixteen tracks:
 
 - `web/` — how the web works, from a single HTTP request to systems serving millions of users.
 - `systems/` — operating systems, distributed systems, databases, reliability.
@@ -19,6 +19,7 @@ Covers fifteen tracks:
 - `testing-quality/` — the craft of testing: test pyramid, TDD/BDD, test doubles, flaky tests, mutation/property-based testing, contract testing, quality culture.
 - `software-design/` — the craft of maintainable code: SOLID, OOP vs. functional, design patterns, refactoring, technical debt, API design.
 - `sustainable-performance/` — the personal sustainability layer: energy/attention management, burnout recovery, boundaries, pacing a career over a decade.
+- `people-management/` — the mechanics of formally leading a team: 1:1s, delegation, feedback, hiring, performance management, terminations, org design, managing managers.
 
 Each track is a sequence of real problems ordered by increasing complexity — no explicit junior/mid/senior/staff labels. Each problem ("unit") is documented at three levels: a quick summary, the underlying concept/architecture, and an extensive deep dive with real code.
 

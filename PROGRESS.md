@@ -48,4 +48,11 @@ Append-only session log. One entry per session that produces or completes conten
 - User chose all four: added `testing-quality/` (13 units), `software-design/` (13 units), and `sustainable-performance/` (8 units) as new tracks; added 2 compensation-negotiation units to the existing `career-craft/` (now 13 units) rather than a new track, since negotiation is a career mechanic, not a separate family.
 - Updated `ROADMAP.md`, `docs/ARCHITECTURE.md` (added relationship notes: `testing-quality/`+`software-design/` relate to `web/`/`systems/` the way `applied-math/` does; `sustainable-performance/` distinguished from `career-craft/`), `CLAUDE.md`, `README.md` to reflect 15 tracks.
 - Total roadmap now 190 units across 15 tracks, all `planned`. User has been asked twice now whether the roadmap is complete — treat a third "any gaps?" pass as the point to push back gently on further expansion in favor of starting content, unless a clearly distinct new gap appears.
+
+## 2026-08-12 — Roadmap expansion: people-management track
+
+- User confirmed they specifically plan to lead teams, so added `people-management/` (15 units): the IC-to-manager transition, 1:1s, delegation, feedback (SBI), goal-setting/OKRs, spotting struggling reports early, conflict mediation, hiring, onboarding, performance calibration, PIPs, terminations, team resilience/succession, org design, and managing managers.
+- This track is explicitly scoped to a management path, not assumed universal — noted as such in `docs/ARCHITECTURE.md` and `ROADMAP.md`, distinguishing it from `career-craft/` (growing yourself as an IC), `corporate-politics/` (informal power/influence), and `business-communication/` (peer/stakeholder communication).
+- Updated `ROADMAP.md`, `docs/ARCHITECTURE.md`, `CLAUDE.md`, `README.md` to reflect 16 tracks.
+- Total roadmap now 205 units across 16 tracks, all `planned`.
 - Next: pick the first unit and track together with the user.

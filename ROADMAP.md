@@ -282,6 +282,26 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 07 | How do I keep growing technically without it consuming my whole identity? (sustainable long-term learning pace) | planned |
 | 08 | How does a staff engineer sustain high output over a decade, not just a good quarter? (long-horizon sustainability, pacing a career like a marathon) | planned |
 
+## people-management/
+
+| # | Problem | Status |
+|---|---|---|
+| 01 | Why does managing people require different skills than being good at the work itself? (IC excellence vs. management, the transition problem) | planned |
+| 02 | How do I run a 1:1 that's actually useful, not just a status check? (1:1 structure, listening, coaching questions) | planned |
+| 03 | How do I delegate work without either micromanaging or abandoning it? (delegation levels, trust but verify) | planned |
+| 04 | How do I give feedback that changes behavior instead of just being heard? (SBI framework, feedback timing, difficult conversations) | planned |
+| 05 | How do I set goals for a team that actually align with what the org needs? (goal-setting, OKRs, translating strategy downward) | planned |
+| 06 | How do I know if someone on my team is struggling before it's a crisis? (early signals, psychological safety, checking in) | planned |
+| 07 | How do I handle conflict between two people on my team? (mediation, staying neutral, addressing root cause) | planned |
+| 08 | How do I hire well instead of just filling a seat? (defining the role, structured hiring loop, avoiding the halo effect) | planned |
+| 09 | How do I onboard someone so they're productive fast without overwhelming them? (onboarding design, ramp plans) | planned |
+| 10 | How do I evaluate performance fairly across a team with different roles and levels? (calibration, avoiding recency/bias, writing honest reviews) | planned |
+| 11 | How do I have the conversation when someone isn't meeting the bar? (performance improvement plans, documentation, the conversation itself) | planned |
+| 12 | How do I let someone go with both fairness and care? (termination process, dignity, legal/practical basics) | planned |
+| 13 | How do I build a team that's resilient to any one person leaving? (bus factor, succession, knowledge distribution) | planned |
+| 14 | How do I decide how to structure a growing team? (org design, span of control, when to split a team) | planned |
+| 15 | How do I lead managers, not just individual contributors? (management of managers, setting culture at scale, second-order leadership) | planned |
+
 ## Notes on ordering
 
 - Numbers reflect complexity ordering *within* a track, not a global session order.
@@ -290,3 +310,4 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 - `logic/`, `learning-craft/`, and `applied-math/` are all transversal (see `docs/ARCHITECTURE.md`) — in practice they tend to get reinforced by every other track rather than studied in total isolation, but each still has its own complete sequence here. In particular, `applied-math/06`, `07`, and `12` are expected to be cross-referenced directly from `systems/` and `web/` units on load, capacity, and reliability.
 - `testing-quality/` and `software-design/` are expected to be cross-referenced constantly from `web/` and `systems/` units — they document the craft underneath most implementation work in those tracks, at a level of generality neither track covers on its own.
 - `career-craft/12` and `13` (compensation negotiation) were added as an extension of the existing track rather than a new one — negotiation is a career mechanic, not a separate family.
+- `people-management/` was added because the user specifically plans to lead teams — it is not assumed as universal staff-track content. It is the one track in this roadmap explicitly scoped to a management path rather than a pure-IC path, and leans on `career-craft/`, `corporate-politics/`, and `business-communication/` throughout (e.g. `people-management/04` on feedback pairs directly with `git-teamwork/12` on code review feedback, and `people-management/15` on leading managers is close in spirit to `corporate-politics/14` on ethical influence at scale).
