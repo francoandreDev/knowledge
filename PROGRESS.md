@@ -27,4 +27,11 @@ Append-only session log. One entry per session that produces or completes conten
 - Added `corporate-politics/` (14 units), progressing from legitimate influence-building, through the gray zone of narrative/timing, to what black politics looks like in practice, defensive tactics (paper trails, reading warning signs, alliances), and staff-level ethical use of influence.
 - Updated `ROADMAP.md`, `docs/ARCHITECTURE.md` (distinguishing it from `business-communication/` and `product-domain/`), `CLAUDE.md`, `README.md` to reflect 10 tracks.
 - Total roadmap now 139 units across 10 tracks, all `planned`.
+
+## 2026-08-12 — Roadmap expansion: learning-craft track
+
+- User asked for a transversal track on finding and learning information correctly and faster, with good judgment.
+- Added `learning-craft/` (13 units): source evaluation, search literacy, real understanding vs. recognition (Feynman technique), retention (spaced repetition/active recall), fast codebase onboarding, evaluating conflicting expert opinions, using AI tools without atrophying judgment, personal knowledge systems, prioritizing depth vs. skimming, staying current without noise, building calibrated technical judgment, and staff-level fast-learning-across-domains.
+- Updated `ROADMAP.md`, `docs/ARCHITECTURE.md` (framed as transversal alongside `logic/`), `CLAUDE.md`, `README.md` to reflect 11 tracks.
+- Total roadmap now 152 units across 11 tracks, all `planned`.
 - Next: pick the first unit and track together with the user.

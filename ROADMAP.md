@@ -193,8 +193,27 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 13 | How do I stay effective in a highly political org without becoming what I dislike? (staying principled, choosing battles, knowing when to exit) | planned |
 | 14 | How does a staff engineer wield influence ethically at scale without playing dirty? (influence as a tool for the org's good, not personal power accumulation) | planned |
 
+## learning-craft/
+
+| # | Problem | Status |
+|---|---|---|
+| 01 | Why doesn't reading more mean learning more? (exposure vs. understanding) | planned |
+| 02 | How do I find information I can actually trust? (source evaluation, primary vs. secondary sources, credibility signals) | planned |
+| 03 | How do I ask a question well enough to get a useful answer? (search literacy: framing queries, going to docs/specs/source directly) | planned |
+| 04 | How do I know when I've actually understood something vs. just recognized it? (the Feynman technique, teach-back, the illusion of competence) | planned |
+| 05 | How do I retain what I learn instead of relearning it every few months? (spaced repetition, retrieval practice, active recall) | planned |
+| 06 | How do I learn a new codebase or system fast? (systematic exploration: entry points, tracing execution, reading tests first) | planned |
+| 07 | How do I evaluate conflicting expert opinions? (weighing credibility, incentives, recency, consensus vs. individual claims) | planned |
+| 08 | How do I use AI/LLM tools to learn faster without atrophying my own judgment? (verification habits, not outsourcing understanding) | planned |
+| 09 | How do I build a personal system for capturing and resurfacing what I learn? (notes, spaced review, second-brain practices) | planned |
+| 10 | How do I decide what's worth learning deeply vs. skimming? (prioritization, the cost of depth, just-in-time vs. just-in-case learning) | planned |
+| 11 | How do I keep up with a fast-moving field without drowning in noise? (curation, filtering, signal vs. hype) | planned |
+| 12 | How do I develop good technical judgment, not just knowledge? (calibration, learning from being wrong, building intuition through deliberate practice) | planned |
+| 13 | How does a staff engineer learn fast enough to be credible across domains they don't own? (breadth-depth trade-off at scale, asking the right expert the right question) | planned |
+
 ## Notes on ordering
 
 - Numbers reflect complexity ordering *within* a track, not a global session order.
 - Track choice per session is decided live (see `CLAUDE.md`), so it's normal and expected to jump between tracks rather than clearing one top-to-bottom.
-- Late-track units (e.g. `web/17`, `systems/17`, `git-teamwork/16`, `business-communication/14`, `logic/12`, `security/13`, `infra-delivery/12`, `career-craft/11`, `product-domain/13`, `corporate-politics/14`) are intentionally where the tracks start blending into each other — that's the point at which staff-level judgment lives, and cross-references between tracks are expected there.
+- Late-track units (e.g. `web/17`, `systems/17`, `git-teamwork/16`, `business-communication/14`, `logic/12`, `security/13`, `infra-delivery/12`, `career-craft/11`, `product-domain/13`, `corporate-politics/14`, `learning-craft/13`) are intentionally where the tracks start blending into each other — that's the point at which staff-level judgment lives, and cross-references between tracks are expected there.
+- `logic/` and `learning-craft/` are both transversal (see `docs/ARCHITECTURE.md`) — in practice they tend to get reinforced by every other track rather than studied in total isolation, but each still has its own complete sequence here.

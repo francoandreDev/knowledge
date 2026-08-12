@@ -2,7 +2,7 @@
 
 A self-study reference for growing from junior engineer to a solid staff-level engineer, built session by session.
 
-Covers ten tracks:
+Covers eleven tracks:
 
 - `web/` — how the web works, from a single HTTP request to systems serving millions of users.
 - `systems/` — operating systems, distributed systems, databases, reliability.
@@ -14,6 +14,7 @@ Covers ten tracks:
 - `career-craft/` — the mechanics of growing as an individual contributor: mentoring, interviewing, feedback, staff scope.
 - `product-domain/` — understanding what to build, modeling the business domain, and selling value to a client — speaking their language well enough to be appreciated, not just understood.
 - `corporate-politics/` — how power and influence really move in an organization: legitimate ("white") influence, the gray zone, what "black" politics looks like in practice, and how to defend against it without becoming it.
+- `learning-craft/` — transversal: how to find trustworthy information fast, learn it correctly, retain it, and build good judgment instead of just accumulating facts.
 
 Each track is a sequence of real problems ordered by increasing complexity — no explicit junior/mid/senior/staff labels. Each problem ("unit") is documented at three levels: a quick summary, the underlying concept/architecture, and an extensive deep dive with real code.
 

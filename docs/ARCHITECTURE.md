@@ -14,7 +14,7 @@ Growth from junior to staff doesn't happen because someone hands you a "senior" 
 
 Nowhere does a document say "you are now senior." The reader infers their own growth from the fact that the problems they can now reason about used to be out of reach.
 
-## The ten tracks
+## The eleven tracks
 
 - **`web/`** — how the web actually works, from a single HTTP request to systems serving millions of users.
 - **`systems/`** — operating systems, distributed systems, databases, reliability — the substrate everything else runs on.
@@ -26,6 +26,9 @@ Nowhere does a document say "you are now senior." The reader infers their own gr
 - **`career-craft/`** — the mechanics of growing as an individual contributor: mentoring, interviewing, feedback, calibration, and what staff scope actually means day to day.
 - **`product-domain/`** — understanding what to build and why: domain modeling, requirements, and the commercial side of technical work — speaking the buyer's language well enough that value is not just understood but appreciated, funded, and closed.
 - **`corporate-politics/`** — power and influence as they actually operate inside an organization: legitimate ("white") influence-building, the gray zone of narrative and timing, what "black" politics (sabotage, credit-stealing, scapegoating) looks like in practice, and how to defend against it without becoming it.
+- **`learning-craft/`** — the transversal skill underneath all nine content tracks: how to find trustworthy information fast, tell real understanding from recognition, retain it, and build good technical judgment rather than just accumulating facts.
+
+`learning-craft/` is transversal in the same sense `logic/` is (see below) — it doesn't sit "above" the other tracks so much as run through all of them: every unit in this project is, itself, an exercise in the skills `learning-craft/` documents.
 
 These are not silos. A staff-level problem in `web/` (e.g. architecting a system migration) leans on `systems/` (distributed consistency), `git-teamwork/` (incremental rollout via branching strategy), `infra-delivery/` (how the migration actually ships), `security/` (whether the new architecture is secure by design), `product-domain/` (whether the migration is worth funding to the business), `corporate-politics/` (whether it survives the org's power dynamics), and `business-communication/` (selling the migration to stakeholders) all at once. The tracks are a storage convenience, not a claim that the skills are separable.
 
@@ -67,6 +70,7 @@ systems-mastery/
   career-craft/ ...
   product-domain/ ...
   corporate-politics/ ...
+  learning-craft/ ...
 ```
 
 ## How the roadmap and reality stay in sync
