@@ -4,7 +4,7 @@ This file governs how content is generated and evolved in this project across se
 
 ## What this project is
 
-A self-study reference the user is building to grow from junior to a solid staff-level engineer. It covers five tracks: `web/`, `systems/`, `git-teamwork/`, `business-communication/`, `logic/`. See `docs/ARCHITECTURE.md` for the full rationale and `ROADMAP.md` for the topic list.
+A self-study reference the user is building to grow from junior to a solid staff-level engineer. It covers eight tracks: `web/`, `systems/`, `git-teamwork/`, `business-communication/`, `logic/`, `security/`, `infra-delivery/`, `career-craft/`. See `docs/ARCHITECTURE.md` for the full rationale and `ROADMAP.md` for the topic list.
 
 ## Non-negotiable generation rules
 

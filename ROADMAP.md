@@ -105,8 +105,59 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 11 | How do I formally model a messy real-world problem well enough to solve it? (abstraction, formal modeling) | planned |
 | 12 | How does a staff engineer reason about trade-offs with no clearly right answer? (multi-criteria decisions under ambiguity) | planned |
 
+## security/
+
+| # | Problem | Status |
+|---|---|---|
+| 01 | Why doesn't "it works" mean "it's safe"? (the security mindset, threat modeling basics) | planned |
+| 02 | How do we prove someone is who they claim to be? (authentication fundamentals, passwords, hashing) | planned |
+| 03 | How do we decide what an authenticated user is allowed to do? (authorization models: RBAC/ABAC) | planned |
+| 04 | Why does storing a password in plain text guarantee disaster? (hashing, salting, key derivation) | planned |
+| 05 | How do we keep data unreadable to anyone but the intended recipient? (symmetric vs. asymmetric encryption basics) | planned |
+| 06 | Why doesn't a green padlock mean a site is safe? (TLS/HTTPS, certificate trust chains) | planned |
+| 07 | How does an attacker actually break into a web app? (OWASP top 10, in depth) | planned |
+| 08 | How do we stop leaking secrets into code and logs? (secrets management, environment hygiene) | planned |
+| 09 | Why did a "trusted" open-source dependency compromise production? (supply chain security, SBOM, dependency scanning) | planned |
+| 10 | How do we design a system assuming a component will be breached? (defense in depth, least privilege, zero trust) | planned |
+| 11 | How do we find our own vulnerabilities before attackers do? (security testing: SAST/DAST, pentesting basics) | planned |
+| 12 | How do we respond when a breach actually happens? (incident response, disclosure, post-mortems) | planned |
+| 13 | How does a staff engineer bake security into architecture decisions from day one? (secure-by-design, threat modeling at system-design time) | planned |
+
+## infra-delivery/
+
+| # | Problem | Status |
+|---|---|---|
+| 01 | Why does "it works on my machine" keep happening? (environment parity, containers basics) | planned |
+| 02 | How do we package an app so it runs the same everywhere? (Docker, images vs. containers) | planned |
+| 03 | How does code get from a commit to running in production? (CI/CD pipeline anatomy) | planned |
+| 04 | Why do manual deploys eventually cause an outage? (deployment automation, repeatability) | planned |
+| 05 | How do we run many containers reliably across many machines? (orchestration basics: Kubernetes concepts) | planned |
+| 06 | How do we change infrastructure without clicking through a console? (Infrastructure as Code) | planned |
+| 07 | How do we ship a risky change without risking everyone? (progressive delivery: canary, blue-green, feature flags) | planned |
+| 08 | How do we undo a bad deploy fast? (rollback strategy, deployment safety nets) | planned |
+| 09 | Why does the same code behave differently in staging vs. prod? (config management, environment-specific behavior) | planned |
+| 10 | How do we know if our infrastructure itself is healthy? (infra observability, SLOs/SLIs, alerting) | planned |
+| 11 | How do we avoid a surprise cloud bill? (cost awareness, resource right-sizing) | planned |
+| 12 | How do we design a deployment architecture that survives a bad Friday deploy? (staff-level release engineering strategy) | planned |
+
+## career-craft/
+
+| # | Problem | Status |
+|---|---|---|
+| 01 | What does "good" actually look like at each stage of an engineering career? (leveling expectations, scope vs. title) | planned |
+| 02 | How do I get useful feedback instead of vague praise? (asking for feedback, calibration) | planned |
+| 03 | How do I help a junior teammate grow without doing their job for them? (mentoring fundamentals) | planned |
+| 04 | How do I know if someone should get the job? (structured interviewing, avoiding bias) | planned |
+| 05 | How do I build a growth plan that isn't just "work harder"? (goal-setting, skill gap analysis) | planned |
+| 06 | Why doesn't being technically right guarantee being seen as senior? (impact and scope over correctness) | planned |
+| 07 | How do I make my work visible without it feeling like bragging? (documentation as a career tool, brag docs) | planned |
+| 08 | How do performance calibrations actually work? (calibration processes, promotion packets) | planned |
+| 09 | How do I decide between staying an IC or moving into management? (IC vs. EM tracks, self-assessment) | planned |
+| 10 | How do I mentor someone who is more senior than me in a different way? (peer mentoring, skip-level relationships) | planned |
+| 11 | What does a staff engineer actually own that a senior doesn't? (staff scope: technical direction, org-level leverage) | planned |
+
 ## Notes on ordering
 
 - Numbers reflect complexity ordering *within* a track, not a global session order.
 - Track choice per session is decided live (see `CLAUDE.md`), so it's normal and expected to jump between tracks rather than clearing one top-to-bottom.
-- Late-track units (e.g. `web/17`, `systems/17`, `git-teamwork/16`, `business-communication/14`, `logic/12`) are intentionally where the tracks start blending into each other — that's the point at which staff-level judgment lives, and cross-references between tracks are expected there.
+- Late-track units (e.g. `web/17`, `systems/17`, `git-teamwork/16`, `business-communication/14`, `logic/12`, `security/13`, `infra-delivery/12`, `career-craft/11`) are intentionally where the tracks start blending into each other — that's the point at which staff-level judgment lives, and cross-references between tracks are expected there.
