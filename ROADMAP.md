@@ -8,7 +8,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 
 | #   | Slug                          | Problem                                                                                                                 | Status  |
 | --- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------- |
-| 01  | http-request-response-basics  | How does a browser turn a URL into a rendered page? (HTTP request/response basics)                                      | planned |
+| 01  | http-request-response-basics  | How does a browser turn a URL into a rendered page? (HTTP request/response basics)                                      | done    |
 | 02  | need-html-semantics-just-divs | Why do we need HTML semantics instead of just divs?                                                                     | planned |
 | 03  | css-cascade-specificity       | How do we style once and reuse everywhere? (CSS cascade & specificity)                                                  | planned |
 | 04  | dom-event-model               | How does a page react to user input without reloading? (the DOM event model)                                            | planned |

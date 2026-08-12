@@ -80,3 +80,14 @@ Append-only session log. One entry per session that produces or completes conten
 - Verified the whole loop end-to-end with a throwaway scaffolded unit (`web/http-request-response-basics`, since removed, status reverted to `planned`): `new:unit` → `validate:content` correctly flagging staleness → `generate:roadmap` clearing it → cleanup.
 - No study content has been written yet. All 218 units remain `planned`.
 - Next: pick the first unit and track together with the user.
+
+## 2026-08-12 — First real unit: web/http-request-response-basics (done)
+
+- Wrote the first actual study content, to validate the whole pipeline (structure, tooling, and the site itself) end-to-end with real material rather than a throwaway fixture. `web/01 — HTTP request/response basics`, chosen as the most foundational, broadly-illustrative unit: it exercises a Mermaid diagram, pseudocode, and real runnable code, which most other units will need some subset of.
+- L3 code examples (`raw-request.mjs` client, `raw-server.mjs` server, both raw `node:net` sockets with no HTTP library) were actually run under `bun run` and verified against each other locally (not just written and assumed correct) — confirmed `GET /time` and a 404 path both round-trip correctly before considering the unit done.
+- Found and fixed a real rendering bug while reviewing the built page in Chrome: Mermaid sequence diagrams mirror actor boxes at the bottom by default, and in our narrow content column that mirrored repeat overlapped the diagram's last note/message instead of getting its own space. Fixed globally via `sequence: { mirrorActors: false }` in `Layout.astro`'s Mermaid init — affects every future Mermaid sequence diagram in the project, not just this unit. (Caught via a user-provided screenshot after a `<br/>`-in-message-text overlap was already fixed — worth remembering: always scroll/screenshot the *entire* rendered diagram, not just what's initially in viewport, since Mermaid layout bugs can be low enough to be off-screen on first look.)
+- Ran `bun run check` clean (0 lint/format/type errors, content validation passed, 9/9 tests, build succeeded) both before and after the Mermaid fix, and visually reviewed all three levels (L1/L2/L3) live in Chrome via `astro preview --background`.
+- Marked `web/http-request-response-basics` `done` in `ROADMAP.md` (all three levels complete, not just started) and ran `generate:roadmap`.
+- Confirms the structure works for both sides as designed: `new:unit` → write content → `check` → visual review → mark `done` is a clean, repeatable loop with no friction found other than the Mermaid bug above (now fixed for all future units).
+- 1/218 units done.
+- Next: pick the next unit and track together with the user.
