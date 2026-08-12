@@ -28,24 +28,11 @@ BLUF = **B**ottom **L**ine **U**p **F**ront — state the conclusion or ask in t
 
 ## The decision procedure
 
-This is the mental checklist behind every rewrite in L3 — not literal code, but the same shape every time:
+This is the mental checklist behind every rewrite in L3 — not a formula, but the same four questions applied consistently instead of improvised fresh each time:
 
-```python
-function compose_message(facts, audience):
-    known = what_audience_already_knows(audience)
-    stake = what_audience_is_measured_on(audience)
+1. **What does this audience already know?** Anything already known doesn't need re-explaining — including it is padding, not clarity.
+2. **What are they actually measured on?** Filter the facts down to the ones that bear on that stake — a true fact that's irrelevant to their stake is noise, not detail, no matter how technically interesting it is.
+3. **What decision or reaction do I actually need from them?** This is the ask — even an informational message has an implicit one ("just be aware," "don't worry about this").
+4. **Does this channel expect the bottom line first?** If so, lead with the ask and follow with supporting detail; if not (a peer conversation with shared context), the supporting detail can come first and the ask can trail it.
 
-    relevant_facts = filter(facts, keep_if=lambda f: affects(f, stake))
-    # Anything the audience already knows doesn't need re-explaining;
-    # anything irrelevant to their stake is noise, not detail.
-    surfaced = remove(relevant_facts, already_known=known)
-
-    ask = what_decision_or_reaction_do_i_need(audience)
-
-    if audience.channel_expects_bluf:
-        return lead_with(ask) + supporting(surfaced)
-    else:
-        return surfaced + trailing(ask)
-```
-
-Note this is pseudocode illustrating a decision procedure, not a claim that message-writing is literally computable — the point is that the same three questions (what do they know, what do they need, what's the ask) get applied consistently, not improvised fresh each time.
+The same four questions, asked in the same order, are what actually changed between the three versions in L3 — not a different process per audience, the same process applied to different answers.

@@ -15,15 +15,7 @@ Every arrow in this chain is locally reasonable — the request was clear, the b
 
 ## The five whys, applied
 
-```python
-function find_underlying_need(stated_request):
-    current = stated_request
-    for _ in range(5):
-        current = ask("Why do you need that?", current)
-        if is_root_need(current):   # a need, not another solution
-            return current
-    return current  # stop after ~5; further whys tend to over-abstract
-```
+Starting from the stated request, keep asking "why do you need that?" — roughly five times, in practice — checking after each answer whether it's landed on an actual **need** or just another layer of solution. Once an answer stops naming a solution and starts naming a need, stop; pushing much further than five tends to over-abstract into something too generic to act on ("I need to feel secure in my job," five whys deep on a bug report, is no longer useful).
 
 ```
 "I want a CSV export"

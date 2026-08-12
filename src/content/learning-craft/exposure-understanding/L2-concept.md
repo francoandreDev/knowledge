@@ -27,25 +27,7 @@ Re-reading a passage a second or third time makes the _processing_ easier — yo
 
 ## The Feynman technique as a forcing function
 
-```python
-function feynman_check(concept):
-    explanation = explain_in_plain_language(concept, audience="someone with no background")
-    # No looking at the source while doing this — the entire point is
-    # testing what's retrievable from memory, not what's recognizable
-    # when read again.
-
-    gaps = []
-    for step in explanation:
-        if uses_jargon_without_defining_it(step):
-            gaps.append(step)   # jargon substituting for an actual mechanism
-        if hand_waves("and then it just works"):
-            gaps.append(step)   # the exact spot understanding is missing
-
-    if gaps:
-        return study_specifically(gaps)  # targeted, not "reread everything"
-    else:
-        return "understood"
-```
+Explain the concept in plain language, to an imagined audience with no background — with no looking at the source while doing it, since the entire point is testing what's retrievable from memory, not what's recognizable when read again. Then scan the explanation for two specific tells: a term used without ever explaining what it actually means (jargon substituting for a mechanism), and any point where the explanation resorts to "and then it just works" (a hand-wave marking exactly where the understanding runs out). Wherever either tell shows up, that's precisely what to study next — not the whole topic again, just that gap. Only once the explanation runs clean, with no jargon-as-placeholder and no hand-waves, is the concept actually understood.
 
 The technique's real value isn't the explaining itself — it's that every specific place the explanation breaks down is a **precise diagnostic** of what to study next, which is far more efficient than re-reading an entire chapter hoping the unclear part sinks in this time.
 

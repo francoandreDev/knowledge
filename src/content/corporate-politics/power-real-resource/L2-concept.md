@@ -24,28 +24,11 @@ Correctness gets a proposal to the gate — it doesn't get it through. What's on
 
 None of these require being disliked, dishonest, or manipulative to acquire — that association is a common reason engineers avoid thinking about power deliberately, but the sources themselves (track record, trust, context, formal role) are the same things that make someone a good colleague, applied with intent instead of accumulated by accident.
 
-## The adoption pipeline, as a pseudocode model
+## The adoption pipeline
 
-```python
-function get_proposal_adopted(proposal, org):
-    correctness = evaluate_technical_merit(proposal)  # necessary...
+Technical merit is evaluated first — necessary, but per the diagram above, not sufficient on its own. The next step is finding someone in the org who actually has power over the problem the proposal addresses; with no such sponsor, the proposal is shelved regardless of how correct it is. If a sponsor exists, the proposal still has to be translated into terms of what _that sponsor_ is accountable for — a sponsor with formal authority needs the framing connected to what they can directly allocate; a sponsor whose power comes from relationships needs the framing strong enough that vouching for it is worth spending their own trust on.
 
-    sponsor = find_someone_with_power(org, cares_about=proposal.problem)
-    if sponsor is None:
-        return "shelved"  # ...but not sufficient without this
-
-    framing = translate_to_sponsor_incentives(proposal, sponsor)
-    # A sponsor with formal authority still needs the proposal framed in
-    # terms of what THEY are accountable for, not just why it's correct.
-
-    if sponsor.power_type == FORMAL_AUTHORITY:
-        return sponsor.allocate(framing)
-    elif sponsor.power_type == RELATIONSHIPS:
-        return sponsor.vouch_for(framing)  # borrows their trust, not theirs to spend on a bad idea for free
-    # ...
-```
-
-The model makes explicit what "politics" often gets blamed for when it's really just this pipeline running as designed: a correct proposal with no sponsor, or a sponsor whose incentives were never addressed in the framing, produces the exact same outcome ("shelved") as a genuinely bad proposal — from the outside they can look identical, which is part of why "I was right and it didn't matter" is such a common and disorienting experience.
+This makes explicit what "politics" often gets blamed for when it's really just this pipeline running as designed: a correct proposal with no sponsor, or a sponsor whose incentives were never addressed in the framing, produces the exact same outcome ("shelved") as a genuinely bad proposal — from the outside they can look identical, which is part of why "I was right and it didn't matter" is such a common and disorienting experience.
 
 ## Politics as a neutral mechanism, not a moral failing
 

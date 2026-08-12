@@ -14,24 +14,7 @@ The manager equation has a term the IC equation doesn't: "how well-supported the
 
 ## Why the retreat-to-IC-work trap is so common
 
-```python
-function new_manager_day(manager, team):
-    unclear_tasks = [
-        "unblock person A's ambiguous requirement",
-        "have a hard feedback conversation with person B",
-        "figure out why person C seems disengaged",
-        "decide priority between two competing asks from other teams",
-    ]
-    familiar_task = "just write this tricky bit of code myself, I know exactly how"
-
-    if manager.feels_uncertain(unclear_tasks):
-        # The familiar task is genuinely productive and feels like real
-        # progress — which is exactly what makes it so easy to default
-        # to, even though it's not what only the manager can do today.
-        return do(familiar_task)
-    else:
-        return do(unclear_tasks)  # the actual job, once the skill is built
-```
+Picture a new manager's actual to-do list on a given day: unblock person A's ambiguous requirement, have a hard feedback conversation with person B, figure out why person C seems disengaged, decide priority between two competing asks from other teams — every one of them unfamiliar and genuinely uncomfortable. Sitting right next to that list is a familiar alternative: "just write this tricky bit of code myself, I know exactly how." Under the discomfort of the unclear tasks, the pull toward the familiar one is strong — not because it's the wrong instinct in general, but because it's genuinely productive and feels like real progress, which is exactly what makes it so easy to default to, even though it isn't what only the manager can do today.
 
 Every one of the "unclear tasks" is something _only_ the manager is positioned to do (the org gave them the context, the authority, or the relationship to do it) — while the familiar task, however well done, is something a senior IC on the team could likely have done too. Retreating to the familiar task doesn't just fail to help the team; it actively withholds capacity the team structurally can't get from anywhere else.
 
