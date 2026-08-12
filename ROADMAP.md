@@ -156,8 +156,26 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 10 | How do I mentor someone who is more senior than me in a different way? (peer mentoring, skip-level relationships) | planned |
 | 11 | What does a staff engineer actually own that a senior doesn't? (staff scope: technical direction, org-level leverage) | planned |
 
+## product-domain/
+
+| # | Problem | Status |
+|---|---|---|
+| 01 | Why does a perfectly built feature go unused? (understanding the user's problem before the solution) | planned |
+| 02 | How do I turn a vague ask into a clear requirement? (requirements gathering, user stories) | planned |
+| 03 | How do I model a business domain so the code doesn't fight the business? (domain-driven design basics, ubiquitous language) | planned |
+| 04 | Why do two teams describe the "same" business concept differently? (bounded contexts, shared vocabulary) | planned |
+| 05 | How do I know if I'm building the right thing before I build it? (validation, prototyping, MVP thinking) | planned |
+| 06 | How do I explain what my product does to someone who isn't technical? (value framing over feature framing) | planned |
+| 07 | Why does a client say no to something that would clearly help them? (buyer psychology, the real objection behind the stated one) | planned |
+| 08 | How do I speak the language of the person I'm selling to? (translating capability into their vocabulary — a CFO hears cost, ops hears reliability, a founder hears speed) | planned |
+| 09 | How do I turn "that's technically impressive" into "I want to pay for this"? (value-based selling, ROI framing, appreciation vs. comprehension) | planned |
+| 10 | How do I run a conversation that uncovers what a prospective client actually needs? (discovery, consultative selling, asking questions that open the deal) | planned |
+| 11 | How do I handle "we already have something that works" or "it's too expensive"? (objection handling, negotiation) | planned |
+| 12 | How do I turn one client win into a repeatable opportunity? (case studies, referrals, compounding momentum) | planned |
+| 13 | How does a staff engineer use technical credibility to close a strategic deal or partnership? (presales engineering, executive-level pitching, exploiting the opportunity, not just describing it) | planned |
+
 ## Notes on ordering
 
 - Numbers reflect complexity ordering *within* a track, not a global session order.
 - Track choice per session is decided live (see `CLAUDE.md`), so it's normal and expected to jump between tracks rather than clearing one top-to-bottom.
-- Late-track units (e.g. `web/17`, `systems/17`, `git-teamwork/16`, `business-communication/14`, `logic/12`, `security/13`, `infra-delivery/12`, `career-craft/11`) are intentionally where the tracks start blending into each other — that's the point at which staff-level judgment lives, and cross-references between tracks are expected there.
+- Late-track units (e.g. `web/17`, `systems/17`, `git-teamwork/16`, `business-communication/14`, `logic/12`, `security/13`, `infra-delivery/12`, `career-craft/11`, `product-domain/13`) are intentionally where the tracks start blending into each other — that's the point at which staff-level judgment lives, and cross-references between tracks are expected there.

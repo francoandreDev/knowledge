@@ -13,4 +13,11 @@ Append-only session log. One entry per session that produces or completes conten
 - User asked whether the 5-track profile had gaps. Identified 3 missing families and added them: `security/` (13 units), `infra-delivery/` (12 units), `career-craft/` (11 units).
 - Updated `ROADMAP.md`, `docs/ARCHITECTURE.md`, `CLAUDE.md`, `README.md` to reflect 8 tracks total.
 - Total roadmap now 112 units across 8 tracks, all `planned`.
+
+## 2026-08-12 — Roadmap expansion: product-domain track
+
+- User asked to add a `product-domain/` track, explicitly including the commercial side: speaking the client's language well enough that value is appreciated (not just understood), and closing/exploiting the opportunity.
+- Added `product-domain/` (13 units), spanning domain modeling/requirements through consultative selling, objection handling, and staff-level presales/executive pitching.
+- Updated `ROADMAP.md`, `docs/ARCHITECTURE.md` (including a note distinguishing it from `business-communication/`), `CLAUDE.md`, `README.md` to reflect 9 tracks.
+- Total roadmap now 125 units across 9 tracks, all `planned`.
 - Next: pick the first unit and track together with the user.
