@@ -211,9 +211,29 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 12 | How do I develop good technical judgment, not just knowledge? (calibration, learning from being wrong, building intuition through deliberate practice) | planned |
 | 13 | How does a staff engineer learn fast enough to be credible across domains they don't own? (breadth-depth trade-off at scale, asking the right expert the right question) | planned |
 
+## applied-math/
+
+| # | Problem | Status |
+|---|---|---|
+| 01 | Why do engineers need math beyond what a compiler already checks? (math as a tool for prediction, not just correctness) | planned |
+| 02 | How do I measure something I can't directly observe? (measurement theory, units, instrumentation basics) | planned |
+| 03 | How do I know if a number is big or small without relying on gut feeling? (orders of magnitude, dimensional analysis) | planned |
+| 04 | How do I reason precisely about growth as input size increases? (asymptotic analysis, Big-O put on rigorous footing) | planned |
+| 05 | How do I count possibilities without enumerating them? (combinatorics: permutations, combinations, foundations of probability) | planned |
+| 06 | How do I model something that involves chance? (probability distributions — uniform, binomial, normal — and where each shows up in systems) | planned |
+| 07 | How do I predict how a system behaves under load before it's built? (queueing theory basics: Little's Law, latency vs. throughput) | planned |
+| 08 | How do I know if a difference I measured is real or noise? (statistics: mean/variance/std. dev., confidence intervals, significance) | planned |
+| 09 | How do I forecast a trend from historical data? (time series basics, extrapolation, regression fundamentals) | planned |
+| 10 | How do I reason precisely about relationships between entities? (graph theory basics: nodes/edges, shortest path, why it's everywhere) | planned |
+| 11 | How do I reason precisely about state and transformation? (linear algebra basics — vectors/matrices — and where they show up: graphics, ML, transforms) | planned |
+| 12 | How do I calculate capacity before I need it? (capacity planning math: throughput budgets, latency budgets, back-of-envelope sizing) | planned |
+| 13 | How do I cost something quantitatively instead of guessing? (unit economics, cost modeling, amortization) | planned |
+| 14 | How do I reason about risk with numbers instead of gut feel? (expected value, decision trees, quantitative risk modeling) | planned |
+| 15 | How does a staff engineer use math to settle an architecture debate instead of opinion? (quantitative modeling for design decisions, defending numbers in a design doc) | planned |
+
 ## Notes on ordering
 
 - Numbers reflect complexity ordering *within* a track, not a global session order.
 - Track choice per session is decided live (see `CLAUDE.md`), so it's normal and expected to jump between tracks rather than clearing one top-to-bottom.
-- Late-track units (e.g. `web/17`, `systems/17`, `git-teamwork/16`, `business-communication/14`, `logic/12`, `security/13`, `infra-delivery/12`, `career-craft/11`, `product-domain/13`, `corporate-politics/14`, `learning-craft/13`) are intentionally where the tracks start blending into each other — that's the point at which staff-level judgment lives, and cross-references between tracks are expected there.
-- `logic/` and `learning-craft/` are both transversal (see `docs/ARCHITECTURE.md`) — in practice they tend to get reinforced by every other track rather than studied in total isolation, but each still has its own complete sequence here.
+- Late-track units (e.g. `web/17`, `systems/17`, `git-teamwork/16`, `business-communication/14`, `logic/12`, `security/13`, `infra-delivery/12`, `career-craft/11`, `product-domain/13`, `corporate-politics/14`, `learning-craft/13`, `applied-math/15`) are intentionally where the tracks start blending into each other — that's the point at which staff-level judgment lives, and cross-references between tracks are expected there.
+- `logic/`, `learning-craft/`, and `applied-math/` are all transversal (see `docs/ARCHITECTURE.md`) — in practice they tend to get reinforced by every other track rather than studied in total isolation, but each still has its own complete sequence here. In particular, `applied-math/06`, `07`, and `12` are expected to be cross-referenced directly from `systems/` and `web/` units on load, capacity, and reliability.

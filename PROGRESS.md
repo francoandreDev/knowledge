@@ -34,4 +34,11 @@ Append-only session log. One entry per session that produces or completes conten
 - Added `learning-craft/` (13 units): source evaluation, search literacy, real understanding vs. recognition (Feynman technique), retention (spaced repetition/active recall), fast codebase onboarding, evaluating conflicting expert opinions, using AI tools without atrophying judgment, personal knowledge systems, prioritizing depth vs. skimming, staying current without noise, building calibrated technical judgment, and staff-level fast-learning-across-domains.
 - Updated `ROADMAP.md`, `docs/ARCHITECTURE.md` (framed as transversal alongside `logic/`), `CLAUDE.md`, `README.md` to reflect 11 tracks.
 - Total roadmap now 152 units across 11 tracks, all `planned`.
+
+## 2026-08-12 — Roadmap expansion: applied-math track
+
+- User asked for a final track on math and engineering: what to measure, calculate, forecast, and estimate, with explicit ties to where each concept applies in `systems/` and `web/`.
+- Added `applied-math/` (15 units): measurement theory, orders of magnitude, asymptotic analysis, combinatorics/probability foundations, probability distributions, queueing theory (Little's Law), statistics/significance, time series/regression, graph theory, linear algebra, capacity planning math, unit economics/cost modeling, quantitative risk modeling, and staff-level quantitative modeling for architecture decisions.
+- Updated `ROADMAP.md`, `docs/ARCHITECTURE.md` (framed as transversal alongside `logic/` and `learning-craft/`, with explicit cross-reference note to `systems/`/`web/`), `CLAUDE.md`, `README.md` to reflect 12 tracks.
+- Total roadmap now 167 units across 12 tracks, all `planned`. This is likely the completion point of the track-level roadmap — future sessions should focus on content generation rather than further track expansion unless a genuine new gap surfaces.
 - Next: pick the first unit and track together with the user.
