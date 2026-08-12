@@ -1,0 +1,101 @@
+{
+  "items": [
+    {
+      "type": "quiz",
+      "id": "docker-image-vs-container",
+      "level": 1,
+      "prompt": "What's the relationship between a Docker image and a Docker container?",
+      "choices": [
+        "They're the same thing, just different names used in different contexts",
+        "An image is a built, immutable artifact (a stack of layers); a container is a running instance of an image — the same relationship as a program file and a running process",
+        "A container is built first, then an image is created from it",
+        "An image can only ever produce one container; running it a second time requires rebuilding"
+      ],
+      "correctIndex": 1,
+      "explanation": "This is the foundational distinction: `docker build` produces an image once; `docker run` can start many independent containers from that same unchanged image, each with its own running process and writable layer on top."
+    },
+    {
+      "type": "quiz",
+      "id": "docker-layer-caching",
+      "level": 1,
+      "prompt": "Why does editing only server.js in a Dockerfile with dependency install BEFORE source copy result in a much faster rebuild than editing package.json?",
+      "choices": [
+        "Editing server.js always takes the same time as editing package.json — there's no real difference",
+        "Only the layer(s) whose inputs actually changed (and everything after them) need to rebuild — editing server.js only invalidates the final COPY layer, while editing package.json invalidates the install layer and everything after it",
+        "Docker always rebuilds the entire image from scratch regardless of what changed",
+        "server.js changes are cached permanently and never trigger a rebuild"
+      ],
+      "correctIndex": 1,
+      "explanation": "Layer caching is keyed on each layer's actual inputs. A source-only change invalidates just the final COPY layer (fast); a dependency-manifest change invalidates the install layer and cascades to everything after it (slow) — exactly what L3's three real build outputs demonstrate."
+    },
+    {
+      "type": "quiz",
+      "id": "docker-multistage",
+      "level": 2,
+      "prompt": "What's the purpose of a multi-stage Dockerfile build?",
+      "choices": [
+        "It's purely a stylistic convention with no functional effect",
+        "One stage can use a full build toolchain (compilers, dev dependencies) while a second, separate stage produces the final image with only what's needed to run — build tools never end up in the shipped image, reducing size and attack surface",
+        "It allows a single Dockerfile to build images for multiple different applications at once",
+        "It's required whenever a Dockerfile has more than 5 instructions"
+      ],
+      "correctIndex": 1,
+      "explanation": "Multi-stage builds separate 'what's needed to build' from 'what's needed to run' — only files explicitly pulled across with COPY --from=<stage> make it into the final image, so compilers and dev tooling from the build stage never ship in production."
+    },
+    {
+      "type": "quiz",
+      "id": "docker-latest-tag",
+      "level": 2,
+      "prompt": "Why is pulling an image tagged `latest` risky for reproducible builds, per L3's failure modes?",
+      "choices": [
+        "`latest` images are always corrupted",
+        "`latest` is just a mutable tag like any other — it can be repointed to a different image at any time, so pulling it doesn't guarantee the same bytes twice, undermining the build-once-run-everywhere guarantee",
+        "Docker doesn't actually support the `latest` tag; it's a common misconception",
+        "`latest` only works for base images, never for application images"
+      ],
+      "correctIndex": 1,
+      "explanation": "A tag is just a movable pointer to an image, and `latest` is not special in that regard — a specific version tag or content digest is what actually pins a reproducible reference, since tags in general (latest included) can be repointed."
+    },
+    {
+      "type": "quiz",
+      "id": "docker-stage-isolation",
+      "level": 3,
+      "prompt": "In a multi-stage Dockerfile, a package is installed in the build stage. Does it automatically exist in the runtime stage's final image?",
+      "choices": [
+        "Yes — all stages in a Dockerfile share the same filesystem state automatically",
+        "No — each stage starts completely fresh; nothing from an earlier stage exists in a later one unless explicitly pulled across with COPY --from=<stage>",
+        "Yes, but only for npm packages specifically",
+        "No, multi-stage builds don't allow copying anything between stages at all"
+      ],
+      "correctIndex": 1,
+      "explanation": "Stages are isolated by design — this is precisely what makes multi-stage builds useful for excluding build-only tooling from the final image, but it also means anything needed in the final stage (like compiled output) must be explicitly named in a COPY --from instruction."
+    },
+    {
+      "type": "code",
+      "id": "docker-rebuild-plan",
+      "level": 3,
+      "prompt": "Implement `computeRebuildPlan(layers, changedInputs)` from L3: `layers` is an array of `{ name, inputs }` in Dockerfile order; `changedInputs` is a Set of input names that changed. A layer rebuilds if its own inputs changed, OR if any earlier layer already needed a rebuild (invalidation cascades forward). Return an array of the names of every layer that must rebuild, in order.",
+      "starterCode": "function computeRebuildPlan(layers, changedInputs) {\n  // TODO\n}\n",
+      "tests": [
+        {
+          "description": "only the last layer rebuilds when only its own input changed",
+          "expr": "expect(computeRebuildPlan([{ name: 'A', inputs: ['x'] }, { name: 'B', inputs: ['y'] }], new Set(['y']))).toEqual(['B'])"
+        },
+        {
+          "description": "an early layer change cascades to every layer after it",
+          "expr": "expect(computeRebuildPlan([{ name: 'A', inputs: ['x'] }, { name: 'B', inputs: ['y'] }, { name: 'C', inputs: [] }], new Set(['x']))).toEqual(['A', 'B', 'C'])"
+        },
+        {
+          "description": "no changed inputs means no rebuilds at all",
+          "expr": "expect(computeRebuildPlan([{ name: 'A', inputs: ['x'] }, { name: 'B', inputs: ['y'] }], new Set())).toEqual([])"
+        },
+        {
+          "description": "a layer with no inputs of its own still rebuilds if cascading from an earlier layer",
+          "expr": "expect(computeRebuildPlan([{ name: 'A', inputs: ['x'] }, { name: 'B', inputs: [] }], new Set(['x']))).toEqual(['A', 'B'])"
+        }
+      ],
+      "solution": "function computeRebuildPlan(layers, changedInputs) {\n  const rebuilds = [];\n  let cascading = false;\n  for (const layer of layers) {\n    const inputsChanged = layer.inputs.some((i) => changedInputs.has(i));\n    if (inputsChanged || cascading) {\n      rebuilds.push(layer.name);\n      cascading = true;\n    }\n  }\n  return rebuilds;\n}",
+      "explanation": "This is the exact rule behind the three real docker build outputs in L3: invalidation only cascades forward — a layer that hasn't changed and follows only unchanged layers stays cached, but once any layer rebuilds, every layer after it must too, since each layer's cache key depends on the output of the one before it."
+    }
+  ]
+}

@@ -1,0 +1,83 @@
+---
+title: "L3 — A real salted-hash implementation, and a real rainbow-table attack against its absence"
+---
+
+## A real salted hash, using Node's built-in crypto
+
+```js
+// auth.mjs — real, runnable salted password hashing with Node's scrypt
+// (a real key-derivation function, not a raw fast hash — see the failure
+// modes below for why that distinction matters).
+import { scryptSync, randomBytes, timingSafeEqual } from "node:crypto";
+
+function register(password) {
+  const salt = randomBytes(16).toString("hex");
+  const hash = scryptSync(password, salt, 64).toString("hex");
+  return { salt, hash }; // store both — the hash alone can't be checked without its salt
+}
+
+function verifyLogin(password, storedSalt, storedHash) {
+  const attemptHash = scryptSync(password, storedSalt, 64);
+  const stored = Buffer.from(storedHash, "hex");
+  // timingSafeEqual, not `===` — see "timing attacks" in failure modes
+  return (
+    attemptHash.length === stored.length && timingSafeEqual(attemptHash, stored)
+  );
+}
+
+const { salt, hash } = register("correct horse battery staple");
+console.log(verifyLogin("correct horse battery staple", salt, hash)); // true
+console.log(verifyLogin("wrong guess", salt, hash)); // false
+```
+
+Every line here maps directly to L2's pseudocode: `register` generates a real random salt and derives a hash from password+salt; `verifyLogin` re-derives using the _stored_ salt and compares. The one addition L2 didn't cover is `timingSafeEqual` instead of a normal `===` comparison — that's a real, separate vulnerability class, explained below.
+
+## A real rainbow-table-style attack, demonstrated against unsalted hashes
+
+This is a genuine, runnable demonstration of exactly why salting matters — not a description of the attack, the actual mechanism:
+
+```js
+// rainbow-table-demo.mjs
+import { createHash } from "node:crypto";
+
+function unsaltedHash(password) {
+  return createHash("sha256").update(password).digest("hex");
+}
+
+// The attacker precomputes this ONCE, entirely offline, no target needed yet.
+const commonPasswords = [
+  "123456",
+  "password",
+  "qwerty",
+  "correct horse battery staple",
+];
+const rainbowTable = new Map(commonPasswords.map((p) => [unsaltedHash(p), p]));
+
+// Two different users, unsalted, both chose a common password.
+const user1Hash = unsaltedHash("password");
+const user2Hash = unsaltedHash("password");
+
+console.log(user1Hash === user2Hash); // true — identical hash for identical password
+console.log(rainbowTable.get(user1Hash)); // "password" — cracked instantly via lookup
+console.log(rainbowTable.get(user2Hash)); // "password" — the SAME precomputed lookup cracks user 2 too
+
+// Now with per-user salts:
+import { scryptSync, randomBytes } from "node:crypto";
+const salt1 = randomBytes(16).toString("hex");
+const salt2 = randomBytes(16).toString("hex");
+const salted1 = scryptSync("password", salt1, 32).toString("hex");
+const salted2 = scryptSync("password", salt2, 32).toString("hex");
+console.log(salted1 === salted2); // false — same password, different hash, per-user salt
+// The precomputed rainbow table above is now useless against either —
+// it would have to be redone from scratch per salt, defeating the entire
+// economic point of precomputing.
+```
+
+The `rainbowTable.get()` lookup succeeding for _both_ users from one precomputed table, unsalted, is the concrete proof of the vulnerability L2 described — and the salted version's `false` on the equality check is the concrete proof of the fix.
+
+## Failure modes
+
+- **Using a fast, general-purpose hash (like raw SHA-256) instead of a real key-derivation function.** `sha256(password)` is cryptographically "one-way" in the abstract sense, but it's designed to be _fast_ — which is exactly wrong for passwords, because it means an attacker can try billions of guesses per second against a stolen hash. `scrypt`/`bcrypt`/`Argon2` are deliberately slow and tunable, trading login-time cost (milliseconds, imperceptible to a real user) for attacker cost (a brute-force attempt now costs the same milliseconds, times however many guesses).
+- **Comparing hashes with `===` instead of a constant-time comparison.** A normal string/byte comparison typically returns as soon as it finds the first mismatched byte — which means comparison time leaks _how many leading bytes matched_, a real (if narrow) side channel an attacker can exploit to guess a hash byte-by-byte over many requests. `timingSafeEqual` (or an equivalent) always takes the same time regardless of where the mismatch is, closing that channel.
+- **Reusing the same salt across all users ("a pepper," misapplied), or hardcoding it.** A single shared salt still defeats a _generic_ precomputed rainbow table, but it means one precomputation effort (targeting that specific salt) cracks every user in the database at once — the actual protection salting is supposed to provide requires a salt unique _per user_, generated randomly, not a single constant baked into the code.
+- **Rolling a custom authentication scheme instead of using audited libraries.** Every mechanism in this unit (salting, slow hashing, constant-time comparison) is individually simple, which is exactly what makes hand-rolling the whole system tempting and risky — a single subtle mistake in any one piece (a salt that isn't actually random, a comparison that isn't actually constant-time) silently reintroduces the vulnerability the mechanism exists to prevent, and it usually isn't discovered until it's exploited.

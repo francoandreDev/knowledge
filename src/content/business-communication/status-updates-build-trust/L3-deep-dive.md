@@ -1,0 +1,38 @@
+---
+title: "L3 — The same three-week delay, reported two different ways"
+---
+
+## The scenario
+
+A feature was estimated at two weeks. It's now week four, still not shipped, due to an external API integration turning out to be more complex than scoped. Watch how the same underlying situation, reported weekly, produces very different levels of trust depending on how each update is written — the facts converge by the end in both paths, but the experience of reading them doesn't.
+
+## Path A: trust-eroding (technically honest, badly structured)
+
+**Week 2 (original due date):** "Almost there — running into some issues with the API integration, should be wrapped up in the next couple days."
+
+**Week 3:** "Still working through some edge cases with the API. Hoping to have it done by end of week."
+
+**Week 4:** "This has taken longer than expected because the third-party API's rate limiting behaves differently than documented, which required a different retry strategy than originally planned. Should be done by Friday."
+
+Every individual sentence here is arguably true at the time it was written. But read as a sequence: three consecutive "almost there"s, each one wrong, with the actual explanation only showing up in week 4 — by which point "should be done by Friday" carries the weight of two previous broken promises, whether or not this one is different.
+
+## Path B: trust-building (identical facts, different structure and specificity)
+
+**Week 2 (original due date):** "This will miss the original estimate — the third-party API's rate limiting doesn't match its documentation, and the retry logic needs to be redesigned around that. New estimate: one additional week, through week 3. I'll flag immediately if that changes; no action needed from you right now."
+
+**Week 3, midweek (before the new deadline, since new information arrived):** "Update on the API integration: the redesigned retry logic is done and tested against the real API's actual behavior (not just docs), so I'm more confident in this estimate than last week's — shipping by end of week 3 as planned."
+
+**Week 3 (on schedule):** "Shipped, as estimated last week."
+
+Path B surfaces the same root cause (undocumented API behavior) immediately, gives a specific revised date instead of "should be wrapped up soon," and explicitly distinguishes what's confirmed (the redesign is done and tested) from what's still a projection would-be in the next update. It also arrives on time for its _second_ estimate — not because the situation was actually easier, but because the first estimate accounted for the newly-understood complexity instead of restating optimism.
+
+## What's identical, what's different
+
+The underlying technical problem, its real difficulty, and the total elapsed time to ship are the same in both paths — this isn't a story about Path B's engineer being faster. What differs is entirely about the update discipline: Path A repeated a vague, unfalsifiable projection three times without ever naming what was actually uncertain; Path B named the real uncertainty once, gave a specific number, and only updated again when there was genuinely new information to report — which is also why Path B needed fewer updates overall to leave the reader feeling informed, not more.
+
+## Failure modes
+
+- **Treating "I don't want to alarm anyone" as a reason to stay vague.** Vagueness doesn't prevent alarm — it just delays it and compounds it, because the reader eventually gets the real news anyway, now stacked on top of however many previous soft updates didn't hold up.
+- **Re-explaining the same root cause every week without new information.** Path B only sent a mid-week update because something genuinely changed (the redesign got done and tested) — an update with no new confirmed fact in it, sent purely on a schedule, trains readers to skim, which defeats the point the next time there's something they actually need to notice.
+- **Apologizing at length instead of stating the new plan.** A brief, direct acknowledgment ("this will miss the original estimate") does the accountability work; a long apology before the actual information reads as managing the reader's feelings about the news rather than giving them the news, and delays the part they actually need.
+- **Confusing "no news" with "nothing to report."** During real uncertainty, silence is read as either "everything's fine" (setting up a bigger surprise later) or "something's being hidden" — neither is the intended message, and both are avoidable with a short, honest "still investigating, more specific estimate by [date]" update instead of nothing.

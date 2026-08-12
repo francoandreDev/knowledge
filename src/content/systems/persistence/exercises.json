@@ -1,0 +1,101 @@
+{
+  "items": [
+    {
+      "type": "quiz",
+      "id": "persistence-volatile-vs-not",
+      "level": 1,
+      "prompt": "Why does a program's data survive a crash if it was written to disk, but not if it was only sitting in a regular in-memory variable?",
+      "choices": [
+        "Disk is faster than RAM, so it processes the data before the crash happens",
+        "RAM is volatile — its contents depend on continuous power and vanish immediately on crash/reboot; disk (SSD/HDD) is non-volatile and retains its contents with no power at all",
+        "There's no real difference; both survive equally well",
+        "Disk data survives because the OS automatically backs it up to the cloud"
+      ],
+      "correctIndex": 1,
+      "explanation": "This is the foundational distinction the whole unit builds on: volatility. RAM (including in-process variables and the OS page cache) needs continuous power; disk doesn't. Anything that only ever touched RAM is gone the instant power is lost, regardless of how the program was designed."
+    },
+    {
+      "type": "quiz",
+      "id": "persistence-write-not-durable",
+      "level": 1,
+      "prompt": "A program calls write() on a file and it returns successfully with no error. Does this guarantee the data would survive a crash happening immediately afterward?",
+      "choices": [
+        "Yes — a successful write() always means the data is physically on disk",
+        "No — write() typically only guarantees the data reached the OS page cache (RAM), which is still volatile; fsync() is the call that waits for actual physical durability",
+        "Yes, but only on Windows systems",
+        "No, write() calls never actually persist data under any circumstances"
+      ],
+      "correctIndex": 1,
+      "explanation": "The OS page cache is a fast, in-RAM buffer that write() typically only needs to reach to return successfully — it's a real optimization, but it means 'write() succeeded' and 'this is crash-durable' are different claims, and only fsync() closes that gap."
+    },
+    {
+      "type": "quiz",
+      "id": "persistence-crash-timing",
+      "level": 2,
+      "prompt": "Per L2's crash-timing table, what happens if a process crashes mid-write, with no fsync ever called for that write?",
+      "choices": [
+        "The write is guaranteed to be either fully present or fully absent after reboot, with no other possibility",
+        "The result is undefined — it can leave the file in a partially written, internally inconsistent state, which is a distinct and often worse failure than the update simply being missing entirely",
+        "The operating system automatically detects and repairs any partial write",
+        "This scenario cannot happen because write() is always atomic"
+      ],
+      "correctIndex": 1,
+      "explanation": "A torn/partial write is a real, distinct failure mode from data simply being missing — it's exactly the problem write-ahead logging is designed to prevent, by making the actual durability boundary a small, sequential, fsynced append rather than a potentially large in-place update."
+    },
+    {
+      "type": "quiz",
+      "id": "persistence-wal-commit-point",
+      "level": 2,
+      "prompt": "In the write-ahead log pattern from L2/L3, what is the actual moment a transaction becomes \"committed\" and safe to acknowledge to a client?",
+      "choices": [
+        "When the full data file finishes being updated with the new value",
+        "When the log entry describing the change is appended AND fsynced — the data file update can happen afterward, even asynchronously",
+        "When the transaction is first received by the database, before any disk I/O",
+        "There is no single commit point; durability is probabilistic"
+      ],
+      "correctIndex": 1,
+      "explanation": "The log entry being fsynced IS the commit point — it's small and sequential, so it's cheap to make durable quickly. The larger data-file update can be deferred, because if a crash happens before it completes, replaying the already-durable log reconstructs the change on restart."
+    },
+    {
+      "type": "quiz",
+      "id": "persistence-db-durability-setting",
+      "level": 3,
+      "prompt": "A team assumes their database is always fully durable and is surprised to lose recent transactions after a power outage. Per L3's failure modes, what's a likely explanation?",
+      "choices": [
+        "Databases never actually persist data, regardless of settings — this is expected behavior",
+        "Many databases offer a faster, less durable mode (batching or skipping fsyncs) as an explicit trade-off, and the team may be running with that mode enabled, intentionally or not, without realizing it",
+        "Power outages always destroy all disk contents regardless of what was fsynced",
+        "This can only happen if the database has a bug, since durability is otherwise guaranteed unconditionally"
+      ],
+      "correctIndex": 1,
+      "explanation": "L3 explicitly warns against assuming a database 'handles this' without checking its actual configuration — many systems offer a real performance/durability trade-off, and losing recent transactions after a crash is the expected, documented behavior of the faster mode, not a bug."
+    },
+    {
+      "type": "code",
+      "id": "persistence-wal-replay",
+      "level": 3,
+      "prompt": "Implement `replayLog(entries)`, modeling the write-ahead log recovery logic from L3: `entries` is an array of `{ key, value }` objects representing durably-logged commits, in the order they were committed. Return the final reconstructed state object — later entries for the same key overwrite earlier ones, exactly like replaying a real log on startup.",
+      "starterCode": "function replayLog(entries) {\n  // TODO: reduce the entries into a final { key: value, ... } state object\n}\n",
+      "tests": [
+        {
+          "description": "single entry reconstructs correctly",
+          "expr": "expect(replayLog([{ key: 'balance', value: 500 }])).toEqual({ balance: 500 })"
+        },
+        {
+          "description": "later entries for the same key overwrite earlier ones",
+          "expr": "expect(replayLog([{ key: 'balance', value: 500 }, { key: 'balance', value: 700 }])).toEqual({ balance: 700 })"
+        },
+        {
+          "description": "multiple distinct keys all appear in the final state",
+          "expr": "expect(replayLog([{ key: 'a', value: 1 }, { key: 'b', value: 2 }])).toEqual({ a: 1, b: 2 })"
+        },
+        {
+          "description": "an empty log reconstructs to an empty state",
+          "expr": "expect(replayLog([])).toEqual({})"
+        }
+      ],
+      "solution": "function replayLog(entries) {\n  const state = {};\n  for (const { key, value } of entries) {\n    state[key] = value;\n  }\n  return state;\n}",
+      "explanation": "This is exactly what WriteAheadLog#replayLog does in L3: fold every durably-logged commit, in order, into a state object — because later entries for the same key represent a more recent committed value, overwriting is correct, and this is precisely how a real database reconstructs its in-memory state from a durable log after a crash, without ever needing the data file itself to have been fully up to date."
+    }
+  ]
+}
