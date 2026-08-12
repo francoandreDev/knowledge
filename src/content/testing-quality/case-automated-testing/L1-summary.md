@@ -1,0 +1,10 @@
+---
+title: 'L1 — Why doesn''t "it passed my manual check" mean it works?'
+---
+
+- A manual check verifies **one specific run, for the inputs you happened to try, at the moment you tried them**. It says nothing about every other input, and nothing about whether it still works after the next change — it's a snapshot, not a guarantee.
+- **Automated tests are that same check, made repeatable and cheap to run again** — the value isn't that a computer runs it instead of a human, it's that "did I break this" becomes a question you can ask thousands of times for free, instead of a question that costs real manual effort every time, which means in practice it mostly doesn't get asked.
+- This is a **regression** problem specifically: code that worked yesterday silently stops working today because of an unrelated change elsewhere — manual testing only catches this if someone happens to manually re-check the exact thing that broke, which gets less and less likely as a codebase grows.
+- Three properties a good automated test has that a manual check structurally can't: **repeatability** (runs identically every time, not subject to a tired human skipping a step), **speed** (a full suite running in seconds means it actually gets run before every change, not just before releases), and **specificity** (a failing test points at what broke, where "someone reported it's broken" doesn't).
+- The core trade being made: **upfront cost** (writing the test takes real time now) for **compounding savings** (every future change gets checked against it for free, forever, until the behavior deliberately changes) — the math only favors testing once code is expected to be touched more than a handful of times, which is most real code.
+- This unit is about the _case_ for automated testing — the specific test-writing techniques (unit vs. integration, mocking, test doubles, coverage) are their own later units. The goal here is the underlying argument: why "it worked when I checked it" and "it works" are different claims, and why the gap between them grows, not shrinks, as a codebase ages.

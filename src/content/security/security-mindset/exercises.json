@@ -1,0 +1,99 @@
+{
+  "items": [
+    {
+      "type": "quiz",
+      "id": "security-correctness-vs-safety",
+      "level": 1,
+      "prompt": "A checkout function passes every functional test: correct totals, correct tax, correct discounts, for all the inputs QA tried. What does this tell you about whether it's secure?",
+      "choices": [
+        "It proves the function is secure, since it handles every case correctly",
+        "Nothing directly — functional tests check the intended/expected inputs, not what happens under deliberately malicious or unexpected input",
+        "It proves the function is secure against every attack except SQL injection",
+        "Security and correctness are the same property, so passing one implies the other"
+      ],
+      "correctIndex": 1,
+      "explanation": "Correctness testing answers 'does this work for the inputs I expect' — security asks 'what happens for inputs an adversary deliberately chooses.' These are different questions with different test suites; passing one says nothing about the other, which is exactly why 'it works' and 'it's safe' can diverge."
+    },
+    {
+      "type": "quiz",
+      "id": "security-trust-boundary",
+      "level": 1,
+      "prompt": "In the trust-boundary diagram, why does a value crossing from the user's browser into the API server need to be re-validated, while a value moving from the API server to its own internal cache doesn't (to the same degree)?",
+      "choices": [
+        "The internal cache is slower, so extra validation there would hurt performance",
+        "The browser is outside the system's control — an adversary can send anything through it — while the API-to-cache path only carries data the system itself already produced or validated",
+        "There's no real difference; every data movement needs identical validation",
+        "Because HTTP requests are inherently less secure than internal function calls"
+      ],
+      "correctIndex": 1,
+      "explanation": "A trust boundary marks the line between 'controlled by us' and 'controlled by someone else.' Data crossing into the system from an untrusted source needs its assumptions re-earned; data moving between components you already control and already validated doesn't carry the same risk, because nothing new is being trusted."
+    },
+    {
+      "type": "quiz",
+      "id": "security-stride-category",
+      "poolId": "stride-id-pool",
+      "level": 2,
+      "prompt": "A user discovers that if they call an admin-only API endpoint directly (bypassing the UI, which just hides the button), it works even though they're not an admin. Which STRIDE category is this?",
+      "choices": [
+        "Repudiation",
+        "Denial of service",
+        "Elevation of privilege",
+        "Information disclosure"
+      ],
+      "correctIndex": 2,
+      "explanation": "This is elevation of privilege — gaining access beyond what was actually granted. Hiding a button in the UI is not an authorization check; the server-side endpoint has to independently verify the caller is allowed to perform the action, regardless of what the client interface shows."
+    },
+    {
+      "type": "quiz",
+      "id": "security-stride-category-v2",
+      "poolId": "stride-id-pool",
+      "level": 2,
+      "prompt": "An error page shows a full stack trace including internal file paths and a database connection string. Which STRIDE category does this fall under?",
+      "choices": [
+        "Information disclosure",
+        "Spoofing",
+        "Tampering",
+        "Denial of service"
+      ],
+      "correctIndex": 0,
+      "explanation": "Leaking data the requester shouldn't have access to — internals like file paths, connection strings, or stack traces — is information disclosure. Even without directly compromising anything, this hands an attacker reconnaissance detail that makes other attacks easier."
+    },
+    {
+      "type": "quiz",
+      "id": "security-shape-vs-trust",
+      "level": 3,
+      "prompt": "A field `price` in a checkout request is validated to be a positive number under 10,000. Does this validation prevent the tampering bug from L3 (client sending price: 0.01 for a $40 item)?",
+      "choices": [
+        "Yes — 0.01 would fail the positive-number check",
+        "No — 0.01 is a valid positive number under 10,000, so shape validation doesn't catch it; the actual fix is not trusting a client-supplied price for a security-sensitive calculation at all",
+        "Yes, but only if combined with rate limiting",
+        "The question is unanswerable without knowing the currency"
+      ],
+      "correctIndex": 1,
+      "explanation": "Shape validation (is it a number, is it in a plausible range) confirms the input is well-formed — it doesn't confirm the input should be trusted for this purpose. The real fix is architectural: recompute price server-side from data the client never controls, not add more validation rules to a value that shouldn't cross the trust boundary as an input in the first place."
+    },
+    {
+      "type": "code",
+      "id": "security-server-side-price",
+      "level": 3,
+      "prompt": "Implement `checkoutTotal(cartItem, catalog)`, the fixed version from L3: it must compute the charge using ONLY the server-side `catalog` (an object mapping productId to `{ price }`), never any `price` field that might be present on `cartItem` itself — the whole point is making a client-supplied price impossible to use, not just ignored by convention.",
+      "starterCode": "function checkoutTotal(cartItem, catalog) {\n  // cartItem: { productId, quantity, price? } — price may be present\n  // but must NEVER be trusted; catalog is the real source of truth\n  // TODO\n}\n",
+      "tests": [
+        {
+          "description": "computes the correct total from the catalog price",
+          "expr": "expect(checkoutTotal({ productId: 'sku-1', quantity: 2 }, { 'sku-1': { price: 19.99 } })).toEqual(39.98)"
+        },
+        {
+          "description": "ignores a tampered client-supplied price entirely",
+          "expr": "expect(checkoutTotal({ productId: 'sku-1', quantity: 2, price: 0.01 }, { 'sku-1': { price: 19.99 } })).toEqual(39.98)"
+        },
+        {
+          "description": "a different quantity scales correctly",
+          "expr": "expect(checkoutTotal({ productId: 'sku-2', quantity: 3 }, { 'sku-2': { price: 10 } })).toEqual(30)"
+        }
+      ],
+      "solution": "function checkoutTotal(cartItem, catalog) {\n  const product = catalog[cartItem.productId];\n  return product.price * cartItem.quantity;\n}",
+      "explanation": "The fix reads `price` from `catalog[productId]` and never touches `cartItem.price` at all — not filtering it out, just never giving it a code path that could influence the result. That's the actual mitigation for a trust-boundary crossing: remove the untrusted value's ability to matter, rather than trying to sanitize a value that shouldn't be trusted for this purpose regardless of its shape."
+    }
+  ]
+}

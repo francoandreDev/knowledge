@@ -52,7 +52,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 
 | #   | Slug                    | Problem                                                                                                                       | Status  |
 | --- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------- |
-| 01  | snapshots-manual-copies | Why do we need version control at all? (snapshots vs. manual copies)                                                          | planned |
+| 01  | snapshots-manual-copies | Why do we need version control at all? (snapshots vs. manual copies)                                                          | done    |
 | 02  | checkout                | How do I undo a mistake without losing everything? (checkout, revert, reset semantics)                                        | planned |
 | 03  | working-tree            | Why did my change disappear when I switched branches? (working tree, staging, commit model)                                   | planned |
 | 04  | merge                   | How do two people edit the same file without destroying each other's work? (merge, conflicts)                                 | planned |
@@ -92,7 +92,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 
 | #   | Slug                                     | Problem                                                                                                                    | Status  |
 | --- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------- |
-| 01  | formal-informal-logic                    | What actually makes an argument valid vs. just convincing? (formal vs. informal logic)                                     | planned |
+| 01  | formal-informal-logic                    | What actually makes an argument valid vs. just convincing? (formal vs. informal logic)                                     | done    |
 | 02  | fallacies                                | Why does "if it's not A, it must be B" often fail? (fallacies, false dichotomy)                                            | planned |
 | 03  | problem-decomposition                    | How do I break a vague problem into solvable pieces? (problem decomposition)                                               | planned |
 | 04  | boolean-logic                            | Why do two "correct" pieces of code produce different results? (boolean logic, precedence, De Morgan's laws)               | planned |
@@ -109,7 +109,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 
 | #   | Slug                                   | Problem                                                                                                                                     | Status  |
 | --- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| 01  | security-mindset                       | Why doesn't "it works" mean "it's safe"? (the security mindset, threat modeling basics)                                                     | planned |
+| 01  | security-mindset                       | Why doesn't "it works" mean "it's safe"? (the security mindset, threat modeling basics)                                                     | done    |
 | 02  | authentication-fundamentals            | How do we prove someone is who they claim to be? (authentication fundamentals, passwords, hashing)                                          | planned |
 | 03  | authorization-models                   | How do we decide what an authenticated user is allowed to do? (authorization models: RBAC/ABAC)                                             | planned |
 | 04  | hashing                                | Why does storing a password in plain text guarantee disaster? (hashing, salting, key derivation)                                            | planned |
@@ -127,7 +127,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 
 | #   | Slug                                     | Problem                                                                                                                  | Status  |
 | --- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------- |
-| 01  | environment-parity                       | Why does "it works on my machine" keep happening? (environment parity, containers basics)                                | planned |
+| 01  | environment-parity                       | Why does "it works on my machine" keep happening? (environment parity, containers basics)                                | done    |
 | 02  | docker                                   | How do we package an app so it runs the same everywhere? (Docker, images vs. containers)                                 | planned |
 | 03  | ci-cd-pipeline-anatomy                   | How does code get from a commit to running in production? (CI/CD pipeline anatomy)                                       | planned |
 | 04  | deployment-automation                    | Why do manual deploys eventually cause an outage? (deployment automation, repeatability)                                 | planned |
@@ -144,7 +144,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 
 | #   | Slug                          | Problem                                                                                                                   | Status  |
 | --- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ------- |
-| 01  | leveling-expectations         | What does "good" actually look like at each stage of an engineering career? (leveling expectations, scope vs. title)      | planned |
+| 01  | leveling-expectations         | What does "good" actually look like at each stage of an engineering career? (leveling expectations, scope vs. title)      | done    |
 | 02  | asking-feedback               | How do I get useful feedback instead of vague praise? (asking for feedback, calibration)                                  | planned |
 | 03  | mentoring-fundamentals        | How do I help a junior teammate grow without doing their job for them? (mentoring fundamentals)                           | planned |
 | 04  | structured-interviewing       | How do I know if someone should get the job? (structured interviewing, avoiding bias)                                     | planned |
@@ -162,7 +162,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 
 | #   | Slug                                             | Problem                                                                                                                                                                                            | Status  |
 | --- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| 01  | understanding-user-s-problem-solution            | Why does a perfectly built feature go unused? (understanding the user's problem before the solution)                                                                                               | planned |
+| 01  | understanding-user-s-problem-solution            | Why does a perfectly built feature go unused? (understanding the user's problem before the solution)                                                                                               | done    |
 | 02  | requirements-gathering                           | How do I turn a vague ask into a clear requirement? (requirements gathering, user stories)                                                                                                         | planned |
 | 03  | domain-driven-design-basics                      | How do I model a business domain so the code doesn't fight the business? (domain-driven design basics, ubiquitous language)                                                                        | planned |
 | 04  | bounded-contexts                                 | Why do two teams describe the "same" business concept differently? (bounded contexts, shared vocabulary)                                                                                           | planned |
@@ -180,7 +180,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 
 | #   | Slug                       | Problem                                                                                                                                                       | Status  |
 | --- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| 01  | power-real-resource        | Why doesn't technical merit alone decide who wins in an organization? (power as a real resource, not a dirty word)                                            | planned |
+| 01  | power-real-resource        | Why doesn't technical merit alone decide who wins in an organization? (power as a real resource, not a dirty word)                                            | done    |
 | 02  | white                      | How does legitimate ("white") influence actually work? (reciprocity, alliance-building, being visibly useful)                                                 | planned |
 | 03  | who-holds-influence        | How do I read the informal org chart, not just the official one? (who actually holds influence, real decision networks)                                       | planned |
 | 04  | favor-economy              | How do I bank goodwill before I need to spend it? (the favor economy, relationship capital)                                                                   | planned |
@@ -199,7 +199,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 
 | #   | Slug                          | Problem                                                                                                                                                                  | Status  |
 | --- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- |
-| 01  | exposure-understanding        | Why doesn't reading more mean learning more? (exposure vs. understanding)                                                                                                | planned |
+| 01  | exposure-understanding        | Why doesn't reading more mean learning more? (exposure vs. understanding)                                                                                                | done    |
 | 02  | source-evaluation             | How do I find information I can actually trust? (source evaluation, primary vs. secondary sources, credibility signals)                                                  | planned |
 | 03  | search-literacy               | How do I ask a question well enough to get a useful answer? (search literacy: framing queries, going to docs/specs/source directly)                                      | planned |
 | 04  | feynman-technique             | How do I know when I've actually understood something vs. just recognized it? (the Feynman technique, teach-back, the illusion of competence)                            | planned |
@@ -217,7 +217,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 
 | #   | Slug                                         | Problem                                                                                                                                                                 | Status  |
 | --- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| 01  | math-tool-prediction                         | Why do engineers need math beyond what a compiler already checks? (math as a tool for prediction, not just correctness)                                                 | planned |
+| 01  | math-tool-prediction                         | Why do engineers need math beyond what a compiler already checks? (math as a tool for prediction, not just correctness)                                                 | done    |
 | 02  | measurement-theory                           | How do I measure something I can't directly observe? (measurement theory, units, instrumentation basics)                                                                | planned |
 | 03  | orders-magnitude                             | How do I know if a number is big or small without relying on gut feeling? (orders of magnitude, dimensional analysis)                                                   | planned |
 | 04  | asymptotic-analysis                          | How do I reason precisely about growth as input size increases? (asymptotic analysis, Big-O put on rigorous footing)                                                    | planned |
@@ -237,7 +237,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 
 | #   | Slug                    | Problem                                                                                                                                               | Status  |
 | --- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| 01  | case-automated-testing  | Why doesn't "it passed my manual check" mean it works? (the case for automated testing)                                                               | planned |
+| 01  | case-automated-testing  | Why doesn't "it passed my manual check" mean it works? (the case for automated testing)                                                               | done    |
 | 02  | test-pyramid            | How do I know what level to test something at? (the test pyramid: unit vs. integration vs. e2e)                                                       | planned |
 | 03  | assertions-matter       | How do I write a test that actually catches bugs, not just exercises code? (assertions that matter, avoiding tautological tests)                      | planned |
 | 04  | tdd-basics              | Why does writing the test first change the design? (TDD basics, red-green-refactor)                                                                   | planned |
@@ -255,7 +255,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 
 | #   | Slug                                | Problem                                                                                                                                                            | Status  |
 | --- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- |
-| 01  | cost-design                         | Why does code that "just works" become impossible to change six months later? (the cost of design, not just correctness)                                           | planned |
+| 01  | cost-design                         | Why does code that "just works" become impossible to change six months later? (the cost of design, not just correctness)                                           | done    |
 | 02  | single-responsibility               | How do I decide where one function's responsibility ends? (single responsibility, cohesion vs. coupling)                                                           | planned |
 | 03  | naming                              | How do I name and structure things so the code explains itself? (naming, readability as a design tool)                                                             | planned |
 | 04  | dry                                 | Why does copy-pasting code eventually blow up? (DRY, abstraction, and the trap of premature abstraction)                                                           | planned |
@@ -273,7 +273,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 
 | #   | Slug                                | Problem                                                                                                                                              | Status  |
 | --- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| 01  | myth-linear-output                  | Why does working more hours eventually produce less, not more? (the myth of linear output, diminishing returns)                                      | planned |
+| 01  | myth-linear-output                  | Why does working more hours eventually produce less, not more? (the myth of linear output, diminishing returns)                                      | done    |
 | 02  | early-warning-signs                 | How do I recognize burnout before it takes me out completely? (early warning signs, tired vs. burned out)                                            | planned |
 | 03  | attention-management                | How do I protect focus time in a job full of interruptions? (attention management, deep work vs. shallow work)                                       | planned |
 | 04  | energy-management-across-day-week   | How do I manage energy, not just time? (energy management across a day/week, matching task type to energy state)                                     | planned |
@@ -286,7 +286,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 
 | #   | Slug                          | Problem                                                                                                                                          | Status  |
 | --- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------- |
-| 01  | ic-excellence-management      | Why does managing people require different skills than being good at the work itself? (IC excellence vs. management, the transition problem)     | planned |
+| 01  | ic-excellence-management      | Why does managing people require different skills than being good at the work itself? (IC excellence vs. management, the transition problem)     | done    |
 | 02  | 1                             | How do I run a 1:1 that's actually useful, not just a status check? (1:1 structure, listening, coaching questions)                               | planned |
 | 03  | delegation-levels             | How do I delegate work without either micromanaging or abandoning it? (delegation levels, trust but verify)                                      | planned |
 | 04  | sbi-framework                 | How do I give feedback that changes behavior instead of just being heard? (SBI framework, feedback timing, difficult conversations)              | planned |

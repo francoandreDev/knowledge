@@ -1,0 +1,10 @@
+---
+title: 'L1 — Why does code that "just works" become impossible to change six months later?'
+---
+
+- **Correctness** answers "does this produce the right output for the inputs I tested." **Design quality** answers a completely different question: "how much effort does the _next_ change to this code cost." Code can score perfectly on the first and terribly on the second.
+- The cost of bad design is almost always **invisible at write time** and only shows up as a tax on every future change — this is exactly why it's so easy to under-invest in: the person who skips it rarely pays the cost themselves, and even when they do, it's deferred and diffuse rather than immediate and obvious.
+- **Coupling** and **cohesion** are the two properties design quality is mostly built from: coupling is how entangled two pieces of code are with each other (high coupling = changing one forces changing the other); cohesion is how tightly a single piece of code's responsibilities belong together (low cohesion = one function/module doing several unrelated things, each needing separate reasons to change it).
+- The core trade this unit examines: writing well-designed code costs more time **now** (naming things carefully, separating concerns, thinking about what's likely to change) in exchange for the _same or lower_ total cost **over the life of the code**, because every future change is cheaper — this is a genuine trade-off, not a free lunch, and it only pays off if the code is actually going to be touched again.
+- **Technical debt** is the right metaphor precisely because it behaves like financial debt: a deliberate shortcut can be a reasonable trade if it's paid down deliberately later, but the same shortcut left unaddressed accrues "interest" — every change built on top of it gets a little more expensive, compounding.
+- This unit is not "always write maximally abstracted, future-proofed code" — over-engineering for hypothetical future requirements is its own real cost, covered explicitly in L3. The actual skill is judging how much design investment a given piece of code is worth, based on how much and how unpredictably it's expected to change.

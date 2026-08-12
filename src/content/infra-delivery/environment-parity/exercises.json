@@ -1,0 +1,101 @@
+{
+  "items": [
+    {
+      "type": "quiz",
+      "id": "infra-drift-definition",
+      "level": 1,
+      "prompt": "What is \"environment drift\" most precisely?",
+      "choices": [
+        "A bug in the application code that only appears under heavy load",
+        "The gradual, usually unintentional divergence of dev/CI/production environments (OS, runtime, libraries, settings) even though the source code is identical",
+        "A deliberate infrastructure migration from one cloud provider to another",
+        "Any bug that takes more than a day to reproduce"
+      ],
+      "correctIndex": 1,
+      "explanation": "Drift is specifically about the *environment* diverging, not the code — three environments set up independently and patched on different schedules end up with different runtime versions, libraries, or settings, even while running byte-identical source code."
+    },
+    {
+      "type": "quiz",
+      "id": "infra-container-vs-vm",
+      "level": 1,
+      "prompt": "What's the key structural difference between a container and a VM, relevant to why containers became the default for environment parity?",
+      "choices": [
+        "Containers are always faster at CPU-bound computation than VMs",
+        "A VM virtualizes an entire OS kernel per instance (heavy, slow to boot); a container shares the host kernel and only isolates the process/filesystem view (light, fast), while still packaging the full app dependency environment",
+        "Containers can only run one process ever, VMs can run many",
+        "There is no real difference; \"container\" is just newer marketing for the same VM technology"
+      ],
+      "correctIndex": 1,
+      "explanation": "Containers trade some isolation strength (shared host kernel) for being lightweight and fast to start, while still fully packaging the app's runtime and dependencies — which is the part that matters for parity: the same bundled environment runs everywhere, regardless of isolation depth."
+    },
+    {
+      "type": "quiz",
+      "id": "infra-npm-ci",
+      "level": 2,
+      "prompt": "Why does the Dockerfile in L3 use `npm ci` instead of `npm install`?",
+      "choices": [
+        "npm ci is faster in every case, with no other difference",
+        "npm ci refuses to proceed if package-lock.json doesn't exactly match package.json, guaranteeing the exact locked dependency tree instead of silently re-resolving slightly different versions",
+        "npm install doesn't work at all inside Docker containers",
+        "npm ci automatically updates the lockfile to the latest compatible versions"
+      ],
+      "correctIndex": 1,
+      "explanation": "npm install can resolve a slightly different dependency tree if the registry state has shifted since the lockfile was generated; npm ci fails loudly instead of silently drifting — exactly the guarantee a parity-focused build step needs, since a silently different node_modules tree is itself a form of environment drift."
+    },
+    {
+      "type": "quiz",
+      "id": "infra-layer-order",
+      "level": 2,
+      "prompt": "The Dockerfile copies `package.json`/`package-lock.json` and runs `npm ci` BEFORE copying the rest of the source code. What's the practical benefit of that ordering?",
+      "choices": [
+        "It's required — Docker will error if you copy source code before dependencies",
+        "Docker layer caching means `npm ci` only reruns when the dependency manifests actually change, not on every source code edit, making rebuilds much faster",
+        "It reduces the final image size by roughly half",
+        "It has no real effect; the ordering is purely stylistic convention"
+      ],
+      "correctIndex": 1,
+      "explanation": "Each Dockerfile instruction creates a cached layer keyed on its inputs. Putting the rarely-changing dependency install before the frequently-changing source copy means most rebuilds (just source edits) skip the expensive `npm ci` step entirely and reuse the cached layer."
+    },
+    {
+      "type": "quiz",
+      "id": "infra-container-scope",
+      "level": 3,
+      "prompt": "A team containerizes their app and declares \"environment parity solved.\" Two weeks later, a bug reproduces in staging but not production because the staging database has an out-of-date schema migration. Was the container's parity guarantee violated?",
+      "choices": [
+        "Yes — this proves containers don't actually provide environment parity",
+        "No — the container guarantees parity for what's inside it (OS, runtime, app dependencies); a database schema is outside the container's boundary and needs its own parity mechanism (e.g. migrations run consistently in every environment)",
+        "Yes, because the database driver version is part of the container image",
+        "No, because database bugs are never really environment-related"
+      ],
+      "correctIndex": 1,
+      "explanation": "Per L3's failure modes, container parity doesn't automatically propagate to systems outside the container — a schema drift is a real parity failure, just at a different layer (the database), which needs its own explicit consistency mechanism rather than being covered for free by containerizing the app."
+    },
+    {
+      "type": "code",
+      "id": "infra-timezone-fix",
+      "level": 3,
+      "prompt": "Implement the fixed `isToday(timestampMs, timezone, referenceNowMs)` from L3: instead of relying on the host machine's ambient local timezone (which drifts between dev/CI/prod), it must format both timestamps in the SAME explicitly-passed IANA timezone (e.g. \"UTC\", \"America/New_York\") using `Intl.DateTimeFormat`, and compare the resulting date strings.",
+      "starterCode": "function isToday(timestampMs, timezone, referenceNowMs) {\n  // TODO: format both timestampMs and referenceNowMs in `timezone`\n  // (e.g. using Intl.DateTimeFormat with { timeZone: timezone }) and\n  // compare the resulting calendar dates\n}\n",
+      "tests": [
+        {
+          "description": "same UTC day returns true",
+          "expr": "expect(isToday(Date.UTC(2026, 0, 15, 10, 0, 0), 'UTC', Date.UTC(2026, 0, 15, 20, 0, 0))).toBe(true)"
+        },
+        {
+          "description": "different UTC day returns false",
+          "expr": "expect(isToday(Date.UTC(2026, 0, 14, 23, 59, 0), 'UTC', Date.UTC(2026, 0, 15, 0, 1, 0))).toBe(false)"
+        },
+        {
+          "description": "in UTC, this pair falls on different calendar days",
+          "expr": "expect(isToday(Date.UTC(2026, 0, 14, 23, 0, 0), 'UTC', Date.UTC(2026, 0, 15, 2, 0, 0))).toBe(false)"
+        },
+        {
+          "description": "the SAME pair, evaluated in America/New_York, falls on the same calendar day",
+          "expr": "expect(isToday(Date.UTC(2026, 0, 14, 23, 0, 0), 'America/New_York', Date.UTC(2026, 0, 15, 2, 0, 0))).toBe(true)"
+        }
+      ],
+      "solution": "function isToday(timestampMs, timezone, referenceNowMs) {\n  const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: timezone });\n  return fmt.format(referenceNowMs) === fmt.format(timestampMs);\n}",
+      "explanation": "Formatting both timestamps through the same explicit `timezone` parameter removes any dependence on the host machine's ambient local timezone setting — the function now produces the identical answer no matter which machine (laptop, CI runner, production host) executes it, because the timezone is part of its explicit input rather than inherited silently from the environment."
+    }
+  ]
+}

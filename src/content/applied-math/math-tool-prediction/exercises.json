@@ -1,0 +1,103 @@
+{
+  "items": [
+    {
+      "type": "quiz",
+      "id": "math-correctness-vs-prediction",
+      "level": 1,
+      "prompt": "A service passes 100% of its unit tests and type-checks cleanly. What does this tell you about whether it will handle 10x production traffic?",
+      "choices": [
+        "It guarantees the service will scale correctly, since correctness implies performance",
+        "Nothing directly — correctness math (tests, type checking) verifies internal consistency for known inputs; it doesn't answer predictive questions like capacity under load, which need a separate kind of math",
+        "It guarantees the service will fail under 10x traffic",
+        "Type checking specifically measures throughput, so this is covered"
+      ],
+      "correctIndex": 1,
+      "explanation": "Correctness and prediction are explicitly separated in this unit: a system can be fully verified correct and still fall over under load nobody predicted, because verifying correctness and forecasting behavior under new conditions are different questions requiring different tools."
+    },
+    {
+      "type": "quiz",
+      "id": "math-littles-law",
+      "level": 2,
+      "prompt": "A service handles 400 requests/second, each taking an average of 100ms end-to-end. Using Little's Law (L = λW), roughly how many concurrent requests should it be provisioned to handle?",
+      "choices": [
+        "400 — matching the requests-per-second figure directly",
+        "40 — computed as 400 × 0.1 seconds",
+        "4,000 — computed as 400 ÷ 0.1",
+        "It can't be estimated without knowing the server's CPU count"
+      ],
+      "correctIndex": 1,
+      "explanation": "L = λW: average concurrent requests = arrival rate × average time in system = 400 × 0.1 = 40. This is exactly the kind of number that's easy to badly misjudge by intuition (guessing from '400 requests per second sounds like a lot') but is directly computable from two known quantities."
+    },
+    {
+      "type": "quiz",
+      "id": "math-nonlinear-utilization",
+      "level": 2,
+      "prompt": "Per L2/L3's utilization curve, why is \"we're at 60% utilization today, we can probably handle 90%\" a risky plan?",
+      "choices": [
+        "Because utilization can never legitimately exceed 60% in a well-run system",
+        "Because wait time doesn't scale linearly with utilization near capacity — going from 60% to 90% utilization corresponds to roughly a 6x jump in relative wait time, not a proportional 1.5x jump",
+        "Because 90% utilization is always physically impossible to reach",
+        "Because the plan doesn't account for network latency specifically"
+      ],
+      "correctIndex": 1,
+      "explanation": "Per the ρ/(1-ρ) approximation, wait time at 60% utilization is about 1.5x the 50% baseline, while at 90% it's about 9x — a 6x jump in wait time from a 1.5x jump in utilization. Linear intuition (utilization went up 50%, so wait time probably did too) badly undercounts the actual effect near saturation."
+    },
+    {
+      "type": "quiz",
+      "id": "math-average-not-worst-case",
+      "poolId": "avg-worst-pool",
+      "level": 3,
+      "prompt": "A team plans capacity using Little's Law and the utilization curve, both computed on average traffic figures. Per L3's failure modes, is this planning sufficient on its own?",
+      "choices": [
+        "Yes — average-based formulas fully account for real-world traffic variance",
+        "No — both formulas describe averages; real traffic has variance (bursts, retries, correlated failures), so a system planned exactly to the average will still see individual periods far worse than predicted, and needs headroom beyond the average-case number",
+        "No, because Little's Law only applies to single-server systems",
+        "Yes, as long as the utilization figure used is the peak, not the average"
+      ],
+      "correctIndex": 1,
+      "explanation": "L3 explicitly warns against treating an average-case formula as a worst-case guarantee — predictive math narrows uncertainty about the typical case, it doesn't eliminate the need for headroom against bursts and variance the average doesn't capture."
+    },
+    {
+      "type": "quiz",
+      "id": "math-service-time-assumption",
+      "poolId": "avg-worst-pool",
+      "level": 3,
+      "prompt": "The capacity near-miss case study assumed per-request service time stays constant as traffic grows. Per L3, why is this assumption worth checking rather than accepting by default?",
+      "choices": [
+        "It isn't worth checking — service time is always constant regardless of load",
+        "In reality, contention effects (lock waiting, CPU scheduling, GC pauses under memory pressure) often make service time itself increase under load, compounding the utilization effect rather than staying independent of it",
+        "Service time only matters for CPU-bound workloads, not I/O-bound ones",
+        "The assumption is fine because Little's Law already accounts for changing service time automatically"
+      ],
+      "correctIndex": 1,
+      "explanation": "L3's third failure mode flags exactly this: assuming service time is constant under load is a real simplification that can hide additional risk, since contention effects often make service time itself worsen under load — a more careful prediction measures this rather than assuming it away."
+    },
+    {
+      "type": "code",
+      "id": "math-relative-wait-time",
+      "level": 3,
+      "prompt": "Implement `relativeWaitTime(utilization)`, the ρ/(1-ρ) queueing approximation from L3, where `utilization` is a number strictly between 0 and 1 (exclusive).",
+      "starterCode": "function relativeWaitTime(utilization) {\n  // TODO: implement rho / (1 - rho)\n}\n",
+      "tests": [
+        {
+          "description": "50% utilization gives a baseline of 1",
+          "expr": "expect(relativeWaitTime(0.5)).toBe(1)"
+        },
+        {
+          "description": "80% utilization gives 4",
+          "expr": "expect(Math.round(relativeWaitTime(0.8) * 100) / 100).toEqual(4)"
+        },
+        {
+          "description": "90% utilization gives 9",
+          "expr": "expect(Math.round(relativeWaitTime(0.9) * 100) / 100).toEqual(9)"
+        },
+        {
+          "description": "wait time grows faster than utilization itself between 80% and 90%",
+          "expr": "expect(relativeWaitTime(0.9) - relativeWaitTime(0.8) > 1).toBeTruthy()"
+        }
+      ],
+      "solution": "function relativeWaitTime(utilization) {\n  return utilization / (1 - utilization);\n}",
+      "explanation": "This is the direct queueing approximation used throughout L2/L3: as utilization approaches 1 (100% busy), the denominator (1 - utilization) shrinks toward zero, which is exactly why wait time grows sharply rather than linearly as a system nears saturation — the formula's shape IS the non-linear blowup, not just a description of it."
+    }
+  ]
+}
