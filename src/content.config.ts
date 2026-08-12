@@ -62,4 +62,48 @@ const exercises = defineCollection({
   }),
 });
 
-export const collections = { curriculum, exercises };
+// One interactives.json per unit (optional), id "<track>/<unit-slug>/interactives".
+// Ungraded, exploratory "move a parameter, see the result and the trend"
+// widgets for the theory sections — distinct from exercises: no pass/fail,
+// no gating on ProgressToggle. See CLAUDE.md "Interactive demos".
+const interactiveParam = z.object({
+  name: z.string(),
+  label: z.string(),
+  min: z.number(),
+  max: z.number(),
+  step: z.number(),
+  default: z.number(),
+  unit: z.string().optional(),
+});
+
+const interactiveOutput = z.object({
+  key: z.string(),
+  label: z.string(),
+  unit: z.string().optional(),
+  // Hex color for this output's line in the trend chart.
+  color: z.string(),
+});
+
+const interactiveDemo = z.object({
+  id: z.string(),
+  level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  title: z.string(),
+  description: z.string(),
+  params: z.array(interactiveParam).min(1),
+  // JS function body: receives `params` (object keyed by param name) and
+  // must return an object keyed by each output's `key`, all numbers.
+  compute: z.string(),
+  outputs: z.array(interactiveOutput).min(1),
+  // Which param's range the trend chart sweeps across (the other params
+  // stay fixed at their current slider values).
+  chartParam: z.string(),
+});
+
+const interactives = defineCollection({
+  loader: glob({ pattern: "**/interactives.json", base: "./src/content" }),
+  schema: z.object({
+    items: z.array(interactiveDemo),
+  }),
+});
+
+export const collections = { curriculum, exercises, interactives };

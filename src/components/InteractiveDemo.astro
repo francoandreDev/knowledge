@@ -1,0 +1,239 @@
+---
+import { SlidersHorizontal } from "lucide-astro";
+import type { InteractiveDemoItem } from "../lib/curriculum";
+
+interface Props {
+  demos: InteractiveDemoItem[];
+}
+
+const { demos } = Astro.props;
+---
+
+{
+  demos.length > 0 && (
+    <div class="mt-10 space-y-6 border-t border-slate-200 pt-8 dark:border-slate-800">
+      <h3 class="flex items-center gap-1.5 text-sm font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-400">
+        <SlidersHorizontal class="h-4 w-4" aria-hidden="true" />
+        Try it
+      </h3>
+      {demos.map((demo) => (
+        <div
+          data-interactive-demo
+          class="rounded-lg border border-slate-200 p-4 dark:border-slate-800"
+        >
+          <script
+            type="application/json"
+            data-demo-config
+            set:html={JSON.stringify(demo)}
+          />
+          <p class="font-medium text-slate-800 dark:text-slate-200">
+            {demo.title}
+          </p>
+          <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            {demo.description}
+          </p>
+          <div data-demo-body class="mt-4" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+<script>
+  interface Param {
+    name: string;
+    label: string;
+    min: number;
+    max: number;
+    step: number;
+    default: number;
+    unit?: string;
+  }
+  interface Output {
+    key: string;
+    label: string;
+    unit?: string;
+    color: string;
+  }
+  interface DemoConfig {
+    id: string;
+    title: string;
+    description: string;
+    params: Param[];
+    compute: string;
+    outputs: Output[];
+    chartParam: string;
+  }
+
+  const CHART_WIDTH = 480;
+  const CHART_HEIGHT = 140;
+  const CHART_SAMPLES = 40;
+
+  function formatValue(value: number, unit?: string): string {
+    const rounded = Number.isInteger(value)
+      ? value
+      : Math.round(value * 100) / 100;
+    return unit ? `${rounded}${unit}` : String(rounded);
+  }
+
+  function buildChart(
+    config: DemoConfig,
+    computeFn: (params: Record<string, number>) => Record<string, number>,
+    currentParams: Record<string, number>,
+  ): string {
+    const chartParam = config.params.find((p) => p.name === config.chartParam)!;
+    const samples: { x: number; values: Record<string, number> }[] = [];
+    for (let i = 0; i <= CHART_SAMPLES; i++) {
+      const x =
+        chartParam.min +
+        ((chartParam.max - chartParam.min) * i) / CHART_SAMPLES;
+      samples.push({
+        x,
+        values: computeFn({ ...currentParams, [chartParam.name]: x }),
+      });
+    }
+
+    let yMin = Infinity;
+    let yMax = -Infinity;
+    for (const sample of samples) {
+      for (const output of config.outputs) {
+        const v = sample.values[output.key];
+        if (v < yMin) yMin = v;
+        if (v > yMax) yMax = v;
+      }
+    }
+    if (yMin === yMax) {
+      yMin -= 1;
+      yMax += 1;
+    }
+
+    const xScale = (x: number) =>
+      ((x - chartParam.min) / (chartParam.max - chartParam.min)) * CHART_WIDTH;
+    const yScale = (y: number) =>
+      CHART_HEIGHT - ((y - yMin) / (yMax - yMin)) * CHART_HEIGHT;
+
+    const lines = config.outputs
+      .map((output) => {
+        const points = samples
+          .map((s) => `${xScale(s.x)},${yScale(s.values[output.key])}`)
+          .join(" ");
+        return `<polyline points="${points}" fill="none" stroke="${output.color}" stroke-width="2" />`;
+      })
+      .join("");
+
+    const currentX = xScale(currentParams[chartParam.name]);
+    const marker = `<line x1="${currentX}" y1="0" x2="${currentX}" y2="${CHART_HEIGHT}" stroke="currentColor" stroke-opacity="0.3" stroke-dasharray="3,3" />`;
+    const dots = config.outputs
+      .map((output) => {
+        const y = yScale(computeFn(currentParams)[output.key]);
+        return `<circle cx="${currentX}" cy="${y}" r="4" fill="${output.color}" />`;
+      })
+      .join("");
+
+    return `<svg viewBox="0 0 ${CHART_WIDTH} ${CHART_HEIGHT}" class="w-full text-slate-400" role="img" aria-label="Trend of ${config.outputs.map((o) => o.label).join(" and ")} across ${chartParam.label}">${lines}${marker}${dots}</svg>`;
+  }
+
+  function renderDemo(root: HTMLElement) {
+    if (root.dataset.wired === "true") return;
+    root.dataset.wired = "true";
+
+    const configJson =
+      root.querySelector<HTMLScriptElement>("[data-demo-config]")?.textContent;
+    if (!configJson) return;
+    const config: DemoConfig = JSON.parse(configJson);
+    const body = root.querySelector<HTMLElement>("[data-demo-body]")!;
+
+    // eslint-disable-next-line no-new-func -- author-provided content (this
+    // project's own units), not learner input; see CLAUDE.md "Interactive demos".
+    const computeFn = new Function("params", config.compute) as (
+      params: Record<string, number>,
+    ) => Record<string, number>;
+
+    const currentParams: Record<string, number> = {};
+    for (const p of config.params) currentParams[p.name] = p.default;
+
+    const sliderContainer = document.createElement("div");
+    sliderContainer.className = "grid gap-3 sm:grid-cols-2";
+    const valueLabels: Record<string, HTMLElement> = {};
+
+    for (const param of config.params) {
+      const wrap = document.createElement("label");
+      wrap.className = "block text-sm";
+
+      const labelRow = document.createElement("div");
+      labelRow.className =
+        "mb-1 flex items-center justify-between text-slate-600 dark:text-slate-400";
+      const labelText = document.createElement("span");
+      labelText.textContent = param.label;
+      const valueText = document.createElement("span");
+      valueText.className = "font-mono text-slate-900 dark:text-slate-100";
+      valueText.textContent = formatValue(param.default, param.unit);
+      valueLabels[param.name] = valueText;
+      labelRow.append(labelText, valueText);
+
+      const slider = document.createElement("input");
+      slider.type = "range";
+      slider.min = String(param.min);
+      slider.max = String(param.max);
+      slider.step = String(param.step);
+      slider.value = String(param.default);
+      slider.className = "w-full accent-slate-900 dark:accent-slate-100";
+
+      slider.addEventListener("input", () => {
+        const value = Number(slider.value);
+        currentParams[param.name] = value;
+        valueLabels[param.name].textContent = formatValue(value, param.unit);
+        rerender();
+      });
+
+      wrap.append(labelRow, slider);
+      sliderContainer.append(wrap);
+    }
+
+    const outputRow = document.createElement("div");
+    outputRow.className = "mt-4 flex flex-wrap gap-4";
+    const outputValues: Record<string, HTMLElement> = {};
+    for (const output of config.outputs) {
+      const chip = document.createElement("div");
+      chip.className = "text-sm";
+      const dot = document.createElement("span");
+      dot.className = "mr-1.5 inline-block h-2 w-2 rounded-full";
+      dot.style.backgroundColor = output.color;
+      const label = document.createElement("span");
+      label.className = "text-slate-500 dark:text-slate-400";
+      label.textContent = `${output.label}: `;
+      const value = document.createElement("span");
+      value.className =
+        "font-mono font-medium text-slate-900 dark:text-slate-100";
+      outputValues[output.key] = value;
+      chip.append(dot, label, value);
+      outputRow.append(chip);
+    }
+
+    const chartWrap = document.createElement("div");
+    chartWrap.className = "mt-4";
+
+    function rerender() {
+      const results = computeFn(currentParams);
+      for (const output of config.outputs) {
+        outputValues[output.key].textContent = formatValue(
+          results[output.key],
+          output.unit,
+        );
+      }
+      chartWrap.innerHTML = buildChart(config, computeFn, currentParams);
+    }
+
+    body.append(sliderContainer, outputRow, chartWrap);
+    rerender();
+  }
+
+  function initInteractiveDemos() {
+    document
+      .querySelectorAll<HTMLElement>("[data-interactive-demo]")
+      .forEach(renderDemo);
+  }
+
+  initInteractiveDemos();
+  document.addEventListener("astro:page-load", initInteractiveDemos);
+</script>

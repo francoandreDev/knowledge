@@ -184,6 +184,79 @@ async function checkExercisesFile(track, unitSlug) {
   }
 }
 
+async function checkInteractivesFile(track, unitSlug) {
+  const interactivesPath = path.join(
+    CONTENT_DIR,
+    track,
+    unitSlug,
+    "interactives.json",
+  );
+  const raw = await readFile(interactivesPath, "utf8").catch(() => null);
+  if (raw === null) return; // no interactive demos for this unit — allowed
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    problems.push(
+      `src/content/${track}/${unitSlug}/interactives.json is not valid JSON: ${err.message}`,
+    );
+    return;
+  }
+
+  if (!Array.isArray(parsed.items)) {
+    problems.push(
+      `src/content/${track}/${unitSlug}/interactives.json must have an "items" array.`,
+    );
+    return;
+  }
+
+  for (const [i, demo] of parsed.items.entries()) {
+    const where = `${track}/${unitSlug}/interactives.json items[${i}]`;
+    if (![1, 2, 3].includes(demo.level)) {
+      problems.push(`${where}: "level" must be 1, 2, or 3.`);
+    }
+    if (!demo.id) problems.push(`${where}: missing "id".`);
+    if (!demo.title) problems.push(`${where}: missing "title".`);
+    if (!demo.description) problems.push(`${where}: missing "description".`);
+    if (!Array.isArray(demo.params) || demo.params.length === 0) {
+      problems.push(`${where}: needs at least one entry in "params".`);
+    }
+    if (!Array.isArray(demo.outputs) || demo.outputs.length === 0) {
+      problems.push(`${where}: needs at least one entry in "outputs".`);
+    }
+    if (typeof demo.compute !== "string" || !demo.compute.includes("return")) {
+      problems.push(
+        `${where}: "compute" must be a JS function body string that returns an object keyed by each output's "key".`,
+      );
+    }
+    const paramNames = new Set((demo.params ?? []).map((p) => p.name));
+    if (!paramNames.has(demo.chartParam)) {
+      problems.push(
+        `${where}: "chartParam" (${JSON.stringify(demo.chartParam)}) must name one of "params".`,
+      );
+    }
+    for (const p of demo.params ?? []) {
+      if (
+        typeof p.min !== "number" ||
+        typeof p.max !== "number" ||
+        p.min >= p.max
+      ) {
+        problems.push(`${where}: param "${p.name}" needs min < max.`);
+      }
+      if (
+        typeof p.default !== "number" ||
+        p.default < p.min ||
+        p.default > p.max
+      ) {
+        problems.push(
+          `${where}: param "${p.name}"'s "default" must be within [min, max].`,
+        );
+      }
+    }
+  }
+}
+
 async function checkFrontmatter(track, unitSlug, files) {
   for (const file of files) {
     const full = path.join(CONTENT_DIR, track, unitSlug, file);
@@ -252,6 +325,7 @@ async function main() {
 
     await checkFrontmatter(unit.track, unit.unitSlug, unit.files);
     await checkExercisesFile(unit.track, unit.unitSlug);
+    await checkInteractivesFile(unit.track, unit.unitSlug);
   }
 
   if (warnings.length > 0) {

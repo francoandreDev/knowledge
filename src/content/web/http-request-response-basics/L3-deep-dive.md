@@ -4,6 +4,20 @@ title: "L3 — HTTP request/response basics"
 
 L1 and L2 established the shape of an HTTP exchange and the mental model behind it. This level proves it by building both sides — a raw request over a TCP socket, and a server that parses one without any HTTP library — and then walks through the failure modes that a real server has to defend against.
 
+## Where the time actually goes
+
+Before writing a single byte of parser code, it's worth knowing what a "slow request" is even competing against. A cold HTTPS request (no cached DNS, no existing connection) spends its time roughly like this before your server logic even runs:
+
+```mermaid
+xychart-beta
+  title "Typical time budget for a cold HTTPS request"
+  x-axis [DNS, TCP, TLS, Request, Response]
+  y-axis "ms" 0 --> 150
+  bar [20, 30, 40, 15, 25]
+```
+
+TLS is usually the single biggest fixed cost on a cold connection — more than DNS and the TCP handshake combined. This is exactly why HTTP/1.1 keep-alive (and connection pooling in general) matters so much in practice: paying the DNS+TCP+TLS setup cost once and reusing the connection for many requests amortizes that ~90ms of setup across all of them, instead of paying it again every time.
+
 ## HTTP is text over TCP — proving it
 
 No framework, no `fetch`, no `http` module. Just a TCP socket and a string built by hand, using Node's `net` module (works identically under `bun run`):

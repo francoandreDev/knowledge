@@ -20,6 +20,7 @@ It is an **Astro + MDX + Tailwind site**, not a folder of loose markdown files �
 - Pages: `/` (track grid with progress bars), `/roadmap` (full roadmap, written units linked), `/[track]/` (unit list for a track), `/[track]/[unit]/` (the actual unit page — `LevelTabs` component switches between L1/L2/L3, `ProgressToggle` persists a done/not-done flag in `localStorage`, keyed `progress:<track>/<unit-slug>`).
 - `getStaticPaths` for `/[track]/[unit]/` is generated from **written content**, not from `ROADMAP.md` — a unit with no files on disk simply doesn't get a page yet; it just shows as `planned`/greyed-out on the track and roadmap pages.
 - A second content collection, `exercises` (also defined in `src/content.config.ts`), loads one optional `exercises.json` per unit. See "Exercises" below for the authoring format and how it gates `ProgressToggle`.
+- A third content collection, `interactives`, loads one optional `interactives.json` per unit — ungraded "move a slider, see the result and the trend" widgets. See "Interactive demos" below.
 
 ## Local workflow
 
@@ -143,12 +144,37 @@ The site's chrome (nav, track cards, status badges, level tabs, the progress but
 
 **Component wiring gotcha:** any client `<script>` that re-runs on repeated events (ours run on `exercise:graded` / `exercises:reset` / `astro:page-load`, not just once) **must guard against re-attaching event listeners** — check-and-set a `data-wired="true"` flag before calling `addEventListener`, the way `ProgressToggle.astro` and `ExercisePanel.astro` both do. Without this, listeners silently stack up and a single click ends up firing the handler multiple times (we hit this for real: one click toggled `done` on then back off). Any new interactive component must follow the same wire-once/render-many split.
 
+## Interactive demos
+
+A third, optional content type alongside levels and exercises: `interactives.json` per unit (`src/content/<track>/<unit-slug>/interactives.json`), rendered by `InteractiveDemo.astro`. **Purely exploratory — ungraded, no pass/fail, no effect on `ProgressToggle` gating.** The point is building intuition for _how a result varies_ as inputs change, not testing recall. Use this where a unit's theory has a real underlying relationship worth playing with (a trade-off, a formula, a threshold effect) — not every unit needs one, same restraint as tables/charts above.
+
+Format:
+
+```json
+{
+  "items": [{
+    "id": "...",
+    "level": 1 | 2 | 3,
+    "title": "...",
+    "description": "...",
+    "params": [{ "name": "...", "label": "...", "min": 0, "max": 0, "step": 0, "default": 0, "unit": "ms" }],
+    "compute": "return { outputKey: params.someParam * 2 };",
+    "outputs": [{ "key": "outputKey", "label": "...", "unit": "ms", "color": "#34d399" }],
+    "chartParam": "someParam"
+  }]
+}
+```
+
+- `compute` is a JS function-body string, called as `new Function("params", compute)`, receiving the current slider values as a `params` object and returning an object keyed by each `outputs[].key`. This runs on the **main thread synchronously** (not the sandboxed Worker exercises use) since it fires on every slider-drag tick and is author-written, not learner input — see CLAUDE.md's earlier note on the exercise sandbox for why that one _does_ need a Worker.
+- The component renders one range `<input>` per param (live-updating value label), the current computed output(s), and an SVG line chart showing every output across the _full range_ of `chartParam` (other params held at their current values) with a marker at the current point — this is what answers "what effect would that variation have," not just the single current number.
+- `validate:content` checks structure (params/outputs non-empty, `chartParam` names a real param, defaults within `[min, max]`) but can't verify `compute` actually runs correctly — **test it yourself in the browser** (drag every slider to its min and max, not just the default) before marking a unit done.
+
 ## Session workflow
 
 1. User picks (or confirms) a track + unit.
 2. Confirm scope for that unit in one or two sentences before writing (especially if it's ambiguous or large) — no need for a full approval cycle each time, just a sanity check.
 3. Write the level(s) in scope for the session, under `src/content/<track>/<unit-slug>/`.
-4. Write `exercises.json` for that unit unless there's a real reason not to (see "Exercises" above) — quiz items for L1/L2 concepts, code items for L3 code.
+4. Write `exercises.json` for that unit unless there's a real reason not to (see "Exercises" above) — quiz items for L1/L2 concepts, code items for L3 code. Add an `interactives.json` demo too if the topic has a real variable relationship worth exploring (see "Interactive demos" above) — not mandatory, but don't skip it just because it's more work than a quiz.
 5. Update `ROADMAP.md` status markers (`planned` → `in-progress` → `done`) and run `bun run generate:roadmap`.
 6. **`bun run check`** (see "Guardrails" above) — not just `build`. Fix anything it flags before moving on.
 7. Spin up `astro preview --background` and actually look at the rendered unit at least once per session — click through the exercises yourself (answer right, answer wrong, run code with a broken and a correct implementation) to confirm grading and the solution/explanation reveal actually work, not just that `check` passed. Don't just trust that markdown parsed.

@@ -8,6 +8,8 @@ import type { CollectionEntry } from "astro:content";
 export type CurriculumEntry = CollectionEntry<"curriculum">;
 export type ExerciseItem =
   CollectionEntry<"exercises">["data"]["items"][number];
+export type InteractiveDemoItem =
+  CollectionEntry<"interactives">["data"]["items"][number];
 
 export interface ParsedEntryId {
   track: string;
@@ -47,6 +49,17 @@ export function parseExercisesEntryId(
   return { track, unitSlug };
 }
 
+/** Parses "<track>/<unit-slug>/interactives" — same shape, different filename. */
+export function parseInteractivesEntryId(
+  id: string,
+): { track: string; unitSlug: string } | null {
+  const segments = id.split("/");
+  const [track, unitSlug, file] = segments;
+  if (!track || !unitSlug || !file) return null;
+  if (file.toLowerCase() !== "interactives") return null;
+  return { track, unitSlug };
+}
+
 export interface UnitContent {
   track: string;
   unitSlug: string;
@@ -55,6 +68,7 @@ export interface UnitContent {
   l3?: CurriculumEntry;
   l3Parts: CurriculumEntry[];
   exercises: ExerciseItem[];
+  interactives: InteractiveDemoItem[];
 }
 
 /** All units that have at least one written level, grouped and ready to render. */
@@ -66,7 +80,13 @@ export async function getWrittenUnits(): Promise<UnitContent[]> {
   function unitFor(track: string, unitSlug: string): UnitContent {
     const key = `${track}/${unitSlug}`;
     if (!byUnit.has(key)) {
-      byUnit.set(key, { track, unitSlug, l3Parts: [], exercises: [] });
+      byUnit.set(key, {
+        track,
+        unitSlug,
+        l3Parts: [],
+        exercises: [],
+        interactives: [],
+      });
     }
     return byUnit.get(key)!;
   }
@@ -93,6 +113,15 @@ export async function getWrittenUnits(): Promise<UnitContent[]> {
     const key = `${parsed.track}/${parsed.unitSlug}`;
     if (!byUnit.has(key)) continue;
     unitFor(parsed.track, parsed.unitSlug).exercises = entry.data.items;
+  }
+
+  const interactiveEntries = await getCollection("interactives");
+  for (const entry of interactiveEntries) {
+    const parsed = parseInteractivesEntryId(entry.id);
+    if (!parsed) continue;
+    const key = `${parsed.track}/${parsed.unitSlug}`;
+    if (!byUnit.has(key)) continue;
+    unitFor(parsed.track, parsed.unitSlug).interactives = entry.data.items;
   }
 
   for (const unit of byUnit.values()) {
