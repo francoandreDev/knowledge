@@ -50,7 +50,7 @@ sequenceDiagram
 
 Pseudocode for the same sequence, as the shell sees it:
 
-```
+```python
 function run_program(path, args):
     child_pid = fork()          # OS duplicates the calling process
     if child_pid == 0:

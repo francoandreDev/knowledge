@@ -50,7 +50,7 @@ Because a request carries everything the server needs to answer it (method, path
 
 Pseudocode for what a server is conceptually doing for every connection — this is the shape underneath every framework you'll ever use, from a raw socket server to Express to a CDN edge function:
 
-```
+```python
 loop forever:
     connection = accept_next_tcp_connection()
 

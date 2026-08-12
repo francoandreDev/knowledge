@@ -10,5 +10,11 @@ export default defineConfig({
     plugins: [tailwindcss()],
   },
 
+  markdown: {
+    shikiConfig: {
+      theme: "dracula",
+    },
+  },
+
   integrations: [mdx()],
 });
