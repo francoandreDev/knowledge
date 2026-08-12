@@ -31,3 +31,24 @@ Start here:
 - `CLAUDE.md` — binding rules for how content gets generated and evolved.
 
 Pace: one unit per session, by design.
+
+## Running it
+
+Built with **Astro + MDX + Tailwind**, using **bun**.
+
+```
+bun install
+bun run build              # builds the static site to dist/
+bun run astro preview --port 4321 --background   # serve dist/ in the background
+bun run astro preview stop                        # stop it when done
+```
+
+`bun run dev` (the file-watching dev server) can be slow to start on a Windows-mounted WSL path — `build` + `preview` is the more reliable local loop here.
+
+After editing `ROADMAP.md` (new unit, reorder, status change), regenerate the data the site reads:
+
+```
+bun run generate:roadmap
+```
+
+This also assigns a stable slug to any new roadmap row and writes it back into `ROADMAP.md`.
