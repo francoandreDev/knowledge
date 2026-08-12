@@ -30,7 +30,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 
 | #   | Slug                    | Problem                                                                                                                      | Status  |
 | --- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- |
-| 01  | process                 | What actually happens when you run a program? (process, memory layout, the OS as mediator)                                   | planned |
+| 01  | process                 | What actually happens when you run a program? (process, memory layout, the OS as mediator)                                   | done    |
 | 02  | persistence             | Why does my program still "remember" data after a crash? (persistence, disk vs. memory)                                      | planned |
 | 03  | algorithmic-complexity  | Why is my code fast on my machine but slow in production? (algorithmic complexity, Big-O in practice)                        | planned |
 | 04  | sockets                 | How do two programs talk to each other? (sockets, ports, protocols)                                                          | planned |
