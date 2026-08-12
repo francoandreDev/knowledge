@@ -125,18 +125,45 @@ const { title } = Astro.props;
         sequence: { mirrorActors: false },
       });
 
-      const blocks = document.querySelectorAll<HTMLElement>(
-        'pre[data-language="mermaid"]',
-      );
-      blocks.forEach((pre) => {
-        const container = document.createElement("div");
-        container.className = "mermaid";
-        container.textContent = pre.textContent ?? "";
-        pre.replaceWith(container);
-      });
-      if (blocks.length > 0) {
-        void mermaid.run();
+      // Convert every fenced mermaid block to a `.mermaid` div up front —
+      // cheap, no layout involved — but only RENDER (mermaid.run) the ones
+      // that are currently visible. flowchart/xychart diagrams measure text
+      // via real DOM layout (getBBox), which returns 0 for anything inside
+      // a `display:none` ancestor — rendering one while its LevelTabs panel
+      // is hidden collapses it to an empty ~16x16 box permanently (sequence
+      // diagrams use canvas-based text measurement instead, so they don't
+      // have this problem, which is why this went unnoticed on L2 tabs that
+      // happened to use sequenceDiagram). LevelTabs dispatches
+      // "mermaid:rerun" after un-hiding a panel so any diagram that was
+      // skipped gets rendered for real the first time it's actually shown.
+      function isInHiddenPanel(el: Element): boolean {
+        return el.closest("[data-tab-panel].hidden") !== null;
       }
+
+      function convertFencedBlocks(scope: ParentNode) {
+        const blocks = scope.querySelectorAll<HTMLElement>(
+          'pre[data-language="mermaid"]',
+        );
+        blocks.forEach((pre) => {
+          const container = document.createElement("div");
+          container.className = "mermaid";
+          container.textContent = pre.textContent ?? "";
+          pre.replaceWith(container);
+        });
+      }
+
+      function renderVisibleMermaid() {
+        const nodes = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            ".mermaid:not([data-processed])",
+          ),
+        ).filter((el) => !isInHiddenPanel(el));
+        if (nodes.length > 0) void mermaid.run({ nodes });
+      }
+
+      convertFencedBlocks(document);
+      renderVisibleMermaid();
+      document.addEventListener("mermaid:rerun", renderVisibleMermaid);
     </script>
   </body>
 </html>

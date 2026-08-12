@@ -6,8 +6,8 @@ title: "L2 — From a multiplier of one to a multiplier of many"
 
 ```mermaid
 flowchart LR
-    IC["IC output = own effort × own skill"] --> ICResult["Direct, visible,\nentirely within your control"]
-    Mgr["Manager output = sum across the team of\n(each person's effort × their skill × how well-supported they are)"] --> MgrResult["Indirect, often invisible day-to-day,\nmostly NOT within your direct control"]
+    IC["IC output = own effort x own skill"] --> ICResult["Direct, visible,\nentirely within your control"]
+    Mgr["Manager output = sum across the team of\n(each person's effort x skill x how well-supported they are)"] --> MgrResult["Indirect, often invisible day-to-day,\nmostly NOT within your direct control"]
 ```
 
 The manager equation has a term the IC equation doesn't: "how well-supported they are" — unclear priorities, missing context, being blocked on a decision only the manager can make, or lacking coaching on a skill gap all directly multiply down every team member's effective output, and closing those gaps is now the actual job, even though it produces no code and no direct, personally-attributable output of its own.
