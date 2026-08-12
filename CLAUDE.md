@@ -27,6 +27,20 @@ It is an **Astro + MDX + Tailwind site**, not a folder of loose markdown files �
 - `bun run astro build --force` if a stale content-layer cache causes ghost pages (e.g. after deleting a content file) — plain `build` alone does not always invalidate the cache.
 - `bun run astro preview --port <port> --background` then `curl`/browser-check it, `bun run astro preview stop` when done. **Avoid `bun run dev`** for verification in this environment — the file watcher on `/mnt/c/...` (WSL-over-Windows filesystem) is slow enough that it has reliably failed to start within Astro's 30s timeout; `build` + `preview` is the dependable loop here.
 
+## Guardrails — run these, don't just trust the markdown
+
+The project has lint, format, typecheck, content-validation, and test tooling specifically so a session can never leave the site in a broken or inconsistent state without it being caught immediately, and so the user can start a new unit from their own side with one command instead of hand-crafting folders.
+
+- **`bun run new:unit <track> <unit-number-or-slug>`** — the one-command way to start a unit. Looks the unit up in `src/data/roadmap.json` (run `generate:roadmap` first if `ROADMAP.md` was just edited and this is stale), scaffolds `L1-summary.md` / `L2-concept.md` / `L3-deep-dive.md` with correct frontmatter under `src/content/<track>/<slug>/`, and flips that unit's `ROADMAP.md` status to `in-progress`. Refuses to run if the unit folder already exists (won't overwrite). The user can run this themselves at the start of a session, or ask Claude to run it — either way it's the same known-good starting shape every time.
+- **`bun run validate:content`** — checks that `ROADMAP.md`, `src/data/roadmap.json`, and the actual files under `src/content/` all agree: every written unit has a matching roadmap row, every `.md` file has `title` frontmatter, a unit marked `done` actually has all three levels written, a unit with written files isn't still marked `planned`, and `roadmap.json` isn't stale relative to `ROADMAP.md`. This is what catches "I wrote the files but forgot to update the roadmap" or "the slug in the folder doesn't match the slug in the roadmap" before they become confusing bugs later.
+- **`bun run lint`** / **`bun run lint:fix`** — ESLint (flat config, TS + Astro + Node-scripts-aware) over the whole project.
+- **`bun run format`** / **`bun run format:check`** — Prettier (with `prettier-plugin-astro`) over everything, including `ROADMAP.md`'s tables (`generate-roadmap-data.mjs` already reformats `ROADMAP.md` with Prettier itself after rewriting it, so this should never actually flag it).
+- **`bun run typecheck`** — `astro check`, catching type errors in `.astro`/`.ts` files, including content-collection schema mismatches.
+- **`bun run test`** — `bun test`, currently covering the roadmap-slug generator and the content-entry-id parser (the two places where a silent parsing bug would be hardest to notice by eye).
+- **`bun run check`** — runs all of the above in order (`generate:roadmap` → `lint` → `format:check` → `typecheck` → `validate:content` → `test` → `build`) and stops at the first failure. **Run this before ending any session that touched content or code**, not just `build` alone — `build` succeeding does not mean the roadmap is in sync, the code is linted, or frontmatter is present.
+
+If `bun run check` fails, fix the root cause — don't work around it by skipping a step, and don't leave a session with a red `check`.
+
 ## Non-negotiable generation rules
 
 1. **All content is written in English.** No exceptions, regardless of the language the session is conducted in.
@@ -55,9 +69,11 @@ src/content/<track>/<unit-slug>/
     part-1-<slug>.md
     part-2-<slug>.md
 ```
+
 `<unit-slug>` must exactly match the `Slug` column for that unit in `ROADMAP.md` (case-sensitive) — that's how the site links a written unit back to its roadmap row. If a unit doesn't have a slug in `ROADMAP.md` yet, run `bun run generate:roadmap` first to have one assigned, rather than inventing one ad hoc in the content folder.
 
 Each `.md` file needs frontmatter with at least `title`:
+
 ```md
 ---
 title: "L1 — <short title>"
@@ -70,6 +86,7 @@ title: "L1 — <short title>"
 2. Confirm scope for that unit in one or two sentences before writing (especially if it's ambiguous or large) — no need for a full approval cycle each time, just a sanity check.
 3. Write the level(s) in scope for the session, under `src/content/<track>/<unit-slug>/`.
 4. Update `ROADMAP.md` status markers (`planned` → `in-progress` → `done`) and run `bun run generate:roadmap`.
-5. `bun run build` (use `--force` if a stale ghost page shows up) to verify the unit actually renders — check the built HTML or spin up `astro preview --background` and look at it, don't just trust that markdown parsed.
-6. Update `PROGRESS.md`.
-7. Suggest — don't decide — what a sensible next unit could be, across any track.
+5. **`bun run check`** (see "Guardrails" above) — not just `build`. Fix anything it flags before moving on.
+6. Spin up `astro preview --background` and actually look at the rendered unit at least once per session (not just trust that `check` passing means it looks right) — don't just trust that markdown parsed.
+7. Update `PROGRESS.md`.
+8. Suggest — don't decide — what a sensible next unit could be, across any track.

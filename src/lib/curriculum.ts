@@ -1,4 +1,9 @@
-import { getCollection, type CollectionEntry } from "astro:content";
+// Type-only import: astro:content is a virtual module that only resolves
+// inside Astro's Vite pipeline, not under `bun test`. getCollection is
+// dynamic-imported below, inside the functions that actually need it, so
+// this file stays importable (and its pure helpers like parseEntryId
+// testable) outside of Astro too.
+import type { CollectionEntry } from "astro:content";
 
 export type CurriculumEntry = CollectionEntry<"curriculum">;
 
@@ -40,6 +45,7 @@ export interface UnitContent {
 
 /** All units that have at least one written level, grouped and ready to render. */
 export async function getWrittenUnits(): Promise<UnitContent[]> {
+  const { getCollection } = await import("astro:content");
   const entries = await getCollection("curriculum");
   const byUnit = new Map<string, UnitContent>();
 

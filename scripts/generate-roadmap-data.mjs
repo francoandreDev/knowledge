@@ -14,11 +14,50 @@ const ROADMAP_PATH = path.join(ROOT, "ROADMAP.md");
 const OUT_JSON = path.join(ROOT, "src/data/roadmap.json");
 
 const STOPWORDS = new Set([
-  "a", "an", "the", "how", "why", "what", "do", "does", "did", "i", "we",
-  "it", "is", "are", "of", "to", "in", "on", "for", "with", "without",
-  "that", "this", "or", "and", "vs", "vs.", "not", "actually", "really",
-  "instead", "before", "after", "so", "if", "than", "at", "as", "be",
-  "my", "me", "someone", "something", "own",
+  "a",
+  "an",
+  "the",
+  "how",
+  "why",
+  "what",
+  "do",
+  "does",
+  "did",
+  "i",
+  "we",
+  "it",
+  "is",
+  "are",
+  "of",
+  "to",
+  "in",
+  "on",
+  "for",
+  "with",
+  "without",
+  "that",
+  "this",
+  "or",
+  "and",
+  "vs",
+  "vs.",
+  "not",
+  "actually",
+  "really",
+  "instead",
+  "before",
+  "after",
+  "so",
+  "if",
+  "than",
+  "at",
+  "as",
+  "be",
+  "my",
+  "me",
+  "someone",
+  "something",
+  "own",
 ]);
 
 function slugFromText(text, maxWords = 6) {
@@ -31,7 +70,7 @@ function slugFromText(text, maxWords = 6) {
   return words.slice(0, maxWords).join("-") || "unit";
 }
 
-function deriveSlug(problem) {
+export function deriveSlug(problem) {
   const parenMatch = problem.match(/\(([^)]+)\)/);
   const primary = parenMatch ? parenMatch[1].split(/[,:;]/)[0] : problem;
   return slugFromText(primary);
@@ -69,7 +108,8 @@ async function main() {
       continue;
     }
 
-    const isTableHeader = /^\|\s*#\s*\|/.test(line) || /^\|\s*#\s*\|\s*Slug\s*\|/.test(line);
+    const isTableHeader =
+      /^\|\s*#\s*\|/.test(line) || /^\|\s*#\s*\|\s*Slug\s*\|/.test(line);
     if (isTableHeader && currentTrack) {
       outLines.push("| # | Slug | Problem | Status |");
       outLines.push("|---|---|---|---|");
@@ -77,8 +117,12 @@ async function main() {
       continue;
     }
 
-    const rowNoSlug = line.match(/^\|\s*(\d+)\s*\|\s*(.+?)\s*\|\s*(planned|in-progress|done)\s*\|$/);
-    const rowWithSlug = line.match(/^\|\s*(\d+)\s*\|\s*([a-z0-9-]+)\s*\|\s*(.+?)\s*\|\s*(planned|in-progress|done)\s*\|$/);
+    const rowNoSlug = line.match(
+      /^\|\s*(\d+)\s*\|\s*(.+?)\s*\|\s*(planned|in-progress|done)\s*\|$/,
+    );
+    const rowWithSlug = line.match(
+      /^\|\s*(\d+)\s*\|\s*([a-z0-9-]+)\s*\|\s*(.+?)\s*\|\s*(planned|in-progress|done)\s*\|$/,
+    );
 
     if (currentTrack && rowWithSlug) {
       const [, num, slug, problem, status] = rowWithSlug;
@@ -101,12 +145,24 @@ async function main() {
   }
 
   await writeFile(ROADMAP_PATH, outLines.join("\n"));
+
+  // Keep the rewritten table prettier-clean (column alignment, spacing) so
+  // `bun run format:check` doesn't flag a file this script itself just wrote.
+  // Must run *before* writing roadmap.json below: validate-content.mjs treats
+  // "ROADMAP.md newer than roadmap.json" as a staleness signal, so ROADMAP.md
+  // needs to finish changing (including this reformat) before json's mtime is set.
+  Bun.spawnSync(["bunx", "prettier", "--write", ROADMAP_PATH], { cwd: ROOT });
+
   await mkdir(path.dirname(OUT_JSON), { recursive: true });
   await writeFile(OUT_JSON, JSON.stringify({ tracks }, null, 2) + "\n");
 
   const totalUnits = tracks.reduce((sum, t) => sum + t.units.length, 0);
   console.log(`Parsed ${tracks.length} tracks, ${totalUnits} units.`);
-  console.log(`Wrote ${path.relative(ROOT, OUT_JSON)} and updated ROADMAP.md with slugs.`);
+  console.log(
+    `Wrote ${path.relative(ROOT, OUT_JSON)} and updated ROADMAP.md with slugs.`,
+  );
 }
 
-main();
+if (import.meta.main) {
+  main();
+}
