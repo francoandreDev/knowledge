@@ -155,3 +155,21 @@ Append-only session log. One entry per session that produces or completes conten
 - `ROADMAP.md` status flipped to `done` for `systems/process`; `bun run check` clean (lint, format, typecheck, content validation, 9/9 tests, build).
 - Takeaway for future sessions: the `<br/>`-in-Mermaid-text pitfall applies to both message text and note text — default to single-line Mermaid text everywhere, don't rely on the CSS fix to handle multi-line cases.
 - Next: pick the next unit and track together with the user.
+
+## 2026-08-12 — Color/legibility pass: Shiki theme, prose accent color, chart axis reference
+
+- User feedback with 2 units written: the site read as too monochrome — keywords/bold text had no accent color, code blocks (especially untagged pseudocode) had near-zero syntax color, and the custom SVG trend chart in `InteractiveDemo.astro` showed only a curve's shape with no readable value scale.
+- Switched Shiki theme (`astro.config.mjs`) from `github-dark` to `dracula` for more vivid syntax colors; tagged the two previously-untagged pseudocode fences (`systems/process` and `web/http-request-response-basics` L2s) as `python` so they get real highlighting instead of flat plaintext.
+- Added a `sky` accent color (reused from existing chart palettes) to `.prose-panel` bold text, links, and inline code chips in `global.css`, via Tailwind Typography's `--tw-prose-*` custom properties rather than overriding generated utility classes.
+- Rewrote `InteractiveDemo.astro`'s `buildChart()` to add axis min/max labels, reference gridlines, and a value label at the current point — a generic infrastructure fix that applies to every current and future `interactives.json` demo, not a one-off. Mermaid's `xychart-beta` already renders its own y-axis scale, so needed no change.
+- Verified all of the above live in the browser (dracula colors, sky accents, chart axis labels/gridlines/value annotation on `systems/process`'s recursion-depth demo); `bun run check` clean throughout. Committed as `47f40dd`.
+- Next: pick the next unit and track together with the user.
+
+## 2026-08-12 — First business-communication/ unit: `audience-awareness` ("Why does the same message land differently depending on who says it?")
+
+- User chose `business-communication/audience-awareness` as the next unit — the first non-code, non-systems track to get content, establishing the pattern for tracks with no natural code/diagram substrate.
+- Wrote all three levels: L1 (bullet summary — context/incentives/channel as the three lenses, the "audience awareness isn't spin" distinction), L2 (a Mermaid flowchart showing one set of facts branching into three audience-specific outputs, a comparison table of the three lenses across peer/manager/exec, and a pseudocode-style decision procedure `compose_message(facts, audience)` tagged `python` for consistent coloring with the code tracks), L3 (one real scenario — a reconciliation job slowdown — rewritten three full times for a peer engineer, a manager, and a non-technical exec, with an explicit "what's assumed / what's foregrounded / the ask" breakdown per version, a "what stayed constant across all three" section making the not-spin distinction concrete, and 5 failure modes).
+- Added `exercises.json`: 6 quiz items only (no code exercises — this track has no runnable-code substrate), including one 2-variant randomized pool on the "audience awareness isn't spin" distinction.
+- No `interactives.json` — no real quantitative variable relationship in this topic; per `CLAUDE.md`'s restraint rule, skipped consciously rather than bolted on.
+- `ROADMAP.md` flipped to `done` for `audience-awareness`; `bun run check` clean (lint, format, typecheck, content validation, tests, build). Browser verification done by the user directly (Chrome extension bridge wasn't connected in this session).
+- Next: user asked to advance every remaining track by one unit (its first), to establish a precedent pattern per track before going deeper on any single one.

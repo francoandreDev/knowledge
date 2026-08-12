@@ -73,7 +73,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 
 | #   | Slug                                     | Problem                                                                                                              | Status  |
 | --- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------- |
-| 01  | audience-awareness                       | Why does the same message land differently depending on who says it? (audience awareness)                            | planned |
+| 01  | audience-awareness                       | Why does the same message land differently depending on who says it? (audience awareness)                            | done    |
 | 02  | status-updates-build-trust               | How do I explain a technical delay without sounding like an excuse? (status updates that build trust)                | planned |
 | 03  | reading-stakeholder-incentives           | Why did my "obviously right" proposal get rejected? (reading stakeholder incentives)                                 | planned |
 | 04  | pushback-frameworks                      | How do I say no to a request without burning the relationship? (pushback frameworks)                                 | planned |
