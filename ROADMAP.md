@@ -155,6 +155,8 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 09 | How do I decide between staying an IC or moving into management? (IC vs. EM tracks, self-assessment) | planned |
 | 10 | How do I mentor someone who is more senior than me in a different way? (peer mentoring, skip-level relationships) | planned |
 | 11 | What does a staff engineer actually own that a senior doesn't? (staff scope: technical direction, org-level leverage) | planned |
+| 12 | How do I evaluate whether an offer or raise is actually fair? (market research, total comp literacy) | planned |
+| 13 | How do I negotiate compensation without damaging the relationship? (negotiation tactics, anchoring, knowing when to walk) | planned |
 
 ## product-domain/
 
@@ -231,9 +233,60 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 14 | How do I reason about risk with numbers instead of gut feel? (expected value, decision trees, quantitative risk modeling) | planned |
 | 15 | How does a staff engineer use math to settle an architecture debate instead of opinion? (quantitative modeling for design decisions, defending numbers in a design doc) | planned |
 
+## testing-quality/
+
+| # | Problem | Status |
+|---|---|---|
+| 01 | Why doesn't "it passed my manual check" mean it works? (the case for automated testing) | planned |
+| 02 | How do I know what level to test something at? (the test pyramid: unit vs. integration vs. e2e) | planned |
+| 03 | How do I write a test that actually catches bugs, not just exercises code? (assertions that matter, avoiding tautological tests) | planned |
+| 04 | Why does writing the test first change the design? (TDD basics, red-green-refactor) | planned |
+| 05 | How do I test behavior instead of implementation? (BDD, testing through the public interface) | planned |
+| 06 | How do I test something that depends on time, randomness, or external services? (test doubles: mocks/stubs/fakes, seams) | planned |
+| 07 | Why does my test suite pass locally but fail in CI? (flaky tests, non-determinism, environment leakage) | planned |
+| 08 | How do I know if my tests are actually testing anything? (mutation testing, coverage as a signal, not a target) | planned |
+| 09 | How do I test properties instead of examples? (property-based testing, generative testing) | planned |
+| 10 | How do I test that two services still agree on their contract? (contract testing, consumer-driven contracts) | planned |
+| 11 | How do I test a system's behavior under failure, not just the happy path? (fault injection, failure-mode testing) | planned |
+| 12 | How do I keep a test suite fast and trustworthy as the codebase grows? (test suite architecture, parallelization, quarantine strategy) | planned |
+| 13 | How does a staff engineer build a culture where quality is everyone's job, not QA's? (quality culture, testing strategy as an architectural decision) | planned |
+
+## software-design/
+
+| # | Problem | Status |
+|---|---|---|
+| 01 | Why does code that "just works" become impossible to change six months later? (the cost of design, not just correctness) | planned |
+| 02 | How do I decide where one function's responsibility ends? (single responsibility, cohesion vs. coupling) | planned |
+| 03 | How do I name and structure things so the code explains itself? (naming, readability as a design tool) | planned |
+| 04 | Why does copy-pasting code eventually blow up? (DRY, abstraction, and the trap of premature abstraction) | planned |
+| 05 | How do I design so a change in one place doesn't ripple everywhere? (SOLID principles, dependency inversion) | planned |
+| 06 | When should I use inheritance vs. composition? (OOP design trade-offs) | planned |
+| 07 | What does functional programming actually buy me? (immutability, pure functions, managing side effects) | planned |
+| 08 | How do I recognize a design pattern I actually need vs. cargo-culting one? (classic design patterns, when they help vs. hurt) | planned |
+| 09 | How do I change a design safely once it's already tangled? (refactoring technique, safe transformation steps) | planned |
+| 10 | How do I know how much technical debt is acceptable? (technical debt as a deliberate trade-off, not just a sin) | planned |
+| 11 | How do I design an interface or API that's hard to misuse? (API design, defensive design, making illegal states unrepresentable) | planned |
+| 12 | How do I evolve a design as requirements change without a rewrite? (evolutionary design, the open-closed principle in practice) | planned |
+| 13 | How does a staff engineer make a design decision that will outlive their own tenure on the project? (long-term design judgment, designing for whoever inherits it) | planned |
+
+## sustainable-performance/
+
+| # | Problem | Status |
+|---|---|---|
+| 01 | Why does working more hours eventually produce less, not more? (the myth of linear output, diminishing returns) | planned |
+| 02 | How do I recognize burnout before it takes me out completely? (early warning signs, tired vs. burned out) | planned |
+| 03 | How do I protect focus time in a job full of interruptions? (attention management, deep work vs. shallow work) | planned |
+| 04 | How do I manage energy, not just time? (energy management across a day/week, matching task type to energy state) | planned |
+| 05 | How do I say no to more work without it looking like I can't handle my job? (sustainable boundary-setting) | planned |
+| 06 | How do I recover from a genuinely brutal period without carrying it forward? (recovery practices after crunch, incidents, layoffs) | planned |
+| 07 | How do I keep growing technically without it consuming my whole identity? (sustainable long-term learning pace) | planned |
+| 08 | How does a staff engineer sustain high output over a decade, not just a good quarter? (long-horizon sustainability, pacing a career like a marathon) | planned |
+
 ## Notes on ordering
 
 - Numbers reflect complexity ordering *within* a track, not a global session order.
 - Track choice per session is decided live (see `CLAUDE.md`), so it's normal and expected to jump between tracks rather than clearing one top-to-bottom.
-- Late-track units (e.g. `web/17`, `systems/17`, `git-teamwork/16`, `business-communication/14`, `logic/12`, `security/13`, `infra-delivery/12`, `career-craft/11`, `product-domain/13`, `corporate-politics/14`, `learning-craft/13`, `applied-math/15`) are intentionally where the tracks start blending into each other — that's the point at which staff-level judgment lives, and cross-references between tracks are expected there.
+- Late-track units (e.g. `web/17`, `systems/17`, `git-teamwork/16`, `business-communication/14`, `logic/12`, `security/13`, `infra-delivery/12`, `career-craft/13`, `product-domain/13`, `corporate-politics/14`, `learning-craft/13`, `applied-math/15`, `testing-quality/13`, `software-design/13`, `sustainable-performance/08`) are intentionally where the tracks start blending into each other — that's the point at which staff-level judgment lives, and cross-references between tracks are expected there.
 - `logic/`, `learning-craft/`, and `applied-math/` are all transversal (see `docs/ARCHITECTURE.md`) — in practice they tend to get reinforced by every other track rather than studied in total isolation, but each still has its own complete sequence here. In particular, `applied-math/06`, `07`, and `12` are expected to be cross-referenced directly from `systems/` and `web/` units on load, capacity, and reliability.
+- `testing-quality/` and `software-design/` are expected to be cross-referenced constantly from `web/` and `systems/` units — they document the craft underneath most implementation work in those tracks, at a level of generality neither track covers on its own.
+- `career-craft/12` and `13` (compensation negotiation) were added as an extension of the existing track rather than a new one — negotiation is a career mechanic, not a separate family.

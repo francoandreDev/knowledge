@@ -2,7 +2,7 @@
 
 A self-study reference for growing from junior engineer to a solid staff-level engineer, built session by session.
 
-Covers twelve tracks:
+Covers fifteen tracks:
 
 - `web/` — how the web works, from a single HTTP request to systems serving millions of users.
 - `systems/` — operating systems, distributed systems, databases, reliability.
@@ -16,6 +16,9 @@ Covers twelve tracks:
 - `corporate-politics/` — how power and influence really move in an organization: legitimate ("white") influence, the gray zone, what "black" politics looks like in practice, and how to defend against it without becoming it.
 - `learning-craft/` — transversal: how to find trustworthy information fast, learn it correctly, retain it, and build good judgment instead of just accumulating facts.
 - `applied-math/` — what to measure, calculate, forecast, and estimate: probability/statistics, queueing theory, capacity math, graph theory, linear algebra, risk modeling — always tied back to real use in `web/` and `systems/`.
+- `testing-quality/` — the craft of testing: test pyramid, TDD/BDD, test doubles, flaky tests, mutation/property-based testing, contract testing, quality culture.
+- `software-design/` — the craft of maintainable code: SOLID, OOP vs. functional, design patterns, refactoring, technical debt, API design.
+- `sustainable-performance/` — the personal sustainability layer: energy/attention management, burnout recovery, boundaries, pacing a career over a decade.
 
 Each track is a sequence of real problems ordered by increasing complexity — no explicit junior/mid/senior/staff labels. Each problem ("unit") is documented at three levels: a quick summary, the underlying concept/architecture, and an extensive deep dive with real code.
 

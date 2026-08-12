@@ -41,4 +41,11 @@ Append-only session log. One entry per session that produces or completes conten
 - Added `applied-math/` (15 units): measurement theory, orders of magnitude, asymptotic analysis, combinatorics/probability foundations, probability distributions, queueing theory (Little's Law), statistics/significance, time series/regression, graph theory, linear algebra, capacity planning math, unit economics/cost modeling, quantitative risk modeling, and staff-level quantitative modeling for architecture decisions.
 - Updated `ROADMAP.md`, `docs/ARCHITECTURE.md` (framed as transversal alongside `logic/` and `learning-craft/`, with explicit cross-reference note to `systems/`/`web/`), `CLAUDE.md`, `README.md` to reflect 12 tracks.
 - Total roadmap now 167 units across 12 tracks, all `planned`. This is likely the completion point of the track-level roadmap — future sessions should focus on content generation rather than further track expansion unless a genuine new gap surfaces.
+
+## 2026-08-12 — Roadmap expansion: testing-quality, software-design, sustainable-performance; career-craft extended
+
+- User asked once more whether the profile had gaps. Identified two genuine ones (no dedicated home for testing craft or software design principles) and two weaker candidates (compensation negotiation, personal sustainability), then asked the user to pick.
+- User chose all four: added `testing-quality/` (13 units), `software-design/` (13 units), and `sustainable-performance/` (8 units) as new tracks; added 2 compensation-negotiation units to the existing `career-craft/` (now 13 units) rather than a new track, since negotiation is a career mechanic, not a separate family.
+- Updated `ROADMAP.md`, `docs/ARCHITECTURE.md` (added relationship notes: `testing-quality/`+`software-design/` relate to `web/`/`systems/` the way `applied-math/` does; `sustainable-performance/` distinguished from `career-craft/`), `CLAUDE.md`, `README.md` to reflect 15 tracks.
+- Total roadmap now 190 units across 15 tracks, all `planned`. User has been asked twice now whether the roadmap is complete — treat a third "any gaps?" pass as the point to push back gently on further expansion in favor of starting content, unless a clearly distinct new gap appears.
 - Next: pick the first unit and track together with the user.
