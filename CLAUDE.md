@@ -19,6 +19,7 @@ It is an **Astro + MDX + Tailwind site**, not a folder of loose markdown files �
 - `src/lib/curriculum.ts` groups raw content-collection entries (ids like `web/http-request-response-basics/l1-summary`) into per-unit `{l1, l2, l3, l3Parts}` bundles for rendering. Note: the glob loader **lowercases generated ids** — level-file names must still be written `L1-summary.md` / `L2-concept.md` / `L3-deep-dive.md` on disk (rule 4 below), the lowercasing is purely an internal id detail already handled by the parser.
 - Pages: `/` (track grid with progress bars), `/roadmap` (full roadmap, written units linked), `/[track]/` (unit list for a track), `/[track]/[unit]/` (the actual unit page — `LevelTabs` component switches between L1/L2/L3, `ProgressToggle` persists a done/not-done flag in `localStorage`, keyed `progress:<track>/<unit-slug>`).
 - `getStaticPaths` for `/[track]/[unit]/` is generated from **written content**, not from `ROADMAP.md` — a unit with no files on disk simply doesn't get a page yet; it just shows as `planned`/greyed-out on the track and roadmap pages.
+- A second content collection, `exercises` (also defined in `src/content.config.ts`), loads one optional `exercises.json` per unit. See "Exercises" below for the authoring format and how it gates `ProgressToggle`.
 
 ## Local workflow
 
@@ -51,6 +52,7 @@ If `bun run check` fails, fix the root cause — don't work around it by skippin
    - `L2-concept.md` — the idea itself: pseudocode, a diagram (ASCII or Mermaid), architecture sketch, semantics, the "why" and the "how it fits together". No production code yet — this is about the model in your head, not the implementation.
    - `L3-deep-dive.md` (or `L3-deep-dive/` folder, see rule 5) — extensive theory with real, runnable code examples. This is the substantial one. Trade-offs, edge cases, failure modes, at least one worked example end-to-end.
 5. **L3 may span multiple sessions.** If a topic is large, split `L3-deep-dive/` into a folder with `part-1-<slug>.md`, `part-2-<slug>.md`, etc., plus a short `00-index.md` listing the parts and their status (done / in progress / planned). Never leave a part half-written across a session boundary — finish the part you're on, then stop.
+   5b. **Add exercises when the unit supports it** (see "Exercises" below) — not strictly mandatory like L1–L3, but the default expectation for any unit where a real quiz question or code exercise is possible, which is most of them. Skipping exercises should be the exception, made consciously, not the default because it's less work.
 6. **Update `PROGRESS.md` at the end of every session** that produces or completes content: date, unit touched, what level(s) were written, and what's next.
 7. **Update `ROADMAP.md`** whenever a unit is added, reordered, split, or reworded — the roadmap must always reflect reality, not the original plan.
 8. **Don't pad.** If a unit's concept is simple, L2 can be short. Depth should track the actual complexity of the problem, not a page-count target.
@@ -80,13 +82,67 @@ title: "L1 — <short title>"
 ---
 ```
 
+## Exercises, "Mark as done" gating, and spaced repetition
+
+Exercises are **optional per unit** but strongly encouraged — a unit with exercises is meaningfully more valuable than one without, and `ProgressToggle` treats units with exercises differently from units without. Live at `src/content/<track>/<unit-slug>/exercises.json`, schema in `src/content.config.ts`.
+
+**Two exercise types**, both self-grading and both client-side only (no backend):
+
+- **`"quiz"`** — best for L1/L2 (concepts, definitions, "why" questions). Multiple choice, self-graded against `correctIndex`.
+- **`"code"`** — best for L3 (anything with real code already). The learner edits `starterCode` in a `<textarea>`, clicks "Run tests", and it executes in a sandboxed Web Worker against `tests[].expr` strings using an injected `expect(actual).toBe/toEqual/toBeTruthy/toThrow(...)` mini-API (see `ExercisePanel.astro`'s `WORKER_SOURCE`). A 3-second timeout guards against infinite loops. **No Node globals available** (no `Buffer`, no `require`) — it's a browser Worker, so use `TextEncoder`/`TextDecoder`/etc. for anything byte-related.
+
+**Every exercise must explain itself, unconditionally, after any attempt** — right or wrong. This is the whole point: a pass/fail signal with no reasoning attached teaches nothing. Concretely:
+
+- Quiz items: `explanation` is **required** (not optional) and is shown after every "Check answer" click, whether the pick was right or wrong.
+- Code items: `solution` (a real working implementation) and `explanation` (why it works, not just what it does) are **both required**, and are revealed after every "Run tests" click, whether tests passed or not.
+
+`bun run validate:content` enforces both of these — an exercise missing `explanation`, or a code exercise missing `solution`, fails the check.
+
+**Randomized variants (pools).** Give two or more items the same `poolId` to make them interchangeable variants of the same underlying question — the page picks one at random on every render (and again on every spaced-repetition reset), so a re-exam isn't just re-answering the exact same question from memory. An item with no `poolId` is its own singleton pool (fine for most exercises; add real variants where a question is easy to memorize the answer to rather than reason through). All variants sharing a `poolId` must have the same `level` and `type` — `validate:content` checks this.
+
+```json
+{
+  "items": [
+    {
+      "type": "quiz",
+      "id": "status-code-range",
+      "poolId": "status-code-range-pool",
+      "level": 1,
+      "prompt": "...",
+      "choices": ["...", "...", "...", "..."],
+      "correctIndex": 2,
+      "explanation": "..."
+    },
+    {
+      "type": "code",
+      "id": "byte-length",
+      "level": 3,
+      "prompt": "...",
+      "starterCode": "function f(x) {\n  // TODO\n}\n",
+      "tests": [{ "description": "...", "expr": "expect(f(1)).toBe(2)" }],
+      "solution": "function f(x) {\n  return x + 1;\n}",
+      "explanation": "..."
+    }
+  ]
+}
+```
+
+**"Mark as done" gating.** If a unit has any exercises, `ProgressToggle` disables "Mark as done" until every pool has been passed at least once in the current session (state tracked per-pool in `localStorage`, key `exercise:<track>/<unit-slug>/<poolId>`). Units with zero exercises keep the old, ungated manual toggle.
+
+**Spaced repetition / re-exam.** Marking a unit done schedules a re-exam via `src/lib/spaced-repetition.ts`: 7 days after first completion, 30 days after the next, 90 days after that (capped there). When the scheduled date passes, the _next visit_ to that unit's page automatically un-marks it done **and clears every exercise pool's pass/fail state**, forcing a genuine re-take (with freshly randomized variants) rather than just re-clicking a button — this is the regression check the user asked for. This logic lives in `checkAndApplyReviewDue()` and runs from `ProgressToggle`'s init; it dispatches an `exercises:reset` DOM event that `ExercisePanel` listens for to re-render with a fresh random pick, even if it already initialized earlier on the same page load.
+
+**Tables and charts** need no special component — GFM tables (`| a | b |`) render via Astro's built-in remark-gfm, and Mermaid supports more than sequence diagrams: use ` ```mermaid ` fences with `xychart-beta` (bar/line charts), `pie`, etc. for illustrating things like algorithmic growth curves or comparative data. These are for **illustrating concepts in the content itself**, not interactive — if a chart needs to be part of an exercise, that's a code exercise, not a chart type.
+
+**Component wiring gotcha:** any client `<script>` that re-runs on repeated events (ours run on `exercise:graded` / `exercises:reset` / `astro:page-load`, not just once) **must guard against re-attaching event listeners** — check-and-set a `data-wired="true"` flag before calling `addEventListener`, the way `ProgressToggle.astro` and `ExercisePanel.astro` both do. Without this, listeners silently stack up and a single click ends up firing the handler multiple times (we hit this for real: one click toggled `done` on then back off). Any new interactive component must follow the same wire-once/render-many split.
+
 ## Session workflow
 
 1. User picks (or confirms) a track + unit.
 2. Confirm scope for that unit in one or two sentences before writing (especially if it's ambiguous or large) — no need for a full approval cycle each time, just a sanity check.
 3. Write the level(s) in scope for the session, under `src/content/<track>/<unit-slug>/`.
-4. Update `ROADMAP.md` status markers (`planned` → `in-progress` → `done`) and run `bun run generate:roadmap`.
-5. **`bun run check`** (see "Guardrails" above) — not just `build`. Fix anything it flags before moving on.
-6. Spin up `astro preview --background` and actually look at the rendered unit at least once per session (not just trust that `check` passing means it looks right) — don't just trust that markdown parsed.
-7. Update `PROGRESS.md`.
-8. Suggest — don't decide — what a sensible next unit could be, across any track.
+4. Write `exercises.json` for that unit unless there's a real reason not to (see "Exercises" above) — quiz items for L1/L2 concepts, code items for L3 code.
+5. Update `ROADMAP.md` status markers (`planned` → `in-progress` → `done`) and run `bun run generate:roadmap`.
+6. **`bun run check`** (see "Guardrails" above) — not just `build`. Fix anything it flags before moving on.
+7. Spin up `astro preview --background` and actually look at the rendered unit at least once per session — click through the exercises yourself (answer right, answer wrong, run code with a broken and a correct implementation) to confirm grading and the solution/explanation reveal actually work, not just that `check` passed. Don't just trust that markdown parsed.
+8. Update `PROGRESS.md`.
+9. Suggest — don't decide — what a sensible next unit could be, across any track.

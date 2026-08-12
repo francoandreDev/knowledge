@@ -2,44 +2,108 @@
 interface Props {
   track: string;
   unitSlug: string;
+  exerciseIds: string[];
 }
 
-const { track, unitSlug } = Astro.props;
-const key = `progress:${track}/${unitSlug}`;
+const { track, unitSlug, exerciseIds } = Astro.props;
 ---
 
 <button
-  data-progress-key={key}
-  class="inline-flex items-center gap-2 rounded-full border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-slate-400 data-[done=true]:border-emerald-500 data-[done=true]:bg-emerald-50 data-[done=true]:text-emerald-700 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-500 dark:data-[done=true]:border-emerald-500 dark:data-[done=true]:bg-emerald-950 dark:data-[done=true]:text-emerald-400"
+  data-progress-toggle
+  data-track={track}
+  data-unit={unitSlug}
+  data-exercise-ids={JSON.stringify(exerciseIds)}
+  class="inline-flex items-center gap-2 rounded-full border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-slate-300 data-[done=true]:border-emerald-500 data-[done=true]:bg-emerald-50 data-[done=true]:text-emerald-700 data-[due=true]:border-amber-500 data-[due=true]:bg-amber-50 data-[due=true]:text-amber-700 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-500 dark:disabled:hover:border-slate-700 dark:data-[done=true]:border-emerald-500 dark:data-[done=true]:bg-emerald-950 dark:data-[done=true]:text-emerald-400 dark:data-[due=true]:border-amber-500 dark:data-[due=true]:bg-amber-950 dark:data-[due=true]:text-amber-400"
 >
   <span data-progress-label>Mark as done</span>
 </button>
 
 <script>
+  import {
+    getProgress,
+    markDone,
+    unmarkDone,
+    allExercisesPassed,
+    checkAndApplyReviewDue,
+    daysUntil,
+  } from "../lib/spaced-repetition";
+
+  function renderToggle(button: HTMLButtonElement) {
+    const track = button.dataset.track!;
+    const unitSlug = button.dataset.unit!;
+    const exerciseIds: string[] = JSON.parse(
+      button.dataset.exerciseIds || "[]",
+    );
+    const label = button.querySelector<HTMLElement>("[data-progress-label]")!;
+
+    const state = getProgress(track, unitSlug);
+    const gated =
+      exerciseIds.length > 0 &&
+      !allExercisesPassed(track, unitSlug, exerciseIds);
+
+    button.dataset.done = String(state.done);
+    button.disabled = false;
+
+    if (state.done) {
+      const days = state.nextReviewAt ? daysUntil(state.nextReviewAt) : null;
+      label.textContent = days !== null ? `Done (review in ${days}d)` : "Done";
+    } else if (gated) {
+      label.textContent = "Complete all exercises to mark as done";
+      button.disabled = true;
+    } else {
+      label.textContent = "Mark as done";
+    }
+  }
+
+  function renderAllToggles() {
+    document
+      .querySelectorAll<HTMLButtonElement>("[data-progress-toggle]")
+      .forEach(renderToggle);
+  }
+
+  function wireToggle(button: HTMLButtonElement) {
+    if (button.dataset.wired === "true") return;
+    button.dataset.wired = "true";
+
+    const track = button.dataset.track!;
+    const unitSlug = button.dataset.unit!;
+    const exerciseIds: string[] = JSON.parse(
+      button.dataset.exerciseIds || "[]",
+    );
+
+    const wasReset = checkAndApplyReviewDue(track, unitSlug, exerciseIds);
+    if (wasReset) {
+      document.dispatchEvent(new CustomEvent("exercises:reset"));
+    }
+
+    button.addEventListener("click", () => {
+      const state = getProgress(track, unitSlug);
+      if (state.done) {
+        unmarkDone(track, unitSlug);
+      } else {
+        if (
+          exerciseIds.length > 0 &&
+          !allExercisesPassed(track, unitSlug, exerciseIds)
+        ) {
+          return; // shouldn't happen (button is disabled), but be safe
+        }
+        markDone(track, unitSlug);
+      }
+      renderToggle(button);
+    });
+  }
+
   function initProgressToggles() {
     document
-      .querySelectorAll<HTMLButtonElement>("button[data-progress-key]")
-      .forEach((button) => {
-        const key = button.dataset.progressKey!;
-        const label = button.querySelector<HTMLElement>(
-          "[data-progress-label]",
-        )!;
-
-        function render() {
-          const done = localStorage.getItem(key) === "true";
-          button.dataset.done = String(done);
-          label.textContent = done ? "Done" : "Mark as done";
-        }
-
-        button.addEventListener("click", () => {
-          const done = localStorage.getItem(key) === "true";
-          localStorage.setItem(key, String(!done));
-          render();
-        });
-
-        render();
-      });
+      .querySelectorAll<HTMLButtonElement>("[data-progress-toggle]")
+      .forEach(wireToggle);
+    renderAllToggles();
   }
+
+  // Re-render (not re-wire) whenever an exercise is graded, so gating
+  // unlocks live without needing a reload.
+  document.addEventListener("exercise:graded", renderAllToggles);
+  document.addEventListener("exercises:reset", renderAllToggles);
 
   initProgressToggles();
   document.addEventListener("astro:page-load", initProgressToggles);

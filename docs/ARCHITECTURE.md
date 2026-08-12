@@ -55,6 +55,17 @@ Each unit (a single problem→solution pair) is documented at three levels, beca
 
 Skipping straight to L3 without L1/L2 tends to produce people who can write code but can't explain why, or explain trade-offs on a whiteboard. Stopping at L1/L2 produces people who sound right but haven't been tested by implementation. All three are required for a unit to be "done."
 
+## Exercises exist because reading isn't the same as knowing
+
+A unit can be read start to finish and still not stick — recognizing an idea in prose is a much weaker signal than being able to produce the answer yourself, which is exactly the gap `learning-craft/04` (the Feynman technique, "the illusion of competence") is about. Exercises close that gap for this project itself, not just as a topic it teaches:
+
+- Self-graded quizzes for concept-level (L1/L2) checks, and sandboxed runnable code exercises (real `expect()` assertions, not multiple choice) for L3, where the whole point is usually "can you actually write this."
+- Every exercise explains itself after any attempt, pass or fail — a bare pass/fail signal is a test, not a lesson. The `solution` and `explanation` fields are mandatory content, not an afterthought, enforced by `bun run validate:content`.
+- "Mark as done" is gated on actually passing the exercises, not just reading to the bottom of the page — otherwise the checkbox measures exposure, not competence.
+- A unit doesn't stay "done" forever passively. It comes back on a spaced-repetition schedule (7/30/90 days) and, when due, forces an honest re-take — with a randomly picked variant where the content author provided one — rather than trusting that a checkbox ticked months ago still means something today. This is the "regression test for what you know" the user asked for directly.
+
+See `CLAUDE.md`'s "Exercises, 'Mark as done' gating, and spaced repetition" section for the authoring format and implementation details (`src/components/ExercisePanel.astro`, `src/components/ProgressToggle.astro`, `src/lib/spaced-repetition.ts`).
+
 ## Structure on disk
 
 The project is an Astro site, not a bare folder of markdown. Content is authored in Markdown, but it's rendered through real layouts and components (level tabs, syntax highlighting, rendered Mermaid diagrams, `localStorage`-backed progress) rather than read as flat files — see `CLAUDE.md`'s "Tech stack" section for how the pieces connect, and why (the user's own framing): a study reference that isn't dull to sit with is worth more than one that is.

@@ -1,0 +1,350 @@
+---
+import { groupExercisesIntoPools, type ExerciseItem } from "../lib/curriculum";
+
+interface Props {
+  track: string;
+  unitSlug: string;
+  exercises: ExerciseItem[];
+}
+
+const { track, unitSlug, exercises } = Astro.props;
+const pools = groupExercisesIntoPools(exercises);
+---
+
+{
+  pools.length > 0 && (
+    <div class="mt-10 space-y-6 border-t border-slate-200 pt-8 dark:border-slate-800">
+      <h3 class="text-sm font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-400">
+        Exercises
+      </h3>
+      {pools.map((pool) => (
+        <div
+          data-exercise-pool
+          data-pool-id={pool.poolId}
+          data-track={track}
+          data-unit={unitSlug}
+          class="rounded-lg border border-slate-200 p-4 dark:border-slate-800"
+        >
+          <script
+            type="application/json"
+            data-pool-variants
+            set:html={JSON.stringify(pool.variants)}
+          />
+          <div data-pool-content />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+<script>
+  import { setExerciseState } from "../lib/spaced-repetition";
+
+  type QuizVariant = {
+    type: "quiz";
+    id: string;
+    prompt: string;
+    choices: string[];
+    correctIndex: number;
+    explanation: string;
+  };
+  type CodeVariant = {
+    type: "code";
+    id: string;
+    prompt: string;
+    starterCode: string;
+    tests: { description: string; expr: string }[];
+    solution: string;
+    explanation: string;
+  };
+  type Variant = QuizVariant | CodeVariant;
+
+  const WORKER_SOURCE = `
+    self.onmessage = (e) => {
+      const { code, tests } = e.data;
+
+      function expect(actual) {
+        return {
+          toBe(expected) {
+            if (!Object.is(actual, expected)) {
+              throw new Error("Expected " + JSON.stringify(actual) + " to be " + JSON.stringify(expected));
+            }
+          },
+          toEqual(expected) {
+            const a = JSON.stringify(actual);
+            const b = JSON.stringify(expected);
+            if (a !== b) throw new Error("Expected " + a + " to equal " + b);
+          },
+          toBeTruthy() {
+            if (!actual) throw new Error("Expected " + JSON.stringify(actual) + " to be truthy");
+          },
+          toThrow() {
+            if (typeof actual !== "function") {
+              throw new Error("expect(...).toThrow() needs a function");
+            }
+            let threw = false;
+            try { actual(); } catch { threw = true; }
+            if (!threw) throw new Error("Expected function to throw, but it didn't");
+          },
+        };
+      }
+
+      const results = [];
+      try {
+        eval(code);
+      } catch (err) {
+        for (const t of tests) {
+          results.push({ description: t.description, passed: false, error: String((err && err.message) || err) });
+        }
+        self.postMessage({ results });
+        return;
+      }
+
+      for (const t of tests) {
+        try {
+          eval(t.expr);
+          results.push({ description: t.description, passed: true });
+        } catch (err) {
+          results.push({ description: t.description, passed: false, error: String((err && err.message) || err) });
+        }
+      }
+      self.postMessage({ results });
+    };
+  `;
+
+  function runInWorker(
+    code: string,
+    tests: { description: string; expr: string }[],
+  ): Promise<{ description: string; passed: boolean; error?: string }[]> {
+    return new Promise((resolve) => {
+      const blob = new Blob([WORKER_SOURCE], {
+        type: "application/javascript",
+      });
+      const worker = new Worker(URL.createObjectURL(blob));
+
+      const timeout = setTimeout(() => {
+        worker.terminate();
+        resolve(
+          tests.map((t) => ({
+            description: t.description,
+            passed: false,
+            error: "Timed out after 3s — possible infinite loop.",
+          })),
+        );
+      }, 3000);
+
+      worker.onmessage = (e) => {
+        clearTimeout(timeout);
+        worker.terminate();
+        resolve(e.data.results);
+      };
+      worker.onerror = (e) => {
+        clearTimeout(timeout);
+        worker.terminate();
+        resolve(
+          tests.map((t) => ({
+            description: t.description,
+            passed: false,
+            error: e.message,
+          })),
+        );
+      };
+
+      worker.postMessage({ code, tests });
+    });
+  }
+
+  function el<K extends keyof HTMLElementTagNameMap>(
+    tag: K,
+    className: string,
+    text?: string,
+  ): HTMLElementTagNameMap[K] {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function renderQuiz(
+    container: HTMLElement,
+    variant: QuizVariant,
+    track: string,
+    unitSlug: string,
+    poolId: string,
+  ) {
+    const prompt = el(
+      "p",
+      "text-sm text-slate-800 dark:text-slate-200",
+      variant.prompt,
+    );
+    const wrap = el("div", "mt-3 space-y-2");
+
+    const radios: HTMLInputElement[] = [];
+    variant.choices.forEach((choice, i) => {
+      const label = el(
+        "label",
+        "flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300",
+      );
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = `quiz-${variant.id}`;
+      radio.value = String(i);
+      radio.className = "accent-slate-900 dark:accent-slate-100";
+      radios.push(radio);
+      label.append(radio, document.createTextNode(choice));
+      wrap.append(label);
+    });
+
+    const feedback = el("p", "hidden text-sm font-medium");
+    const explanation = el(
+      "p",
+      "hidden mt-1 text-sm text-slate-500 dark:text-slate-400",
+      variant.explanation,
+    );
+    const checkButton = el(
+      "button",
+      "rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:text-slate-300",
+      "Check answer",
+    );
+    checkButton.type = "button";
+
+    checkButton.addEventListener("click", () => {
+      const selected = radios.find((r) => r.checked);
+      if (!selected) {
+        feedback.textContent = "Pick an answer first.";
+        feedback.className = "text-sm font-medium text-amber-600";
+        feedback.classList.remove("hidden");
+        return;
+      }
+      const passed = Number(selected.value) === variant.correctIndex;
+      setExerciseState(track, unitSlug, poolId, passed ? "passed" : "failed");
+      feedback.textContent = passed ? "Correct" : "Not quite";
+      feedback.className = passed
+        ? "text-sm font-medium text-emerald-600"
+        : "text-sm font-medium text-red-600";
+      feedback.classList.remove("hidden");
+      explanation.classList.remove("hidden");
+      document.dispatchEvent(new CustomEvent("exercise:graded"));
+    });
+
+    wrap.append(checkButton, feedback, explanation);
+    container.append(prompt, wrap);
+  }
+
+  function renderCode(
+    container: HTMLElement,
+    variant: CodeVariant,
+    track: string,
+    unitSlug: string,
+    poolId: string,
+  ) {
+    const prompt = el(
+      "p",
+      "text-sm text-slate-800 dark:text-slate-200",
+      variant.prompt,
+    );
+    const wrap = el("div", "mt-3 space-y-2");
+
+    const textarea = document.createElement("textarea");
+    textarea.spellcheck = false;
+    textarea.rows = 6;
+    textarea.value = variant.starterCode;
+    textarea.className =
+      "w-full rounded-md border border-slate-300 bg-slate-50 p-3 font-mono text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100";
+
+    const runButton = el(
+      "button",
+      "rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:text-slate-300",
+      "Run tests",
+    );
+    runButton.type = "button";
+
+    const resultsList = el("ul", "space-y-1 text-sm");
+    const solutionWrap = el("div", "hidden mt-3 space-y-1");
+    const solutionLabel = el(
+      "p",
+      "text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-400",
+      "Solution",
+    );
+    const solutionCode = el(
+      "pre",
+      "overflow-x-auto rounded-md bg-slate-900 p-3 text-sm text-slate-100",
+    );
+    const solutionCodeInner = document.createElement("code");
+    solutionCodeInner.textContent = variant.solution;
+    solutionCode.append(solutionCodeInner);
+    const solutionExplanation = el(
+      "p",
+      "text-sm text-slate-500 dark:text-slate-400",
+      variant.explanation,
+    );
+    solutionWrap.append(solutionLabel, solutionCode, solutionExplanation);
+
+    runButton.addEventListener("click", async () => {
+      runButton.disabled = true;
+      runButton.textContent = "Running…";
+      const results = await runInWorker(textarea.value, variant.tests);
+      runButton.disabled = false;
+      runButton.textContent = "Run tests";
+
+      resultsList.innerHTML = "";
+      let allPassed = true;
+      for (const r of results) {
+        if (!r.passed) allPassed = false;
+        const li = el(
+          "li",
+          r.passed ? "text-emerald-600" : "text-red-600",
+          r.passed
+            ? `✓ ${r.description}`
+            : `✗ ${r.description}${r.error ? ` — ${r.error}` : ""}`,
+        );
+        resultsList.append(li);
+      }
+      setExerciseState(
+        track,
+        unitSlug,
+        poolId,
+        allPassed ? "passed" : "failed",
+      );
+      solutionWrap.classList.remove("hidden");
+      document.dispatchEvent(new CustomEvent("exercise:graded"));
+    });
+
+    wrap.append(textarea, runButton, resultsList, solutionWrap);
+    container.append(prompt, wrap);
+  }
+
+  function renderPool(poolEl: HTMLElement) {
+    const track = poolEl.dataset.track!;
+    const unitSlug = poolEl.dataset.unit!;
+    const poolId = poolEl.dataset.poolId!;
+    const content = poolEl.querySelector<HTMLElement>("[data-pool-content]")!;
+    const variantsJson = poolEl.querySelector<HTMLScriptElement>(
+      "[data-pool-variants]",
+    )?.textContent;
+    const variants: Variant[] = variantsJson ? JSON.parse(variantsJson) : [];
+    if (variants.length === 0) return;
+
+    const variant = variants[Math.floor(Math.random() * variants.length)];
+    content.innerHTML = "";
+
+    if (variant.type === "quiz") {
+      renderQuiz(content, variant, track, unitSlug, poolId);
+    } else {
+      renderCode(content, variant, track, unitSlug, poolId);
+    }
+  }
+
+  function initExercises() {
+    document
+      .querySelectorAll<HTMLElement>("[data-exercise-pool]")
+      .forEach(renderPool);
+  }
+
+  // A fresh random variant every time the pool is (re-)rendered — including
+  // after a spaced-repetition reset, so a re-exam isn't the same question.
+  document.addEventListener("exercises:reset", initExercises);
+
+  initExercises();
+  document.addEventListener("astro:page-load", initExercises);
+</script>

@@ -90,6 +90,100 @@ function levelsPresent(files) {
   };
 }
 
+async function checkExercisesFile(track, unitSlug) {
+  const exercisesPath = path.join(
+    CONTENT_DIR,
+    track,
+    unitSlug,
+    "exercises.json",
+  );
+  const raw = await readFile(exercisesPath, "utf8").catch(() => null);
+  if (raw === null) return; // no exercises for this unit — allowed
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    problems.push(
+      `src/content/${track}/${unitSlug}/exercises.json is not valid JSON: ${err.message}`,
+    );
+    return;
+  }
+
+  if (!Array.isArray(parsed.items)) {
+    problems.push(
+      `src/content/${track}/${unitSlug}/exercises.json must have an "items" array.`,
+    );
+    return;
+  }
+
+  const seenIds = new Set();
+  const poolLevelAndType = new Map();
+  for (const [i, item] of parsed.items.entries()) {
+    const where = `${track}/${unitSlug}/exercises.json items[${i}]`;
+    if (![1, 2, 3].includes(item.level)) {
+      problems.push(`${where}: "level" must be 1, 2, or 3.`);
+    }
+    if (!item.id || typeof item.id !== "string") {
+      problems.push(`${where}: missing "id".`);
+    } else if (seenIds.has(item.id)) {
+      problems.push(
+        `${where}: duplicate exercise id "${item.id}" within this unit.`,
+      );
+    } else {
+      seenIds.add(item.id);
+    }
+    if (!item.prompt) problems.push(`${where}: missing "prompt".`);
+    if (!item.explanation) {
+      problems.push(
+        `${where}: missing "explanation" — every exercise must say why the answer is what it is, not just pass/fail.`,
+      );
+    }
+
+    const poolId = item.poolId ?? item.id;
+    const prior = poolLevelAndType.get(poolId);
+    if (prior && (prior.level !== item.level || prior.type !== item.type)) {
+      problems.push(
+        `${where}: poolId "${poolId}" mixes variants of different level/type — all variants in a pool must match.`,
+      );
+    } else {
+      poolLevelAndType.set(poolId, { level: item.level, type: item.type });
+    }
+
+    if (item.type === "quiz") {
+      if (!Array.isArray(item.choices) || item.choices.length < 2) {
+        problems.push(`${where}: quiz needs at least 2 "choices".`);
+      } else if (
+        typeof item.correctIndex !== "number" ||
+        item.correctIndex < 0 ||
+        item.correctIndex >= item.choices.length
+      ) {
+        problems.push(
+          `${where}: "correctIndex" must be a valid index into "choices".`,
+        );
+      }
+    } else if (item.type === "code") {
+      if (typeof item.starterCode !== "string") {
+        problems.push(`${where}: code exercise needs "starterCode".`);
+      }
+      if (!Array.isArray(item.tests) || item.tests.length === 0) {
+        problems.push(
+          `${where}: code exercise needs at least one entry in "tests".`,
+        );
+      }
+      if (!item.solution) {
+        problems.push(
+          `${where}: code exercise needs "solution" — revealed after any attempt so there's real learning behind the pass/fail.`,
+        );
+      }
+    } else {
+      problems.push(
+        `${where}: "type" must be "quiz" or "code", got ${JSON.stringify(item.type)}.`,
+      );
+    }
+  }
+}
+
 async function checkFrontmatter(track, unitSlug, files) {
   for (const file of files) {
     const full = path.join(CONTENT_DIR, track, unitSlug, file);
@@ -157,6 +251,7 @@ async function main() {
     }
 
     await checkFrontmatter(unit.track, unit.unitSlug, unit.files);
+    await checkExercisesFile(unit.track, unit.unitSlug);
   }
 
   if (warnings.length > 0) {
