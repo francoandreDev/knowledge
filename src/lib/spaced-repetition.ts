@@ -112,18 +112,22 @@ export function allExercisesPassed(
  * page (see the "unit:exercises-reset" CustomEvent dispatched by
  * ProgressToggle) to re-render as unanswered even if they already
  * initialized before this ran.
+ *
+ * Clears by localStorage key prefix rather than a passed-in id list — the
+ * exercise pool shown to the learner is now chosen randomly per page view
+ * (see ExercisePanel), so there's no fixed id list to know ahead of time.
  */
 export function checkAndApplyReviewDue(
   track: string,
   unitSlug: string,
-  exerciseIds: string[],
 ): boolean {
   const state = getProgress(track, unitSlug);
   if (!isReviewDue(state)) return false;
 
   saveProgress(track, unitSlug, { ...state, done: false });
-  for (const id of exerciseIds) {
-    localStorage.removeItem(exerciseKey(track, unitSlug, id));
+  const prefix = exerciseKey(track, unitSlug, "");
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith(prefix)) localStorage.removeItem(key);
   }
   return true;
 }

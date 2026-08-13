@@ -30,6 +30,17 @@ const quizExercise = z.object({
   choices: z.array(z.string()).min(2),
   correctIndex: z.number().int().min(0),
   explanation: z.string(),
+  // Trusted HTML (a compact visual + one-line theory statement) shown in
+  // the exercise's whiteboard reference panel, below the question — the
+  // link from "got it wrong" back to the concept being tested. Optional,
+  // but must be identical across every variant sharing a poolId (checked
+  // by validate-content.mjs) since only one variant renders per view.
+  reference: z.string().optional(),
+  // Trusted HTML — a real, multi-paragraph explanation of the concept this
+  // pool tests, shown in a dedicated "Learn more" modal (separate from the
+  // whiteboard, see src/lib/learn-more.ts). Deeper than `reference`'s
+  // one-line theory statement. Same per-pool consistency rule as above.
+  learnMore: z.string().optional(),
 });
 
 const codeExercise = z.object({
@@ -53,6 +64,8 @@ const codeExercise = z.object({
   // not just the pass/fail signal.
   solution: z.string(),
   explanation: z.string(),
+  reference: z.string().optional(),
+  learnMore: z.string().optional(),
 });
 
 const exercises = defineCollection({

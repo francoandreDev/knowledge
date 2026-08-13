@@ -4,17 +4,17 @@ import { Check, Lock, Circle } from "lucide-astro";
 interface Props {
   track: string;
   unitSlug: string;
-  exerciseIds: string[];
+  hasExercises: boolean;
 }
 
-const { track, unitSlug, exerciseIds } = Astro.props;
+const { track, unitSlug, hasExercises } = Astro.props;
 ---
 
 <button
   data-progress-toggle
   data-track={track}
   data-unit={unitSlug}
-  data-exercise-ids={JSON.stringify(exerciseIds)}
+  data-has-exercises={String(hasExercises)}
   class="inline-flex items-center gap-2 rounded-full border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-slate-300 data-[done=true]:border-emerald-500 data-[done=true]:bg-emerald-50 data-[done=true]:text-emerald-700 data-[due=true]:border-amber-500 data-[due=true]:bg-amber-50 data-[due=true]:text-amber-700 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-500 dark:disabled:hover:border-slate-700 dark:data-[done=true]:border-emerald-500 dark:data-[done=true]:bg-emerald-950 dark:data-[done=true]:text-emerald-400 dark:data-[due=true]:border-amber-500 dark:data-[due=true]:bg-amber-950 dark:data-[due=true]:text-amber-400"
 >
   <Check data-icon="done" class="hidden h-4 w-4" aria-hidden="true" />
@@ -33,12 +33,29 @@ const { track, unitSlug, exerciseIds } = Astro.props;
     daysUntil,
   } from "../lib/spaced-repetition";
 
+  // Exercise panels are scoped to one level each and pick their own random
+  // 2-of-N pools on init (see ExercisePanel.astro), writing the result onto
+  // their own dataset rather than a static prop — this reads that state
+  // directly from the DOM (pull-based) so gating is correct regardless of
+  // whether ProgressToggle's or ExercisePanel's script executes first.
+  function getShownExerciseIds(): { ready: boolean; ids: string[] } {
+    const panels = document.querySelectorAll<HTMLElement>(
+      "[data-exercise-panel]",
+    );
+    if (panels.length === 0) return { ready: true, ids: [] };
+
+    const ids: string[] = [];
+    for (const panel of panels) {
+      if (panel.dataset.ready !== "true") return { ready: false, ids: [] };
+      ids.push(...JSON.parse(panel.dataset.shownIds || "[]"));
+    }
+    return { ready: true, ids };
+  }
+
   function renderToggle(button: HTMLButtonElement) {
     const track = button.dataset.track!;
     const unitSlug = button.dataset.unit!;
-    const exerciseIds: string[] = JSON.parse(
-      button.dataset.exerciseIds || "[]",
-    );
+    const hasExercises = button.dataset.hasExercises === "true";
     const label = button.querySelector<HTMLElement>("[data-progress-label]")!;
     const icons = {
       done: button.querySelector<HTMLElement>('[data-icon="done"]')!,
@@ -47,9 +64,10 @@ const { track, unitSlug, exerciseIds } = Astro.props;
     };
 
     const state = getProgress(track, unitSlug);
+    const shown = getShownExerciseIds();
     const gated =
-      exerciseIds.length > 0 &&
-      !allExercisesPassed(track, unitSlug, exerciseIds);
+      hasExercises &&
+      (!shown.ready || !allExercisesPassed(track, unitSlug, shown.ids));
 
     button.dataset.done = String(state.done);
     button.disabled = false;
@@ -82,11 +100,8 @@ const { track, unitSlug, exerciseIds } = Astro.props;
 
     const track = button.dataset.track!;
     const unitSlug = button.dataset.unit!;
-    const exerciseIds: string[] = JSON.parse(
-      button.dataset.exerciseIds || "[]",
-    );
 
-    const wasReset = checkAndApplyReviewDue(track, unitSlug, exerciseIds);
+    const wasReset = checkAndApplyReviewDue(track, unitSlug);
     if (wasReset) {
       document.dispatchEvent(new CustomEvent("exercises:reset"));
     }
@@ -96,13 +111,21 @@ const { track, unitSlug, exerciseIds } = Astro.props;
       if (state.done) {
         unmarkDone(track, unitSlug);
       } else {
+        const hasExercises = button.dataset.hasExercises === "true";
+        const shown = getShownExerciseIds();
         if (
-          exerciseIds.length > 0 &&
-          !allExercisesPassed(track, unitSlug, exerciseIds)
+          hasExercises &&
+          (!shown.ready || !allExercisesPassed(track, unitSlug, shown.ids))
         ) {
           return; // shouldn't happen (button is disabled), but be safe
         }
         markDone(track, unitSlug);
+        button.classList.remove("animate-pop");
+        // Re-trigger even if the class never finished removing (rapid
+        // clicks) — reflow forces the browser to notice the class was gone
+        // for a moment before it's added back.
+        void button.offsetWidth;
+        button.classList.add("animate-pop");
       }
       renderToggle(button);
     });
@@ -119,6 +142,7 @@ const { track, unitSlug, exerciseIds } = Astro.props;
   // unlocks live without needing a reload.
   document.addEventListener("exercise:graded", renderAllToggles);
   document.addEventListener("exercises:reset", renderAllToggles);
+  document.addEventListener("exercises:shown", renderAllToggles);
 
   initProgressToggles();
   document.addEventListener("astro:page-load", initProgressToggles);

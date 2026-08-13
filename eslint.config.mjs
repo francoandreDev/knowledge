@@ -11,7 +11,7 @@ export default tseslint.config(
   ...astro.configs["flat/recommended"],
   eslintConfigPrettier,
   {
-    ignores: ["dist/**", ".astro/**", "node_modules/**"],
+    ignores: ["dist/**", ".astro/**", "node_modules/**", ".claude/**"],
   },
   {
     files: ["scripts/**/*.mjs", "*.config.mjs"],

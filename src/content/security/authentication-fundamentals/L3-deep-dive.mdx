@@ -77,7 +77,21 @@ The `rainbowTable.get()` lookup succeeding for _both_ users from one precomputed
 
 ## Failure modes
 
+Four ways every mechanism above can be individually correct on paper and still leave a real hole — which one would you check first in a code review?
+
+```mermaid
+xychart-beta
+    title "Illustrative guesses/second, log scale (10^x)"
+    x-axis ["SHA-256 (GPU cluster)", "bcrypt (cost 12)", "scrypt (tuned)", "Argon2id (tuned)"]
+    y-axis "log10(guesses per second)" 0 --> 11
+    bar [10.5, 2, 1.3, 1]
+```
+
+The bar heights above are exponents, not guesses — `10.5` means roughly 3×10^10 guesses/second, `1` means about 10 guesses/second. That gap, not the algorithm names, is the entire reason "just hash it" isn't good enough advice.
+
 - **Using a fast, general-purpose hash (like raw SHA-256) instead of a real key-derivation function.** `sha256(password)` is cryptographically "one-way" in the abstract sense, but it's designed to be _fast_ — which is exactly wrong for passwords, because it means an attacker can try billions of guesses per second against a stolen hash. `scrypt`/`bcrypt`/`Argon2` are deliberately slow and tunable, trading login-time cost (milliseconds, imperceptible to a real user) for attacker cost (a brute-force attempt now costs the same milliseconds, times however many guesses).
 - **Comparing hashes with `===` instead of a constant-time comparison.** A normal string/byte comparison typically returns as soon as it finds the first mismatched byte — which means comparison time leaks _how many leading bytes matched_, a real (if narrow) side channel an attacker can exploit to guess a hash byte-by-byte over many requests. `timingSafeEqual` (or an equivalent) always takes the same time regardless of where the mismatch is, closing that channel.
 - **Reusing the same salt across all users ("a pepper," misapplied), or hardcoding it.** A single shared salt still defeats a _generic_ precomputed rainbow table, but it means one precomputation effort (targeting that specific salt) cracks every user in the database at once — the actual protection salting is supposed to provide requires a salt unique _per user_, generated randomly, not a single constant baked into the code.
 - **Rolling a custom authentication scheme instead of using audited libraries.** Every mechanism in this unit (salting, slow hashing, constant-time comparison) is individually simple, which is exactly what makes hand-rolling the whole system tempting and risky — a single subtle mistake in any one piece (a salt that isn't actually random, a comparison that isn't actually constant-time) silently reintroduces the vulnerability the mechanism exists to prevent, and it usually isn't discovered until it's exploited.
+
+The `register`/`verifyLogin` pair above is one worked example, not the whole territory. **What would you need to change if the same code had to handle a password reset flow** — where a second, brand-new hash has to replace the old one for a user who's currently locked out and can't supply their old password to re-derive it? (The salt for the new password can simply be freshly generated at reset time, same as at registration — reset never needs to re-derive anything from the old hash.)

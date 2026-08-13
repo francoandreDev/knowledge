@@ -119,6 +119,7 @@ async function checkExercisesFile(track, unitSlug) {
 
   const seenIds = new Set();
   const poolLevelAndType = new Map();
+  const poolFields = new Map();
   for (const [i, item] of parsed.items.entries()) {
     const where = `${track}/${unitSlug}/exercises.json items[${i}]`;
     if (![1, 2, 3].includes(item.level)) {
@@ -148,6 +149,23 @@ async function checkExercisesFile(track, unitSlug) {
       );
     } else {
       poolLevelAndType.set(poolId, { level: item.level, type: item.type });
+    }
+
+    // `reference` (whiteboard "Why:" line) and `learnMore` (deep-dive
+    // modal) both render only once per pool view (a random variant is
+    // shown), so every variant sharing a poolId must carry the identical
+    // string where either is set.
+    for (const field of ["reference", "learnMore"]) {
+      if (!item[field]) continue;
+      const key = `${poolId}:${field}`;
+      const prior = poolFields.get(key);
+      if (prior === undefined) {
+        poolFields.set(key, item[field]);
+      } else if (prior !== item[field]) {
+        problems.push(
+          `${where}: poolId "${poolId}" has a "${field}" that differs from another variant in the same pool — only one variant renders per view, so all variants must carry the identical ${field}.`,
+        );
+      }
     }
 
     if (item.type === "quiz") {

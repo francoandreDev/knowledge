@@ -70,11 +70,30 @@ const { demos } = Astro.props;
   const CHART_SAMPLES = 40;
   const CHART_PADDING = { top: 14, right: 10, bottom: 20, left: 44 };
 
+  // Currency symbols read as a prefix ($340, not 340$) — everything else
+  // (%, ms, kg, ...) reads as a suffix. A plain suffix-always rule made
+  // dollar amounts look like a formatting bug rather than a value.
+  const PREFIX_UNITS = new Set(["$", "€", "£", "¥"]);
+
   function formatValue(value: number, unit?: string): string {
-    const rounded = Number.isInteger(value)
-      ? value
-      : Math.round(value * 100) / 100;
-    return unit ? `${rounded}${unit}` : String(rounded);
+    // A relationship with real exponential growth (e.g. brute-force time
+    // vs. hash speed) can legitimately produce values in the trillions —
+    // showing every digit ("754566709180386.5") reads as a bug, not a
+    // number. Compact notation ("755T") keeps it readable while still
+    // conveying the actual order of magnitude.
+    const formatted =
+      Math.abs(value) >= 1_000_000
+        ? new Intl.NumberFormat(undefined, {
+            notation: "compact",
+            maximumFractionDigits: 1,
+          }).format(value)
+        : String(
+            Number.isInteger(value) ? value : Math.round(value * 100) / 100,
+          );
+    if (!unit) return formatted;
+    return PREFIX_UNITS.has(unit)
+      ? `${unit}${formatted}`
+      : `${formatted}${unit}`;
   }
 
   function buildChart(
@@ -108,13 +127,27 @@ const { demos } = Astro.props;
       yMax += 1;
     }
 
-    const plotWidth = CHART_WIDTH - CHART_PADDING.left - CHART_PADDING.right;
+    const yUnit = config.outputs[0]?.unit ?? "";
+    const yMaxLabel = formatValue(yMax, yUnit);
+    const yMinLabel = formatValue(yMin, yUnit);
+    const xMaxLabel = formatValue(chartParam.max, chartParam.unit);
+    // A fixed left/right margin clips long labels off the chart's own edge
+    // once a relationship produces values with real magnitude (e.g. compact
+    // notation like "754.6 B years") — grow the margin to fit whatever the
+    // current data actually needs instead of assuming short numbers.
+    const leftPadding = Math.max(
+      CHART_PADDING.left,
+      Math.max(yMaxLabel.length, yMinLabel.length) * 6 + 12,
+    );
+    const rightPadding = Math.max(CHART_PADDING.right, xMaxLabel.length * 4);
+
+    const plotWidth = CHART_WIDTH - leftPadding - rightPadding;
     const plotHeight = CHART_HEIGHT - CHART_PADDING.top - CHART_PADDING.bottom;
     const plotTop = CHART_PADDING.top;
     const plotBottom = CHART_PADDING.top + plotHeight;
 
     const xScale = (x: number) =>
-      CHART_PADDING.left +
+      leftPadding +
       ((x - chartParam.min) / (chartParam.max - chartParam.min)) * plotWidth;
     const yScale = (y: number) =>
       plotBottom - ((y - yMin) / (yMax - yMin)) * plotHeight;
@@ -125,19 +158,18 @@ const { demos } = Astro.props;
     const gridlines = [plotTop, plotBottom]
       .map(
         (y) =>
-          `<line x1="${CHART_PADDING.left}" y1="${y}" x2="${CHART_WIDTH - CHART_PADDING.right}" y2="${y}" stroke="currentColor" stroke-opacity="0.15" />`,
+          `<line x1="${leftPadding}" y1="${y}" x2="${CHART_WIDTH - rightPadding}" y2="${y}" stroke="currentColor" stroke-opacity="0.15" />`,
       )
       .join("");
 
-    const yUnit = config.outputs[0]?.unit ?? "";
     const yAxisLabels = `
-      <text x="${CHART_PADDING.left - 6}" y="${plotTop + 4}" text-anchor="end" font-size="10" fill="currentColor" opacity="0.7">${formatValue(yMax, yUnit)}</text>
-      <text x="${CHART_PADDING.left - 6}" y="${plotBottom}" text-anchor="end" font-size="10" fill="currentColor" opacity="0.7">${formatValue(yMin, yUnit)}</text>
+      <text x="${leftPadding - 6}" y="${plotTop + 4}" text-anchor="end" font-size="10" fill="currentColor" opacity="0.7">${yMaxLabel}</text>
+      <text x="${leftPadding - 6}" y="${plotBottom}" text-anchor="end" font-size="10" fill="currentColor" opacity="0.7">${yMinLabel}</text>
     `;
     const xAxisLabels = `
-      <text x="${CHART_PADDING.left}" y="${CHART_HEIGHT - 4}" text-anchor="start" font-size="10" fill="currentColor" opacity="0.7">${formatValue(chartParam.min, chartParam.unit)}</text>
-      <text x="${CHART_WIDTH - CHART_PADDING.right}" y="${CHART_HEIGHT - 4}" text-anchor="end" font-size="10" fill="currentColor" opacity="0.7">${formatValue(chartParam.max, chartParam.unit)}</text>
-      <text x="${CHART_PADDING.left + plotWidth / 2}" y="${CHART_HEIGHT - 4}" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.5">${chartParam.label}</text>
+      <text x="${leftPadding}" y="${CHART_HEIGHT - 4}" text-anchor="start" font-size="10" fill="currentColor" opacity="0.7">${formatValue(chartParam.min, chartParam.unit)}</text>
+      <text x="${CHART_WIDTH - rightPadding}" y="${CHART_HEIGHT - 4}" text-anchor="end" font-size="10" fill="currentColor" opacity="0.7">${xMaxLabel}</text>
+      <text x="${leftPadding + plotWidth / 2}" y="${CHART_HEIGHT - 4}" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.5">${chartParam.label}</text>
     `;
 
     const lines = config.outputs
@@ -155,7 +187,20 @@ const { demos } = Astro.props;
       .map((output) => {
         const value = computeFn(currentParams)[output.key];
         const y = yScale(value);
-        return `<circle cx="${currentX}" cy="${y}" r="4" fill="${output.color}" /><text x="${currentX + 6}" y="${y - 6}" font-size="10" font-weight="600" fill="${output.color}">${formatValue(value, output.unit)}</text>`;
+        const label = formatValue(value, output.unit);
+        // The marker can sit anywhere in the plot area, including right at
+        // an edge — a label always drawn to the dot's right/above it can
+        // then run past the SVG's own bounds and get silently clipped by
+        // overflow, rather than wrapping or shrinking. Flip which side of
+        // the dot the label sits on when there isn't room to the right, and
+        // clamp its vertical position to stay inside the plot area, instead
+        // of letting it cross the edge at all.
+        const labelWidth = label.length * 6;
+        const flipLeft = CHART_WIDTH - rightPadding - currentX < labelWidth + 8;
+        const textX = flipLeft ? currentX - 6 : currentX + 6;
+        const textAnchor = flipLeft ? "end" : "start";
+        const textY = Math.min(Math.max(y - 6, plotTop + 8), plotBottom - 2);
+        return `<circle cx="${currentX}" cy="${y}" r="4" fill="${output.color}" /><text x="${textX}" y="${textY}" text-anchor="${textAnchor}" font-size="10" font-weight="600" fill="${output.color}">${label}</text>`;
       })
       .join("");
 
