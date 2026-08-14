@@ -2,7 +2,9 @@
 title: "L2 — Proxies, validity vs. reliability, and why optimizing a proxy can betray the target"
 ---
 
-## The measurement chain
+## What actually connects "code quality" to a number on a dashboard?
+
+Team A and Team B from L1 both watched the same coverage percentage climb. Before looking at the diagram: what has to be true for a rising proxy to actually mean a rising target?
 
 ```mermaid
 flowchart LR
@@ -11,18 +13,22 @@ flowchart LR
     Instrument --> Number["The number you actually see"]
 ```
 
-The dotted line is the load-bearing, and most fragile, part of this whole chain — everything downstream of it (instrumentation accuracy, sampling error) is a solvable engineering problem; whether the proxy actually correlates with the target is a separate, often-unchecked assumption that the rest of the chain quietly inherits.
+The dotted line is the load-bearing, and most fragile, part of this whole chain — everything downstream of it (instrumentation accuracy, sampling error) is a solvable engineering problem; whether the proxy actually correlates with the target is a separate, often-unchecked assumption that the rest of the chain quietly inherits. Team B's coverage number was never disconnected from the chain — it just stopped being connected to anything real once the correlation itself broke down.
 
-## Validity and reliability, as independent axes
+## Can a measurement be trustworthy and still be wrong?
+
+A scale that reads 5 pounds heavy, every single time, never once contradicts itself — so what makes it dangerous instead of merely imprecise?
 
 |                   | Low reliability                                                                     | High reliability                                                   |
 | ----------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | **Low validity**  | Random AND wrong (e.g. a badly miscalibrated, noisy sensor)                         | Consistently wrong (e.g. a scale reliably reading 5 lbs too heavy) |
 | **High validity** | Correct on average but noisy per-reading (e.g. a good scale on an unstable surface) | Correct and consistent (the actual goal)                           |
 
-A measurement can be reliable (consistent) without being valid (correct), and this combination is specifically dangerous because consistency _feels_ like trustworthiness — a proxy that reliably produces the same wrong answer every time is easy to mistake for a good measurement, precisely because it never visibly contradicts itself.
+A measurement can be reliable (consistent) without being valid (correct), and this combination is specifically dangerous because consistency _feels_ like trustworthiness — a proxy that reliably produces the same wrong answer every time is easy to mistake for a good measurement, precisely because it never visibly contradicts itself. Team B's coverage number was, in this sense, perfectly reliable the whole time — it just stopped being valid once the tests being added stopped exercising real behavior.
 
-## Goodhart's/Campbell's Law: what happens when a proxy becomes the target
+## Why does a proxy that used to track the target eventually stop?
+
+The chart below is the same shape as L1's table, generalized: what happens to the real target as pressure on the proxy keeps increasing, for a weak vs. a strong proxy?
 
 ```mermaid
 xychart-beta
@@ -30,11 +36,19 @@ xychart-beta
     x-axis "Optimization pressure on the proxy" [0, 25, 50, 75, 100]
     y-axis "Score" 0 --> 100
     line "Proxy score (e.g. test coverage %)" [40, 55, 70, 85, 98]
-    line "Real target (actual defect-freedom)" [40, 52, 58, 55, 45]
+    line "Real target (weak proxy, like Team B)" [40, 51, 53, 46, 30]
 ```
 
-At low optimization pressure, the proxy and the real target move together — this is exactly why the proxy seemed reasonable to adopt in the first place, and why it's easy to miss the divergence starting. As pressure specifically on the proxy increases (a team starts optimizing _for coverage percentage_ rather than for quality that coverage was supposed to indicate — padding tests that assert nothing meaningful just to hit a number), the proxy keeps climbing while the real target plateaus and then declines, because effort that used to correlate with real quality improvement is now spent purely on the number itself. This is the formal content of "when a measure becomes a target, it ceases to be a good measure" — the correlation the proxy was chosen for was real, but it was never guaranteed to survive someone optimizing directly for the proxy instead of the underlying target.
+At low optimization pressure, the proxy and the real target move together — this is exactly why the proxy seemed reasonable to adopt in the first place, and why it's easy to miss the divergence starting. As pressure specifically on the proxy increases (a team starts optimizing _for coverage percentage_ rather than for quality that coverage was supposed to indicate — padding tests that assert nothing meaningful just to hit a number), the proxy keeps climbing while the real target plateaus and then declines, because effort that used to correlate with real quality improvement is now spent purely on the number itself. This is the formal content of "when a measure becomes a target, it ceases to be a good measure" — the correlation the proxy was chosen for was real, but it was never guaranteed to survive someone optimizing directly for the proxy instead of the underlying target. Team A avoided this because their correlation stayed strong even under pressure — the "Try it" demo below lets you drag that correlation directly and watch where the curve starts to bend.
 
-## Instrumentation cost, and why measuring changes what's measured
+## Does measuring something ever change the thing being measured?
 
 Adding logging, tracing, or metrics collection to a running system has a real, non-zero cost — CPU/memory overhead, storage, and in latency-sensitive systems, sometimes enough overhead to measurably change the very timing being measured (an informal but real version of an observer-effect problem). This means an instrumentation decision is itself a small trade-off calculation: the value of the data collected has to exceed its collection cost, and over-instrumenting "just in case" has a real, ongoing price, not a free one.
+
+| Instrumentation choice                | Value of the data                        | Ongoing cost                                                         |
+| ------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------- |
+| No instrumentation                    | None — flying blind                      | None                                                                 |
+| Sampled tracing (e.g. 1% of requests) | Enough to catch trends and most outliers | Small, roughly proportional to sample rate                           |
+| Full tracing, every request           | Complete picture, no sampling error      | Real CPU/storage cost, can itself become the bottleneck at high load |
+
+The right amount of instrumentation isn't "as much as possible" — it's the point where the next unit of data stops being worth its collection cost, which is a genuinely different amount for a low-traffic internal tool than for a production system at scale.

@@ -1,0 +1,83 @@
+---
+title: "L1 — How do I undo a mistake without losing everything?"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario>
+  <Fragment slot="facts">
+    <div class="not-prose">
+      <div class="mb-1 flex items-baseline justify-between">
+        <span class="text-lg font-bold text-slate-800 dark:text-slate-100">1 file</span>
+        <span class="text-xs text-slate-400">intended to touch</span>
+      </div>
+      <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+        <div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 100%"></div>
+      </div>
+      <div class="mt-2 mb-1 flex items-baseline justify-between">
+        <span class="text-lg font-bold text-rose-600 dark:text-rose-400">2 files</span>
+        <span class="text-xs text-slate-400">actually wiped</span>
+      </div>
+      <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+        <div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 100%"></div>
+      </div>
+    </div>
+
+    <div class="not-prose mt-3 flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🎯</span> Wanted: undo <code>config.json</code> only</div>
+      <div class="flex items-center gap-1.5"><span>💥</span> Ran a whole-directory command instead</div>
+      <div class="flex items-center gap-1.5"><span>😱</span> Three hours of uncommitted <code>feature.js</code> work: gone</div>
+    </div>
+
+    <p class="not-prose mt-3 mb-1 text-xs font-semibold tracking-wide text-slate-400 uppercase">The three verbs</p>
+    <div class="not-prose flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🔀</span> <code>checkout</code> — move HEAD, or restore files</div>
+      <div class="flex items-center gap-1.5"><span>⏪</span> <code>revert</code> — new commit, history untouched</div>
+      <div class="flex items-center gap-1.5"><span>⚠️</span> <code>reset --hard</code> — overwrites, no undo</div>
+    </div>
+
+  </Fragment>
+
+You broke `config.json` with a bad edit. `feature.js`, sitting right next to
+it in the same working directory, has three hours of good, uncommitted work
+you haven't touched yet. You want to undo _just_ `config.json`.
+
+You type `git checkout .` — a dot for "the current directory" — expecting it
+to restore the one broken file. Instead, both files snap back to their
+last-committed state. `feature.js`'s three hours are gone, with no
+confirmation prompt and no undo.
+
+| What you meant          | What you typed   | What actually happened                             |
+| ----------------------- | ---------------- | -------------------------------------------------- |
+| Undo `config.json` only | `git checkout .` | Every uncommitted change in the directory reverted |
+
+**The command did exactly what it says — restore everything in the current directory to its last-committed state. The mistake wasn't the tool malfunctioning; it was not knowing that `checkout .` (no path, no `--`) is scoped to the whole directory, not the one file you had in mind. What single word, added before the dot, would have saved `feature.js`?**
+
+</Scenario>
+
+The fix (`git checkout -- config.json`, naming the file) was one word away —
+the danger wasn't the command family, it was not knowing which of three
+genuinely different operations you were actually invoking.
+
+- Git has three different "undo" commands that get used interchangeably in casual speech but do genuinely different things: **`checkout`** (move between commits/branches, or restore specific files), **`revert`** (create a _new_ commit that undoes an old one), and **`reset`** (move a branch pointer backward, optionally touching the working directory too).
+- The critical distinction: some undo operations **rewrite history** (reset, an old-style checkout that moves your branch), others **add to it** (revert) — this matters enormously the moment more than one person shares the branch, because rewritten history that's already been shared creates real conflicts for everyone else.
+- `reset` has three modes that differ in how much they touch: `--soft` (move the branch pointer only, keep everything staged), `--mixed` (also unstage, but keep working-directory files as they are — the default), `--hard` (also overwrite working-directory files to match — **this one can destroy uncommitted work with no recovery path**).
+- `revert` is the safe default for anything already pushed/shared: it doesn't erase the mistake from history, it adds a new commit that cancels it out — history stays append-only, which is exactly why it's safe on a shared branch where `reset` would not be.
+- `checkout` (and its modern split, `switch`/`restore`) is the most overloaded of the three verbs historically — it can switch branches, detach HEAD to an old commit, or restore individual files from another commit, and conflating those three different actions under one command name is a real, common source of confusion, including the exact mistake above.
+- The single most dangerous command in this unit is `git reset --hard` on a branch with uncommitted changes — it silently, irrecoverably discards them, no confirmation prompt, no undo. Everything else here has some recovery path; that combination often doesn't.
+- The practical rule this unit builds: before undoing anything, know whether the target commit is still only local (safe to rewrite) or already shared (rewrite only with real coordination, or don't rewrite at all — revert instead) — and know exactly what scope your command covers before you run it.
+
+```mermaid
+flowchart LR
+    Mistake["Wanted: undo config.json only"] --> Ran["Ran: git checkout . (whole directory)"]
+    Ran --> Lost["feature.js uncommitted work: gone"]
+    Fix["Correct: git checkout -- config.json"] --> Safe["Only config.json touched,\nfeature.js untouched"]
+```
+
+| Command                          | What it moves                | Rewrites history? | Recoverable if wrong?                      |
+| -------------------------------- | ---------------------------- | ----------------- | ------------------------------------------ |
+| `checkout <branch>`              | HEAD, working directory      | No                | Yes — just check out the other branch back |
+| `checkout -- <file>` / `restore` | One or more named files      | No                | Only if the file was previously committed  |
+| `revert <commit>`                | Nothing — adds a new commit  | No (append-only)  | Yes — revert the revert                    |
+| `reset --soft` / `--mixed`       | Branch pointer (+ staging)   | Yes (locally)     | Yes, via `reflog`                          |
+| `reset --hard`                   | Branch pointer + working dir | Yes (locally)     | Only for already-committed content         |
