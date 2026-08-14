@@ -1,0 +1,122 @@
+---
+title: "L3 — Checking a real argument mechanically, and where these patterns hide in plain language"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="The scenario">
+  <Fragment slot="facts">
+    <div class="not-prose">
+      <div class="mb-1 flex items-baseline justify-between">
+        <span class="text-lg font-bold text-slate-800 dark:text-slate-100">3 of 4</span>
+        <span class="text-xs text-slate-400">recent Mondays it was closed</span>
+      </div>
+      <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+        <div class="h-full rounded-full bg-sky-500 animate-fill-bar" style="--target-width: 75%"></div>
+      </div>
+    </div>
+
+    <div class="not-prose mt-3 flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📋</span> House rule: open implies lights on (one direction only)</div>
+      <div class="flex items-center gap-1.5"><span>🧹</span> Cleaning crew sometimes leaves lights on before opening</div>
+      <div class="flex items-center gap-1.5"><span>🥐</span> One of the four checked visits found it open anyway</div>
+    </div>
+
+  </Fragment>
+
+Four friends are standing outside the bakery on a Monday morning. The lights
+are on. What follows is the actual conversation, argument by argument, before
+anyone stepped back to ask which claims were forced by the evidence and which
+were just good bets.
+
+</Scenario>
+
+## The conversation, checked argument by argument
+
+> **Priya:** "The lights are on, so it's open." _(Affirming the consequent — invalid. The house rule only says open implies lights-on, not the reverse. The cleaning crew leaving lights on before opening is a real counterexample to the unstated assumption this needs.)_
+>
+> **Marcus:** "Wait, we've checked three Mondays and it was closed every single time — the lights thing doesn't override that." _(Correctly invokes an inductive pattern, but doesn't yet address whether it's strong enough to outweigh what's directly in front of them right now — three past observations are evidence, not proof, about a different Monday.)_
+>
+> **Priya:** "Sure, but this is a different Monday, and today the lights are actually on. That's new information the pattern doesn't include." _(A fair point — inductive evidence about past Mondays doesn't erase the value of a direct observation about today, though "lights on" alone still doesn't validly prove "open," per Priya's own earlier reasoning.)_
+>
+> **Devon:** "Fine, let's just check the door instead of arguing about lights and patterns." _(Sidesteps the whole disagreement with a cheap, direct test — often the actual right move once an argument's structure is unclear, rather than resolving the logic in the abstract.)_
+>
+> They try the door. It's unlocked. It's open — cleaning crew, restocking early, lights on for that reason, door unlocked for deliveries. Priya's conclusion ("it's open") turned out to be _true_, but her argument for it was still invalid; she got the right answer by luck, not by a structure that forced it.
+
+## Checking validity mechanically
+
+Validity has a mechanical definition — "no case where the premises are true and the conclusion is false" — which means it's checkable by brute force for a small, fixed number of variables. This is a real, runnable proof that Priya's argument fails for exactly the reason described above, not just an assertion:
+
+```js
+// validity-checker.mjs — brute-force truth-table validity check.
+// For n boolean variables, try all 2^n assignments; an argument is valid
+// iff there is NO assignment where every premise is true but the
+// conclusion is false.
+function isValid(variableNames, premises, conclusion) {
+  const n = variableNames.length;
+  for (let bits = 0; bits < 2 ** n; bits++) {
+    const env = {};
+    variableNames.forEach((name, i) => {
+      env[name] = Boolean((bits >> i) & 1);
+    });
+
+    const allPremisesTrue = premises.every((p) => p(env));
+    const conclusionTrue = conclusion(env);
+
+    if (allPremisesTrue && !conclusionTrue) {
+      return { valid: false, counterexample: env };
+    }
+  }
+  return { valid: true };
+}
+
+// House rule as a premise: "if Open then LightsOn" — written as (not Open) or LightsOn
+const houseRule = (e) => !e.Open || e.LightsOn;
+
+// Priya's argument: house rule; lights are on; therefore open (affirming the consequent)
+const priyasArgument = isValid(
+  ["Open", "LightsOn"],
+  [houseRule, (e) => e.LightsOn],
+  (e) => e.Open,
+);
+console.log("Priya's argument:", priyasArgument);
+// { valid: false, counterexample: { Open: false, LightsOn: true } }
+```
+
+The counterexample the checker finds — `Open: false, LightsOn: true` — is exactly the cleaning-crew case Marcus and Priya were half-articulating: lights can be on while the bakery is closed. The checker doesn't know anything about bakeries or cleaning crews; it's purely checking whether the _shape_ of the argument forces the conclusion, which is what formal logic evaluates regardless of subject matter. And to confirm the shape distinction from L2 holds up mechanically, not just by table-lookup:
+
+```js
+// Modus tollens, same house rule, different added fact
+const modusTollens = isValid(
+  ["Open", "LightsOn"],
+  [houseRule, (e) => !e.LightsOn],
+  (e) => !e.Open,
+);
+console.log("Modus tollens (lights off, so not open):", modusTollens);
+// { valid: true } — no counterexample exists
+```
+
+## Where the deductive check runs out
+
+The checker above only evaluates claims that are genuinely deductive — a fixed rule, a fixed set of added facts, boolean in and boolean out. Marcus's "closed three Mondays running" claim isn't that kind of claim at all; there's no boolean premise that deductively forces "closed today" from "closed the last three visits." Running it through `isValid` wouldn't even make sense — there's no house-rule-shaped premise to encode, because inductive strength is a matter of degree, not a yes/no structural fact. That's not a limitation of this particular checker; it's a real boundary of what deductive validity checking can evaluate at all. Treating an inductive argument's weight as if a validity checker could certify it — "run the numbers and tell me if it's valid" — is itself a category mistake, mixing up two different kinds of reasoning that call for two different kinds of scrutiny.
+
+## Failure modes
+
+- **Confusing a true conclusion with a valid argument.** Priya was right that the bakery was open — but her argument for it (lights on, therefore open) was still invalid. A conclusion landing on the truth doesn't retroactively fix a broken structure; it just means the argument got lucky this time, and the same invalid move will mislead the next time the unstated assumption doesn't hold.
+- **Treating "valid" and "true" as compliments, and their opposites as insults.** Calling Priya's argument invalid is a narrow, technical claim about its structure — not an accusation that Priya was foolish or dishonest. The useful move is naming the specific gap ("this affirms the consequent — lights being on doesn't rule out the cleaning-crew case"), not a vague "that's not logical."
+- **Applying deductive standards to an inductive claim, or vice versa.** Demanding that Marcus's "closed three Mondays running" produce deductive certainty misunderstands what kind of claim it ever was. Just as wrongly, treating Priya's lights argument as merely "weak evidence that needs more data" undersells the actual problem — it's not weak, it's structurally invalid regardless of sample size, because no amount of repetition fixes an unstated assumption.
+- **Assuming a validity check settles what to actually do.** Even after correctly identifying Priya's argument as invalid, the friends still had a real, separate decision to make — try the door or not — which the truth-table checker has nothing to say about. Logic evaluates whether an argument's structure is sound; it doesn't replace the judgment call that comes after.
+
+## Beyond this example
+
+<div class="not-prose my-3 flex items-center justify-center gap-3 text-sm text-slate-500 dark:text-slate-400">
+  <span>🥐 This bakery conversation</span>
+  <span>&rarr;</span>
+  <span>💬 Any claim you're deciding whether to trust</span>
+</div>
+
+This bakery morning is one small, fully worked case — not the whole territory. A few questions to test whether the distinctions actually transferred, not just to this specific conversation:
+
+- What would change about Priya's argument if the house rule had instead been "the lights are on _if and only if_ it's open" (a two-way rule, not one-way)? Would "lights on, therefore open" become valid under that stronger premise — and what real-world fact would you need to confirm before trusting that stronger premise itself?
+- If Marcus's pattern had instead been "closed the last _ten_ Mondays running," would that make his inductive claim behave like a deductively valid one, or just a much stronger inductive one? What's the actual difference between "very strong" and "certain," and why does it matter which one you act on?
+- Think of a real claim you've accepted recently — from a friend, an ad, a news headline. Was it structured as a deductive promise (a rule plus a fact) or an inductive bet (a pattern from past cases)? If you can't tell which, what does that ambiguity itself suggest about how the claim was phrased?

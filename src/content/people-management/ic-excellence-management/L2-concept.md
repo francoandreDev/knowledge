@@ -4,21 +4,34 @@ title: "L2 — From a multiplier of one to a multiplier of many"
 
 ## Two different output equations
 
+Maya, from L1, is measuring herself against the same equation she used as an IC — but the job underneath her changed. What does the new equation actually look like, and where does it leave room for a gap her old one never had?
+
 ```mermaid
 flowchart LR
     IC["IC output = own effort x own skill"] --> ICResult["Direct, visible,\nentirely within your control"]
     Mgr["Manager output = sum across the team of\n(each person's effort x skill x how well-supported they are)"] --> MgrResult["Indirect, often invisible day-to-day,\nmostly NOT within your direct control"]
 ```
 
-The manager equation has a term the IC equation doesn't: "how well-supported they are" — unclear priorities, missing context, being blocked on a decision only the manager can make, or lacking coaching on a skill gap all directly multiply down every team member's effective output, and closing those gaps is now the actual job, even though it produces no code and no direct, personally-attributable output of its own.
+The manager equation has a term the IC equation doesn't: "how well-supported they are" — unclear priorities, missing context, being blocked on a decision only the manager can make, or lacking coaching on a skill gap all directly multiply down every team member's effective output, and closing those gaps is now the actual job, even though it produces no code and no direct, personally-attributable output of its own. Maya's two unclear reports are exactly that missing term showing up as a cost.
 
 ## Why the retreat-to-IC-work trap is so common
 
-Picture a new manager's actual to-do list on a given day: unblock person A's ambiguous requirement, have a hard feedback conversation with person B, figure out why person C seems disengaged, decide priority between two competing asks from other teams — every one of them unfamiliar and genuinely uncomfortable. Sitting right next to that list is a familiar alternative: "just write this tricky bit of code myself, I know exactly how." Under the discomfort of the unclear tasks, the pull toward the familiar one is strong — not because it's the wrong instinct in general, but because it's genuinely productive and feels like real progress, which is exactly what makes it so easy to default to, even though it isn't what only the manager can do today.
+If the new equation is genuinely better for the team, why does almost every new manager still drift back toward the old one? Picture a new manager's actual to-do list on a given day: unblock person A's ambiguous requirement, have a hard feedback conversation with person B, figure out why person C seems disengaged, decide priority between two competing asks from other teams — every one of them unfamiliar and genuinely uncomfortable. Sitting right next to that list is a familiar alternative: "just write this tricky bit of code myself, I know exactly how." Under the discomfort of the unclear tasks, the pull toward the familiar one is strong — not because it's the wrong instinct in general, but because it's genuinely productive and feels like real progress, which is exactly what makes it so easy to default to, even though it isn't what only the manager can do today.
 
 Every one of the "unclear tasks" is something _only_ the manager is positioned to do (the org gave them the context, the authority, or the relationship to do it) — while the familiar task, however well done, is something a senior IC on the team could likely have done too. Retreating to the familiar task doesn't just fail to help the team; it actively withholds capacity the team structurally can't get from anywhere else.
 
+```mermaid
+pie showData
+    title Where a retreating new manager's week actually went (Maya, month 1)
+    "Personally writing code" : 55
+    "1:1s and unblocking" : 20
+    "Priority-setting across the team" : 10
+    "Everything else" : 15
+```
+
 ## The skill set genuinely doesn't transfer 1:1
+
+Maya is clearly skilled — nobody disputes that. So if skill isn't the missing piece, what specifically is she short on?
 
 | IC skill (what got them promoted)           | Manager skill (what the job actually needs)                                                              | Why it's not the same muscle                                                                    |
 | ------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
@@ -31,4 +44,8 @@ None of these manager-column skills are things a strong IC automatically already
 
 ## Measuring success by the right output
 
-The practical consequence of the "multiplier of many" framing: a manager's self-assessment question shouldn't be "what did I personally produce this week" — it should be "is my team more capable, more unblocked, and more clear on priorities than they were a month ago, and is that measurably true even in areas I didn't personally touch." The second question is harder to answer and slower to show results, which is exactly why it's easy to substitute the first, more familiar, faster-feedback question instead.
+If Maya's PR count is the wrong scoreboard, what question should she actually be asking herself at the end of a week?
+
+The practical consequence of the "multiplier of many" framing: a manager's self-assessment question shouldn't be "what did I personally produce this week" — it should be "is my team more capable, more unblocked, and more clear on priorities than they were a month ago, and is that measurably true even in areas I didn't personally touch." The second question is harder to answer and slower to show results, which is exactly why it's easy to substitute the first, more familiar, faster-feedback question instead — the same substitution Maya has been making without noticing.
+
+L3 walks the same starting team through a full month handled both ways, so the gap between the two scoreboards stops being abstract.

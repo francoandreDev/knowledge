@@ -419,3 +419,10 @@ Append-only session log. One entry per session that produces or completes conten
 - Browser-verified all three: L1/L2/L3 render, exercise gating wired (`shownIds` populated), and each unit's interactive-demo slider(s) dragged to every param's min/max with zero SVG text overflow via the `getBBox()`/`getCTM()` geometry check.
 - Content notes: `environment-parity` added a second code-exercise pool (`dockerfile-review`, a linter-style `isUnpinnedBaseImage` check) alongside the existing timezone-fix pool — first unit in this retrofit pass with two distinct L3 code pools rather than one. `fallacies` kept one piece of genuine runnable code (`isFalseDichotomy`, a real exhaustiveness check) inside an otherwise non-technical/prose track, correctly distinguishing "real defensible code" from "fake pseudocode" per rule 9's actual intent rather than mechanically banning all code blocks from non-technical tracks.
 - 14 of 30 remaining units done. 16 remain.
+
+## 2026-08-14 — Retrofit batch 6 (3 units) — clean run
+
+- Retrofitted `logic/formal-informal-logic`, `people-management/1` (the "1:1s" unit), `people-management/ic-excellence-management`. All 3 self-caught and fixed their own issues before reporting (one agent caught a poolId mixing `quiz` and `code` item types in the same pool — an invalid combination per `validate:content` — and fixed it before finishing).
+- Merged, ran the full guardrail suite fresh in the main checkout — clean on the first pass (`lint`, `format`, `typecheck`, `validate:content`, `test`, `generate:roadmap`, `build`), no bugs found.
+- Browser-verified all three: L1/L2/L3 render, exercise gating wired (`shownIds` populated), every interactive-demo slider dragged to min/max on every param with zero SVG text overflow.
+- 17 of 30 remaining units done. 13 remain.
