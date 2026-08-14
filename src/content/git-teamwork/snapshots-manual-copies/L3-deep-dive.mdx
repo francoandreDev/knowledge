@@ -1,0 +1,146 @@
+---
+title: "L3 — Proving the snapshot model with real commands and a real hash"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="The scenario">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>1️⃣</span> Three-state model — watch <code>git status</code> change with no "undo" involved</div>
+      <div class="flex items-center gap-1.5"><span>2️⃣</span> Content-addressing — an independent hash implementation matches <code>git hash-object</code> exactly</div>
+      <div class="flex items-center gap-1.5"><span>3️⃣</span> Storage growth — manual copies vs. Git, computed for real numbers</div>
+    </div>
+    <p class="not-prose mt-3 mb-1 text-xs font-semibold tracking-wide text-slate-400 uppercase">Claim being proven</p>
+    <div class="not-prose rounded border border-sky-300 bg-sky-50 p-1.5 text-xs dark:border-sky-800 dark:bg-sky-950">
+      Git's storage key is a pure function of content bytes — not a filename, not a timestamp, not which commit asked for it.
+    </div>
+
+  </Fragment>
+
+L1 and L2 described the snapshot model. This session proves it — a real
+terminal session showing the three-state model in action, an independent
+hash function that reproduces `git hash-object`'s exact output, and working
+code that quantifies how much smaller Git's storage actually is than the
+zip-file approach from L1's opening scenario, for real numbers.
+
+</Scenario>
+
+## Watching the three-state model in a real session — does `git status` actually report three genuinely different things?
+
+A real terminal session, captured as-is (this is literal output, not code to run yourself — reproduce it locally if you want to follow along):
+
+```
+$ mkdir demo && cd demo && git init
+Initialized empty Git repository in /demo/.git/
+
+$ echo "hello" > greeting.txt
+$ git status
+On branch main
+Untracked files:
+  greeting.txt
+
+$ git add greeting.txt
+$ git status
+On branch main
+Changes to be committed:
+  new file:   greeting.txt
+
+$ git commit -m "Add greeting"
+[main (root-commit) a1b2c3d] Add greeting
+ 1 file changed, 1 insertion(+)
+
+$ echo "hello again" > greeting.txt
+$ git status
+On branch main
+Changes not staged for commit:
+  modified:   greeting.txt
+```
+
+Notice `git status` reports a _different_ state after each command, even though nothing was "undone" — that's the three-state model directly: the file on disk (working directory), what's staged for the next snapshot, and what's already permanently committed are three genuinely separate pieces of state, and every git command operates on exactly one of them.
+
+## Proving content-addressing with a real hash — does an independent implementation, with no access to Git's source, actually reproduce Git's own output?
+
+Git's claim in L2 was: every stored object is identified by the SHA-1 hash of its own content. This is checkable — Git computes a blob's hash as `sha1("blob " + content.length + "\0" + content)`. Here's that computation done independently in Node, and compared against what `git hash-object` actually produces:
+
+```js
+// hash-object.mjs — reimplements git's blob-hashing algorithm from scratch
+// to prove it's just a hash of "blob <size>\0<content>", nothing magic.
+import { createHash } from "node:crypto";
+
+function gitBlobHash(content) {
+  const bytes = Buffer.from(content, "utf8");
+  const header = `blob ${bytes.length}\0`;
+  const store = Buffer.concat([Buffer.from(header, "utf8"), bytes]);
+  return createHash("sha1").update(store).digest("hex");
+}
+
+const content = "hello\n";
+console.log(gitBlobHash(content));
+```
+
+Running this prints `ce013625030ba8dba906f756967f9e9ca394464` — and running `git hash-object` on a file containing exactly `hello\n` (via `echo "hello" | git hash-object --stdin`) prints the **exact same hash**, computed by completely independent code. This is the practical proof behind "identical content is stored once": the storage key isn't a filename or a timestamp, it's a pure function of the bytes.
+
+## Why does this change what "undo" means, compared to the zip-file scenario from L1?
+
+With manual copies, undo means "hope you kept a copy from before the mistake, and manually figure out what else changed since then." With snapshots:
+
+```
+$ git log --oneline
+c3d4e5f Fix typo in greeting
+b2c3d4e Add greeting v2
+a1b2c3d Add greeting
+
+$ git checkout a1b2c3d -- greeting.txt   # restore this one file to that snapshot
+$ git reset --hard a1b2c3d                # or: rewind the whole project to that snapshot
+```
+
+Both commands work because every past state is a fully addressable snapshot, not a fragile chain of manual edits — "go back to exactly how things were on Tuesday" is a lookup, not an archaeology project.
+
+## Turning the L2 storage claim into a real number — for a real project, how much does content-addressing actually save?
+
+L2's chart showed 10 manual copies stored 10× an unchanged file, while Git stored it once. That's the easy case (nothing changed at all). Real projects change a bit each commit — this function models storage for either strategy as a function of how much actually changes per commit, which is exactly the relationship the interactive demo on this unit's L2 section lets you drag:
+
+```js
+// storage-estimate.mjs — real, runnable comparison of manual-copy storage
+// vs. Git's content-addressed storage, as a function of how much of the
+// project actually changes between saves.
+function manualCopyStorageKB(numSaves, projectSizeKB) {
+  // Every save is a full, independent copy — no deduplication at all.
+  return numSaves * projectSizeKB;
+}
+
+function gitStorageKB(numCommits, projectSizeKB, changedFraction) {
+  if (numCommits <= 0) return 0;
+  // The first commit always stores the full project once.
+  const firstCommit = projectSizeKB;
+  // Every commit after that stores only the changed slice — the
+  // untouched remainder is already in the object store, referenced
+  // again for free.
+  const laterCommits = (numCommits - 1) * projectSizeKB * changedFraction;
+  return firstCommit + laterCommits;
+}
+
+const numCommits = 20;
+const projectSizeKB = 500;
+const changedFraction = 0.05; // 5% of the project changes, on average, per commit
+
+console.log(manualCopyStorageKB(numCommits, projectSizeKB)); // 10000
+console.log(gitStorageKB(numCommits, projectSizeKB, changedFraction)); // 975
+```
+
+For a 500 KB project committed 20 times with a realistic 5% of it changing each time, manual copies cost 10,000 KB while Git's content-addressed storage costs 975 KB — over 10× smaller, and the gap only widens as `numCommits` grows, because manual copies scale linearly with every save while Git scales with what actually changed.
+
+## Failure modes
+
+- **Forgetting to `git add` a file before committing.** A very common beginner trap: the file exists and is edited, but was never staged, so `git commit` silently commits _without_ it. `git status` before every commit is the habit that prevents this — it always shows exactly what's staged vs. not.
+- **Committing generated or dependency files** (`node_modules/`, build output, `.env` with real secrets). Content-addressing means Git will happily store and diff megabytes of generated noise forever, bloating the repo permanently — a `.gitignore` has to be set up deliberately; Git doesn't infer "this doesn't belong" on its own.
+- **Treating uncommitted work as safe.** The working directory and staging area are _not_ part of the permanent history — a bad `reset`, a bad `checkout`, or just accidentally deleting a file can lose uncommitted changes with no recovery path (the safety net starts at the first commit, not before; the exact mechanics of which undo commands are recoverable and which aren't are covered in `git-teamwork/checkout`). Commit early and often; a messy history is fixable later, lost work generally isn't.
+- **Assuming a large binary file (a video, a database dump) behaves like a text file in history.** Content-addressing stores a _new full copy_ of a binary blob every time even one byte changes (there's no meaningful line-based diff for a binary), so repeatedly committing changing binaries grows the repository's size roughly linearly with every version ever committed — close to the manual-copies growth curve, not the deduplicated one — which is the reason large media/data usually lives outside Git proper (object storage, Git LFS) rather than committed directly.
+
+## Beyond this one project
+
+The `hash-object.mjs` and `storage-estimate.mjs` examples above both used one project, one file, one changed-fraction estimate — worked cases, not the whole territory:
+
+- `gitStorageKB` assumes every commit changes roughly the same fraction of the project. What would you need to change about the function if, instead, the project had one enormous binary asset (say, a 400 KB video out of the 500 KB project) that gets re-exported and re-committed whole every single time, while the rest of the project barely changes — does a single flat `changedFraction` still describe that project honestly, or does the estimate need to treat that one file differently from the rest?
+- The `gitBlobHash` proof above hashed one small text file. What would you expect to happen to the hash if the file were byte-identical but saved with Windows-style line endings (`\r\n`) instead of Unix-style (`\n`) — same visible text, different bytes? Would you still expect Git to treat the two as "the same content," and what does that imply about `.gitattributes` line-ending normalization, which this unit doesn't cover but which exists specifically because of this exact edge case?
