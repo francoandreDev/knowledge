@@ -1,0 +1,74 @@
+---
+title: "L1 — HTTP request/response basics"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="The problem">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🔴</span> <strong>Team A</strong> — alert checks status code only — outage found via a user complaint</div>
+      <div class="flex items-center gap-1.5"><span>🟢</span> <strong>Team B</strong> — alert checks status code AND body shape — outage found automatically</div>
+    </div>
+    <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
+        <p class="font-semibold text-rose-600 dark:text-rose-400">Team A</p>
+        ~6 hours to detect
+      </div>
+      <div class="rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950">
+        <p class="font-semibold text-emerald-600 dark:text-emerald-400">Team B</p>
+        ~40 seconds to detect
+      </div>
+    </div>
+
+  </Fragment>
+
+A backend crashes at 2am. Its process is dead, but the load balancer in front
+of it still answers every request with `200 OK` and an empty body — a stale
+health-check quirk nobody remembers configuring. Team A's monitoring only
+checks `if (response.status === 200)`. Team B's monitoring checks the status
+code _and_ validates that the body actually looks like a healthy response.
+
+| Team | What the alert checks     | How the outage was found                         |
+| ---- | ------------------------- | ------------------------------------------------ |
+| A    | `response.status === 200` | A user complained on Twitter, ~6 hours later     |
+| B    | status code + body shape  | The alert fired automatically within ~40 seconds |
+
+**Both teams received the exact same `200 OK`. Why did only Team B's system know something was wrong?**
+
+</Scenario>
+
+Team A trusted the status code as if it were a fact about the world. It's
+only a claim the server made — and nothing forced that claim to match what
+was actually in the body.
+
+- The web runs on a strict **request → response** contract: a client sends one request, the server sends back exactly one response. No response arrives unprompted.
+- Every request has three parts: a **request line** (method + path + HTTP version), **headers** (metadata as key/value pairs), and an optional **body**.
+- Every response mirrors that shape: a **status line** (HTTP version + status code + reason phrase), **headers**, and an optional **body**.
+
+```mermaid
+flowchart LR
+    subgraph Request
+    RL["Request line\nGET /articles/42 HTTP/1.1"] --> RH["Headers\nHost, Accept, ..."] --> RB["Body?\n(optional)"]
+    end
+    subgraph Response
+    SL["Status line\nHTTP/1.1 200 OK"] --> SH["Headers\nContent-Type, ..."] --> SB["Body?\n(optional)"]
+    end
+    Request -. "sent over TCP" .-> Response
+```
+
+- **Methods** describe intent: `GET` (fetch, no side effects expected), `POST` (create/submit), `PUT`/`PATCH` (replace/update), `DELETE` (remove). This is a convention, not something the network enforces.
+- **Status codes** are grouped by their first digit: `2xx` success, `3xx` redirect, `4xx` client made a mistake, `5xx` server made a mistake — but as Team A learned, the number is only ever the server's own claim.
+- HTTP is **stateless** by default — the server treats every request as if it's never seen the client before, unless something (a cookie, a token) carries state across requests explicitly.
+- HTTP itself is just **text sent over a TCP connection** — there's no magic underneath it, which is exactly why it's readable with nothing but `curl` or `nc`.
+- Key terms: request line, status line, header, body, method, status code, statelessness, connection (TCP), `Host` header, `Content-Type`, `Content-Length`.
+
+## Status code ranges at a glance
+
+| Range | Meaning                                                | Typical example                                        |
+| ----- | ------------------------------------------------------ | ------------------------------------------------------ |
+| `1xx` | Informational — request received, still processing     | `100 Continue`                                         |
+| `2xx` | Success — the request worked                           | `200 OK`, `201 Created`                                |
+| `3xx` | Redirection — go look somewhere else                   | `301 Moved Permanently`, `304 Not Modified`            |
+| `4xx` | Client error — the request itself was the problem      | `404 Not Found`, `401 Unauthorized`                    |
+| `5xx` | Server error — the request was fine, the server failed | `500 Internal Server Error`, `503 Service Unavailable` |

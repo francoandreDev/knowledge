@@ -1,0 +1,89 @@
+---
+title: "L2 — The shape, and the cost/confidence/specificity trade-off behind it"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same bug, three places it could have been caught">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🧮</span> The bug: a discount over 100% produces a negative total</div>
+      <div class="flex items-center gap-1.5"><span>🧩</span> A unit test on the math function would fail in <strong>2ms</strong></div>
+      <div class="flex items-center gap-1.5"><span>🌐</span> Instead it was only caught by an e2e test, after <strong>6 minutes</strong> of browser setup, page loads, and checkout steps</div>
+    </div>
+    <div class="not-prose mt-3 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs dark:border-amber-800 dark:bg-amber-950">
+      The bug lived in one pure function. The test that caught it drove an
+      entire browser session to get there.
+    </div>
+
+  </Fragment>
+
+Both tests would have failed on the same bug. One took 2 milliseconds and
+pointed at the exact broken line. The other took 6 minutes, and the
+failure message just said "checkout total assertion failed" — someone
+still had to go find out why.
+
+**If both tests catch the same bug, what actually determines which level
+is the right one to write it at?**
+
+</Scenario>
+
+## The pyramid, and why its shape isn't arbitrary
+
+```mermaid
+flowchart TD
+    E2E["End-to-end tests\n(few — slow, realistic, fragile)"]
+    Integration["Integration tests\n(some — checks real component contracts)"]
+    Unit["Unit tests\n(many — fast, isolated, precise)"]
+    Unit --> Integration --> E2E
+```
+
+The pyramid's shape encodes a specific claim: most bugs are cheapest to catch and diagnose at the unit level, a smaller number of real problems only show up when components actually interact (integration), and the smallest number of tests should be reserved for validating whole critical flows (e2e), specifically because that layer is the most expensive per test to write, run, and maintain.
+
+## Three properties, compared directly
+
+**Why did the scenario's 2ms test and 6-minute test disagree so much on cost, if they caught the same bug?** Because "catches the bug" is only one property of a test — speed, diagnostic precision, and fragility are three separate axes, and a test's level determines all three at once, not just one.
+
+| Property                                | Unit                                       | Integration                                                            | E2E                                                                     |
+| --------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Speed                                   | Milliseconds                               | Seconds                                                                | Seconds to minutes                                                      |
+| What it actually verifies               | One function/module's logic, in isolation  | Real components working together (a real DB call, a real API contract) | The whole system, driven like a real user                               |
+| Failure specificity                     | Very high — points at exactly one function | Moderate — points at a component boundary                              | Low — "checkout is broken," real investigation needed to find where     |
+| Fragility (fails for unrelated reasons) | Low — isolated, few moving parts           | Moderate                                                               | High — depends on the most moving parts (network, timing, UI rendering) |
+
+Every row is a real, distinct cost or benefit — there's no single "best" level, only the level that matches what's actually being verified. A pure calculation function tested end-to-end pays all of e2e's costs (slow, fragile, imprecise on failure) for zero benefit the unit-level test wouldn't already provide.
+
+## The inverted pyramid, and why it's expensive rather than just "more thorough"
+
+**The team from L1's opening scenario had 500 tests and 47 minutes of CI time. What would the same coverage have cost, shaped the other way around?**
+
+| Shape                     | Runtime | Flake rate                    | Bugs caught   |
+| ------------------------- | ------- | ----------------------------- | ------------- |
+| Inverted (mostly e2e)     | ~47 min | ~1 run in 5, unrelated causes | Same coverage |
+| Well-shaped (mostly unit) | ~4 min  | Near-zero                     | Same coverage |
+
+```mermaid
+flowchart TD
+    E2EBig["End-to-end tests\n(MANY — the bulk of coverage)"]
+    IntSmall["Integration tests\n(few)"]
+    UnitSmall["Unit tests\n(few)"]
+    UnitSmall --> IntSmall --> E2EBig
+```
+
+This looks thorough — lots of tests, driving real user flows — but it inherits e2e's costs at scale: a full suite takes much longer to run (slowing feedback for every change), individual failures are expensive to diagnose (which of the many moving parts actually broke), and the suite as a whole becomes flaky (more moving parts per test means more chances for an unrelated timing or environment issue to fail a test that has nothing to do with the actual bug being introduced). The inverted shape doesn't catch more real bugs than a well-shaped pyramid with equivalent coverage — it just costs more to run and trust, exactly as the table above shows: identical coverage, wildly different bill.
+
+## Choosing a level: what specifically needs verifying
+
+**Given a new test to write, how do you actually decide — without just defaulting to whichever level is most familiar?** Ask what would make it fail, and let the answer pick the level:
+
+```mermaid
+flowchart LR
+    Q["What would make this test fail?"] --> A{"A pure logic error\nin isolated code?"}
+    A -- "Yes" --> Unit["Unit test"]
+    A -- "No" --> B{"A mismatch between\ntwo real components'\ncontracts?"}
+    B -- "Yes" --> Integration["Integration test"]
+    B -- "No" --> C{"A break in a critical,\nwhole user-facing flow?"}
+    C -- "Yes" --> E2E["E2E test\n(sparingly)"]
+```
+
+This is the practical decision procedure: identify what specifically would cause the test to fail, and let that determine the level — not habit, not "e2e feels more thorough," not "unit tests are what I already know how to write." Applied to the scenario at the top: the discount-over-100% bug is a pure logic error in an isolated calculation, which the flowchart routes straight to "unit test" — exactly the 2ms test that was skipped in favor of the 6-minute one.

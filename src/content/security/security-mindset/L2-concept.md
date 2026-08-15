@@ -2,7 +2,7 @@
 title: "L2 — Trust boundaries and the STRIDE model"
 ---
 
-## Trust boundaries: where assumptions have to be re-earned
+## Which of these four arrows actually needs to be questioned?
 
 ```mermaid
 flowchart LR
@@ -12,9 +12,24 @@ flowchart LR
     API -- "4. query" --> Cache["Trusted: internal cache"]
 ```
 
-Every arrow crossing from "untrusted" into "trusted" is a place where the system has to actively decide whether to believe what it's receiving — arrows 1 and 3 cross a trust boundary, arrows 2 and 4 don't (they're internal, already-validated data moving between components you control). A shocking amount of real vulnerabilities come from code that treats an untrusted-side input as if it had already crossed the boundary safely — trusting a client-supplied "isAdmin" field, trusting a webhook payload's claimed sender, trusting a file's declared content-type.
+Arrows 1 and 3 cross from something outside your control into something inside it; arrows 2 and 4 stay entirely within components you already own and already validated. A shocking amount of real vulnerabilities come from code that treats an untrusted-side input (arrow 1 or 3) as if it had already crossed the boundary safely — trusting a client-supplied "isAdmin" field, trusting a webhook payload's claimed sender, trusting a file's declared content-type.
 
-## STRIDE: six categories of "what could go wrong"
+<div class="not-prose my-4 grid grid-cols-2 gap-2 text-xs">
+  <div class="rounded border border-rose-300 bg-rose-50 p-2 dark:border-rose-800 dark:bg-rose-950">
+    <p class="font-semibold text-rose-600 dark:text-rose-400">
+      Untrusted side (1, 3)
+    </p>
+    Anything the caller controls — must be re-verified every time, no exceptions
+  </div>
+  <div class="rounded border border-emerald-300 bg-emerald-50 p-2 dark:border-emerald-800 dark:bg-emerald-950">
+    <p class="font-semibold text-emerald-600 dark:text-emerald-400">
+      Trusted side (2, 4)
+    </p>
+    Data your own system already produced or validated — nothing new to earn
+  </div>
+</div>
+
+## If you had to review a component in five minutes, what six questions would cover the most ground?
 
 | Category                   | The adversary's goal                          | Concrete example                                                           |
 | -------------------------- | --------------------------------------------- | -------------------------------------------------------------------------- |
@@ -25,9 +40,11 @@ Every arrow crossing from "untrusted" into "trusted" is a place where the system
 | **D**enial of service      | Make the system unavailable to legitimate use | Sending oversized payloads that exhaust server memory                      |
 | **E**levation of privilege | Gain access beyond what was granted           | A regular user calling an admin-only endpoint the UI just happened to hide |
 
-STRIDE isn't a checklist of specific bugs to search for — it's a set of _lenses_. For any given component, running through all six ("could someone spoof a caller here? Tamper with this data? Deny they did this?") surfaces categories of risk a purely functional review wouldn't think to ask about, because functional review only asks "does the intended flow work."
+STRIDE isn't a checklist of specific bugs to search for — it's a set of _lenses_. Running through all six for any given component ("could someone spoof a caller here? Tamper with this data? Deny they did this?") surfaces categories of risk a purely functional review wouldn't think to ask about, because functional review only asks "does the intended flow work."
 
-## The threat-modeling procedure
+## Once you've found ten plausible threats, what do you actually do with the list?
+
+You don't try to fix all ten with equal urgency — you rank them, the same way you'd triage bugs by severity instead of fixing them in file-alphabetical order:
 
 ```python
 function threat_model(component):
@@ -45,8 +62,8 @@ function threat_model(component):
     return ranked  # highest-priority risks first, not an exhaustive fix-everything list
 ```
 
-Threat modeling deliberately produces a _ranked_ list, not an infinite one — the point isn't to eliminate all conceivable risk (impossible), it's to know where the highest-value mitigation effort should go, the same way you'd triage bugs by severity rather than fixing them in file-alphabetical order.
+Threat modeling deliberately produces a _ranked_ list, not an infinite one — the point isn't to eliminate all conceivable risk (impossible), it's to know where the highest-value mitigation effort should go.
 
-## The mindset shift, stated plainly
+## What's actually different about the question a security-minded reviewer asks?
 
-A functional reviewer asks: "if a user does X, does the system produce the right result?" A security-minded reviewer asks the same question with one word changed: "if an **adversary** does X — deliberately, with malicious intent, possibly automating it a million times — does the system still behave safely?" Same code, same review, fundamentally different question — and it's the second question that catches the failure modes the first one is structurally blind to.
+A functional reviewer asks: "if a user does X, does the system produce the right result?" A security-minded reviewer asks the same question with one word changed: "if an **adversary** does X — deliberately, with malicious intent, possibly automating it a million times — does the system still behave safely?" Same code, same review, fundamentally different question — and it's the second question that catches the failure modes the first one is structurally blind to, the way it caught Team B's missing rate limit in L1 before a single line of code existed.

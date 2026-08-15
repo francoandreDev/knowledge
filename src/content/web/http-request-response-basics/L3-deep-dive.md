@@ -18,9 +18,9 @@ xychart-beta
 
 TLS is usually the single biggest fixed cost on a cold connection — more than DNS and the TCP handshake combined. This is exactly why HTTP/1.1 keep-alive (and connection pooling in general) matters so much in practice: paying the DNS+TCP+TLS setup cost once and reusing the connection for many requests amortizes that ~90ms of setup across all of them, instead of paying it again every time.
 
-## HTTP is text over TCP — proving it
+## Is "HTTP is just text over TCP" actually true, or just a simplification for beginners?
 
-No framework, no `fetch`, no `http` module. Just a TCP socket and a string built by hand, using Node's `net` module (works identically under `bun run`):
+It's literally true — provable with eleven lines of code and no framework, no `fetch`, no `http` module. Just a TCP socket and a string built by hand, using Node's `net` module (works identically under `bun run`):
 
 ```js
 // raw-request.mjs
@@ -52,9 +52,9 @@ Run it with `bun run raw-request.mjs`. The output is the response's status line 
 
 Every header line matters. `Host` isn't optional in HTTP/1.1 — a single server process often answers for many domains (virtual hosting), and `Host` is the only thing in the request that says which one. Drop it and compliant servers must respond `400 Bad Request`.
 
-## Building a server that parses HTTP by hand
+## If frameworks hide all this parsing, what exactly are they hiding?
 
-Frameworks hide the parsing, but the parsing is where the interesting edge cases live. Here's a minimal server built directly on `net.Server`, handling exactly the pieces from the L2 pseudocode:
+Frameworks hide the parsing, but the parsing is where the interesting edge cases live — and hiding it doesn't make the edge cases go away, it just moves them somewhere you can't see. Here's a minimal server built directly on `net.Server`, handling exactly the pieces from the L2 pseudocode:
 
 ```js
 // raw-server.mjs
@@ -125,7 +125,9 @@ server.listen(8080, () => console.log("listening on http://localhost:8080"));
 
 Run it with `bun run raw-server.mjs`, then in another terminal: `curl http://localhost:8080/time`. It answers exactly like a "real" HTTP server, because — at this layer — that's all a real HTTP server is: parse the head, decide what `Content-Length` to promise, write it, keep the promise.
 
-## Failure modes a naive parser walks straight into
+## Which of these four mistakes would still pass a quick smoke test on localhost?
+
+All of them, which is exactly what makes them dangerous — a naive parser that works perfectly against `curl http://localhost` in a demo can still walk straight into every one of these under real network conditions or real attacker input:
 
 **1. Trusting `Content-Length` without validating it against what's actually written.** If `buildResponse` computed `Content-Length` from the wrong string (say, the object before `JSON.stringify` instead of after), clients reading exactly that many bytes would either truncate the JSON or hang waiting for bytes that never arrive, because the receiver stops reading once it has read `Content-Length` bytes — it has no other way to know the message ended. This is why `Buffer.byteLength(body)` — not `body.length`, which counts UTF-16 code units, not bytes — is used above; a body with multi-byte UTF-8 characters would otherwise get a wrong count and every response with non-ASCII content would be silently truncated for the client.
 
@@ -141,6 +143,13 @@ and `userSuppliedRedirectUrl` contains a literal `\r\n`, an attacker can inject 
 **3. Not handling partial reads.** TCP makes no promise that one `write()` on the client arrives as one `data` event on the server — a request can arrive split across multiple chunks, or multiple pipelined requests can arrive in a single chunk. The `buffer +=` / `indexOf("\r\n\r\n")` pattern above exists specifically to handle this: it keeps accumulating until it has seen a complete head, rather than assuming the first `data` event is the whole request. A parser that assumes one `data` event equals one full request will intermittently — and only under real network conditions, never in a fast localhost test — truncate requests.
 
 **4. Not bounding how much you'll buffer.** The server above will happily keep appending to `buffer` forever if a client sends headers but never sends the terminating `\r\n\r\n`. A production server needs a maximum header size and a timeout, or a single slow/malicious client can exhaust memory (this is the shape of a "slowloris" attack: open many connections, send headers one byte at a time, never finish).
+
+| #   | Failure mode                            | Real symptom                                      | Fix                                                           |
+| --- | --------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------- |
+| 1   | Wrong `Content-Length`                  | Truncated or hung response for non-ASCII bodies   | Compute length from the real UTF-8 bytes, after serialization |
+| 2   | Unsanitized header values               | CRLF injection / response splitting               | Strip or reject `\r`/`\n` before writing any header value     |
+| 3   | Assuming one `data` event = one request | Intermittent truncation under real network jitter | Buffer and re-check for a complete head on every chunk        |
+| 4   | Unbounded header buffering              | Memory exhaustion (slowloris-style)               | Cap header size, enforce a read timeout                       |
 
 ## Worked example: keep-alive changes the loop
 
@@ -164,3 +173,5 @@ socket.on("data", (chunk) => {
 ```
 
 This is the detail that trips up most from-scratch HTTP parsers: keep-alive turns "one request per connection" into "an unbounded stream of requests per connection," and the parser has to re-synchronize on request boundaries itself instead of relying on the connection closing to mark the end.
+
+The raw server above is one worked example — a GET-only, JSON-only toy — not the whole territory. **What would you need to add to `parseRequestHead` and the dispatch logic if a route needed to accept a request body** (say, a `POST /articles` that creates a resource from a JSON payload)? At minimum: check for `Content-Length` on the parsed headers, keep buffering past `headerEnd + 4` until that many body bytes have arrived, and only then parse and dispatch — the same "don't assume one `data` event is the whole message" discipline this unit already applied to headers, extended to the body.

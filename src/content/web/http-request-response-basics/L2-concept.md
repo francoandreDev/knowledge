@@ -2,7 +2,7 @@
 title: "L2 — HTTP request/response basics"
 ---
 
-## The shape of one exchange
+## What actually happens between "click" and "page appears"?
 
 ```mermaid
 sequenceDiagram
@@ -36,9 +36,9 @@ Content-Length: 27
 {"id":42,"title":"Hello"}
 ```
 
-The blank line is not decoration — it's the field separator between headers and body. Miss it and the parser can't tell where headers end.
+The blank line is not decoration — it's the field separator between headers and body. Miss it and the parser can't tell where headers end (L1's Team A/Team B scenario is a variant of this same "the machinery trusts a signal that turned out to be misleading" problem, one level up: a status code instead of a blank line).
 
-## The architecture this implies
+## Why does a load balancer get to send request #1 and request #2 to two completely different, uncoordinated servers?
 
 Because a request carries everything the server needs to answer it (method, path, headers, body) and the server carries everything the client needs to interpret the answer (status, headers, body), **neither side has to remember the other exists** between requests. That single property — statelessness — is why:
 
@@ -46,7 +46,7 @@ Because a request carries everything the server needs to answer it (method, path
 - You can `curl` an endpoint in isolation and get a meaningful answer, without "logging in" to a session first, unless the _application_ layers state on top (cookies, `Authorization` headers, tokens).
 - Caching works: a response to `GET /articles/42` can be cached and replayed for anyone, because the request alone determines the response (in principle — real APIs vary by auth, but that's the app opting back into statefulness).
 
-## Handling a request: the mental model
+## What is a server actually doing, underneath any framework?
 
 Pseudocode for what a server is conceptually doing for every connection — this is the shape underneath every framework you'll ever use, from a raw socket server to Express to a CDN edge function:
 
@@ -79,8 +79,18 @@ loop forever:
 
 Every real HTTP server — Node's `http` module, nginx, a Go `net/http` handler — is a more sophisticated, more concurrent version of exactly this loop. Nothing about `async`, routers, or middleware changes the underlying contract; they just make the "parse → route → handle → write" pipeline easier to compose.
 
+## If a method's semantics are just a convention, what stops someone from breaking it?
+
+Nothing at the network layer — which is exactly the risk worth internalizing. `GET`, `PUT`, and `DELETE` are supposed to be **idempotent** (calling them twice has the same effect as once); `POST` is not. Browsers, proxies, and retry logic lean on this promise to decide what's safe to auto-retry — but the promise only holds if the server's own handler actually honors it.
+
+| Method   | Supposed to be idempotent? | Supposed to be safe (no side effects)? | What breaks if the handler doesn't honor this                                  |
+| -------- | -------------------------- | -------------------------------------- | ------------------------------------------------------------------------------ |
+| `GET`    | Yes                        | Yes                                    | A prefetching browser or crawler can trigger real damage                       |
+| `PUT`    | Yes                        | No                                     | An automatic retry after a timeout can silently "undo" a newer write           |
+| `DELETE` | Yes                        | No                                     | A retried delete should be a harmless no-op, not an error or a second deletion |
+| `POST`   | No                         | No                                     | Retrying it can create a duplicate (double-charge, double-comment)             |
+
 ## Semantics worth internalizing now
 
-- **Idempotency is a promise, not a guarantee.** `GET`, `PUT`, and `DELETE` are supposed to be idempotent (calling them twice has the same effect as once) — but nothing stops a poorly written server from making `GET /delete-everything` destructive. The convention exists so _callers_ (browsers, proxies, retry logic) can safely retry idempotent methods without asking.
-- **A status code is a claim, not a fact.** A `200 OK` with a broken JSON body is still, technically, a `200`. Client code that only checks the status code and never validates the body is trusting the server's word for it.
+- **A status code is a claim, not a fact.** A `200 OK` with a broken JSON body is still, technically, a `200`. Client code — or a monitoring check, per L1's scenario — that only reads the status code and never validates the body is trusting the server's word for it.
 - **`Content-Length` (or chunked encoding) is how the receiver knows where the body ends.** TCP is a byte stream with no built-in message boundaries — HTTP has to tell you the body's length explicitly, or stream it in labeled chunks (`Transfer-Encoding: chunked`), or the reader would have no way to know when to stop reading.

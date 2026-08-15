@@ -60,9 +60,23 @@ Component: an endpoint that lets users upload a profile picture.
 
 Notice this is a genuinely boring feature — "let users upload a picture" — and STRIDE still surfaces six distinct, real risk categories a purely functional spec ("accepts an image, saves it, returns a URL") would never mention, because the functional spec only describes the intended path.
 
+## How much does adding entry points actually compound risk?
+
+```mermaid
+xychart-beta
+    title "P(at least one exploitable entry point), 3% risk per endpoint"
+    x-axis ["1", "5", "10", "20", "30", "40"]
+    y-axis "Probability" 0 --> 1
+    bar [0.03, 0.14, 0.26, 0.46, 0.60, 0.71]
+```
+
+This is the same file-upload endpoint's math scaled up: if each of N independent entry points has even a small, fixed chance of an exploitable flaw, the odds that _at least one_ of them is exploitable grow non-linearly with N — doubling the number of endpoints roughly doubles the exponent, not the risk. A system with 40 loosely-reviewed entry points isn't "a bit riskier" than one with 5 — it's a fundamentally different risk profile, which is exactly why STRIDE is run per-component rather than once for the whole system: the unit of analysis has to match the unit that's actually multiplying. Play with the numbers yourself in the "Try it" demo below.
+
 ## Failure modes
 
 - **Validating shape, not trust.** Checking that `price` is a number, or that a filename ends in `.jpg`, confirms the _shape_ of the input is well-formed — it says nothing about whether the input's _value_ should be trusted for anything security-sensitive. The checkout bug above passes every reasonable shape check.
 - **Security review as a separate late-stage gate.** Treating "think like an adversary" as a checklist run by a different team right before launch means the design itself was never adversarially examined — by then, fixing a trust-boundary mistake often means reworking the architecture, not patching a line.
 - **Stopping at "this specific bug is fixed" instead of "this category is covered."** Patching the price-tampering bug in `checkout()` doesn't mean every other client-controlled value elsewhere in the codebase (discount codes, shipping cost, user roles) is safe — STRIDE's value is in making you re-ask the same six questions per component, not treating one fix as proof the mindset was applied everywhere.
 - **Assuming "we'd never get attacked, we're small/unknown."** Most real-world exploitation of small or obscure systems is automated and untargeted (scanners probing for a known vulnerable pattern across millions of hosts) — obscurity reduces the odds of a _targeted_ attack, not an automated one, and the checkout bug above would be found by a script, not a person specifically hunting your company.
+
+The checkout bug and the file-upload table are one worked example each, not the whole territory. **What changes if the file-upload endpoint were internal-only, used by employees rather than the public** — does that shrink the STRIDE table, or just change which mitigations are worth the engineering cost? And **what happens to the checkout fix if `catalog` itself is populated from a third-party pricing feed** — does the trust boundary just move one hop further back, and if so, to where?
