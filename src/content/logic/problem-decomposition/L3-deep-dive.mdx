@@ -1,0 +1,137 @@
+---
+title: "L3 — Decomposing checkout's 4.2 seconds, and detecting a false decomposition in code"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Four numbers instead of one vague complaint">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>⏱️</span> <strong>Total</strong> — 4,200ms measured checkout time</div>
+      <div class="flex items-center gap-1.5"><span>📊</span> <strong>Stages</strong> — network 300ms, server 800ms, DB query 2,500ms, rendering 600ms</div>
+    </div>
+  </Fragment>
+
+**Before reading the code, predict: if someone reports the database
+query dropped from 2,500ms to 1,000ms, but the OTHER three stages' times
+are unchanged, what should the new checkout total be?**
+
+</Scenario>
+
+## Decomposing the total into measurable, independent stages
+
+```js
+function decomposeTiming(stages) {
+  const total = stages.reduce((sum, s) => sum + s.ms, 0);
+  return stages.map((s) => ({
+    name: s.name,
+    ms: s.ms,
+    shareOfTotal: s.ms / total,
+  }));
+}
+```
+
+```js
+const measurements = [
+  { name: "network", ms: 300 },
+  { name: "server-processing", ms: 800 },
+  { name: "db-query", ms: 2500 },
+  { name: "client-rendering", ms: 600 },
+];
+
+decomposeTiming(measurements);
+// [
+//   { name: "network", ms: 300, shareOfTotal: 0.071 },
+//   { name: "server-processing", ms: 800, shareOfTotal: 0.190 },
+//   { name: "db-query", ms: 2500, shareOfTotal: 0.595 },
+//   { name: "client-rendering", ms: 600, shareOfTotal: 0.143 },
+// ]
+```
+
+## Identifying which piece is worth attention
+
+```js
+function identifyBottleneck(decomposedStages) {
+  return decomposedStages.reduce((max, s) => (s.ms > max.ms ? s : max));
+}
+
+identifyBottleneck(decomposeTiming(measurements));
+// { name: "db-query", ms: 2500, shareOfTotal: 0.595 }
+```
+
+This is the concrete output of decomposition: not just four numbers, but
+an unambiguous answer to "where should someone actually start" —
+`db-query`, at 59% of the total, dwarfing everything else.
+
+## Checking that a decomposition is exhaustive
+
+```js
+function isExhaustiveDecomposition(stages, measuredTotal) {
+  const sum = stages.reduce((s, x) => s + x.ms, 0);
+  return sum === measuredTotal;
+}
+
+isExhaustiveDecomposition(measurements, 4200); // true — the pieces account for the whole thing
+isExhaustiveDecomposition(measurements, 5000); // false — 800ms is unaccounted for somewhere
+```
+
+A `false` result here is a genuine signal: if the pieces don't sum to the
+independently-measured total, some real contributor to the 4.2 seconds
+isn't represented in the decomposition at all — a hidden cache miss, a
+retry loop, something not yet named as one of the four stages.
+
+## Detecting a false, overlapping decomposition
+
+```js
+function hasOverlap(stages, trueTotal) {
+  const sum = stages.reduce((s, x) => s + x.ms, 0);
+  return sum > trueTotal;
+}
+```
+
+```js
+// A believable-looking BUT overlapping decomposition: "server-processing"
+// was measured in a way that already includes the DB query's time inside it
+const overlappingStages = [
+  { name: "server-processing-incl-db", ms: 3300 }, // double-counts db-query
+  { name: "db-query", ms: 2500 },
+  { name: "network", ms: 300 },
+  { name: "client-rendering", ms: 600 },
+];
+
+hasOverlap(measurements, 4200); // false — the real decomposition, no overlap
+hasOverlap(overlappingStages, 4200); // true — sum (6700) exceeds the true total (4200)
+```
+
+The overlapping version isn't obviously wrong just by looking at it — all
+four numbers look like real measurements. It's only checkable by
+comparing the sum against the independently-measured true total, which is
+exactly why the exhaustive/non-overlapping checks matter as actual code,
+not just a one-time mental sanity check.
+
+## Extend the example: a decomposition that isn't purely additive
+
+**The checkout example is additive — the four stages happen one after
+another, so their times simply sum. What if a vaguer problem's pieces
+don't sum, but instead depend on each other in more complex ways?**
+
+Consider "our onboarding is confusing" instead of "checkout is slow."
+There's no single total number, and a naive decomposition into
+"confusing for new users" and "confusing for returning users" might look
+independent but actually share a root cause (an ambiguous button label
+that confuses everyone, just noticed differently by each group). The
+additive structure of the checkout example is a special case that made
+exhaustive/non-overlapping checks easy to compute directly — most
+real-world decompositions require more judgment to verify the same two
+properties, but the properties themselves (does this cover the whole
+problem, do any two pieces share a cause) still apply.
+
+## Failure modes
+
+| Failure mode                                                                             | What it gets wrong                                                                                           |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Treating "I don't know where to start" as a signal the problem is unsolvable             | It's usually a signal the problem hasn't been decomposed yet, not that it can't be                           |
+| Splitting a problem into pieces without checking they sum to the whole                   | A real contributing cause can hide entirely outside the named pieces                                         |
+| Measuring two pieces in a way that double-counts the same underlying cause               | Fixing one piece inflates the other's apparent improvement without anything real changing                    |
+| Assuming a proposed split's pieces can each be worked on independently, without checking | A piece that secretly depends on another isn't really separate — it's the same problem with two labels       |
+| Spreading effort evenly across all decomposed pieces instead of the dominant one         | Decomposition's real value is revealing where the effort should concentrate, not just producing more numbers |

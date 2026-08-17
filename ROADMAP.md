@@ -94,7 +94,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | --- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------- |
 | 01  | formal-informal-logic                    | What actually makes an argument valid vs. just convincing? (formal vs. informal logic)                                     | done    |
 | 02  | fallacies                                | Why does "if it's not A, it must be B" often fail? (fallacies, false dichotomy)                                            | done    |
-| 03  | problem-decomposition                    | How do I break a vague problem into solvable pieces? (problem decomposition)                                               | planned |
+| 03  | problem-decomposition                    | How do I break a vague problem into solvable pieces? (problem decomposition)                                               | done    |
 | 04  | boolean-logic                            | Why do two "correct" pieces of code produce different results? (boolean logic, precedence, De Morgan's laws)               | planned |
 | 05  | state-machines                           | How do I reason about a system with many possible states? (state machines, truth tables)                                   | planned |
 | 06  | edge-case-reasoning                      | How do I prove my code handles every case, not just the ones I tested? (edge case reasoning, invariants)                   | planned |
