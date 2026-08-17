@@ -2,6 +2,33 @@
 title: "L3 — A shared function, a silent regression, and the test that would have caught it"
 ---
 
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="One function, two unrelated call sites, one silent regression">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🛒</span> <code>checkout.mjs</code> — <code>applyDiscount(100, 20)</code> → expects <strong>$80</strong></div>
+      <div class="flex items-center gap-1.5"><span>💸</span> <code>refunds.mjs</code> — <code>applyDiscount(price, feePercent)</code>, where <code>feePercent</code> can legitimately exceed <strong>100</strong> by design</div>
+      <div class="flex items-center gap-1.5"><span>🔧</span> The "fix": clamp <code>discountPercent</code> to 100 — looks safe from checkout's point of view</div>
+    </div>
+    <div class="not-prose mt-3 rounded border border-rose-300 bg-rose-50 p-1.5 text-xs dark:border-rose-800 dark:bg-rose-950">
+      The clamp silently breaks refunds — a file the fixing developer never
+      opened, testing a case they never knew existed.
+    </div>
+
+  </Fragment>
+
+Both call sites were manually verified when they were first built —
+checkout was clicked through in a browser, refunds were tested with a
+sample order. Both checks passed. Both checks are now permanently in
+the past.
+
+**Before reading the "fix" below: what would you need to know about
+`applyDiscount`'s callers — not just its current behavior — to safely
+change it?**
+
+</Scenario>
+
 ## The setup: one function, two unrelated call sites
 
 ```js
@@ -16,8 +43,6 @@ const total = applyDiscount(100, 20); // $100 item, 20% off -> $80
 // refunds.mjs
 const refundAmount = applyDiscount(originalPrice, restockingFeePercent);
 ```
-
-Both call sites were manually verified when they were first built — checkout was clicked through in a browser, refunds were tested with a sample order. Both checks passed. Both checks are now permanently in the past.
 
 ## The change, and what a manual re-check would (and wouldn't) catch
 
@@ -58,9 +83,40 @@ describe("applyDiscount", () => {
 
 Running this suite after the "fix" fails the second test immediately, with the exact function and expected-vs-actual value named — not "something's wrong with refunds," discovered days later by a confused support ticket, but "this specific assertion, in this specific file, broke, right now, before it shipped." The test doesn't require the checkout developer to have known refunds depended on this behavior — it only requires that someone, at some point, wrote down the dependency once, and the suite remembers it forever afterward.
 
+## Where the fix went wrong, traced
+
+```mermaid
+flowchart TD
+    Bug["Bug report: 150% discount\nproduces a negative checkout total"] --> Fix["Fix: clamp discountPercent to 100"]
+    Fix --> ManualCheck["Manual re-check: checkout only\n(the only caller the developer knew about)"]
+    ManualCheck --> Ship["Shipped — both manual checks passed"]
+    Ship --> Hidden["Refund tool's over-100% case\nsilently starts returning wrong amounts"]
+    Hidden --> Discovered["Discovered 9 days later,\nvia a support ticket"]
+    style Hidden fill:#fecaca,stroke:#dc2626
+```
+
 ## Failure modes
 
 - **Writing tests that assert nothing meaningful.** `expect(applyDiscount(100, 20)).toBe(applyDiscount(100, 20))` passes trivially and provides zero protection — it's testing the function against itself, not against a known-correct expected value. A test's value comes entirely from the expected value being independently correct, not from the test merely existing.
 - **Testing implementation details instead of behavior.** A test that asserts `applyDiscount` internally calls a specific helper function, rather than asserting its actual input/output behavior, breaks every time the implementation is refactored even when the behavior is unchanged — this trains people to distrust or delete failing tests rather than trust them, which defeats the entire purpose.
 - **Flaky tests that fail intermittently for reasons unrelated to correctness** (timing assumptions, shared mutable state between tests, relying on real network calls) erode exactly the trust the "automated tests are repeatable" argument depends on — a test suite people have learned to re-run until it passes is no longer providing a real signal, it's theater.
 - **Only testing the case you already know about.** The refund tool's `discountPercent: 150` case only got a test because someone already knew it mattered — automated testing doesn't discover which behaviors matter on its own; it makes a known-important behavior permanently checked once someone identifies it. This is why testing pairs with the audience-awareness-style discipline of actually understanding a function's full set of callers before "fixing" it, not a replacement for that understanding.
+
+## Beyond `applyDiscount`: the same reasoning, a harder case
+
+The pricing scenario is one worked example — a case, not the whole
+territory. **What changes if the shared function isn't `applyDiscount`
+but something with three real callers instead of two — say, a
+`formatCurrency` helper used by checkout, refunds, and a nightly
+financial-reconciliation report?** The reasoning doesn't change: each
+caller can have its own legitimate edge case the others don't share
+(the reconciliation report might need negative amounts formatted
+differently than a customer-facing total), and a developer fixing a
+bug for one caller still can't be expected to remember callers they've
+never opened. What changes is the cost of getting it wrong — a broken
+reconciliation report might not surface as a "bug" at all, just
+silently wrong numbers in a report nobody double-checks by hand,
+which is arguably worse than a loud support ticket. The fix is the
+same at any number of callers: a test per known-important behavior,
+written once, checked forever — not a developer trying to hold every
+caller in their head before every change.

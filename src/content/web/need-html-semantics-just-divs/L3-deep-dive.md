@@ -82,7 +82,18 @@ console.log(
 
 The last two lines are the entire argument in code: a `<div onclick>` with nothing else is unconditionally inaccessible, and making a `<div>` accessible by hand requires reproducing _both_ pieces `<button>` already provides — which is strictly more code, more to get right, and more to maintain than just using `<button>` in the first place.
 
+## What extending the worked example changes
+
+The refactor above fixes a marketing-style page — a logo, a two-link nav, one heading, one CTA. What changes if the page were a data table with 40 rows and a "select all" checkbox instead? The `<nav>`/`<button>` choices stay exactly the same, but now `<table>`, `<th scope="col">`, and `<input type="checkbox">` (not a styled `<div>` toggle) are also load-bearing — a screen reader announces row/column position from `<table>` semantics alone, which no amount of CSS Grid on `<div>`s replicates. The underlying rule doesn't change with scale or content type; only which specific semantic elements are the ones doing the work does.
+
 ## Failure modes
+
+| Failure mode                                          | Who it's invisible to               | Minimum fix                                                  |
+| ----------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------ |
+| `onclick` with no `tabindex`/keydown handler          | Sighted QA, mouse users             | Use `<button>`, or add both `tabindex="0"` and key handling  |
+| `keydown` handler only checks `Enter`, not `Space`    | Anyone testing only the "usual" key | Handle both keys, or use `<button>`                          |
+| `<div>` used where a matching semantic element exists | Sighted QA (looks identical)        | Swap the wrapper for the real element                        |
+| Keyboard fixed, but no `role`/accessible name set     | Sighted keyboard-only testers       | Set `role` and an accessible name, or use the native element |
 
 - **Adding `onclick` without `tabindex` and a keydown handler.** The single most common div-as-button mistake — it works for a mouse, and silently excludes every keyboard-only and switch-device user, with no visual sign anything is wrong.
 - **Using `<div tabindex="0">` with a keydown handler but forgetting Space, only handling Enter.** Native buttons respond to both; a hand-rolled one that only checks `Enter` breaks the convention users (and screen readers announcing "button") expect to work.

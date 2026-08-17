@@ -21,7 +21,21 @@ Three things happen at once as hours worked climb: focus and judgment quality de
 
 The key mechanic that produces the downward-bending curve, not just a flattening one: `rework_cost` isn't paid by the tired hour that caused it — it's paid by _future_ hours that have to be spent finding and fixing whatever the fatigued hour got wrong. A model that only tracks hours worked against direct output misses this entirely, because the cost shows up on a different day than the hour that caused it.
 
+Put another way — where does a late, fatigued hour's time actually go? Roughly, into three buckets:
+
+```mermaid
+pie showData
+    title Where a late-in-the-day, fatigued hour's time actually goes
+    "Genuine new output" : 55
+    "Mistakes made this hour" : 20
+    "Future rework this hour causes" : 25
+```
+
+Only the first slice is what the linear model assumes the whole hour buys. The other two are the hidden cost the linear model has no term for at all — one paid immediately (the mistake), one paid later (the rework), which is exactly why the effect is easy to underestimate while it's happening.
+
 ## Diminishing vs. negative returns — the distinction matters for the decision
+
+Both regions past the linear stretch involve "more hours produces a worse exchange rate than before" — so does it actually matter which one you're in, or is "diminishing" close enough to "negative" that the distinction is academic?
 
 | Region                        | What's happening                                      | What it implies                                                                                                |
 | ----------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
@@ -32,5 +46,7 @@ The key mechanic that produces the downward-bending curve, not just a flattening
 The practically important line isn't "linear vs. not" — it's the boundary between diminishing and negative returns, because that's the point where "push harder" stops being a suboptimal-but-still-helpful lever and becomes a lever pointed the wrong direction entirely.
 
 ## What determines where the curve bends
+
+If the shape is real, why doesn't everyone bend at the same 60-hour mark — is there a single "safe" number of hours that applies across any kind of work?
 
 The exact shape isn't universal — it depends on the nature of the work (deep, error-consequential technical work bends earlier than routine low-stakes work, because mistakes in the former are more expensive to find and fix) and the time horizon (a single hard push before a real deadline operates on a much shorter fatigue-accumulation curve than a sustained weekly pattern held for months, where the "rework_cost" term keeps compounding across weeks, not just within one day).
