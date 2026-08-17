@@ -1,0 +1,130 @@
+---
+title: "L3 — Reproducing the discount bug, and a function that checks whether a test catches it"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same input, two implementations, one boundary">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>💰</span> <strong>Spec</strong> — orders of $100 or more get a 10% discount</div>
+      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>Bug</strong> — <code>subtotal &gt; 100</code> instead of <code>subtotal &gt;= 100</code></div>
+    </div>
+  </Fragment>
+
+**Before reading the code, predict: is there any dollar amount where the
+buggy and fixed implementations return the exact same result?**
+
+</Scenario>
+
+## The buggy and fixed implementations
+
+```js
+// BUGGY: off-by-one at the discount boundary
+function calculateOrderTotalBuggy(subtotal) {
+  const DISCOUNT_THRESHOLD = 100;
+  if (subtotal > DISCOUNT_THRESHOLD) {
+    return subtotal * 0.9;
+  }
+  return subtotal;
+}
+
+// FIXED: correct boundary, matching the actual spec ("$100 or more")
+function calculateOrderTotal(subtotal) {
+  const DISCOUNT_THRESHOLD = 100;
+  if (subtotal >= DISCOUNT_THRESHOLD) {
+    return subtotal * 0.9;
+  }
+  return subtotal;
+}
+```
+
+```js
+calculateOrderTotalBuggy(100); // 100 — WRONG, spec says $100 qualifies
+calculateOrderTotal(100); // 90  — correct
+```
+
+## The weak assertion that let it ship
+
+```js
+// The ORIGINAL test — tautological for this bug
+function weakAssertionPasses(fn) {
+  const result = fn(100);
+  return typeof result === "number" && result > 0;
+}
+
+weakAssertionPasses(calculateOrderTotalBuggy); // true
+weakAssertionPasses(calculateOrderTotal); // true
+```
+
+Both implementations pass. The assertion never asked "is the discount
+actually applied at exactly $100" — it asked "is the result a positive
+number," a question both the buggy and correct code answer identically.
+
+## The strong assertion that would have caught it
+
+```js
+function strongAssertionPasses(fn) {
+  return fn(100) === 90;
+}
+
+strongAssertionPasses(calculateOrderTotalBuggy); // false — catches the bug
+strongAssertionPasses(calculateOrderTotal); // true  — correct code passes
+```
+
+## A function that checks whether a given input catches a given bug
+
+```js
+// Encodes the mutation-testing idea directly: does testInput distinguish
+// the correct implementation from the buggy one?
+function testCatchesBug(goodFn, buggyFn, testInput) {
+  return goodFn(testInput) !== buggyFn(testInput);
+}
+
+testCatchesBug(calculateOrderTotal, calculateOrderTotalBuggy, 100); // true  — boundary value catches it
+testCatchesBug(calculateOrderTotal, calculateOrderTotalBuggy, 150); // false — same result either way
+testCatchesBug(calculateOrderTotal, calculateOrderTotalBuggy, 50); // false — below threshold, same result
+```
+
+Only **100** — the exact boundary — distinguishes the two implementations.
+150 and 50 are both "reasonable-looking test values" that would make a
+test suite feel thorough while never actually exercising the one input
+where the bug lives.
+
+## Extend the incident: what if there's a second boundary?
+
+**The fix above assumed one threshold. What changes if the same order
+also has a separate free-shipping threshold at a different dollar
+amount?**
+
+```js
+function calculateOrderTotalWithShipping(subtotal) {
+  const DISCOUNT_THRESHOLD = 100;
+  const FREE_SHIPPING_THRESHOLD = 50;
+  const total = subtotal >= DISCOUNT_THRESHOLD ? subtotal * 0.9 : subtotal;
+  const shipping = subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : 7.5;
+  return total + shipping;
+}
+
+calculateOrderTotalWithShipping(49); // 56.5 — below both thresholds, full shipping
+calculateOrderTotalWithShipping(50); // 50   — free shipping, no discount yet
+calculateOrderTotalWithShipping(100); // 90   — discount applied, free shipping
+```
+
+Two independent boundaries means two independent places a `>` vs. `>=`
+bug could hide, and a test suite covering only the discount boundary
+(100) would still miss a shipping-boundary bug at 50. **The generalizable
+habit**: for every conditional with a threshold, the boundary value
+itself is a required test input, not an optional one — and each
+independent threshold needs its own boundary check, since passing one
+doesn't imply the other is correct.
+
+## Failure modes
+
+| Failure mode                                                                                           | What it gets wrong                                                                              |
+| ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| Asserting on type or truthiness (`typeof result === 'number'`) when the risk is about a specific value | Passes identically whether the code is correct or subtly wrong                                  |
+| Testing only values comfortably inside a range, never the boundary itself                              | Off-by-one bugs live exactly at boundaries and go untested                                      |
+| Assuming a passing test means the behavior is verified                                                 | A test only verifies what its specific assertion checks, nothing more                           |
+| Testing one boundary and assuming other independent boundaries are also covered                        | Each threshold needs its own boundary check; one passing doesn't imply another does             |
+| Asserting on internal implementation details instead of observable output                              | Breaks on harmless refactors, a false signal in the opposite direction from a tautological test |
