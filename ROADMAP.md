@@ -10,7 +10,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | --- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------- |
 | 01  | http-request-response-basics  | How does a browser turn a URL into a rendered page? (HTTP request/response basics)                                      | done    |
 | 02  | need-html-semantics-just-divs | Why do we need HTML semantics instead of just divs?                                                                     | done    |
-| 03  | css-cascade-specificity       | How do we style once and reuse everywhere? (CSS cascade & specificity)                                                  | planned |
+| 03  | css-cascade-specificity       | How do we style once and reuse everywhere? (CSS cascade & specificity)                                                  | done    |
 | 04  | dom-event-model               | How does a page react to user input without reloading? (the DOM event model)                                            | planned |
 | 05  | bundling                      | Why do we need a build step at all? (bundling, transpilation, module systems)                                           | planned |
 | 06  | component-state               | How do we manage state across a page without global chaos? (component state, unidirectional data flow)                  | planned |

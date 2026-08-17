@@ -1,0 +1,56 @@
+---
+title: "L1 — How do we style once and reuse everywhere? (CSS cascade & specificity)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="The rule that should have worked">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🔵</span> <strong>New rule</strong> — `.btn-primary { background: blue; }`, added last in the stylesheet</div>
+      <div class="flex items-center gap-1.5"><span>⚫</span> <strong>Old rule</strong> — `#page .toolbar .btn { background: gray; }`, written months earlier</div>
+      <div class="flex items-center gap-1.5"><span>🖥️</span> <strong>Rendered result</strong> — button stays gray, `.btn-primary` never applies</div>
+    </div>
+    <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div class="rounded border border-slate-300 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">
+        <p class="font-semibold text-slate-600 dark:text-slate-300">Old rule specificity</p>
+        1 id, 2 classes → wins
+      </div>
+      <div class="rounded border border-sky-300 bg-sky-50 p-1.5 dark:border-sky-800 dark:bg-sky-950">
+        <p class="font-semibold text-sky-600 dark:text-sky-400">New rule specificity</p>
+        1 class → loses, despite being written later
+      </div>
+    </div>
+  </Fragment>
+
+A developer adds one line of CSS — `.btn-primary { background: blue; }` — at the very
+bottom of the stylesheet, certain that "last one written wins." The button stays gray.
+Nothing in the browser is broken; the CSS is valid; there's no error anywhere. The rule
+simply never had a chance: an older, more specific rule (`#page .toolbar .btn`) was
+always going to beat it, regardless of which one was written more recently.
+
+| Rule                           | Written             | Applies? |
+| ------------------------------ | ------------------- | -------- |
+| `#page .toolbar .btn { gray }` | Months ago          | ✅ Yes   |
+| `.btn-primary { blue }`        | Just now, last line | ❌ No    |
+
+**Both rules target the same button. Why does the older one win?**
+
+</Scenario>
+
+- The browser doesn't apply CSS rules in "whichever was written last" order — it resolves every rule that matches an element through the **cascade**, which decides a winner using three factors, checked in this exact priority: **origin & importance** (where the rule came from, and whether it's marked `!important`), then **specificity** (how precisely the selector targets the element), then **source order** (last one wins — but only as the final tiebreaker, after the first two are exhausted).
+- **Specificity is a score computed from the selector itself**, not from when or where in the file it appears. The common mental model: count IDs, classes/attributes/pseudo-classes, and elements/pseudo-elements in the selector, then compare in that order — an ID selector alone (`#page`) already outranks any number of classes, because ID beats class before class-count is even considered.
+- This is exactly what happened above: `#page .toolbar .btn` has 1 id + 2 classes; `.btn-primary` has 1 class. The id alone puts the first rule ahead — source order never even gets consulted, because specificity already produced a winner.
+- **Inheritance is a separate mechanism from the cascade** — some properties (`color`, `font-family`, `line-height`) pass down from parent to child automatically if nothing overrides them; others (`border`, `padding`, `background`) don't inherit at all, regardless of specificity. Confusing "it inherited" with "it cascaded" is a common source of CSS debugging confusion.
+- **`!important` doesn't fix a specificity loss — it escalates the fight to a different, harder-to-track battlefield.** A declaration marked `!important` jumps to the front of the origin-and-importance check, ahead of specificity entirely — which means the only thing that can override it later is another `!important` declaration that wins on origin or specificity among `!important` rules. Reaching for `!important` to win one battle routinely starts an arms race that makes every future style change riskier.
+- The practical skill this unit builds: before adding a CSS rule expecting it to apply, compare its specificity (and origin/importance) against whatever's already targeting that element — not just check whether it comes later in the file.
+
+## Specificity at a glance
+
+| Selector example      | IDs | Classes/attrs/pseudo-classes | Elements/pseudo-elements | Beats                                                                                                    |
+| --------------------- | --- | ---------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `#page .toolbar .btn` | 1   | 2                            | 0                        | Any selector with 0 ids                                                                                  |
+| `.btn-primary`        | 0   | 1                            | 0                        | `button.btn`, `div .btn`                                                                                 |
+| `button.btn`          | 0   | 1                            | 1                        | `.btn-primary` (ids tie at 0, classes tie at 1, so the element count breaks the tie — `button.btn` wins) |
+| `div p a:hover`       | 0   | 1                            | 3                        | `a` alone                                                                                                |
+| inline `style="..."`  | —   | —                            | —                        | Every selector above (origin outranks specificity entirely)                                              |

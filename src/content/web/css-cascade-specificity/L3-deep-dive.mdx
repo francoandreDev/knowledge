@@ -1,0 +1,183 @@
+---
+title: "L3 — A design-system rollout that silently failed, and the linter that would have caught it"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="The rollout that looked done but wasn't">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📦</span> <strong>New design system</strong> — ships `.ds-button--primary { background: var(--brand-blue); }`</div>
+      <div class="flex items-center gap-1.5"><span>🏚️</span> <strong>Legacy CSS</strong> — untouched, still has `#app .toolbar .btn { background: #888; }`</div>
+      <div class="flex items-center gap-1.5"><span>🔎</span> <strong>QA result</strong> — every page "looks migrated" in the diff tool, but half the buttons render gray in the browser</div>
+    </div>
+    <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div class="rounded border border-slate-300 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">
+        <p class="font-semibold text-slate-600 dark:text-slate-300">Specificity: legacy rule</p>
+        (1, 2, 0) — one id, two classes
+      </div>
+      <div class="rounded border border-sky-300 bg-sky-50 p-1.5 dark:border-sky-800 dark:bg-sky-950">
+        <p class="font-semibold text-sky-600 dark:text-sky-400">Specificity: new rule</p>
+        (0, 1, 0) — one class
+      </div>
+    </div>
+  </Fragment>
+
+A team migrates their app to a shared design system. The migration PR replaces every
+`class="btn"` with `class="ds-button--primary"` in the markup, and the diff review looks
+complete — no old class names remain anywhere in the templates. The team ships it. Within
+a day, screenshots start arriving in Slack: half the buttons across the app are still the
+old gray, not the new brand blue, on pages nobody remembered to touch in months.
+
+**The markup was migrated correctly. The new class is genuinely present on every button.
+Why did the old color still win on some of them?**
+
+The legacy stylesheet — written years earlier, never deleted because "it's not hurting
+anything" — still contained `#app .toolbar .btn { background: #888; }`, targeting the
+_same elements_ by their surrounding structure rather than by class. That selector's
+specificity, `(1, 2, 0)`, beat the new `.ds-button--primary`'s `(0, 1, 0)` on every page
+where the old id/class structure happened to still be present in the DOM — which was most
+of the older pages, since the migration only touched class names on the button itself, not
+the ancestor markup the legacy selector was keyed to.
+
+</Scenario>
+
+## A specificity calculator worth actually having
+
+**Before the incident above could even be diagnosed, someone had to manually count ids and
+classes in two selectors by eye, under pressure, while the whole team watched screenshots
+pile up in Slack. What would make that step instant instead of error-prone?** A small,
+real function — the kind a CSS linter or a build-time lint rule genuinely uses — that
+parses a selector string and returns its specificity tuple:
+
+```js
+// specificity.js — a minimal, correct-enough specificity calculator
+// Handles the common cases: ids, classes, attribute selectors, pseudo-classes,
+// element/type selectors, and pseudo-elements. Does not handle :is()/:where()
+// argument-list specificity resolution (a real linter would recurse into those).
+
+function calculateSpecificity(selector) {
+  // Strip out :where(...) contents entirely — they contribute zero specificity
+  // by spec, regardless of what's inside them.
+  const withoutWhere = selector.replace(/:where\([^)]*\)/g, "");
+
+  let ids = 0;
+  let classes = 0;
+  let elements = 0;
+
+  // IDs: #foo
+  ids += (withoutWhere.match(/#[\w-]+/g) || []).length;
+
+  // Classes, attribute selectors, and pseudo-classes: .foo, [href], :hover
+  // (but not pseudo-ELEMENTS, which use double colons, e.g. ::before)
+  classes += (withoutWhere.match(/\.[\w-]+/g) || []).length;
+  classes += (withoutWhere.match(/\[[^\]]+\]/g) || []).length;
+  classes += (withoutWhere.match(/(?<!:):[\w-]+(?!\()/g) || []).length;
+
+  // Pseudo-elements: ::before, ::after — these count as elements, not classes
+  const pseudoElements = (withoutWhere.match(/::[\w-]+/g) || []).length;
+  elements += pseudoElements;
+
+  // Type/element selectors: div, p, a — anything left that isn't punctuation
+  const withoutIdsClassesEtc = withoutWhere
+    .replace(/#[\w-]+/g, "")
+    .replace(/\.[\w-]+/g, "")
+    .replace(/\[[^\]]+\]/g, "")
+    .replace(/::?[\w-]+/g, "")
+    .trim();
+  elements += (withoutIdsClassesEtc.match(/[a-zA-Z][\w-]*/g) || []).length;
+
+  return { ids, classes, elements };
+}
+
+function compareSpecificity(a, b) {
+  if (a.ids !== b.ids) return a.ids - b.ids;
+  if (a.classes !== b.classes) return a.classes - b.classes;
+  return a.elements - b.elements;
+}
+```
+
+```js
+const legacy = calculateSpecificity("#app .toolbar .btn");
+// { ids: 1, classes: 2, elements: 0 }
+
+const designSystem = calculateSpecificity(".ds-button--primary");
+// { ids: 0, classes: 1, elements: 0 }
+
+compareSpecificity(legacy, designSystem); // > 0 — legacy wins, matching the incident
+```
+
+Running this against the two real selectors from the incident reproduces exactly what the
+browser did — `legacy` wins because its id column (1) beats `designSystem`'s id column
+(0), before either selector's class count is even compared. This is the same function (in
+spirit) that CSS-in-JS tooling and specificity linters run automatically on every PR to
+flag exactly this kind of silent regression before it ships.
+
+## The fix, and why it works
+
+```css
+/* Option A: lower the legacy selector's specificity with :where() */
+:where(#app .toolbar) .btn {
+  background: #888; /* now (0, 1, 0) — ties with .ds-button--primary,
+                        so source order decides, and the design system
+                        file is loaded later */
+}
+
+/* Option B: cascade layers — no selector needs to change at all */
+@layer legacy, design-system;
+
+@layer legacy {
+  #app .toolbar .btn {
+    background: #888; /* still (1, 2, 0) — but layer priority is checked
+                          BEFORE specificity, so it loses regardless */
+  }
+}
+
+@layer design-system {
+  .ds-button--primary {
+    background: var(
+      --brand-blue
+    ); /* wins — later layer, no specificity fight needed */
+  }
+}
+```
+
+Option A still leaves a specificity/source-order dependency (the design system file has to
+load after the legacy one — fragile if load order ever changes). Option B removes the
+dependency entirely: as long as `design-system` is declared as a later layer than
+`legacy`, the design system wins no matter what specificity either selector ends up with,
+even if someone adds more ids to the legacy CSS later. This is why teams migrating a large
+legacy codebase onto a new design system increasingly reach for `@layer` specifically —
+it turns "hope the new selector is specific enough" into a structural guarantee.
+
+## Extend the incident: what if it isn't a design system migration?
+
+The rollout above is one case, not the whole territory. **What changes if the conflicting
+rule instead comes from a third-party widget's stylesheet, loaded from a CDN, that your
+team doesn't control at all?** Trace it through: you can't edit the third party's
+selectors to add `:where()`, and you can't guarantee they'll ever adopt `@layer`
+themselves — but you _can_ control where your own `<link>` tag sits relative to theirs,
+and you can wrap your own overriding rules in a layer declared to sit above an
+`@layer` you assign to their stylesheet's origin, even without their cooperation, as long
+as you control the load order enough to know which file's rules are unlayered (unlayered
+CSS always has the highest layer priority, per spec — so if the third party's CSS is
+unlayered, layering only your own CSS won't help; you'd need `:where()` on your side, or a
+higher-specificity override, instead).
+
+**A second question worth sitting with**: what if the legacy rule had used `!important`
+instead of relying on specificity? Neither `:where()` nor `@layer` changes the outcome
+against an `!important` declaration — origin-and-importance is checked _before_
+specificity or layers, so the only thing that beats an `!important` rule is another
+`!important` rule that wins the origin-and-importance comparison. This is the concrete
+reason `!important` is harder to walk back than a plain specificity mismatch: it opts a
+declaration out of every escape valve this unit just covered.
+
+## Failure modes
+
+| Failure mode                                              | What it gets wrong                                                                                                                                                 |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Assuming source order first, specificity second           | The cascade checks origin/importance and specificity _before_ source order — a rule written later can still lose, exactly as in the incident above                 |
+| Treating specificity as additive points (id=100)          | Useful shorthand for quick mental comparison, but the real comparison is tuple-based with no carrying — 99 classes never outweigh 1 id                             |
+| Reaching for `!important` to resolve the conflict         | Wins the immediate fight but opts the declaration out of `:where()`/`@layer`/specificity entirely — every future override now also needs `!important`, compounding |
+| Deleting legacy CSS instead of migrating it               | Faster short-term, but risks removing styles still relied on elsewhere — `@layer` lets old and new coexist safely without one silently overriding the other        |
+| Assuming a passing visual diff means the migration worked | The incident's QA diff tool compared markup, not computed styles — the class was present, but the color rendered was never actually checked against the new value  |
