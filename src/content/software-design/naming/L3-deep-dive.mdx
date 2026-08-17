@@ -1,0 +1,160 @@
+---
+title: "L3 — Reproducing the notification bug and fixing it with names alone"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="One field, two meanings, reproduced exactly">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>💳</span> <strong>Billing sets</strong> — <code>order.flag = true</code> to mean "this invoice is overdue"</div>
+      <div class="flex items-center gap-1.5"><span>🔔</span> <strong>Notifications reads</strong> — <code>order.flag</code>, assuming it means "customer muted notifications"</div>
+    </div>
+  </Fragment>
+
+**Before reading the code, predict: does the buggy function's logic
+contain an actual mistake in its own right, or is the bug entirely in
+what the field name allowed a reader to assume?**
+
+</Scenario>
+
+## The buggy version, reproducing the incident exactly
+
+```js
+// The buggy Notifications-team code — logically simple, semantically wrong
+function shouldSkipNotification(order) {
+  return order.flag; // assumed: true means "customer muted notifications"
+}
+```
+
+```js
+// Billing's code, written years earlier, sets order.flag = true
+// to mean something completely different: "this invoice is overdue"
+const overdueOrder = { flag: true }; // set by Billing: this invoice IS overdue
+
+shouldSkipNotification(overdueOrder);
+// true — the overdue customer's reminder gets silently skipped
+```
+
+**The function itself has no bug in its logic** — `return order.flag`
+does exactly what it says. The entire failure is that `flag` was
+ambiguous enough for two teams to load it with contradictory meanings, and
+nothing in the code could catch that, because syntactically both usages
+are completely valid.
+
+## The fix: two explicit fields, no shared ambiguity
+
+```js
+function shouldSkipNotification(order) {
+  return order.notificationsMuted;
+}
+
+const overdueUnmutedOrder = { isOverdue: true, notificationsMuted: false };
+shouldSkipNotification(overdueUnmutedOrder); // false — correctly does NOT skip
+
+const mutedOrder = { isOverdue: false, notificationsMuted: true };
+shouldSkipNotification(mutedOrder); // true — correctly skips
+```
+
+Nothing about the _logic_ changed — it's still a single boolean field
+read directly. What changed is that `notificationsMuted` can only mean
+one thing, and `isOverdue` is now its own separate, equally unambiguous
+field. The bug's actual root cause — one name serving two purposes — is
+structurally impossible once the two concepts have two names.
+
+## Combining fields with a positive-phrased predicate
+
+```js
+// A combined check, phrased as a direct positive assertion — no negation
+// stacked on an ambiguous name
+function isOverdueAndUnmuted(order) {
+  return order.isOverdue && !order.notificationsMuted;
+}
+
+isOverdueAndUnmuted({ isOverdue: true, notificationsMuted: false }); // true
+isOverdueAndUnmuted({ isOverdue: true, notificationsMuted: true }); // false
+isOverdueAndUnmuted({ isOverdue: false, notificationsMuted: false }); // false
+```
+
+The single `!` here is safe precisely because `notificationsMuted` is
+unambiguous — negating a clear name stays clear. This is the same
+function that a reviewer could accurately guess the behavior of just from
+its name, before reading a single line of its body.
+
+## Extraction over comments, on real code
+
+```js
+// BEFORE: one function, three responsibilities, explained by comments
+function calculateOrderTotalWithComments(order) {
+  // sum up the items
+  let subtotal = 0;
+  for (const item of order.items) {
+    subtotal += item.price * item.quantity;
+  }
+  // now apply the discount
+  const discount = subtotal * (order.discountPercent / 100);
+  // finally add tax
+  const tax = (subtotal - discount) * (order.taxRate / 100);
+  return subtotal - discount + tax;
+}
+```
+
+```js
+// AFTER: the same behavior, structured as three named steps
+function calculateOrderTotal(order) {
+  const subtotal = calculateSubtotal(order.items);
+  const discount = calculateDiscount(subtotal, order.discountPercent);
+  const tax = calculateTax(subtotal - discount, order.taxRate);
+  return subtotal - discount + tax;
+}
+
+function calculateSubtotal(items) {
+  return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+}
+function calculateDiscount(subtotal, discountPercent) {
+  return subtotal * (discountPercent / 100);
+}
+function calculateTax(taxableAmount, taxRate) {
+  return taxableAmount * (taxRate / 100);
+}
+```
+
+```js
+const order = {
+  items: [{ price: 100, quantity: 2 }],
+  discountPercent: 10,
+  taxRate: 8,
+};
+calculateOrderTotal(order); // 194.4 — identical result to the commented version
+```
+
+The two versions compute the identical result — **194.4** — but the
+extracted version's structure survives a future edit the commented
+version wouldn't: if someone reorders the discount and tax steps, the
+extracted version's function _names_ immediately show the new sequence,
+while the commented version's stale comments would keep describing the
+old one until someone remembers to update them.
+
+## Extend the example: what if the field genuinely needs to serve two purposes?
+
+**The fix above assumed `isOverdue` and `notificationsMuted` really are
+two separate concepts. What if a field genuinely represents one true
+either/or state — like an order being exactly one of `pending`,
+`shipped`, or `cancelled` — where splitting it into three separate
+booleans (`isPending`, `isShipped`, `isCancelled`) would let invalid
+combinations exist that shouldn't (like `isPending: true` and
+`isShipped: true` at once)?** In that case, the fix isn't more booleans —
+it's a single, explicitly named field with an enumerated set of valid
+values (`order.status = OrderStatus.Pending`), which keeps the "exactly
+one state at a time" guarantee a set of loose booleans can't express, while
+still avoiding `flag`'s original sin of not saying what it means at all.
+
+## Failure modes
+
+| Failure mode                                                                              | What it gets wrong                                                                                 |
+| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Reusing a generic field name (`flag`, `data`, `value`) across unrelated concepts          | Nothing stops two readers from loading it with contradictory meanings                              |
+| Negating an already-ambiguous name (`!order.flag`)                                        | Compounds one uncertain question into two, doubling the chance of a reversed reading               |
+| Explaining a block of logic with a comment instead of extracting it into a named function | The comment can silently drift out of sync with the code; a function's name can't                  |
+| Splitting a true either/or state into several independent booleans                        | Allows invalid combinations that an enumerated single field would have ruled out by construction   |
+| Treating naming quality as equally important everywhere                                   | A name's blast radius (shared field vs. a 3-line loop variable) should drive how much care it gets |
