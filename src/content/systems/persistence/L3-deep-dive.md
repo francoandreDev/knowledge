@@ -251,13 +251,13 @@ file, never its directory entry, was ever fsynced.
 
 ## Failure modes
 
-| Failure mode                                          | Why it happens                                                                                                                    | How to avoid it                                                          |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| Trusting a successful `write()` as durable               | `write()` only needs to reach the OS page cache to return without error — it never promised physical durability                     | Call `fsync` (or an equivalent) before acknowledging anything as saved      |
-| Calling `fsync` on the wrong fd, or too late              | `fsync` only guarantees durability for writes issued before it, on the same file descriptor                                          | Fsync the exact fd holding the critical data, before acknowledging a commit |
-| Assuming a database "handles this" by default             | Many databases offer a faster, less durable mode (batching or skipping fsyncs) as an explicit, sometimes default, trade-off          | Check the actual durability setting; don't assume                          |
-| Forgetting the containing directory needs syncing too     | A new file's contents and its directory entry are separate metadata the OS can persist independently                                 | Fsync the directory after creating a new file, not just the file itself     |
-| Trusting a torn write's bytes without checking             | A crash mid-write can leave a truncated, syntactically-broken entry that a naive parser may mis-handle or silently accept            | Checksum each entry; stop replay at the first mismatch                     |
+| Failure mode                                          | Why it happens                                                                                                              | How to avoid it                                                             |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Trusting a successful `write()` as durable            | `write()` only needs to reach the OS page cache to return without error — it never promised physical durability             | Call `fsync` (or an equivalent) before acknowledging anything as saved      |
+| Calling `fsync` on the wrong fd, or too late          | `fsync` only guarantees durability for writes issued before it, on the same file descriptor                                 | Fsync the exact fd holding the critical data, before acknowledging a commit |
+| Assuming a database "handles this" by default         | Many databases offer a faster, less durable mode (batching or skipping fsyncs) as an explicit, sometimes default, trade-off | Check the actual durability setting; don't assume                           |
+| Forgetting the containing directory needs syncing too | A new file's contents and its directory entry are separate metadata the OS can persist independently                        | Fsync the directory after creating a new file, not just the file itself     |
+| Trusting a torn write's bytes without checking        | A crash mid-write can leave a truncated, syntactically-broken entry that a naive parser may mis-handle or silently accept   | Checksum each entry; stop replay at the first mismatch                      |
 
 ## Where does this go beyond the examples shown here?
 

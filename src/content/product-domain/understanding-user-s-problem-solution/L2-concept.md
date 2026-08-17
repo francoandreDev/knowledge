@@ -52,7 +52,7 @@ imagine.
 **How specific a problem statement is doesn't move in a straight line with
 how many whys you ask** — it's roughly flat at first (the first "why" is
 often still a solution in disguise, like "a report"), climbs fast through
-the middle whys, and then the *usefulness* of the statement for choosing a
+the middle whys, and then the _usefulness_ of the statement for choosing a
 build actually starts to fall again if you keep pushing, because it's
 gone too abstract to act on:
 
@@ -77,11 +77,11 @@ progress on a specific job in a specific context. If "see this number over
 time" is the need in both of the rows below, why would the best solution
 still be different for each one?
 
-| Component           | Weekly glance (Mara's actual job)                          | One-off deep investigation (a different job)          |
-| -------------------- | ------------------------------------------------------------ | --------------------------------------------------------- |
-| The job              | "Notice a worsening trend before it's a crisis"              | "Understand exactly why last month's numbers dropped"     |
-| The context          | Routine, low-stakes, five seconds of attention                | Rare, high-stakes, worth twenty minutes of real analysis   |
-| Best-fit solution     | A live trend line already visible on the dashboard            | A raw data export to slice and filter freely in a tool     |
+| Component                  | Weekly glance (Mara's actual job)                                            | One-off deep investigation (a different job)                             |
+| -------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| The job                    | "Notice a worsening trend before it's a crisis"                              | "Understand exactly why last month's numbers dropped"                    |
+| The context                | Routine, low-stakes, five seconds of attention                               | Rare, high-stakes, worth twenty minutes of real analysis                 |
+| Best-fit solution          | A live trend line already visible on the dashboard                           | A raw data export to slice and filter freely in a tool                   |
 | Why the other is a bad fit | A raw export adds friction to something that needs to be instant and routine | A pre-baked chart can't answer an open-ended "why," which needs raw data |
 
 Framing the need as a "job" forces the context into the picture — the same
@@ -99,10 +99,10 @@ Before committing to a build, the problem should be statable with **zero
 reference to the proposed solution**. Does the statement below pass that
 test?
 
-| Statement                                                                              | Passes the test? | Why                                              |
-| ---------------------------------------------------------------------------------------- | :---------------: | ------------------------------------------------- |
-| "Users need a CSV export so they can track trends"                                       | No                 | Still names the solution (CSV export)              |
-| "Users need to notice when a metric is trending in the wrong direction, in time to act, without a manual weekly ritual" | Yes                | Describes only the need — no solution named        |
+| Statement                                                                                                               | Passes the test? | Why                                         |
+| ----------------------------------------------------------------------------------------------------------------------- | :--------------: | ------------------------------------------- |
+| "Users need a CSV export so they can track trends"                                                                      |        No        | Still names the solution (CSV export)       |
+| "Users need to notice when a metric is trending in the wrong direction, in time to act, without a manual weekly ritual" |       Yes        | Describes only the need — no solution named |
 
 The second version can be evaluated against _multiple_ candidate solutions
 (a live chart, an automated alert threshold, a weekly digest email) — the
