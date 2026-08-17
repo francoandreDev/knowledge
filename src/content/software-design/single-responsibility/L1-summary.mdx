@@ -1,0 +1,45 @@
+---
+title: "L1 — How do I decide where one function's responsibility ends?"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="The stray edit that overbilled every customer">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🎨</span> <strong>Request</strong> — rebrand the PDF: new fonts, new header, a logo</div>
+      <div class="flex items-center gap-1.5"><span>✍️</span> <strong>Edit made</strong> — layout lines, in a method that also computes billing</div>
+      <div class="flex items-center gap-1.5"><span>💥</span> <strong>Stray change</strong> — one adjacent line: <code>0.001</code> → <code>0.01</code></div>
+      <div class="flex items-center gap-1.5"><span>📉</span> <strong>Impact</strong> — every API-call customer billed 10x for a month</div>
+    </div>
+    <div class="not-prose mt-3 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs dark:border-amber-800 dark:bg-amber-950">
+      Nobody touched billing on purpose. The billing math just happened to live in the same method as the layout code someone else needed to change.
+    </div>
+  </Fragment>
+
+A designer asks for a rebrand: new fonts, a new header, a logo on the monthly
+invoice PDF. An engineer opens `MonthlyReportGenerator.generate()` to make the
+change — and while editing the layout lines, brushes past an adjacent line
+that computes the billing rate and nudges it by accident. The rebrand ships.
+Two weeks later, finance discovers every API-call customer was billed 10x
+for the month.
+
+**The engineer never intended to touch billing. So what actually caused
+this — carelessness, or something about how the code was organized that
+made billing logic easy to hit by accident while doing something unrelated?**
+
+</Scenario>
+
+- **Single responsibility** isn't "a function should do one thing" in the literal, one-line sense — a function can do several literal steps and still have a single responsibility, if all those steps serve one cohesive purpose. The real test, introduced in `software-design/cost-design` and made precise here, is **reasons to change**: a unit of code has a single responsibility if there's only one kind of change that would require editing it.
+- **The test, applied concretely**: if you can name two genuinely different reasons someone might need to modify a function — a business-rule change and a data-format change, say — it has (at least) two responsibilities, even if it's ten lines long and reads as "doing one thing" at a glance.
+
+| Reading "does one thing" as…              | `MonthlyReportGenerator.generate()` verdict                                                  |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| One literal block of code, one method      | Passes — it's a single method, reads top to bottom as "generate the report"                    |
+| One reason to change (the real SRP test)   | Fails — a rebrand, a pricing-tier change, and a new data source are three unrelated reasons     |
+
+- **Responsibility boundaries aren't fixed — they depend on what's actually likely to change independently in this specific codebase.** The right boundary in one system (where billing rates and PDF layout change on totally different schedules, owned by different people) can be the wrong boundary in another (where they're small, stable, and always change together) — this is why SRP is a judgment call informed by context, not a rule with a universal correct answer.
+- **A common overcorrection**: splitting code into many tiny functions/classes purely because each one "does less," without checking whether they actually have independent reasons to change — this produces more files and more indirection with none of SRP's real benefit, and is exactly the over-engineering failure mode from `cost-design`.
+- **The practical symptom of a responsibility violation**: a change requested for one reason (say, a rebrand) requires editing code that also handles something unrelated (say, billing math), risking a bug in the unrelated part purely because it happened to sit nearby.
+- This unit is the "how do I actually decide, in a specific case" companion to `cost-design`'s "why does this matter at all" — same underlying principle (coupling/cohesion, reasons to change), applied here as a concrete, repeatable test rather than a general argument.
+- The practical skill: before splitting or merging code, name the actual reasons it might need to change in the future, and let _that_ — not line count, not "feels like it's doing a lot" — determine where the responsibility boundary belongs.

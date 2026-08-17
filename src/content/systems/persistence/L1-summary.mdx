@@ -1,0 +1,74 @@
+---
+title: 'L1 — Why does my program still "remember" data after a crash?'
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="The problem">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5">
+        <span>⚡</span> <strong>RAM</strong> — volatile, gone the instant
+        power drops
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span>💾</span> <strong>Disk</strong> — non-volatile, keeps its
+        contents with no power at all
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span>⏳</span> <strong>The gap</strong> — `write()` can return
+        "success" while the data is still only in RAM
+      </div>
+    </div>
+    <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div class="rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950">
+        <p class="font-semibold text-emerald-600 dark:text-emerald-400">
+          After fsync() returns
+        </p>
+        Durable — survives a crash the very next instant
+      </div>
+      <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
+        <p class="font-semibold text-rose-600 dark:text-rose-400">
+          After write() only
+        </p>
+        Optimistic — gone if the crash lands before the OS flushes it
+      </div>
+    </div>
+
+  </Fragment>
+
+A payments service calls `write()` on the transaction it just processed. No
+error comes back. It tells the caller "saved." One second later, the power
+fails. **When the machine boots back up, is that transaction still there?**
+The honest answer is: it depends on one call the code may or may not have
+made — and a successful `write()` alone doesn't answer the question.
+
+</Scenario>
+
+- **RAM is volatile** — its contents depend on continuous power; the instant power is lost (a crash, a reboot, an unplugged machine), everything in it is gone. **Disk (SSD/HDD) is non-volatile** — it retains its contents with no power at all, which is the entire reason it's used for anything meant to survive a crash.
+- A program's in-memory data structures (a variable, an in-memory cache, an unflushed buffer) live in RAM and vanish on crash. A program's _persisted_ data — anything explicitly written to disk (a file, a database's data files) — survives, because disk doesn't depend on the process or the power staying on.
+- "Writing to disk" is not instantaneous or atomic by default: the OS and disk hardware both buffer writes for performance, meaning a `write()` call returning successfully doesn't guarantee the data is physically on disk yet — it might still be sitting in a buffer that a crash would lose.
+- **`fsync`** (and equivalents) is the explicit instruction "don't return until this data is actually durable on disk, not just handed to a buffer" — it's slower than a normal write specifically because it waits for that guarantee, and skipping it is a common, subtle source of "the database says it saved my data, but it's gone after a crash."
+- **A crash between write and fsync is exactly the gap where "the program remembered" and "the program forgot" get decided** — this unit is about understanding that gap precisely, not treating persistence as an all-or-nothing property.
+- Fsyncing on every single write is correct but slow — real systems batch multiple pending writes behind one `fsync` call (**group commit**), trading a slightly larger window of at-risk data for much higher throughput. That trade-off is a deliberate dial, not a bug.
+- Databases build strong durability guarantees (the "D" in ACID) on top of this exact mechanism — a write-ahead log fsynced before acknowledging a transaction as committed is the concrete technique that makes "the database said it saved it" actually trustworthy.
+- The practical question this unit answers: when your program says "saved," what specifically has to be true on disk, right now, for that claim to survive the machine losing power in the next instant?
+
+```mermaid
+flowchart TD
+    W["write() called"] --> Q{"Did fsync()\nreturn before\nthe crash?"}
+    Q -- "Yes" --> Safe["Durable —\nsurvives reboot"]
+    Q -- "No" --> Lost["Only in RAM —\nlost on reboot"]
+```
+
+| Term        | One-line meaning                                                     |
+| ----------- | ---------------------------------------------------------------------- |
+| Volatile    | Contents depend on continuous power (RAM)                              |
+| Non-volatile | Contents survive with no power at all (disk)                          |
+| Page cache  | The OS's in-RAM buffer that a plain `write()` typically only reaches   |
+| `fsync`     | Blocks until the OS confirms the disk itself has the data              |
+| Durability  | The guarantee that acknowledged data survives a crash                  |
+| Write-ahead log (WAL) | A small, sequential, fsynced log that backs a "committed" claim |
+| Group commit | Batching several writes behind one shared `fsync` call                |
+
+Key terms: volatile vs. non-volatile, page cache, `fsync`, durability, write-ahead log, group commit, torn write, crash consistency.

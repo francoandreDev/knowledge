@@ -1,10 +1,12 @@
 ---
-title: "L3 — A real fsync call, and a minimal write-ahead log that actually works"
+title: "L3 — A real fsync call, a working write-ahead log, and the trade-offs that follow"
 ---
 
-## Proving the page-cache gap with real code
+## How do you prove, in code, that write() alone isn't durable?
 
-This is real, runnable Node.js — `fs.writeSync` without `fsync` versus with it, showing exactly where the extra call sits in the code:
+You can't script an actual power loss safely, but you can make the code
+difference between "optimistic" and "durable" concrete — real, runnable
+Node.js, differing by exactly one call:
 
 ```js
 // durable-write.mjs
@@ -32,11 +34,17 @@ writeDurably("important.txt", "balance: 500");
 console.log("Durably saved — this claim is now actually true.");
 ```
 
-There's no way to _demonstrate_ the crash-loses-it case in a script (that requires an actual power loss or `kill -9` mid-write, not something safe to script) — but the code difference is the entire point: `writeWithoutFsync` and `writeDurably` differ by exactly one line, and that line is the entire durability guarantee. Everything else about the two functions is identical.
+`writeWithoutFsync` and `writeDurably` differ by exactly one line, and that
+line is the entire durability guarantee. Everything else about the two
+functions is identical — which is exactly why the bug is so easy to miss in
+review: the code "looks the same," and it behaves identically under every
+condition except the one durability exists to protect against.
 
-## A minimal, real write-ahead log
+## How does a real write-ahead log turn a crash mid-update into a solved problem?
 
-This implements the actual mechanism from L2 — append a log entry, fsync it, then apply it — small enough to read end to end, but doing the real thing, not a toy simplification of it:
+This implements the actual mechanism from L2 — append a log entry, fsync it,
+then apply it — small enough to read end to end, but doing the real thing,
+not a toy simplification of it:
 
 ```js
 // wal.mjs — a minimal write-ahead log: durable commit via a small,
@@ -87,11 +95,181 @@ console.log(
 );
 ```
 
-If the process crashes between the `fsync` and the `writeFileSync` on the data file, the log already has the entry — `#replayLog()` reconstructs `{ balance: 500 }` on the next startup even though `data.json` never got updated before the crash. The log, not the data file, is what actually backs the durability promise.
+If the process crashes between the `fsync` and the `writeFileSync` on the
+data file, the log already has the entry — `#replayLog()` reconstructs
+`{ balance: 500 }` on the next startup even though `data.json` never got
+updated before the crash. The log, not the data file, is what actually backs
+the durability promise.
+
+## fsyncing every commit works, but how do you get the throughput back?
+
+Fsyncing on every single `commit()` call above is correct, but if the disk's
+`fsync` costs ~5ms and commits arrive faster than that, callers start
+queueing behind a single-file bottleneck. **Group commit** batches several
+pending commits and issues one shared `fsync` for the whole batch:
+
+```js
+// group-commit.mjs — batches pending commits behind a single fsync,
+// trading a small window of unflushed data for much higher throughput.
+import fs from "node:fs";
+
+class GroupCommitLog {
+  constructor(logPath, { maxBatchSize = 10, maxWaitMs = 5 } = {}) {
+    this.logPath = logPath;
+    this.maxBatchSize = maxBatchSize;
+    this.maxWaitMs = maxWaitMs;
+    this.pending = []; // [{ entry, resolve }]
+    this.flushTimer = null;
+  }
+
+  // Returns a Promise that resolves only once this entry's batch has
+  // actually been fsynced — never before.
+  commit(entry) {
+    return new Promise((resolve) => {
+      this.pending.push({ entry, resolve });
+      if (this.pending.length >= this.maxBatchSize) {
+        this.#flush();
+      } else if (!this.flushTimer) {
+        this.flushTimer = setTimeout(() => this.#flush(), this.maxWaitMs);
+      }
+    });
+  }
+
+  #flush() {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    if (this.pending.length === 0) return;
+
+    const batch = this.pending;
+    this.pending = [];
+
+    const fd = fs.openSync(this.logPath, "a");
+    for (const { entry } of batch) {
+      fs.writeSync(fd, JSON.stringify(entry) + "\n");
+    }
+    fs.fsyncSync(fd); // ONE fsync durably commits the entire batch
+    fs.closeSync(fd);
+
+    // Every pending commit in this batch becomes durable at the exact
+    // same instant — none of them were durable a moment before this.
+    for (const { resolve } of batch) resolve({ committed: true });
+  }
+}
+```
+
+The batch is the new unit of durability: nothing in it is safe until the
+single `fsync` for the whole batch returns, which is exactly what makes the
+trade-off real — a bigger `maxBatchSize` amortizes the fixed `fsync` cost
+over more commits (higher throughput) but also means more recent commits
+share that one not-yet-flushed batch (a bigger data-loss window if the crash
+lands before the flush). This is the same relationship the L2 interactive
+demo lets you drag sliders on.
+
+## How do you detect a torn write instead of silently trusting a corrupt log?
+
+A crash mid-`write()` with no fsync can leave a **partial** log entry on
+disk — not missing, but truncated or garbled. A checksum on each entry turns
+"silently trust whatever bytes are there" into "detect and stop at the first
+corrupt entry":
+
+```js
+// checksummed-wal.mjs — detects a torn write instead of trusting it.
+import fs from "node:fs";
+import crypto from "node:crypto";
+
+function checksum(str) {
+  return crypto.createHash("sha256").update(str).digest("hex").slice(0, 8);
+}
+
+function appendChecksummedEntry(logPath, entry) {
+  const payload = JSON.stringify(entry);
+  const line = `${payload}|${checksum(payload)}\n`;
+  const fd = fs.openSync(logPath, "a");
+  fs.writeSync(fd, line);
+  fs.fsyncSync(fd);
+  fs.closeSync(fd);
+}
+
+// Replays only entries whose checksum still matches their payload —
+// stops at the first mismatch, since a torn write always lands at the
+// tail of the log (everything durably fsynced before it is still good).
+function replayChecksummedLog(logPath) {
+  if (!fs.existsSync(logPath)) return {};
+  const lines = fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean);
+  const state = {};
+  for (const line of lines) {
+    const separatorIndex = line.lastIndexOf("|");
+    const payload = line.slice(0, separatorIndex);
+    const storedSum = line.slice(separatorIndex + 1);
+    if (checksum(payload) !== storedSum) {
+      break; // torn write: stop here, everything before this was durable
+    }
+    const { key, value } = JSON.parse(payload);
+    state[key] = value;
+  }
+  return state;
+}
+```
+
+Without the checksum, a torn entry (say, a crash mid-`write` left
+`{"key":"bala` on disk with no closing brace) would throw a `JSON.parse`
+error and could take the whole recovery process down with it, or worse, get
+silently skipped by an overly permissive parser. With the checksum, recovery
+treats a torn tail entry as exactly what it is — an uncommitted write that
+never finished — and simply stops there, keeping everything durably written
+before it.
+
+## What about the directory entry, not just the file?
+
+```js
+// directory-fsync.mjs — durably creating a NEW file requires fsyncing
+// the directory too, not just the file's own contents.
+import fs from "node:fs";
+import path from "node:path";
+
+function createFileDurably(filePath, data) {
+  const fd = fs.openSync(filePath, "w");
+  fs.writeSync(fd, data);
+  fs.fsyncSync(fd); // the file's own contents are now durable
+  fs.closeSync(fd);
+
+  // The directory entry that says "this file exists at this path" is
+  // separate metadata — on some filesystems it can still be lost on a
+  // crash unless the directory itself is fsynced too.
+  const dirFd = fs.openSync(path.dirname(filePath), "r");
+  fs.fsyncSync(dirFd);
+  fs.closeSync(dirFd);
+}
+```
+
+This is a real, frequently-missed edge case in low-level persistence code —
+plenty of production incidents trace back to "the file's bytes were
+correct, but after a crash the file didn't exist at all," because only the
+file, never its directory entry, was ever fsynced.
 
 ## Failure modes
 
-- **Trusting a successful `write()` as if it were durable.** The single most common version of this bug — code that writes, returns "success," and never calls `fsync` (or an equivalent) looks completely correct under normal operation and loses data specifically under the one condition (a crash) that durability exists to protect against.
-- **Calling `fsync` on the wrong file descriptor, or too late.** `fsync` only guarantees durability for writes issued _before_ it, on the _same_ file descriptor — fsyncing after acknowledging a commit to a caller, or fsyncing a different file than the one actually holding the critical data, produces a false sense of safety.
-- **Assuming a database "handles this" without checking its actual durability setting.** Many databases offer a _faster, less durable_ mode (batching fsyncs, or skipping them) as an explicit performance trade-off — assuming a database is always fully durable by default, without checking its configuration, is a common way "the database lost data after a power outage" surprises a team that never opted into the faster/riskier mode on purpose.
-- **Forgetting that a directory entry itself may need syncing.** Creating a _new_ file durably can require fsyncing the containing directory too, not just the file — on some filesystems, a crash right after creating a new file can lose the directory entry pointing to it, even if the file's own contents were fsynced correctly. This is a real, frequently-missed edge case in low-level persistence code.
+| Failure mode                                          | Why it happens                                                                                                                    | How to avoid it                                                          |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| Trusting a successful `write()` as durable               | `write()` only needs to reach the OS page cache to return without error — it never promised physical durability                     | Call `fsync` (or an equivalent) before acknowledging anything as saved      |
+| Calling `fsync` on the wrong fd, or too late              | `fsync` only guarantees durability for writes issued before it, on the same file descriptor                                          | Fsync the exact fd holding the critical data, before acknowledging a commit |
+| Assuming a database "handles this" by default             | Many databases offer a faster, less durable mode (batching or skipping fsyncs) as an explicit, sometimes default, trade-off          | Check the actual durability setting; don't assume                          |
+| Forgetting the containing directory needs syncing too     | A new file's contents and its directory entry are separate metadata the OS can persist independently                                 | Fsync the directory after creating a new file, not just the file itself     |
+| Trusting a torn write's bytes without checking             | A crash mid-write can leave a truncated, syntactically-broken entry that a naive parser may mis-handle or silently accept            | Checksum each entry; stop replay at the first mismatch                     |
+
+## Where does this go beyond the examples shown here?
+
+Every example above assumed a single machine and a single disk. **What
+changes if the durability target isn't "survive this one machine losing
+power" but "survive this entire machine, disk included, disappearing
+permanently"?** That's no longer a job `fsync` can do alone — it needs
+replication to another machine before acknowledging a commit, and now the
+trade-off from group commit reappears one level up: wait for a remote
+acknowledgment on every commit (safer, slower) or batch several commits
+before requiring the remote ack (faster, bigger loss window if the primary
+dies before replicating). The worked examples in this unit are a single-node
+case of a general problem, not the whole territory — the same "how much
+recent data can you afford to lose, and how much are you willing to slow
+down to shrink that window" question just keeps reappearing at every layer.

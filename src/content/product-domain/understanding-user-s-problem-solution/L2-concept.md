@@ -2,7 +2,12 @@
 title: "L2 — From requested solution to validated problem, and back to a (possibly different) solution"
 ---
 
-## The shape of the failure
+## Why did a correctly built feature still fail?
+
+Mara's export button (from L1) took Priya about three days to build and
+ship. It was correct, tested, and matched the ticket exactly — and it
+still didn't solve Mara's problem. If the build wasn't at fault, where did
+the actual failure happen, and how far upstream of the code was it?
 
 ```mermaid
 flowchart LR
@@ -11,11 +16,22 @@ flowchart LR
     Ship --> Unused["Feature goes unused\n(nobody asks 'why')"]
 ```
 
-Every arrow in this chain is locally reasonable — the request was clear, the build matched the spec, QA passed. The failure is invisible at every individual step because it isn't a build-quality problem; it's that the chain skipped a validation step entirely: nobody confirmed the requested _solution_ actually addresses the underlying _problem_, or that it's the best available solution to it.
+Every arrow in this chain is locally reasonable — the request was clear,
+the build matched the spec, QA passed. The failure is invisible at every
+individual step because it isn't a build-quality problem; it's that the
+chain skipped a validation step entirely: nobody confirmed the requested
+_solution_ actually addresses the underlying _problem_, or that it's the
+best available solution to it.
 
-## The five whys, applied
+## How do you get from a stated request to the actual need underneath it?
 
-Starting from the stated request, keep asking "why do you need that?" — roughly five times, in practice — checking after each answer whether it's landed on an actual **need** or just another layer of solution. Once an answer stops naming a solution and starts naming a need, stop; pushing much further than five tends to over-abstract into something too generic to act on ("I need to feel secure in my job," five whys deep on a bug report, is no longer useful).
+The five whys keeps asking "why do you need that?" — roughly five times,
+in practice — checking after each answer whether it's landed on an actual
+**need** or just another layer of solution. Once an answer stops naming a
+solution and starts naming a need, stop; pushing much further than five
+tends to over-abstract into something too generic to act on ("I need to
+feel secure in my job," five whys deep on a bug report, is no longer
+useful).
 
 ```
 "I want a CSV export"
@@ -25,24 +41,70 @@ Starting from the stated request, keep asking "why do you need that?" — roughl
   ROOT NEED: early visibility into a worsening trend
 ```
 
-Notice each answer stays closer to a _need_ the deeper you go, and the original request (CSV export) turns out to be just one of many possible ways to satisfy that need — a live trend chart in the product itself might serve "early visibility into a worsening trend" better than a manual CSV-then-spreadsheet workflow, without the user ever having thought to ask for that, because they anchored on the first workaround they could imagine.
+Notice each answer stays closer to a _need_ the deeper you go, and the
+original request (CSV export) turns out to be just one of many possible
+ways to satisfy that need — a live trend chart in the product itself might
+serve "early visibility into a worsening trend" better than a manual
+CSV-then-spreadsheet workflow, without the user ever having thought to ask
+for that, because they anchored on the first workaround they could
+imagine.
 
-## Jobs to be done: the need has a context, not just a description
+**How specific a problem statement is doesn't move in a straight line with
+how many whys you ask** — it's roughly flat at first (the first "why" is
+often still a solution in disguise, like "a report"), climbs fast through
+the middle whys, and then the *usefulness* of the statement for choosing a
+build actually starts to fall again if you keep pushing, because it's
+gone too abstract to act on:
 
-| Component          | CSV export example                                                      |
-| ------------------ | ----------------------------------------------------------------------- |
-| The job            | "Help me notice a worsening trend before it's a crisis"                 |
-| The context        | Weekly, low-stakes glance — not a deep one-time analysis                |
-| What's "hired" now | Manually exporting, opening a spreadsheet, building a chart, every week |
-| Why it's a bad fit | High friction for something that needs to happen routinely and quickly  |
+```mermaid
+xychart-beta
+    title "How useful the problem statement is for choosing a build, by whys depth"
+    x-axis ["0 (literal ask)", "1", "2", "3", "4", "5+"]
+    y-axis "Usefulness for evaluating solutions" 0 --> 100
+    bar [40, 55, 75, 95, 90, 55]
+```
 
-Framing the need as a "job" forces the context into the picture — the same underlying need ("see this number over time") calls for a very different solution if the job is "quick weekly glance" versus "one-off deep investigation for a postmortem." A generic CSV export serves the second job reasonably well and the first one badly, which is exactly why validating the job before building matters more than validating the feature request.
+Depth 0 (the literal request) is fully specific but useless for comparing
+alternatives — it's already committed to one solution. Depth 3-4 is the
+sweet spot: specific enough to evaluate candidate solutions against, general
+enough not to have foreclosed any of them. Depth 5+ risks over-abstracting
+into something no longer actionable at all.
 
-## The one-sentence test
+## Why does the same underlying need call for different solutions in different contexts?
 
-Before committing to a build, the problem should be statable with **zero reference to the proposed solution**:
+**Jobs to be done**: users don't want a product, they "hire" it to make
+progress on a specific job in a specific context. If "see this number over
+time" is the need in both of the rows below, why would the best solution
+still be different for each one?
 
-- Fails the test: "Users need a CSV export so they can track trends." (still names the solution)
-- Passes the test: "Users need to notice when a metric is trending in the wrong direction, in time to act, without a manual weekly ritual."
+| Component           | Weekly glance (Mara's actual job)                          | One-off deep investigation (a different job)          |
+| -------------------- | ------------------------------------------------------------ | --------------------------------------------------------- |
+| The job              | "Notice a worsening trend before it's a crisis"              | "Understand exactly why last month's numbers dropped"     |
+| The context          | Routine, low-stakes, five seconds of attention                | Rare, high-stakes, worth twenty minutes of real analysis   |
+| Best-fit solution     | A live trend line already visible on the dashboard            | A raw data export to slice and filter freely in a tool     |
+| Why the other is a bad fit | A raw export adds friction to something that needs to be instant and routine | A pre-baked chart can't answer an open-ended "why," which needs raw data |
 
-The second version can be evaluated against _multiple_ candidate solutions (a live chart, an automated alert threshold, a weekly digest email) — the first version has already foreclosed that comparison by baking the requester's first-imagined solution into the problem statement itself.
+Framing the need as a "job" forces the context into the picture — the same
+underlying need ("see this number over time") calls for a very different
+solution depending on the job it's serving, which is exactly why
+validating the job before building matters more than validating the
+feature request. A generic CSV export happens to serve the deep
+investigation column reasonably well and the weekly-glance column badly —
+which is precisely backwards for Mara, whose actual job was the weekly
+glance.
+
+## How do you know when you've actually found the problem, and not just restated the solution?
+
+Before committing to a build, the problem should be statable with **zero
+reference to the proposed solution**. Does the statement below pass that
+test?
+
+| Statement                                                                              | Passes the test? | Why                                              |
+| ---------------------------------------------------------------------------------------- | :---------------: | ------------------------------------------------- |
+| "Users need a CSV export so they can track trends"                                       | No                 | Still names the solution (CSV export)              |
+| "Users need to notice when a metric is trending in the wrong direction, in time to act, without a manual weekly ritual" | Yes                | Describes only the need — no solution named        |
+
+The second version can be evaluated against _multiple_ candidate solutions
+(a live chart, an automated alert threshold, a weekly digest email) — the
+first version has already foreclosed that comparison by baking the
+requester's first-imagined solution into the problem statement itself.
