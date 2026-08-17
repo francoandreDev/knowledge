@@ -1,0 +1,174 @@
+---
+title: "L3 — Building a units-tracking value type, and a fast Fermi estimator, in real code"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="The storage estimate that was 1,000x too big, reproduced in code">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🧮</span> <strong>Correct chain</strong> — 2,000,000 records × 5 KB/record, converted KB→MB→GB</div>
+      <div class="flex items-center gap-1.5"><span>❌</span> <strong>The mistake</strong> — same raw number, relabeled MB instead of converted</div>
+      <div class="flex items-center gap-1.5"><span>💵</span> <strong>Consequence</strong> — storage provisioned at 1,000x the real requirement</div>
+    </div>
+    <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div class="rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950">
+        <p class="font-semibold text-emerald-600 dark:text-emerald-400">Correct</p>
+        10 GB/day
+      </div>
+      <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
+        <p class="font-semibold text-rose-600 dark:text-rose-400">Mistaken</p>
+        10,000 GB/day (10 TB)
+      </div>
+    </div>
+  </Fragment>
+
+**Before reading the code below, notice what kind of bug this actually is: nothing here is
+a typo or a logic error in the usual sense — the number `10,000,000` is completely correct.
+The bug is that a plain JavaScript number has no memory of what unit it's in, so nothing
+stops a KB figure from being silently treated as an MB figure two lines later.** The fix
+isn't better arithmetic — it's a value type that refuses to forget its unit.
+
+</Scenario>
+
+## A units-tracking value type
+
+```js
+// quantity.js — a minimal value type that carries its unit through every operation,
+// refusing to silently mix incompatible units or drop a conversion step.
+
+class Quantity {
+  constructor(value, unit) {
+    this.value = value;
+    this.unit = unit;
+  }
+
+  static CONVERSIONS = {
+    "KB->MB": 1 / 1000,
+    "MB->GB": 1 / 1000,
+    "KB->GB": 1 / 1_000_000,
+  };
+
+  to(targetUnit) {
+    if (this.unit === targetUnit) return this;
+    const key = `${this.unit}->${targetUnit}`;
+    const factor = Quantity.CONVERSIONS[key];
+    if (factor === undefined) {
+      throw new Error(`No conversion known from ${this.unit} to ${targetUnit}`);
+    }
+    return new Quantity(this.value * factor, targetUnit);
+  }
+
+  add(other) {
+    if (this.unit !== other.unit) {
+      throw new Error(
+        `Cannot add incompatible units: ${this.unit} + ${other.unit}`,
+      );
+    }
+    return new Quantity(this.value + other.value, this.unit);
+  }
+
+  toString() {
+    return `${this.value} ${this.unit}`;
+  }
+}
+
+function dailyStorage(records, kbPerRecord) {
+  return new Quantity(records * kbPerRecord, "KB"); // unit is DERIVED, not chosen
+}
+```
+
+```js
+const correct = dailyStorage(2_000_000, 5).to("GB");
+console.log(correct.toString());
+// "10 GB" — the actual daily storage requirement
+
+// The incident's exact mistake, reproduced: constructing a Quantity with the
+// right NUMBER but the wrong UNIT, exactly what happened when "10,000,000" got
+// labeled "MB" instead of correctly converted from KB.
+const mistaken = new Quantity(2_000_000 * 5, "MB");
+console.log(mistaken.to("GB").toString());
+// "10000 GB" — 1,000x too large, exactly matching the real incident
+
+console.log(mistaken.to("GB").value / correct.value);
+// 1000 — the inflation factor, reproduced exactly
+```
+
+The `Quantity` class can't prevent someone from constructing `new Quantity(10_000_000,
+"MB")` by mistake — that's still a human judgment call. What it _can_ do is make every
+downstream `.add()` or `.to()` call check units explicitly, so an incompatible mix throws
+immediately instead of silently producing a wrong number three functions away from where
+the mistake was actually made:
+
+```js
+new Quantity(5, "KB").add(new Quantity(3, "MB"));
+// throws: "Cannot add incompatible units: KB + MB"
+```
+
+## A Fermi estimator, as real code
+
+```js
+// fermi.js — round each factor to its nearest power of 10, multiply the powers.
+// This is the "few seconds, independent sanity check" from L2, made runnable.
+
+function fermiEstimate(...factors) {
+  let mantissaProduct = 1;
+  let exponentSum = 0;
+  for (const f of factors) {
+    const exponent = Math.floor(Math.log10(f));
+    const mantissa = f / Math.pow(10, exponent);
+    mantissaProduct *= mantissa;
+    exponentSum += exponent;
+  }
+  return mantissaProduct * Math.pow(10, exponentSum);
+}
+```
+
+```js
+fermiEstimate(2_000_000, 5_000); // 2e6 records, ~5e3 bytes/record (5 KB)
+// 10000000000 — that's 10^10 bytes, i.e. ~10 GB
+
+// Run this BEFORE trusting a reported "10,000 GB" figure, and the mismatch
+// (10 GB expected vs. 10,000 GB reported) is immediately obvious — three
+// orders of magnitude apart, not a rounding difference.
+```
+
+Notice this function never touches the `Quantity` class or the original calculation at
+all — it's a genuinely independent estimate, computed from the same raw inputs (record
+count, bytes per record) but through an entirely separate code path. That independence is
+exactly what makes it a real check rather than a repeat of the same mistake.
+
+## A well-known real-world parallel
+
+This class of bug — correct arithmetic, wrong unit, no code or process forcing the two to
+be checked against each other — isn't hypothetical. In 1999, NASA's Mars Climate Orbiter
+was lost because one engineering team's software produced thruster output in pound-force
+seconds (imperial units) while the navigation software that consumed those values expected
+newton-seconds (metric) — a unit mismatch that survived to the spacecraft's loss, at a cost
+of $327 million. The specific units differ from this unit's storage incident, but the
+underlying failure is identical: a number was correct in the unit it was computed in, and
+wrong the moment something downstream assumed a different one, with nothing in the system
+forcing an explicit check.
+
+## Extend the incident: what if the error had gone the other direction?
+
+**This unit's incident was an overestimate (wasted spend on unneeded storage). What
+changes if the same class of error instead produces an _underestimate_ — say, someone
+divides by 1,000 an extra, unnecessary time, planning for 10 MB/day instead of 10 GB/day?**
+Trace it through: the consequence flips from "wasted budget" to "storage fills up and the
+pipeline starts dropping data or crashing under real load" — a live incident instead of a
+budget line item, and typically discovered much later (when the system is already under
+real production traffic) rather than caught in a cost-review meeting before anything ships.
+**The dimensional-analysis and Fermi-estimate discipline from L2 catches both directions
+equally** — neither technique cares whether the error inflates or deflates the number, only
+whether the reported figure and the independent estimate actually agree.
+
+## Failure modes
+
+| Failure mode                                                                    | What it gets wrong                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Trusting a number because the arithmetic that produced it was correct           | Correct arithmetic can still carry the wrong unit — `2,000,000 × 5` is right regardless of whether the result is KB, MB, or mislabeled entirely                                                                    |
+| Skipping an independent sanity check because "the math checks out"              | A sanity check needs to be genuinely independent (different method, like a Fermi estimate) — re-verifying the same calculation can't catch a units error baked into that same calculation                          |
+| Treating unit conversion as a formality to do "at the end"                      | Converting at the end, from memory, is exactly how a KB figure gets casually relabeled MB — tracking units through every intermediate step prevents this                                                           |
+| Assuming a large-sounding number is inherently more suspicious than a small one | Both the storage incident (overestimate) and its "opposite" (underestimate) are equally dangerous — one wastes money, the other causes outages; magnitude of the NUMBER isn't what determines risk                 |
+| Assuming this class of bug only happens in "sloppy" teams or scripts            | The Mars Climate Orbiter mismatch happened at NASA, with professional engineering teams on both sides — the failure is structural (nothing forced an explicit unit check), not a matter of individual carelessness |

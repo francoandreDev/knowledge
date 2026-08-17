@@ -1,0 +1,76 @@
+---
+title: "L1 — How do I know if a number is big or small without relying on gut feeling? (orders of magnitude, dimensional analysis)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="The storage estimate that was 1,000x too big">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📊</span> <strong>Workload</strong> — 2,000,000 records/day, ~5 KB each</div>
+      <div class="flex items-center gap-1.5"><span>🧮</span> <strong>Calculation</strong> — multiplied records × size, skipped a unit-conversion step</div>
+      <div class="flex items-center gap-1.5"><span>💸</span> <strong>Result</strong> — provisioned storage for 10 TB/day; actual need was 10 GB/day</div>
+    </div>
+    <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
+        <p class="font-semibold text-rose-600 dark:text-rose-400">Reported estimate</p>
+        10,000,000 "MB"/day ≈ 10 TB/day
+      </div>
+      <div class="rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950">
+        <p class="font-semibold text-emerald-600 dark:text-emerald-400">Actual need</p>
+        10 GB/day
+      </div>
+    </div>
+  </Fragment>
+
+An engineer estimates daily storage for a new logging pipeline: 2,000,000 records a day, each
+roughly 5 KB. They multiply: `2,000,000 × 5 = 10,000,000`, label it "MB," and provision
+storage for roughly 10 terabytes a day — an expensive, high-tier storage plan gets approved
+on that number. **The actual number, computed correctly, was 10 gigabytes a day — one
+thousand times smaller.** Nobody caught it in review, because "10,000,000 of something"
+sounded appropriately large for "2 million records," and nobody stopped to ask whether the
+_unit_ on that number was actually right.
+
+The arithmetic (`2,000,000 × 5 = 10,000,000`) was completely correct. **The error was
+entirely in the unit** — `2,000,000 records × 5 KB/record` produces a result measured in
+KB, not MB, and treating a KB figure as an MB figure inflates it by exactly 1,000x, since
+1 MB = 1,000 KB.
+
+</Scenario>
+
+- **An order of magnitude is a power of 10** — roughly "how many zeros." Two numbers are
+  "the same order of magnitude" if they're within about 10x of each other; a 1,000x gap
+  (like the incident above) spans **three** orders of magnitude, not one — a much bigger
+  miss than "off by a bit."
+- **Dimensional analysis means tracking the unit through a calculation as carefully as the
+  number itself** — units combine and cancel algebraically, exactly like variables:
+  `records × (KB/record) = KB`, not "records" and not some unitless quantity. Losing track
+  of what unit a result is actually in is precisely how the incident's `10,000,000` turned
+  into "10,000,000 MB" instead of the correct "10,000,000 KB."
+- **The fastest way to catch an error like this isn't redoing the exact calculation — it's
+  a rough, independent order-of-magnitude sanity check.** "2 million records, each a few
+  KB — that's a few times 10⁶ records times a few times 10³ bytes, so roughly 10⁹ to 10¹⁰
+  bytes, which is single-digit gigabytes" takes seconds and would have caught the 1,000x
+  inflation instantly, without needing the exact figure.
+- **Only quantities with the same unit can be added or subtracted; multiplication and
+  division combine units freely** — `5 KB + 3 MB` isn't meaningful until converted to a
+  shared unit first, but `2,000,000 records × 5 KB/record` is always meaningful, and its
+  resulting unit (KB) is determined by the units being multiplied, not chosen freely.
+- The practical skill this unit builds: before trusting any calculated number — cost,
+  capacity, latency, storage — check both that its order of magnitude feels plausible from
+  an independent rough estimate, and that its unit was actually tracked correctly through
+  every step, not just assumed at the end.
+
+## Orders of magnitude, at a glance
+
+| Quantity                         | Approximate order of magnitude           |
+| -------------------------------- | ---------------------------------------- |
+| A single record (~5 KB)          | 10³ bytes                                |
+| A daily log file (10 GB)         | 10¹⁰ bytes                               |
+| The mistaken estimate (10 TB)    | 10¹³ bytes                               |
+| Gap between correct and mistaken | 10³ = 1,000x — three orders of magnitude |
+
+This isn't a trivia table — it's the actual sanity-check calculation that would have caught
+the incident: comparing the reported number's order of magnitude against an independent,
+rough estimate, rather than trusting a number just because the arithmetic that produced it
+was correct.
