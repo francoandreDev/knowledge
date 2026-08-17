@@ -1,0 +1,132 @@
+---
+title: "L3 — Reproducing the split-message bug, and fixing it with a real framer"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="One message, split into two chunks">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📨</span> <strong>The message</strong> — {"{\"type\":\"chat\",\"text\":\"hello world\"}"} followed by a newline</div>
+      <div class="flex items-center gap-1.5"><span>✂️</span> <strong>What the network actually delivered</strong> — the same 38 bytes, arriving as two separate `data` events</div>
+    </div>
+  </Fragment>
+
+**Before reading the code, predict: does `JSON.parse()` on the FIRST
+chunk alone throw an error, or does it silently return something
+incorrect without throwing?**
+
+</Scenario>
+
+## The buggy handler, reproducing the incident exactly
+
+```js
+// The buggy assumption: one 'data' event === one complete message
+function naiveHandler(onMessage) {
+  return function onData(chunk) {
+    onMessage(chunk); // WRONG — chunk may be partial, or contain multiple messages
+  };
+}
+```
+
+```js
+// The exact incident: one message, split across two 'data' events
+const fullMessage = '{"type":"chat","text":"hello world"}\n';
+const chunk1 = fullMessage.slice(0, 20); // '{"type":"chat","text'
+const chunk2 = fullMessage.slice(20); // '":"hello world"}\n'
+
+const received = [];
+const onData = naiveHandler((msg) => received.push(msg));
+onData(chunk1);
+onData(chunk2);
+
+received;
+// ['{"type":"chat","text', '":"hello world"}\n']
+// Two USELESS fragments delivered as if they were two separate messages —
+// neither one is valid JSON on its own.
+```
+
+The naive handler doesn't crash on delivery — it happily calls
+`onMessage` twice with two fragments, each of which fails to parse as
+JSON downstream. The bug isn't a crash at the socket layer; it's silent
+corruption one layer up, in whatever code trusted `onMessage` to receive
+complete messages.
+
+## The fix: buffer bytes until a real message boundary is found
+
+```js
+function createLineFramer(onMessage) {
+  let buffer = "";
+  return function onData(chunk) {
+    buffer += chunk;
+    let newlineIndex;
+    while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, newlineIndex);
+      buffer = buffer.slice(newlineIndex + 1);
+      onMessage(line);
+    }
+  };
+}
+```
+
+```js
+const receivedFramed = [];
+const onDataFramed = createLineFramer((msg) => receivedFramed.push(msg));
+onDataFramed(chunk1); // buffer now holds a partial line, no '\n' yet — nothing delivered
+onDataFramed(chunk2); // buffer now completes the line — exactly one message delivered
+
+receivedFramed;
+// ['{"type":"chat","text":"hello world"}']
+
+JSON.parse(receivedFramed[0]);
+// { type: "chat", text: "hello world" } — parses correctly
+```
+
+Nothing about how the network delivered the bytes changed between the
+buggy and fixed runs — the exact same two chunks, in the exact same
+order. The only difference is that the framer buffers incomplete data
+instead of assuming each `data` event is already a complete message.
+
+## Handling the opposite case: multiple messages in one chunk
+
+```js
+// TCP can just as easily coalesce multiple writes into a single delivery
+const twoMessagesOneChunk = '{"a":1}\n{"b":2}\n';
+
+const receivedMulti = [];
+const onDataMulti = createLineFramer((msg) => receivedMulti.push(msg));
+onDataMulti(twoMessagesOneChunk);
+
+receivedMulti;
+// ['{"a":1}', '{"b":2}'] — both messages correctly separated from one chunk
+```
+
+The `while` loop inside `createLineFramer` is what handles this case —
+it keeps extracting complete lines from the buffer as long as any remain,
+rather than assuming at most one message could be present per `data`
+event. A framer that only checked for a newline once per call (using
+`if` instead of `while`) would silently lose the second message here.
+
+## Extend the incident: what if the message format itself can contain a newline?
+
+**Newline-delimited framing works cleanly for single-line JSON. What
+breaks if a message's actual content legitimately needs to contain a
+newline character** — a chat message with a line break in it, for
+instance? Newline-delimited framing would misinterpret that internal
+newline as a message boundary, splitting one real message into two. This
+is exactly the scenario where **length-prefixed** framing is the more
+robust choice: prefixing each message with its exact byte length lets the
+receiver read precisely that many bytes regardless of what characters
+they contain, since the boundary is determined by a count, not by
+scanning for a specific byte value that might also legitimately appear
+inside the message itself.
+
+## Failure modes
+
+| Failure mode                                                                          | What it gets wrong                                                             |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Assuming one `data`/`read` event delivers exactly one complete message                | TCP makes no such guarantee — messages can be split or coalesced               |
+| Testing exclusively on localhost with small payloads                                  | The exact conditions that hide a framing bug until production                  |
+| Using `if` instead of `while` when draining a buffer for complete messages            | Silently drops any messages beyond the first one found in a single chunk       |
+| Choosing newline-delimited framing for content that may legitimately contain newlines | Misinterprets in-message content as a message boundary, corrupting the message |
+| Treating a downstream parse error as a data-correctness bug rather than a framing bug | The actual fix is buffering/boundary logic, not more defensive parsing         |

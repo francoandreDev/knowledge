@@ -1,0 +1,65 @@
+---
+title: "L1 — How do two programs talk to each other?"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Works on localhost, garbles messages in production">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>💬</span> <strong>The chat server</strong> — client sends one JSON message per line, server parses each `data` event as one message</div>
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Local testing</strong> — messages are small; every message arrives as exactly one `data` event</div>
+      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>Production</strong> — a longer message gets split across two `data` events; the server tries to parse half a JSON object and fails</div>
+    </div>
+  </Fragment>
+
+A chat server works perfectly in local testing — every message a client
+sends arrives as exactly one `data` event, gets parsed as one JSON
+object, done. In production, over a real network, a slightly longer
+message triggers a parse error: the server received something that isn't
+valid JSON. **The client definitely sent valid JSON. What happened to it
+in between?**
+
+TCP — the protocol underneath almost every socket connection on the
+internet — delivers a **stream of bytes**, not a stream of messages. A
+single `send()` on one side can arrive as multiple `data` events on the
+other, or multiple `send()` calls can arrive coalesced into a single
+`data` event. The server's code assumed "one `data` event equals one
+message" — an assumption that happens to hold on localhost, where
+messages are small and the network is instant, and quietly breaks the
+moment a real network is involved.
+
+</Scenario>
+
+- **A socket is an endpoint for two-way communication between two
+  programs, identified by an IP address and a port number** — the
+  address says which machine, the port says which program on that
+  machine. A web server and a chat server on the same machine can both
+  be reachable, distinguished only by port.
+- **TCP delivers an ordered, reliable stream of bytes — not a stream of
+  discrete messages.** The network is free to split one write into
+  multiple deliveries, or combine multiple writes into one delivery,
+  depending on packet size, timing, and buffering along the way. Neither
+  behavior is a bug in TCP; both are explicitly allowed by the protocol.
+- **Because TCP doesn't preserve message boundaries, the application
+  layer has to define its own** — deciding, in the bytes themselves, how
+  a reader can tell where one message ends and the next begins. This is
+  what a wire protocol actually is: an agreement about message boundaries
+  and structure, layered on top of TCP's raw byte stream.
+- **Code that assumes one `data` event equals one complete message will
+  work reliably on localhost and unreliably everywhere else** — small
+  messages and negligible network latency make the assumption look true
+  in testing, right up until a real network or a slightly larger message
+  breaks it.
+- The practical skill this unit builds: **treating "one event equals one
+  message" as an assumption to verify, not a given** — and knowing that
+  fixing it means adding an explicit framing scheme, not just handling
+  parse errors more gracefully.
+
+## What actually changed between localhost and production
+
+|                             | Localhost testing                                      | Real network                                                     |
+| --------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------- |
+| Message size                | Small, fits in one packet easily                       | Can exceed what a single packet or buffer flush delivers         |
+| Delivery pattern            | Reliably one `data` event per message                  | Can split one message across events, or combine several into one |
+| Where the assumption breaks | It doesn't — conditions happen to match the assumption | The mismatch becomes an actual parse failure                     |
