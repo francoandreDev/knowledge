@@ -32,7 +32,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | --- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- |
 | 01  | process                 | What actually happens when you run a program? (process, memory layout, the OS as mediator)                                   | done    |
 | 02  | persistence             | Why does my program still "remember" data after a crash? (persistence, disk vs. memory)                                      | done    |
-| 03  | algorithmic-complexity  | Why is my code fast on my machine but slow in production? (algorithmic complexity, Big-O in practice)                        | planned |
+| 03  | algorithmic-complexity  | Why is my code fast on my machine but slow in production? (algorithmic complexity, Big-O in practice)                        | done    |
 | 04  | sockets                 | How do two programs talk to each other? (sockets, ports, protocols)                                                          | planned |
 | 05  | concurrency             | Why does my server fall over under load? (concurrency: threads, processes, async I/O)                                        | planned |
 | 06  | race-conditions         | How do we avoid two processes corrupting shared data? (race conditions, locks, atomicity)                                    | planned |

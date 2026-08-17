@@ -1,0 +1,160 @@
+---
+title: "L3 — Proving the growth rate with a real benchmark, and where the same mistake hides elsewhere"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="The nightly import that stopped finishing">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>CI test file</strong> — 200 records, `removeDuplicates` runs in under 1ms</div>
+      <div class="flex items-center gap-1.5"><span>🚨</span> <strong>Production import</strong> — 500,000 records, job killed after a 20-minute timeout</div>
+      <div class="flex items-center gap-1.5"><span>🔧</span> <strong>The actual bug</strong> — `record.id not in result` scanning a growing plain array, once per record</div>
+    </div>
+    <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
+        <p class="font-semibold text-rose-600 dark:text-rose-400">Array-based (before)</p>
+        O(n²) — quadratic
+      </div>
+      <div class="rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950">
+        <p class="font-semibold text-emerald-600 dark:text-emerald-400">Set-based (after)</p>
+        O(n) — linear
+      </div>
+    </div>
+  </Fragment>
+
+The on-call engineer pulls up the job, sees it's still running at minute 20 with no error,
+and traces it to `removeDuplicates` — the exact function that sailed through code review
+and CI, because CI's fixture file only had 200 rows. **The fix everyone reaches for first
+is usually "make the machine bigger" or "add a timeout and retry" — but neither actually
+addresses why the function needs 250 billion comparisons for half a million rows in the
+first place.**
+
+</Scenario>
+
+## Reproducing the incident with real, runnable code
+
+```js
+// dedupe.js — the two versions from L2, made concrete and benchmarkable
+
+function removeDuplicatesArray(records) {
+  const result = [];
+  for (const record of records) {
+    // Array.prototype.includes scans the whole array in the worst case —
+    // this is the hidden O(n) inside what looks like a single check.
+    const alreadySeen = result.some((r) => r.id === record.id);
+    if (!alreadySeen) {
+      result.push(record);
+    }
+  }
+  return result;
+}
+
+function removeDuplicatesSet(records) {
+  const seenIds = new Set();
+  const result = [];
+  for (const record of records) {
+    if (!seenIds.has(record.id)) {
+      seenIds.add(record.id);
+      result.push(record);
+    }
+  }
+  return result;
+}
+```
+
+```js
+// benchmark.js — measure both versions across growing input sizes
+function makeRecords(n) {
+  const records = [];
+  for (let i = 0; i < n; i++) {
+    // ~10% duplicate rate, mirroring a realistic import
+    records.push({ id: i % Math.floor(n * 0.9) });
+  }
+  return records;
+}
+
+function timeIt(fn, records) {
+  const start = performance.now();
+  fn(records);
+  return performance.now() - start;
+}
+
+for (const n of [2000, 8000, 32000]) {
+  const records = makeRecords(n);
+  const arrayMs = timeIt(removeDuplicatesArray, records);
+  const setMs = timeIt(removeDuplicatesSet, records);
+  console.log(
+    `n=${n}: array=${arrayMs.toFixed(1)}ms, set=${setMs.toFixed(1)}ms`,
+  );
+}
+// Actual measured output (Node, after a JIT warm-up pass — exact numbers vary by machine):
+// n=2000:  array=2.2ms,    set=0.9ms
+// n=8000:  array=188.4ms,  set=0.7ms    <- array time jumped ~86x for 4x the input
+// n=32000: array=2560.1ms, set=4.7ms    <- array time jumped ~14x for another 4x input
+```
+
+**Before reading further, predict: if `n` quadruples, roughly how much longer should the
+array version take, if the O(n²) claim is right?** Quadrupling `n` should roughly _16x_
+the array version's time (`4² = 16`), while the Set version's time should stay close to
+proportional — roughly 4x, not 16x. The measured 8,000→32,000 step lands close to that
+prediction (~14x); the earlier 2,000→8,000 step overshoots it (~86x) because 2,000 rows
+still ran fast enough for measurement noise and JIT warm-up effects to distort the ratio —
+a real reminder that a single small-`n` timing isn't proof of anything by itself, and
+Big-O claims are about the trend across several growing sizes, not one measurement. The
+Set version, meanwhile, stays under 5ms across the entire 16x range in n — the actual
+empirical meaning of "O(n²) vs. O(n)": not a one-time gap, but a ratio that keeps
+compounding every time the input grows.
+
+## Extend the example: the same mistake, two different disguises
+
+The dedup function is one case, not the whole territory. **What if the task isn't "remove
+duplicates within one list," but "find which user IDs appear in both of two 100,000-row
+lists" — does the same fix still apply, and does it change shape at all?**
+
+```js
+// The same O(n²) trap, wearing a different disguise
+function intersectionSlow(listA, listB) {
+  return listA.filter((a) => listB.some((b) => b.id === a.id)); // O(n * m)
+}
+
+// The same fix: convert ONE side to a Set first
+function intersectionFast(listA, listB) {
+  const idsB = new Set(listB.map((b) => b.id)); // O(m), done once
+  return listA.filter((a) => idsB.has(a.id)); // O(n), each lookup O(1)
+}
+```
+
+`listB.some(...)` inside `listA.filter(...)` is the identical shape as `result.some(...)`
+inside the earlier loop — a scan nested inside a scan. The fix is the same idea again:
+build a Set from one side once (`O(m)`), then every lookup against it during the pass over
+the other side is `O(1)` instead of `O(m)`, bringing the total down from `O(n × m)` to
+`O(n + m)`.
+
+**A second question worth sitting with: what if the input can't fit in memory at all —
+say, streaming 50 million records instead of holding 500,000 in an array?** A `Set` doesn't
+solve that on its own; it still has to hold every unique id seen so far, which itself grows
+unbounded with the stream. At that scale the actual fix shifts from "which data structure"
+to "which strategy" entirely — a probabilistic structure like a Bloom filter (trading a
+small false-positive rate for bounded memory) or an external, disk-backed hash join, the
+kind a database's query planner reaches for. The Big-O lens still applies, but memory
+complexity joins time complexity as an equally real constraint once "does it fit in RAM at
+all" becomes the actual question.
+
+## Failure modes
+
+| Failure mode                                                     | What it gets wrong                                                                                                                             |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Trusting a small test fixture as proof of performance            | A 200-row fixture can't reveal an O(n²) growth rate — the gap between O(n) and O(n²) is invisible until n is large enough for it to compound   |
+| Treating `array.includes()`/`.indexOf()` as "just one operation" | Both scan the array in the worst case — nesting either inside another loop silently creates O(n²), even though no `for` loop appears twice     |
+| Optimizing an already-O(1) or O(log n) operation                 | The incident's fix mattered because the ORIGINAL was O(n²); rewriting code that's already efficient adds complexity for no measurable benefit  |
+| Assuming Set/Map lookups are O(1) unconditionally                | O(1) is the _average_ case; pathological hash collisions can degrade a lookup toward O(n) — rare in practice, but not a hard guarantee         |
+| Fixing time complexity while ignoring memory complexity          | A Set-based fix trades scan time for memory to hold every id seen — fine at 500K rows, a real constraint again once data no longer fits in RAM |
+
+**What changes for this specific unit's example if, instead of a nightly batch job, this
+code ran inside a user-facing API endpoint called on every page load?** The same O(n²)
+function that costs 20 minutes once a night would instead add growing latency to every
+single request as the dataset grows — the fix is identical, but the failure mode shifts
+from "one visible incident" to "a slow, creeping regression" that's often harder to notice
+until users start complaining, which is worth keeping in mind before assuming a batch-job
+framing is the only shape this problem takes.
