@@ -54,7 +54,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | --- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------- |
 | 01  | snapshots-manual-copies | Why do we need version control at all? (snapshots vs. manual copies)                                                          | done    |
 | 02  | checkout                | How do I undo a mistake without losing everything? (checkout, revert, reset semantics)                                        | done    |
-| 03  | working-tree            | Why did my change disappear when I switched branches? (working tree, staging, commit model)                                   | planned |
+| 03  | working-tree            | Why did my change disappear when I switched branches? (working tree, staging, commit model)                                   | done    |
 | 04  | merge                   | How do two people edit the same file without destroying each other's work? (merge, conflicts)                                 | planned |
 | 05  | merge-rebase            | Why does `git pull` sometimes create a mess? (merge vs. rebase, fast-forward)                                                 | planned |
 | 06  | commit-conventions      | How do we keep history readable as a team? (commit conventions, atomic commits)                                               | planned |

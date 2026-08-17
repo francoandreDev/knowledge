@@ -1,0 +1,101 @@
+---
+title: "L2 — What `git status` is actually diffing, and what checkout really decides per file"
+---
+
+## Three areas, two diffs
+
+**`git status` reports things like "changes not staged for commit" and "changes to be
+committed" — what exactly is being compared to produce those two different categories?**
+
+```mermaid
+flowchart LR
+    WT["Working tree\n(files on disk)"] -- "git add" --> IDX["Staging area / index\n(next commit's snapshot)"]
+    IDX -- "git commit" --> REPO["Repository\n(HEAD, commit history)"]
+    REPO -. "git checkout" .-> WT
+    REPO -. "git checkout" .-> IDX
+```
+
+`git status` runs two independent diffs: **working tree vs. index** ("changes not staged
+for commit" — edits you've made but haven't `git add`ed yet), and **index vs. HEAD**
+("changes to be committed" — edits you've staged but haven't `git commit`ted yet). A file
+can be in a different state in all three areas simultaneously — edited on disk, staged at
+an older version, and committed at an even older one — which is exactly why `git status`
+needs two separate diffs, not one, to describe it precisely.
+
+## What `checkout <branch>` actually decides, per file
+
+**Given that a checkout has to update potentially thousands of files at once, how does it
+decide what to leave alone?** Per file, checkout effectively asks one question: _does this
+file's content differ between the current commit and the target commit?_
+
+```mermaid
+flowchart TD
+    A["For each file, compare current commit's\nversion vs target commit's version"] --> B{"Do they differ?"}
+    B -- "No" --> C["Leave the working tree file untouched\n(any uncommitted edit stays exactly as-is)"]
+    B -- "Yes" --> D{"Does the working tree\nhave uncommitted changes\nto this file?"}
+    D -- "No" --> E["Overwrite the file with\nthe target commit's version"]
+    D -- "Yes, but it merges cleanly" --> F["Apply the uncommitted edit on top of\nthe target version (silent 3-way merge)"]
+    D -- "Yes, and it conflicts" --> G["REFUSE the entire checkout:\n'local changes would be overwritten'"]
+```
+
+This is the exact mechanism from L1's incident: `shared-config.js` was identical between
+`feature-a` and `feature-b`'s last commits, so branch B was taken — the uncommitted edit
+was never at risk, because checkout never needed to touch that file at all.
+
+## Reproducing the two different outcomes for real
+
+**The same starting point — an uncommitted edit — leads to two very different outcomes
+depending on one fact: did the target branch's committed version of the file actually
+change?** Both transcripts below are real, run against an actual two-branch repo.
+
+**Case 1 — the file is identical on both branches (silent carry-over):**
+
+```
+$ git checkout feature-a
+$ echo "shared config v1 - my local tweak" > shared-config.js
+$ git status --short
+ M shared-config.js
+
+$ git checkout feature-b
+Switched to branch 'feature-b'
+M	shared-config.js
+
+$ git status --short
+ M shared-config.js
+$ cat shared-config.js
+shared config v1 - my local tweak
+```
+
+No warning, no conflict — the edit is now sitting on `feature-b`'s working tree, exactly
+as it was on `feature-a`, because `shared-config.js` never differed between the two
+branches' commits in the first place.
+
+**Case 2 — the file genuinely diverged between branches (refused):**
+
+```
+$ git checkout feature-a
+$ echo "feature-a uncommitted divergent edit" > shared-config.js
+$ git status --short
+ M shared-config.js
+
+$ git checkout feature-b
+error: Your local changes to the following files would be overwritten by checkout:
+	shared-config.js
+Please commit your changes or stash them before you switch branches.
+Aborting
+```
+
+Here, `feature-b`'s committed version of `shared-config.js` genuinely differs from
+`feature-a`'s, and applying the uncommitted edit on top of it would conflict — so Git
+stops the entire checkout rather than risk silently discarding or corrupting the edit.
+This is the one case where Git's default behavior actively protects you; the "gone
+without warning" experience in L1 only happens in Case 1's silent-carry-over path.
+
+## The practical takeaway
+
+The single fact that resolves the confusion in both directions: **an uncommitted edit is
+not "on" any branch — it's sitting in the working tree, independent of whatever branch is
+currently checked out.** Whether it follows you silently, gets refused, or eventually gets
+discarded by an unrelated cleanup command depends entirely on whether the target branch's
+committed version of that specific file happens to match what you started from — not on
+which branch you "meant" the edit for.

@@ -1,0 +1,78 @@
+---
+title: "L1 — Why did my change disappear when I switched branches?"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="The edit that followed you, then vanished">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>✏️</span> <strong>On feature-a</strong> — edited `shared-config.js`, never committed</div>
+      <div class="flex items-center gap-1.5"><span>🔀</span> <strong>Switched to feature-b</strong> — no warning, no conflict — the edit came along</div>
+      <div class="flex items-center gap-1.5"><span>🧹</span> <strong>On feature-b</strong> — ran a cleanup command, unrelated to `shared-config.js` in their mind</div>
+      <div class="flex items-center gap-1.5"><span>😱</span> <strong>Back on feature-a</strong> — the edit is just gone</div>
+    </div>
+    <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div class="rounded border border-slate-300 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">
+        <p class="font-semibold text-slate-600 dark:text-slate-300">Assumption</p>
+        "My edit belongs to feature-a"
+      </div>
+      <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
+        <p class="font-semibold text-rose-600 dark:text-rose-400">Reality</p>
+        The edit belonged to nothing — it was never committed anywhere
+      </div>
+    </div>
+  </Fragment>
+
+A developer edits `shared-config.js` on `feature-a` — a real, useful tweak — but doesn't
+commit it yet. They switch to `feature-b` to check something unrelated. Git doesn't
+complain; the switch goes through cleanly, and the edit is still sitting right there in the
+file. On `feature-b`, they run a routine cleanup command to discard some other, unrelated
+scratch changes before testing something. They switch back to `feature-a`. **The edit to
+`shared-config.js` is gone — but they never touched that file on `feature-b`. What
+happened?**
+
+The edit was never "on" `feature-a` in the first place. It was sitting in the **working
+tree** — a single, branch-independent workspace — and `git checkout` only moves the files
+that actually _differ_ between the two branches' last commits. Since `shared-config.js`
+was identical on both branches, checkout left it alone and the edit came along for the
+ride. The cleanup command on `feature-b` didn't know or care that the edit "belonged" to a
+different branch, because it didn't.
+
+</Scenario>
+
+- **Git tracks a file's state in three separate places, not one**: the **working tree**
+  (the actual files on disk, exactly as they look right now), the **staging area / index**
+  (a snapshot prepared for the next commit, built with `git add`), and the **repository**
+  (the permanent history of commits, updated by `git commit`). `git status` is entirely a
+  report of the differences between these three areas.
+- **Uncommitted changes live in the working tree and index — not "inside" any branch.**
+  A branch is just a name pointing at a commit; uncommitted edits aren't part of any
+  commit yet, so they aren't tied to whichever branch happened to be checked out when the
+  edit was made.
+- **`git checkout <branch>` only touches files that actually differ** between the current
+  commit and the target branch's commit. If `shared-config.js` is identical on both
+  branches, checkout has nothing to update there, so an uncommitted edit to that file
+  simply stays in the working tree, unaffected — it "follows" you to the new branch, not
+  because Git moved it, but because Git never needed to touch it at all.
+- **If the file genuinely differs between the two branches AND has uncommitted changes,
+  Git refuses the checkout** with "local changes would be overwritten" — this is Git
+  protecting you from silently losing work in the one case where blindly proceeding would
+  actually destroy something. The confusing case is the one where no conflict exists: Git
+  proceeds silently, and the edit's origin becomes easy to forget.
+- The practical rule this unit builds: before switching branches with uncommitted work,
+  know whether that edit is meant to be committed on the current branch — if so, commit
+  or stash it first, rather than trusting it to "stay behind" on its own, because
+  uncommitted work has no branch affinity at all.
+
+## The three areas, at a glance
+
+| Area               | What it holds                           | Updated by             |
+| ------------------ | --------------------------------------- | ---------------------- |
+| Working tree       | The actual files on disk right now      | Editing files directly |
+| Staging area/index | A prepared snapshot for the next commit | `git add`              |
+| Repository (HEAD)  | Permanent, committed history            | `git commit`           |
+
+`git checkout <branch>` updates the working tree and index to match the target branch's
+last commit — but only for files that actually changed between the two commits being
+compared.

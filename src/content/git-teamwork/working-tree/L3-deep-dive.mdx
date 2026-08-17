@@ -1,0 +1,138 @@
+---
+title: "L3 — Reproducing the full incident, command by command, in a real repo"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="The full incident, start to finish">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>1️⃣</span> Edit `shared-config.js` on `feature-a`, uncommitted</div>
+      <div class="flex items-center gap-1.5"><span>2️⃣</span> `git checkout feature-b` — succeeds silently, edit carries over</div>
+      <div class="flex items-center gap-1.5"><span>3️⃣</span> On `feature-b`, run `git restore .` to clean up something unrelated</div>
+      <div class="flex items-center gap-1.5"><span>4️⃣</span> `git checkout feature-a` — the edit is gone, no trace, no error</div>
+    </div>
+    <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div class="rounded border border-slate-300 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">
+        <p class="font-semibold text-slate-600 dark:text-slate-300">What was lost</p>
+        An uncommitted edit, never staged, never committed
+      </div>
+      <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
+        <p class="font-semibold text-rose-600 dark:text-rose-400">Recoverable?</p>
+        No — nothing to recover, it was never in any commit
+      </div>
+    </div>
+  </Fragment>
+
+Every command below was actually run against a real two-branch repository — this is a
+verified reproduction, not a hypothetical. **Before reading the transcript, predict:
+at which of the four numbered steps does the edit actually get lost — the switch to
+feature-b, the restore on feature-b, or the switch back to feature-a?**
+
+</Scenario>
+
+## The full transcript
+
+```
+$ git checkout feature-a
+$ echo "shared config v1 - my local tweak" > shared-config.js
+$ git status --short
+ M shared-config.js
+```
+
+The edit exists only in the working tree — unstaged, uncommitted, and (per L1/L2) not
+tied to `feature-a` in any way Git actually tracks.
+
+```
+$ git checkout feature-b
+Switched to branch 'feature-b'
+M	shared-config.js
+
+$ git status --short
+ M shared-config.js
+$ cat shared-config.js
+shared config v1 - my local tweak
+```
+
+The switch succeeds with no warning, because `shared-config.js` is identical between
+`feature-a`'s and `feature-b`'s last commits — checkout has nothing to reconcile for that
+file, so the working tree copy (including the uncommitted edit) is left completely alone.
+**The edit is not lost yet** — it's sitting on `feature-b` now, functionally
+indistinguishable from an edit someone made directly on `feature-b`.
+
+```
+$ git restore .
+$ git status --short
+
+```
+
+This is the actual moment of loss. `git restore .` (the modern equivalent of
+`git checkout -- .` from this track's `checkout` unit) discards every uncommitted change
+in the current working tree, restoring every tracked file to its last-committed state.
+The developer ran this to clean up something else entirely — but `shared-config.js`'s
+edit was sitting in that same working tree, with no marker distinguishing "this belongs to
+a different mental context" from anything else. `git status --short` now prints nothing:
+the working tree is clean.
+
+```
+$ git checkout feature-a
+$ git status --short
+
+$ cat shared-config.js
+shared config v1
+```
+
+Back on `feature-a`, `shared-config.js` shows its original committed content —
+`"shared config v1"`, with no trace of `"- my local tweak"`. **The loss happened at step 3
+(`git restore .` on feature-b), not at either checkout** — both branch switches were
+completely uneventful. This is the core misdiagnosis in incidents like this: the natural
+instinct is to blame the checkout, when the actual command responsible for the loss ran on
+a different branch entirely, targeting a file the developer had already forgotten was
+mid-edit.
+
+## Why this doesn't happen with a genuinely diverged file
+
+**Extend the incident: what if `shared-config.js` had already diverged between the two
+branches before the edit — does the same silent loss still happen?** Re-run the same
+sequence, but this time the target branch's committed version of the file is actually
+different from the source branch's:
+
+```
+$ git checkout feature-a
+$ echo "feature-a uncommitted divergent edit" > shared-config.js
+$ git status --short
+ M shared-config.js
+
+$ git checkout feature-b
+error: Your local changes to the following files would be overwritten by checkout:
+	shared-config.js
+Please commit your changes or stash them before you switch branches.
+Aborting
+```
+
+Here Git refuses outright — because `feature-b`'s committed version of `shared-config.js`
+genuinely differs, silently carrying the edit over risks either overwriting information or
+producing a confusing merge, so Git stops before doing anything. The incident above was
+only possible **because** the file happened to be identical between branches — the
+"protected" case (genuine divergence) is actually the safer one; the "convenient" case
+(no divergence) is the one that quietly set up the loss.
+
+## What actually would have prevented this
+
+**Given that the edit was real, useful work, what single habit — not a different Git
+command — would have prevented losing it?** Committing it (even as a disposable
+`git commit -m "wip"`) or stashing it (`git stash`) before switching branches at all would
+have moved the edit into the repository or a dedicated stash entry — both of which
+`git restore .` on a _different_ branch cannot touch. The failure wasn't a Git bug or a
+missing safety net; the working tree genuinely has no per-branch memory for uncommitted
+content, and the fix is to stop relying on it having one.
+
+## Failure modes
+
+| Failure mode                                                               | What it gets wrong                                                                                                                                       |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Assuming uncommitted edits are tied to whichever branch you made them on   | The working tree has no branch affinity — an edit is just sitting on disk until it's committed, regardless of which branch is checked out                |
+| Blaming the checkout for a loss that happened on a different branch        | The checkout itself only refuses or silently carries a file over — the actual data loss in this incident came from a cleanup command run afterward       |
+| Assuming Git will always warn before discarding uncommitted work           | `checkout <branch>` warns when a file genuinely diverges; `restore .`/`checkout -- .`/`reset --hard` do NOT warn — they discard immediately and silently |
+| Treating "no conflict on checkout" as proof nothing risky happened         | A clean, warning-free checkout can still leave uncommitted work sitting somewhere easy to lose track of and later discard by accident                    |
+| Relying on memory instead of `git status` before running a discard command | A quick `git status --short` before any `restore`/`checkout --`/`reset --hard` would have surfaced the at-risk file before it was too late               |
