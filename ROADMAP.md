@@ -182,7 +182,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | --- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
 | 01  | power-real-resource        | Why doesn't technical merit alone decide who wins in an organization? (power as a real resource, not a dirty word)                                            | done    |
 | 02  | white                      | How does legitimate ("white") influence actually work? (reciprocity, alliance-building, being visibly useful)                                                 | done    |
-| 03  | who-holds-influence        | How do I read the informal org chart, not just the official one? (who actually holds influence, real decision networks)                                       | planned |
+| 03  | who-holds-influence        | How do I read the informal org chart, not just the official one? (who actually holds influence, real decision networks)                                       | done    |
 | 04  | favor-economy              | How do I bank goodwill before I need to spend it? (the favor economy, relationship capital)                                                                   | planned |
 | 05  | strategic-ambiguity        | What is "gray" politics, and where's the line before it turns dishonest? (strategic ambiguity, selective disclosure, timing information)                      | planned |
 | 06  | framing                    | How do I control the narrative around my own work without lying? (framing, emphasis, owning the story honestly)                                               | planned |
