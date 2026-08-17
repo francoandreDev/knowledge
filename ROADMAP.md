@@ -75,7 +75,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | --- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------- |
 | 01  | audience-awareness                       | Why does the same message land differently depending on who says it? (audience awareness)                            | done    |
 | 02  | status-updates-build-trust               | How do I explain a technical delay without sounding like an excuse? (status updates that build trust)                | done    |
-| 03  | reading-stakeholder-incentives           | Why did my "obviously right" proposal get rejected? (reading stakeholder incentives)                                 | planned |
+| 03  | reading-stakeholder-incentives           | Why did my "obviously right" proposal get rejected? (reading stakeholder incentives)                                 | done    |
 | 04  | pushback-frameworks                      | How do I say no to a request without burning the relationship? (pushback frameworks)                                 | planned |
 | 05  | building-credibility-ahead-ask           | How do I get buy-in before I need it? (building credibility ahead of the ask)                                        | planned |
 | 06  | decision-making-frameworks               | Why do meetings feel like they decide nothing? (decision-making frameworks: DACI/RACI)                               | planned |
