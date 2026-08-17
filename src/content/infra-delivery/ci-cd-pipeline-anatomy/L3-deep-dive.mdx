@@ -1,0 +1,152 @@
+---
+title: "L3 — Reproducing the bypassed gate, and modeling pipeline logic in code"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same pipeline config, one leftover flag">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>⚙️</span> <strong>Pipeline</strong> — build → test → deploy-production, three sequential stages</div>
+      <div class="flex items-center gap-1.5"><span>🚩</span> <strong>The leftover flag</strong> — <code>continue-on-error: true</code> on the test step, added two weeks earlier and never removed</div>
+    </div>
+  </Fragment>
+
+**Before reading the config, predict: does the deploy stage need any
+special-case logic to protect against a failed test step, or should
+"halt on failure" be the pipeline's default behavior everywhere?**
+
+</Scenario>
+
+## The actual pipeline config, reproducing the incident
+
+```yaml
+# .github/workflows/deploy.yml — the ACTUAL config that shipped the bug
+name: Deploy
+on: [push]
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+        continue-on-error: true # left over from a flaky-test workaround, 2 weeks ago
+
+      - name: Deploy to production
+        run: ./deploy.sh production
+```
+
+With `continue-on-error: true` on the Test step, a failing test suite
+still reports the step as passed at the job level — nothing stops the
+`Deploy to production` step from running immediately after, regardless of
+what `npm test` actually reported.
+
+```yaml
+# THE FIX — a single line removed
+- name: Test
+  run: npm test
+  # continue-on-error line deleted entirely — the test gate is real again
+```
+
+## Modeling the exact same logic in runnable code
+
+```js
+// A minimal model of the gating logic above, general enough to test directly
+function runPipeline(steps) {
+  const results = [];
+  for (const step of steps) {
+    const passed = step.run();
+    results.push({ name: step.name, passed });
+    if (!passed && !step.continueOnError) {
+      return { results, deployed: false, stoppedAt: step.name };
+    }
+  }
+  return { results, deployed: true, stoppedAt: null };
+}
+```
+
+```js
+// Reproducing the incident exactly: continueOnError left true on a FAILING test
+const buggyPipeline = [
+  { name: "build", continueOnError: false, run: () => true },
+  { name: "test", continueOnError: true, run: () => false }, // failing, but tolerated
+  { name: "deploy-production", continueOnError: false, run: () => true },
+];
+runPipeline(buggyPipeline);
+// { results: [...], deployed: true, stoppedAt: null }
+// The failing test didn't stop anything — exactly the incident.
+```
+
+```js
+// The fix: continueOnError removed from the test step
+const fixedPipeline = [
+  { name: "build", continueOnError: false, run: () => true },
+  { name: "test", continueOnError: false, run: () => false }, // same failure, now real
+  { name: "deploy-production", continueOnError: false, run: () => true },
+];
+runPipeline(fixedPipeline);
+// { results: [...], deployed: false, stoppedAt: "test" }
+// The pipeline correctly halts before reaching deploy.
+```
+
+Nothing about `runPipeline` itself changed between the buggy and fixed
+runs — the exact same function, given the exact same kind of failure,
+produces completely different outcomes purely based on one boolean flag
+on one step. This mirrors the real incident precisely: the bug was never
+in the pipeline's core logic, it was in one leftover configuration value.
+
+## Artifact promotion, modeled the same way
+
+```js
+// The SAME artifact moves through each environment — never rebuilt per stage
+function promoteThroughEnvironments(artifactId, environments) {
+  const promoted = [];
+  for (const env of environments) {
+    if (!env.gate(artifactId)) {
+      return { promoted, blockedAt: env.name };
+    }
+    promoted.push(env.name);
+  }
+  return { promoted, blockedAt: null };
+}
+```
+
+```js
+const environments = [
+  { name: "staging", gate: (id) => runSmokeTests(id) },
+  { name: "production", gate: (id) => hasManualApproval(id) },
+];
+promoteThroughEnvironments("build-8231", environments);
+```
+
+The same `artifactId` is checked against each environment's own gate in
+sequence — `build-8231` that passes staging's smoke tests is the _exact
+same build_ that later needs production's approval gate, never a
+freshly-rebuilt copy that could have drifted from what staging actually
+verified.
+
+## Extend the incident: what if the bypassed gate had been caught in review?
+
+**The `continue-on-error: true` line sat in the pipeline config for two
+weeks. Could a different practice have caught it before the second
+incident?** Pipeline configuration is code, and it's easy to treat it as
+lower-stakes than application code because it doesn't ship a user-facing
+feature — but a change to a deploy gate has arguably higher blast radius
+than most application code changes. Treating pipeline config changes with
+the same review rigor as application code (a visible diff, a reviewer who
+asks "why is this override here and when does it come out") would have
+surfaced the leftover flag as an open question well before the second
+incident forced the issue.
+
+## Failure modes
+
+| Failure mode                                                                                                | What it gets wrong                                                                                                               |
+| ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Applying `continue-on-error` to the actual correctness gate (tests), not just genuinely non-blocking checks | Silently converts the one stage built to catch real bugs into a no-op                                                            |
+| Leaving a temporary override in place with no removal plan or ticket                                        | The override outlives its original justification and becomes a permanent, invisible gap                                          |
+| Rebuilding the artifact separately for each environment                                                     | Reopens the exact drift risk artifact promotion exists to close — staging and production may no longer be running the same thing |
+| Deciding how rollback works only after a bad deploy is already live                                         | Slower, riskier, and less reliable than a rollback path designed and rehearsed in advance                                        |
+| Treating pipeline configuration changes as lower-stakes than application code                               | A deploy-gate change can have a larger blast radius than most feature code, and deserves matching review rigor                   |

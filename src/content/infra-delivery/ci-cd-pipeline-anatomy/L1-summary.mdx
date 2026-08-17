@@ -1,0 +1,63 @@
+---
+title: "L1 — How does code get from a commit to running in production?"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Green checkmark, broken code in production">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>Two weeks earlier</strong> — a flaky test kept failing intermittently; someone adds "continue on error" to the test step to unblock a release</div>
+      <div class="flex items-center gap-1.5"><span>😬</span> <strong>Nobody removes it</strong> — the workaround stays in the pipeline config after the flaky test is forgotten</div>
+      <div class="flex items-center gap-1.5"><span>🔥</span> <strong>This week</strong> — a genuinely broken commit fails the test suite, but the pipeline shows all green and deploys to production anyway</div>
+    </div>
+  </Fragment>
+
+A commit with a real bug fails the test suite. The pipeline dashboard
+shows every stage green, and the broken code is already running in
+production by the time anyone notices. **The team has a CI/CD pipeline
+specifically to prevent this. What went wrong?**
+
+Two weeks earlier, a flaky test kept failing for unrelated reasons, and
+someone added `continue-on-error: true` to the test step to unblock a
+release under time pressure — intending to come back and fix the flaky
+test properly. Nobody did. The flag stayed. When a real test failure
+happened weeks later, the pipeline treated it exactly like the flaky
+failure it was built to tolerate: it logged the failure, marked the step
+"green" anyway, and moved on to deploy.
+
+</Scenario>
+
+- **A CI/CD pipeline is a sequence of stages, each one built to catch a
+  specific class of problem** — a build stage catches "does this even
+  compile," a test stage catches "does this behave correctly," a staging
+  deploy catches "does this work outside a developer's machine." Each
+  stage is only useful if a failure in it actually stops the pipeline.
+- **"Continue on error" is a deliberate escape hatch for a specific,
+  temporary situation — not a permanent setting.** It exists for cases
+  like a known-flaky, non-blocking check; left in place indefinitely, it
+  silently converts a real safety gate into a no-op that always reports
+  success regardless of what actually happened.
+- **CI (continuous integration) and CD (continuous delivery/deployment)
+  are two different concerns chained together**: CI answers "is this
+  change good," CD answers "how does a change that's already been judged
+  good actually reach production." A pipeline can have excellent CI and
+  still ship broken code if the connection between the two — the gate —
+  isn't enforced.
+- **The same build artifact should move through every environment
+  unchanged** — built once, then promoted through staging and production
+  — rather than rebuilt separately for each one, so that what gets tested
+  in staging is provably the exact same thing that reaches production.
+- The practical skill this unit builds: **treating every "temporary"
+  override to a pipeline gate as something that needs an expiration plan**
+  — a ticket, a follow-up, a reason it will actually get removed — not
+  just a fix for right now.
+
+## What a pipeline stage is actually for
+
+| Stage                | Question it answers                           | What a silent bypass costs                                |
+| -------------------- | --------------------------------------------- | --------------------------------------------------------- |
+| Build                | Does this compile / package correctly?        | Broken artifacts reach later stages                       |
+| Test                 | Does this behave correctly?                   | Bugs reach production undetected                          |
+| Deploy to staging    | Does this work outside a developer's machine? | Environment-specific bugs reach production                |
+| Deploy to production | Is this actually live for users?              | N/A — this is the stage everything else exists to protect |
