@@ -1,0 +1,172 @@
+---
+title: "L3 — Reproducing the IDOR bug and its fix in real, runnable code"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="One missing comparison, reproduced exactly">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>👤</span> <strong>User 42</strong> — role `billing-viewer`, owns invoice `48213`</div>
+      <div class="flex items-center gap-1.5"><span>👤</span> <strong>User 7</strong> — role `billing-viewer`, owns invoice `48212`</div>
+      <div class="flex items-center gap-1.5"><span>🔓</span> <strong>The request</strong> — user 42 requests invoice `48212` (not theirs)</div>
+    </div>
+    <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
+        <p class="font-semibold text-rose-600 dark:text-rose-400">Vulnerable handler</p>
+        Returns the invoice — 200 OK
+      </div>
+      <div class="rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950">
+        <p class="font-semibold text-emerald-600 dark:text-emerald-400">Fixed handler</p>
+        Throws 403 Forbidden
+      </div>
+    </div>
+  </Fragment>
+
+**Before reading the code, predict: does adding the ownership check require changing the
+`users` or `invoices` data at all, or only the logic inside the handler function?**
+
+</Scenario>
+
+## The vulnerable handler, reproducing the exact incident
+
+```js
+// invoices.js — a simplified store and the ORIGINAL, vulnerable handler
+const invoices = {
+  48212: { id: 48212, ownerId: 7, amount: 120 },
+  48213: { id: 48213, ownerId: 42, amount: 340 },
+};
+const users = {
+  42: { id: 42, role: "billing-viewer" },
+  7: { id: 7, role: "billing-viewer" },
+  1: { id: 1, role: "billing-admin" },
+};
+
+function getInvoiceVulnerable(currentUserId, invoiceId) {
+  const user = users[currentUserId];
+  if (!user) throw new Error("401 Unauthorized");
+
+  const invoice = invoices[invoiceId];
+  if (!invoice) throw new Error("404 Not Found");
+
+  return invoice; // BUG: authenticated, but never checked ownership
+}
+```
+
+```js
+// Reproducing L1's incident exactly: user 42 requests invoice 48212, owned by user 7
+getInvoiceVulnerable(42, 48212);
+// { id: 48212, ownerId: 7, amount: 120 } — returned successfully, no error at all
+```
+
+The function correctly checks that `currentUserId` maps to a real, authenticated user —
+that check works exactly as intended. **It never once compares `invoice.ownerId` against
+`user.id`** — the ABAC-style attribute comparison from L2 simply doesn't exist in this
+code, which is precisely why any authenticated user can fetch any invoice by ID.
+
+## The fixed handler — one added comparison
+
+```js
+function getInvoiceFixed(currentUserId, invoiceId) {
+  const user = users[currentUserId];
+  if (!user) throw new Error("401 Unauthorized");
+
+  const invoice = invoices[invoiceId];
+  if (!invoice) throw new Error("404 Not Found");
+
+  const isOwner = invoice.ownerId === user.id;
+  const isAdmin = user.role === "billing-admin";
+  if (!isOwner && !isAdmin) throw new Error("403 Forbidden");
+
+  return invoice;
+}
+```
+
+```js
+try {
+  getInvoiceFixed(42, 48212); // user 42 requesting user 7's invoice
+} catch (e) {
+  console.log(e.message); // "403 Forbidden"
+}
+
+getInvoiceFixed(7, 48212); // the actual owner — succeeds
+getInvoiceFixed(1, 48212); // billing-admin — succeeds via the role clause
+```
+
+**Neither the `users` object nor the `invoices` object changed at all.** The fix is
+entirely the added `isOwner`/`isAdmin` check — exactly the missing row from L1's table,
+implemented as two boolean comparisons and a guard clause.
+
+## The RBAC and ABAC checks, as separate, composable functions
+
+```js
+// A real system typically separates these two kinds of checks
+function rbacAllows(role, permission) {
+  const ROLE_PERMISSIONS = {
+    "billing-viewer": ["view-invoice", "view-billing-history"],
+    "billing-admin": [
+      "view-invoice",
+      "view-billing-history",
+      "edit-invoice",
+      "refund-invoice",
+    ],
+  };
+  return (ROLE_PERMISSIONS[role] || []).includes(permission);
+}
+
+function abacAllowsViewInvoice(user, invoice) {
+  return invoice.ownerId === user.id || user.role === "billing-admin";
+}
+```
+
+```js
+rbacAllows("billing-viewer", "view-invoice"); // true — role has this permission
+rbacAllows("billing-viewer", "refund-invoice"); // false — role lacks this permission
+
+abacAllowsViewInvoice({ id: 42, role: "billing-viewer" }, { ownerId: 7 }); // false
+abacAllowsViewInvoice({ id: 7, role: "billing-viewer" }, { ownerId: 7 }); // true
+```
+
+A real endpoint combines both: `rbacAllows` gates whether the _kind_ of action is even
+possible for this role, and `abacAllowsViewInvoice` gates whether _this specific_ resource
+is accessible to _this specific_ user. Neither function alone reproduces the fixed
+handler's behavior — `rbacAllows("billing-viewer", "view-invoice")` returns `true`
+regardless of which invoice ID is requested, and would incorrectly allow the original bug
+if used alone.
+
+## Extend the incident: what if the resource has a more complex ownership rule?
+
+L1 and L2's ownership check was a simple one-to-one comparison (`invoice.ownerId ===
+user.id`). **What changes if invoices can belong to a whole team, not just one user — does
+the same ABAC pattern still work?**
+
+```js
+function abacAllowsViewTeamInvoice(user, invoice, userTeamIds) {
+  const isTeamMember = userTeamIds.includes(invoice.teamId);
+  return isTeamMember || user.role === "billing-admin";
+}
+
+abacAllowsViewTeamInvoice(
+  { id: 42, role: "billing-viewer" },
+  { teamId: "team-9" },
+  ["team-9", "team-12"], // user 42's team memberships
+); // true — user is on team-9
+```
+
+The pattern generalizes directly: the comparison shifts from a single ID match to a
+membership check against a list, but it's still an attribute-of-the-user-vs-attribute-of-
+the-resource comparison — the same ABAC shape as before, just with a richer relationship
+than strict ownership. **This is the actual generalizable lesson**: whatever the specific
+relationship is (owns, is-on-the-same-team-as, is-assigned-to), an authorization check has
+to encode it explicitly — authentication alone, and even a correct role check alone, never
+implies it.
+
+## Failure modes
+
+| Failure mode                                                                    | What it gets wrong                                                                                                                                                       |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Assuming a valid login implies authorization to access any specific resource    | Authentication and authorization are separate checks — the invoice bug passed authentication perfectly and still leaked private data                                     |
+| Using only RBAC for resource-specific access control                            | `rbacAllows("billing-viewer", "view-invoice")` is true regardless of which invoice — role checks can't express per-resource ownership by design                          |
+| Adding the ownership check only to some endpoints that return user data         | Any endpoint accepting a resource ID from the request is a candidate for this exact bug class — the audit needs to cover all of them, not just the one that was reported |
+| Treating a "found the bug in one place, fixed it" as the whole task             | The generalizable fix is the AUDIT QUESTION (is there an attribute comparison for every ID-accepting endpoint), not just the one line changed in the reported endpoint   |
+| Assuming complex ownership (teams, shared resources) can't use the same pattern | The comparison shape stays the same (attribute of user vs. attribute of resource) even when the relationship is richer than a single ID match                            |

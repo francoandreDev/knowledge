@@ -1,0 +1,73 @@
+---
+title: "L1 — How do we decide what an authenticated user is allowed to do? (authorization models: RBAC/ABAC)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Logged in, but not supposed to see this">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🔑</span> <strong>The endpoint</strong> — `GET /api/invoices/:id`, requires a valid login</div>
+      <div class="flex items-center gap-1.5"><span>🔢</span> <strong>The test</strong> — a logged-in user changes the `:id` in the URL from their own invoice to a neighboring number</div>
+      <div class="flex items-center gap-1.5"><span>😱</span> <strong>The result</strong> — a complete stranger's invoice, full billing details, returned successfully</div>
+    </div>
+    <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div class="rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950">
+        <p class="font-semibold text-emerald-600 dark:text-emerald-400">Check performed</p>
+        Is there a valid login session? ✅
+      </div>
+      <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
+        <p class="font-semibold text-rose-600 dark:text-rose-400">Check NOT performed</p>
+        Does this invoice belong to this logged-in user? ❌
+      </div>
+    </div>
+  </Fragment>
+
+An engineer, testing their own account, notices their invoice URL is
+`/api/invoices/48213`. Out of curiosity, they change it to `/api/invoices/48212`. It
+returns — successfully, with a `200 OK` — a complete stranger's invoice: their name,
+address, and billing history. **The endpoint required a valid login. The request came
+from a genuinely authenticated user. So why did it return someone else's private data?**
+
+The endpoint checked _authentication_ — is there a valid, logged-in session — and stopped
+there. It never checked _authorization_ — does the specific resource being requested
+(invoice `48212`) actually belong to the specific user making the request. Being logged in
+answered "who are you," not "what are you allowed to see," and the endpoint only ever
+asked the first question.
+
+</Scenario>
+
+- **Authentication and authorization answer genuinely different questions, and a system
+  can get the first one completely right while failing the second** — "this request comes
+  from a real, logged-in user" (authentication) says nothing about "this specific user is
+  allowed to access this specific resource" (authorization). The invoice endpoint proves
+  both can be true and false at the same time.
+- **This specific failure pattern — checking login status but not resource ownership — is
+  common enough to have a name: Insecure Direct Object Reference (IDOR).** It's one of the
+  most frequently reported real-world web vulnerabilities precisely because it's easy to
+  write an endpoint that "obviously" requires login and never notice the missing second
+  check.
+- **An authorization model is the systematic answer to "what determines whether this
+  request should succeed."** Two common approaches: **RBAC** (role-based access control) —
+  permissions attached to a role, like "billing-viewer can view invoices" — and **ABAC**
+  (attribute-based access control) — permissions computed from attributes of the user, the
+  resource, and the context, like "user.id must equal invoice.ownerId."
+- **RBAC alone cannot express the invoice bug's fix.** "Is this user's role allowed to view
+  invoices at all" is a real, useful RBAC question — but it can only ever answer "can a
+  billing-viewer view invoices," never "can _this specific_ billing-viewer view _this
+  specific_ invoice." The missing check was inherently an attribute-level (ABAC-style)
+  comparison, not a role-level one.
+- The practical skill this unit builds: for any endpoint or action, ask not just "is this
+  role allowed to do this kind of thing" but **"is this specific actor allowed to act on
+  this specific resource"** — the second question is where IDOR-class bugs hide, and no
+  amount of correct role-checking catches it on its own.
+
+## Two questions, two different bugs
+
+| Question                                                       | Answers                              | Bug if skipped                                                                          |
+| -------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------- |
+| Is there a valid, authenticated session?                       | Authentication                       | Anyone, logged in or not, can access anything                                           |
+| Is this session's role allowed to perform this KIND of action? | Authorization (RBAC)                 | A role can perform actions it shouldn't be able to at all                               |
+| Does this specific resource belong to this specific actor?     | Authorization (ABAC-style ownership) | Any valid user of the right role can access ANY resource of that type — the invoice bug |
+
+The invoice endpoint got the first two rows right and skipped the third entirely.

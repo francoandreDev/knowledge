@@ -111,7 +111,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | --- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
 | 01  | security-mindset                       | Why doesn't "it works" mean "it's safe"? (the security mindset, threat modeling basics)                                                     | done    |
 | 02  | authentication-fundamentals            | How do we prove someone is who they claim to be? (authentication fundamentals, passwords, hashing)                                          | done    |
-| 03  | authorization-models                   | How do we decide what an authenticated user is allowed to do? (authorization models: RBAC/ABAC)                                             | planned |
+| 03  | authorization-models                   | How do we decide what an authenticated user is allowed to do? (authorization models: RBAC/ABAC)                                             | done    |
 | 04  | hashing                                | Why does storing a password in plain text guarantee disaster? (hashing, salting, key derivation)                                            | planned |
 | 05  | symmetric-asymmetric-encryption-basics | How do we keep data unreadable to anyone but the intended recipient? (symmetric vs. asymmetric encryption basics)                           | planned |
 | 06  | tls-https                              | Why doesn't a green padlock mean a site is safe? (TLS/HTTPS, certificate trust chains)                                                      | planned |
