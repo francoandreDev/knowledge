@@ -1,0 +1,157 @@
+---
+title: "L3 — Three pasted copies, one extraction, and the flag that revealed the trap"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="One rule, three pasted copies, then a new rule that isn't the same one">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📋</span> <strong>Start</strong> — the exact same bulk-discount rule, pasted into checkout, cart preview, and the admin refund tool</div>
+      <div class="flex items-center gap-1.5"><span>🔧</span> <strong>Extraction</strong> — consolidated into one shared <code>applyBulkDiscount</code> function</div>
+      <div class="flex items-center gap-1.5"><span>⚠️</span> <strong>The trap</strong> — a new, genuinely different loyalty-discount rule gets bolted onto the same function via a boolean flag</div>
+    </div>
+  </Fragment>
+
+**Before reading further, predict: once the loyalty discount is added
+as a flag on the shared function, what's the first kind of bug likely
+to show up — and would it show up immediately, or only later?**
+
+</Scenario>
+
+## Step 1: true duplication, three pasted copies
+
+```js
+// checkout.js
+function checkoutDiscount(price, quantity) {
+  if (quantity >= 5) return Math.round(price * quantity * 0.9 * 100) / 100;
+  return Math.round(price * quantity * 100) / 100;
+}
+
+// cart-preview.js — pasted from checkout.js, same rule
+function cartPreviewDiscount(price, quantity) {
+  if (quantity >= 5) return Math.round(price * quantity * 0.9 * 100) / 100;
+  return Math.round(price * quantity * 100) / 100;
+}
+
+// admin-refund-tool.js — pasted again, same rule, third copy
+function refundToolDiscount(price, quantity) {
+  if (quantity >= 5) return Math.round(price * quantity * 0.9 * 100) / 100;
+  return Math.round(price * quantity * 100) / 100;
+}
+```
+
+This is genuinely **true duplication**, not coincidental — all three
+copies express the exact same rule ("10% off at quantity 5 or more"),
+and per L2's test, a change to that rule should hit all three at once.
+By the rule of three, this is the third occurrence: real evidence, not
+a guess.
+
+## Step 2: extracting the shared rule
+
+```js
+// discounts.js
+function applyBulkDiscount(price, quantity) {
+  const total = price * quantity;
+  const discounted = quantity >= 5 ? total * 0.9 : total;
+  return Math.round(discounted * 100) / 100;
+}
+
+console.log(applyBulkDiscount(10, 5)); // 45
+console.log(applyBulkDiscount(10, 4)); // 40
+```
+
+All three call sites now import and call `applyBulkDiscount`. One rule,
+one place it lives — exactly what DRY was asking for, and correctly
+earned by three real occurrences of the _same_ rule, not extracted on a
+guess after just one or two.
+
+## Step 3: the trap — a new rule that only looks like the old one
+
+A product requirement arrives: loyalty-program customers get 15% off
+starting at quantity 3, instead of the standard bulk discount. The
+existing `applyBulkDiscount` function is right there, already shared,
+already imported everywhere discounts happen — so it gets a flag:
+
+```js
+// discounts.js — the trap
+function applyDiscount(price, quantity, isLoyalty) {
+  const total = price * quantity;
+  let discounted = total;
+  if (isLoyalty && quantity >= 3) {
+    discounted = total * 0.85;
+  } else if (quantity >= 5) {
+    discounted = total * 0.9;
+  }
+  return Math.round(discounted * 100) / 100;
+}
+
+console.log(applyDiscount(10, 5, false)); // 45  — bulk, unchanged
+console.log(applyDiscount(10, 3, true)); // 25.5 — loyalty
+console.log(applyDiscount(10, 5, true)); // 42.5 — loyalty silently wins over bulk here
+```
+
+The function still passes every existing test — `applyDiscount(10, 5,
+false)` still returns `45`, exactly as `applyBulkDiscount` always did.
+**But look at the third call**: a loyalty customer buying 5 units
+qualifies for _both_ rules, and the `if/else if` ordering silently
+decided loyalty wins, with no caller ever having stated that priority
+on purpose — it fell out of which branch happened to be written first.
+This is the forced-abstraction warning sign from L2, now concrete: a
+boolean flag that exists purely to let one function serve two rules
+that were never actually the same rule.
+
+## Step 4: undoing it — composition instead of a flag
+
+```js
+// discounts.js — fixed
+const discountRules = [
+  { name: "loyalty", applies: (q, ctx) => ctx.isLoyalty && q >= 3, rate: 0.85 },
+  { name: "bulk", applies: (q, ctx) => q >= 5, rate: 0.9 },
+];
+
+function calculateDiscount(price, quantity, ctx = {}) {
+  const total = price * quantity;
+  const rule = discountRules.find((r) => r.applies(quantity, ctx));
+  const discounted = rule ? total * rule.rate : total;
+  return Math.round(discounted * 100) / 100;
+}
+
+console.log(calculateDiscount(10, 5, {})); // 45   — bulk
+console.log(calculateDiscount(10, 3, { isLoyalty: true })); // 25.5 — loyalty
+console.log(calculateDiscount(10, 5, { isLoyalty: true })); // 42.5 — loyalty, now explicit
+console.log(calculateDiscount(10, 2, {})); // 20   — no rule applies
+```
+
+The numeric results are identical to Step 3 — this isn't a behavior
+change, it's a legibility one. `discountRules`'s **order is now the
+explicit, visible statement of priority** ("loyalty is checked before
+bulk") instead of an accidental side effect of `if/else if` ordering
+buried inside a function nobody meant to make a priority decision in.
+Adding a third, future discount rule means adding one more object to
+the array — not editing a growing chain of `if/else if` branches that
+each have to know about every rule that came before them.
+
+## Extend it: what if the two rules needed genuinely shared logic, not just a shared shape?
+
+**Everything above assumed loyalty and bulk discounts share nothing but
+percentage-off-and-round. What if a real requirement existed that both
+rules truly need — say, a company-wide policy that no discount may ever
+exceed 50%, regardless of which rule applied?** That constraint _is_
+true duplication in L2's sense (the same rule, needing to change
+everywhere at once) — the right fix is a shared clamp applied once,
+after whichever rule's rate is selected, not copied into each rule
+object: `Math.min(rule?.rate ?? 1, 0.5)`. The lesson isn't "never share
+logic between the two rules" — it's that only the parts genuinely
+representing one rule belong in one place; the parts that don't should
+stay separate, even while living right next to each other.
+
+## Failure modes
+
+| Failure mode                                                                                         | What it gets wrong                                                                                                              |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Extracting a shared function after only one or two occurrences                                       | Not enough evidence yet to know if it's true or coincidental duplication                                                        |
+| Adding a boolean flag to an existing function for a new, different rule                              | Stitches two unrelated rules together behind one signature, hiding which one takes priority when both could apply               |
+| Treating "the tests still pass" as proof an abstraction is still correct                             | The existing tests only exercised the old rule — they can't catch an ordering bug between two rules that never coexisted before |
+| Refusing to ever share code between two genuinely related rules                                      | Coincidental-duplication caution taken too far re-introduces true duplication for the parts that actually are the same rule     |
+| Judging duplication by whether the code looks similar, not by whether it changes for the same reason | Identical-looking code can be coincidental; different-looking code can encode the same rule twice                               |
