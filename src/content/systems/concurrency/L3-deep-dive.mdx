@@ -1,0 +1,150 @@
+---
+title: "L3 — Measuring the block, then measuring the fix"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same 200ms of work, two very different outcomes for everyone else">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🚫</span> <strong>Unchunked</strong> — one continuous 200ms synchronous block</div>
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Chunked</strong> — the same 200ms of work, split into 10 pieces</div>
+      <div class="flex items-center gap-1.5"><span>⏱️</span> <strong>Measured</strong> — how late a concurrent 0ms timer actually fires, in each case</div>
+    </div>
+  </Fragment>
+
+**Before reading the fix, predict: if the same 200ms of total work is
+split into ten 20ms pieces instead of one continuous block, roughly how
+late will the concurrent 0ms timer fire — still close to 200ms, or
+something closer to 20ms?**
+
+</Scenario>
+
+## The block, measured directly
+
+```js
+// blocking-demo.mjs
+function blockFor(ms) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {} // busy-wait — occupies the thread completely
+}
+
+console.log("Request A: start", Date.now());
+const scheduledAt = Date.now();
+
+setTimeout(() => {
+  const firedAt = Date.now();
+  console.log(
+    "Request B (async, requested 0ms): fired at",
+    firedAt,
+    "- actual delay:",
+    firedAt - scheduledAt,
+    "ms",
+  );
+}, 0);
+
+blockFor(200);
+console.log("Request A: done", Date.now());
+```
+
+```
+Request A: start 1787082980426
+Request A: done 1787082980628
+Request B (async, requested 0ms): fired at 1787082980628 - actual delay: 200 ms
+```
+
+Request B asked to run "as soon as possible" and got queued
+immediately — but it didn't actually run until the exact millisecond
+Request A's `blockFor` finished. The single thread was occupied that
+entire time; a 0ms request time is a request to run _next_, not a
+promise about _when_ next actually arrives.
+
+## The fix: yielding control between chunks
+
+```js
+// chunked-demo.mjs
+function blockForChunk(ms) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {}
+}
+
+function chunkedWork(totalMs, chunkMs, onDone) {
+  let remaining = totalMs;
+  function step() {
+    if (remaining <= 0) return onDone();
+    const thisChunk = Math.min(chunkMs, remaining);
+    blockForChunk(thisChunk);
+    remaining -= thisChunk;
+    setImmediate(step); // return control to the event loop before the next chunk
+  }
+  step();
+}
+
+console.log("Request A: start", Date.now());
+const scheduledAt = Date.now();
+
+setTimeout(() => {
+  const firedAt = Date.now();
+  console.log(
+    "Request B (async, requested 0ms): fired at",
+    firedAt,
+    "- actual delay:",
+    firedAt - scheduledAt,
+    "ms",
+  );
+}, 0);
+
+chunkedWork(200, 20, () => {
+  console.log("Request A: done", Date.now());
+});
+```
+
+```
+Request A: start 1787082988004
+Request B (async, requested 0ms): fired at 1787082988026 - actual delay: 20 ms
+Request A: done 1787082988206
+```
+
+Request B now fires after roughly **20ms**, not 200ms — a 10x
+improvement — simply because `setImmediate` hands control back to the
+event loop after every chunk, giving any other pending callback (like
+Request B's timer) a chance to run before the next chunk starts.
+Request A still takes the same total ~200ms to finish overall; what
+changed is that it no longer monopolizes the thread continuously to get
+there.
+
+## What actually changed, concretely
+
+|                                               | Unchunked               | Chunked                                        |
+| --------------------------------------------- | ----------------------- | ---------------------------------------------- |
+| Total time for Request A                      | ~200ms                  | ~200ms (unchanged)                             |
+| Delay before Request B's 0ms timer fires      | ~200ms                  | ~20ms                                          |
+| What the thread does between start and finish | One uninterrupted block | Repeatedly yields, letting other callbacks run |
+
+Nothing about the actual computation changed — the same total CPU work
+still has to happen. What changed is _when_ other pending callbacks get
+a chance to interleave with it.
+
+## Extend it: what if Request A's work couldn't be split into chunks at all?
+
+**Everything above assumed the 200ms of work could be cleanly divided
+into independent pieces. What if it were a single computation that
+genuinely can't be interrupted partway through — say, a cryptographic
+hash of a large buffer, computed by one library call?** Chunking isn't
+available there, but the underlying problem is identical: that call
+still occupies the one thread for its full duration. The real fix in
+that case is moving the work off the main thread entirely — a worker
+thread (Node's `worker_threads` module) or a separate process — so the
+main thread stays free to keep handling other requests' I/O while the
+CPU-bound work runs elsewhere, then reports its result back via a
+message rather than a direct function return.
+
+## Failure modes
+
+| Failure mode                                                               | What it gets wrong                                                                                                                 |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Assuming "non-blocking I/O" means the whole server can't be blocked        | CPU-bound work blocks a single-threaded event loop exactly as completely as any other single thread                                |
+| Treating a 0ms or immediate timer as a guarantee about timing              | It only guarantees "run next when the thread is free" — not a bound on how soon the thread becomes free                            |
+| Chunking work but forgetting to actually yield between chunks              | A loop that just calls itself synchronously still runs as one uninterrupted block, chunked or not                                  |
+| Reaching for threads/processes as the first fix for every blocking problem | Most blocking in a typical server is I/O, already solved by the event loop — chunking or offloading only helps the CPU-bound share |
+| Assuming parallelism whenever concurrency is present                       | A single event loop interleaves turns on one thread — it never runs two callbacks at the literal same instant                      |

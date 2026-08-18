@@ -1,0 +1,61 @@
+---
+title: "L1 — Why does one slow request freeze every other request on the same server?"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="A 0ms timer that took 200ms to fire">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>⏱️</span> <strong>Request B</strong> — scheduled to run after 0ms, no work of its own to do</div>
+      <div class="flex items-center gap-1.5"><span>🧮</span> <strong>Request A</strong> — a synchronous, CPU-heavy calculation, running at the same moment</div>
+      <div class="flex items-center gap-1.5"><span>😳</span> <strong>What happened</strong> — Request B didn't fire until Request A finished, 200ms later</div>
+    </div>
+  </Fragment>
+
+A single-threaded server schedules a callback to run after 0 milliseconds
+— essentially "run this as soon as possible." At nearly the same
+instant, a different request starts a synchronous calculation that
+takes 200 milliseconds. **The 0ms callback doesn't fire until 200
+milliseconds later, at the exact moment the calculation finishes — not
+because it was scheduled late, but because of what the server was doing
+in between. What was actually happening during those 200 milliseconds
+that a request asking for "nothing, immediately" had to wait through?**
+
+</Scenario>
+
+## The shape of the problem
+
+- A single-threaded program can only run one piece of JavaScript at a
+  time — "concurrency" in that context doesn't mean two things run
+  simultaneously, it means many things take _turns_ quickly enough that
+  they all appear to make progress together.
+- A synchronous, CPU-heavy piece of code holds that single thread for
+  its entire duration — nothing else, including an "immediate" timer or
+  a completely unrelated request, gets a turn until it finishes.
+
+## Key terms
+
+- **Concurrency** — multiple tasks making progress over the same
+  period of time, which doesn't require true simultaneous execution —
+  only that the system interleaves turns between them.
+- **Parallelism** — tasks actually executing at the exact same instant,
+  which requires more than one thread or core; concurrency doesn't
+  require parallelism, though the two are often used loosely as
+  synonyms.
+- **Blocking** — code that holds the current thread until it finishes,
+  during which nothing else on that thread can make progress, even
+  work that was ready to run immediately.
+- **Event loop** — the mechanism a single-threaded runtime (like
+  Node.js's JavaScript thread) uses to interleave many pending
+  callbacks, giving each a turn between the moments the currently
+  running piece of code voluntarily yields control back.
+
+## What this unit covers
+
+L2 works through what the event loop actually does between turns, and
+why non-blocking I/O lets a single thread serve many concurrent
+requests without ever running more than one at a time. L3 demonstrates
+both the blocking problem and a real fix — measured with actual
+timestamps, not just described — using a CPU-heavy task that's broken
+into chunks so it stops starving everything else waiting for a turn.
