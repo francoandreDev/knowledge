@@ -289,7 +289,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 01  | ic-excellence-management      | Why does managing people require different skills than being good at the work itself? (IC excellence vs. management, the transition problem)     | done    |
 | 02  | 1                             | How do I run a 1:1 that's actually useful, not just a status check? (1:1 structure, listening, coaching questions)                               | done    |
 | 03  | delegation-levels             | How do I delegate work without either micromanaging or abandoning it? (delegation levels, trust but verify)                                      | done    |
-| 04  | sbi-framework                 | How do I give feedback that changes behavior instead of just being heard? (SBI framework, feedback timing, difficult conversations)              | planned |
+| 04  | sbi-framework                 | How do I give feedback that changes behavior instead of just being heard? (SBI framework, feedback timing, difficult conversations)              | done    |
 | 05  | goal-setting                  | How do I set goals for a team that actually align with what the org needs? (goal-setting, OKRs, translating strategy downward)                   | planned |
 | 06  | early-signals                 | How do I know if someone on my team is struggling before it's a crisis? (early signals, psychological safety, checking in)                       | planned |
 | 07  | mediation                     | How do I handle conflict between two people on my team? (mediation, staying neutral, addressing root cause)                                      | planned |
