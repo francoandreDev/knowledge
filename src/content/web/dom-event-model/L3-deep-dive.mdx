@@ -1,0 +1,151 @@
+---
+title: "L3 — Reproducing the icon-click bug with a real closest() implementation"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same button, two different event.target values">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🔘</span> <strong>The button</strong> — <code>button.delete-btn</code></div>
+      <div class="flex items-center gap-1.5"><span>🎨</span> <strong>Its child</strong> — <code>span.icon</code>, nested inside the button</div>
+    </div>
+  </Fragment>
+
+**Before reading the code, predict: does a naive `event.target.className
+=== 'delete-btn'` check work when the click lands on the button's own
+text/background, but fail only when it lands on the icon — or does it
+fail in both cases?**
+
+</Scenario>
+
+## Modeling the DOM tree and the closest() logic
+
+This L3 models elements as plain objects (`tagName`, `className`,
+`parent`) rather than requiring an actual browser — the underlying logic
+is identical to what a real `element.closest()` does internally.
+
+```js
+function makeNode(tagName, className, parent = null) {
+  return { tagName, className, parent };
+}
+
+function matchesClass(node, className) {
+  return !!node.className && node.className.split(" ").includes(className);
+}
+
+// Models element.closest(selector) — walk up from node through its ancestors
+function closest(node, className) {
+  let current = node;
+  while (current) {
+    if (matchesClass(current, className)) return current;
+    current = current.parent;
+  }
+  return null;
+}
+```
+
+```js
+// Reproducing the incident's exact structure
+const deleteButton = makeNode("button", "delete-btn");
+const icon = makeNode("span", "icon", deleteButton); // icon's parent IS the button
+```
+
+## The buggy handler, reproducing the incident exactly
+
+```js
+function naiveDelegatedHandler(targetClassName, onMatch) {
+  return function onClick(clickedNode) {
+    if (matchesClass(clickedNode, targetClassName)) {
+      onMatch(clickedNode);
+    }
+  };
+}
+```
+
+```js
+let caught = null;
+const onClick = naiveDelegatedHandler("delete-btn", (n) => (caught = n));
+
+onClick(deleteButton);
+console.log(caught === deleteButton); // true — clicking the button directly works
+
+caught = null;
+onClick(icon);
+console.log(caught); // null — clicking the icon does NOTHING, exactly the reported bug
+```
+
+The naive handler checks `clickedNode` directly — it never looks at
+`clickedNode`'s ancestors. When `clickedNode` is the icon, the check
+fails, even though the icon is visually and structurally part of the
+delete button.
+
+## The fixed handler, using closest()
+
+```js
+function createDelegatedClickHandler(targetClassName, onMatch) {
+  return function onClick(clickedNode) {
+    const match = closest(clickedNode, targetClassName);
+    if (match) {
+      onMatch(match);
+    }
+  };
+}
+```
+
+```js
+let fixedCaught = null;
+const onClickFixed = createDelegatedClickHandler(
+  "delete-btn",
+  (n) => (fixedCaught = n),
+);
+
+onClickFixed(deleteButton);
+console.log(fixedCaught === deleteButton); // true
+
+fixedCaught = null;
+onClickFixed(icon);
+console.log(fixedCaught === deleteButton); // true — the icon click now correctly resolves to the button
+```
+
+`createDelegatedClickHandler` never checks `clickedNode` directly — it
+always walks up via `closest()`, so whether the click lands on the
+button itself or three levels of nested icon/span inside it, the same
+button is correctly identified as the match.
+
+## Why closest() correctly returns null for an unrelated click
+
+```js
+const sidebar = makeNode("div", "sidebar");
+console.log(closest(sidebar, "delete-btn")); // null — no delete-btn among its ancestors
+```
+
+This matters just as much as the positive case: a delegated handler
+attached to a large container (like the whole page, or a list containing
+many different kinds of controls) needs `closest()` to correctly say "no
+match" for clicks on unrelated elements, not just correctly say "match"
+for clicks on the intended ones.
+
+## Extend the incident: what if the icon itself has its own click handler?
+
+**The fix above assumes the icon has no click behavior of its own — a
+click on it should always mean "the button was clicked." What if the
+icon is itself meant to do something different, like open a tooltip on
+click, separate from the button's delete action?** This is where
+`event.stopPropagation()` becomes relevant: calling it inside the icon's
+own handler prevents the event from bubbling further up to the
+button/list's delegated handler at all — but this needs to be a
+deliberate design decision, not a default. Calling `stopPropagation()`
+reflexively "just in case" would silently break delegation for every
+ancestor listening for that click, including ones added later that had
+no way to know the icon was swallowing their events.
+
+## Failure modes
+
+| Failure mode                                                                                        | What it gets wrong                                                                          |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Checking `event.target` directly against a selector, when the target could be a descendant          | Fails silently for any click on a nested child element like an icon                         |
+| Confusing `event.target` with `event.currentTarget` in a delegated handler                          | `currentTarget` is always the listener's own element, never the specific clicked descendant |
+| Attaching a separate listener to each individual clickable element                                  | Elements added later never get a listener, unlike a delegated parent listener               |
+| Calling `stopPropagation()` by default "just in case"                                               | Silently breaks delegation for any ancestor listener, including ones added later            |
+| Assuming a visually single-looking control (an icon inside a button) is always a single DOM element | The actual event target can be any specific descendant, not the visual whole                |
