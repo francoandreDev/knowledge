@@ -1,0 +1,131 @@
+---
+title: "L3 — A real deploy pipeline function, and why a scripted step can't be skipped"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Deploy 9, reproduced as data">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📝</span> <strong>Manual list</strong> — assembled from memory, `install-deps` left out</div>
+      <div class="flex items-center gap-1.5"><span>🤖</span> <strong>Scripted list</strong> — built by a function, `install-deps` always present</div>
+    </div>
+  </Fragment>
+
+**Before reading further, predict: if a manually-typed step list and a
+function-built step list both end up as "just an array of strings" at
+the end, what actually stops the manual one from being incomplete in a
+way the scripted one can't be?**
+
+</Scenario>
+
+## Modeling the pipeline as a function, not a list someone types
+
+```js
+// deploy.mjs
+function buildDeploySteps(currentRelease, newRelease) {
+  return [
+    `extract:${newRelease}`,
+    `install-deps:${newRelease}`,
+    `run-migrations:${newRelease}`,
+    `switch-symlink:${currentRelease}->${newRelease}`,
+    "restart-service",
+  ];
+}
+```
+
+The steps aren't typed out by whoever happens to be running the
+deploy that day — they're the return value of a function, which means
+every call to `buildDeploySteps` produces the exact same five steps in
+the exact same order, regardless of who's tired, new, or in a hurry.
+
+## Reproducing Deploy 9's mistake, side by side
+
+```js
+// The manual list from Deploy 9: install-deps quietly left out
+const manualSteps = [
+  "extract:v9",
+  "run-migrations:v9",
+  "switch-symlink:v8->v9",
+  "restart-service",
+];
+
+// The scripted list for the same release
+console.log(buildDeploySteps("v8", "v9"));
+// [ "extract:v9", "install-deps:v9", "run-migrations:v9",
+//   "switch-symlink:v8->v9", "restart-service" ]
+```
+
+`manualSteps` is missing `install-deps:v9` — the exact mistake from
+the opening scenario. Nothing about typing that array out by hand
+would have caught the omission; there's no step that checks "did I
+forget one?" `buildDeploySteps` can't produce this array missing a
+step, because there's no path through the function that skips the
+`install-deps` line — the only way to change what it returns is to
+change the function itself, which is a deliberate, reviewable edit,
+not a slip made at 5pm on a Friday.
+
+## A real health check and rollback
+
+```js
+// runDeploy.mjs
+function runDeploy(steps, healthCheckFn) {
+  const executed = [...steps];
+  const healthy = healthCheckFn();
+  if (!healthy) {
+    executed.push("rollback");
+    return { success: false, executed };
+  }
+  return { success: true, executed };
+}
+
+console.log(runDeploy(["a", "b"], () => true));
+// { success: true, executed: ["a", "b"] }
+
+console.log(runDeploy(["a", "b"], () => false));
+// { success: false, executed: ["a", "b", "rollback"] }
+```
+
+`runDeploy` never asks a human whether the deploy looked okay — the
+`healthCheckFn` result decides, and a failing result appends
+`"rollback"` to what actually ran, automatically, as part of the same
+function call that ran the deploy. There's no separate "someone
+notices and re-runs the old steps" phase.
+
+## Extend it: what if the health check is flaky, not just pass/fail?
+
+**Everything above treats the health check as a single yes/no call.
+What if a freshly-restarted service takes a moment to warm up, so the
+very first check sometimes fails even on a perfectly healthy deploy —
+should one failed check really trigger a full rollback?** Not
+necessarily — a more realistic health check retries a few times before
+giving up:
+
+```js
+function retryHealthCheck(healthCheckFn, attempts) {
+  for (let i = 0; i < attempts; i++) {
+    if (healthCheckFn()) return true;
+  }
+  return false;
+}
+```
+
+Try modeling a health check that fails twice (still warming up) and
+then succeeds — `retryHealthCheck(flakyCheck, 5)` should return `true`
+after 3 calls, while `retryHealthCheck(flakyCheck, 2)` should give up
+and return `false` after only 2. **What would change if the warm-up
+took five checks instead of three — at what `attempts` value does the
+pipeline start rolling back a deploy that was actually fine?** This is
+the same trade-off every retry policy makes: too few attempts and you
+roll back healthy deploys; too many and a genuinely broken deploy stays
+live longer before rollback kicks in.
+
+## Failure modes
+
+| Failure mode                                                        | What it gets wrong                                                                          |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Treating a wiki-page checklist as equivalent to a script            | A checklist documents the steps; it doesn't enforce that they all ran, in order, every time |
+| Running the health check after the atomic switch                    | Traffic already reached the new release before anyone found out it was broken               |
+| Overwriting release files in place instead of switching a pointer   | Creates a window where some requests read old files and some read new ones                  |
+| Assuming "it worked the last eight times" means the process is safe | A manual process's safety depends on the person running it, not on the process itself       |
+| Giving a flaky health check zero retries                            | A slow-starting but healthy deploy gets rolled back for no real reason                      |

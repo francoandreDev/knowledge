@@ -130,7 +130,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 01  | environment-parity                       | Why does "it works on my machine" keep happening? (environment parity, containers basics)                                | done    |
 | 02  | docker                                   | How do we package an app so it runs the same everywhere? (Docker, images vs. containers)                                 | done    |
 | 03  | ci-cd-pipeline-anatomy                   | How does code get from a commit to running in production? (CI/CD pipeline anatomy)                                       | done    |
-| 04  | deployment-automation                    | Why do manual deploys eventually cause an outage? (deployment automation, repeatability)                                 | planned |
+| 04  | deployment-automation                    | Why do manual deploys eventually cause an outage? (deployment automation, repeatability)                                 | done    |
 | 05  | orchestration-basics                     | How do we run many containers reliably across many machines? (orchestration basics: Kubernetes concepts)                 | planned |
 | 06  | infrastructure-code                      | How do we change infrastructure without clicking through a console? (Infrastructure as Code)                             | planned |
 | 07  | progressive-delivery                     | How do we ship a risky change without risking everyone? (progressive delivery: canary, blue-green, feature flags)        | planned |
