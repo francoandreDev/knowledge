@@ -1,0 +1,141 @@
+---
+title: "L3 — A real dependency-graph resolver, and why the shared file appears once"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same three files, two very different results">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📜</span> <strong>Manual order</strong> — script tags in the order they were pasted in</div>
+      <div class="flex items-center gap-1.5"><span>🧮</span> <strong>Resolved order</strong> — computed from the actual import graph</div>
+      <div class="flex items-center gap-1.5"><span>🔁</span> <strong>Shared file</strong> — depended on by two different modules</div>
+    </div>
+  </Fragment>
+
+**Before reading further, predict: if `a.js` and `b.js` both import
+`c.js`, and a bundler resolves the graph correctly, how many times does
+`c.js`'s code actually end up in the final output — once, or twice?**
+
+</Scenario>
+
+## A real dependency-graph resolver
+
+```js
+// resolve-order.mjs
+function resolveOrder(graph) {
+  const visited = new Set();
+  const order = [];
+
+  function visit(node) {
+    if (visited.has(node)) return; // already included — this is what prevents duplicates
+    visited.add(node);
+    for (const dep of graph[node] || []) visit(dep);
+    order.push(node); // a module is only added AFTER all its dependencies are
+  }
+
+  for (const node in graph) visit(node);
+  return order;
+}
+
+const graph = { app: ["utils", "api"], utils: [], api: ["utils"] };
+console.log(resolveOrder(graph));
+// [ 'utils', 'api', 'app' ]
+```
+
+This is a real topological sort: `visit` only appends a module to
+`order` after recursively visiting everything it depends on, which
+guarantees every dependency appears before the thing that needs it —
+`utils` before `api`, and both before `app`, exactly matching what the
+opening scenario's manually-ordered script tags failed to guarantee.
+
+## The shared-dependency case, resolved once
+
+```js
+const graph2 = { main: ["a", "b"], a: ["c"], b: ["c"], c: [] };
+console.log(resolveOrder(graph2));
+// [ 'c', 'a', 'b', 'main' ]
+```
+
+Both `a` and `b` depend on `c`, but `c` appears **exactly once** in the
+output — the `visited` set is what makes this happen: the first time
+`visit("c")` runs (while resolving `a`'s dependencies), `c` gets added
+to `order` and marked visited; when `b`'s dependency on `c` is
+processed next, `visit("c")` returns immediately without adding a
+second copy. A hand-maintained set of script tags has no equivalent
+safeguard — nothing stops `c.js` from being pasted in twice, or from
+being left out because whoever added `b.js` assumed someone else had
+already included it.
+
+## What a naive, unresolved order actually breaks
+
+```js
+// naive-order-demo.mjs — using the graph's raw key order, not the resolved order
+const graph = { app: ["utils", "api"], utils: [], api: ["utils"] };
+const naiveOrder = Object.keys(graph); // ['app', 'utils', 'api'] — insertion order, not resolved
+console.log("naive order:", naiveOrder);
+console.log("resolved order:", resolveOrder(graph));
+```
+
+```
+naive order: [ 'app', 'utils', 'api' ]
+resolved order: [ 'utils', 'api', 'app' ]
+```
+
+The naive order places `app` first — exactly the bug from the opening
+scenario, where a script needing `utils` loads before `utils.js` has
+run. `Object.keys` reflects whatever order files happened to be added
+to the graph in, which has no required relationship to which files
+depend on which — that relationship only comes from actually walking
+the graph's edges, which is what `resolveOrder` does and a plain list
+of script tags never does.
+
+## Tree-shaking: using the same graph information one step further
+
+```js
+// tree-shaking-demo.mjs
+function findUnusedExports(allExports, usedImports) {
+  return allExports.filter((name) => !usedImports.includes(name));
+}
+
+const allExports = ["formatDate", "formatCurrency", "debounce", "throttle"];
+const usedImports = ["formatDate", "debounce"]; // everything actually imported, across the whole graph
+
+console.log(findUnusedExports(allExports, usedImports));
+// [ 'formatCurrency', 'throttle' ]
+```
+
+The same dependency information that makes correct ordering possible
+also makes this possible: since the bundler already knows exactly
+which exports are imported anywhere in the graph, it can safely
+exclude `formatCurrency` and `throttle` from the final bundle — nobody
+in the entire dependency graph asked for them. This is only safe
+because the graph is exhaustive; a build tool with no visibility into
+every importer has no way to be sure an export is really unused
+anywhere.
+
+## Extend it: what if two modules import each other?
+
+**Everything above assumed the graph has no cycles. What happens if
+`a.js` imports something from `b.js`, and `b.js` also imports something
+from `a.js`?** `resolveOrder`'s `visited` check prevents an infinite
+loop either way — try `resolveOrder({ a: ["b"], b: ["a"] })` and it
+terminates, returning `['b', 'a']` rather than recursing forever. But
+termination isn't the same as correctness: whichever module gets
+visited _first_ ends up executed while the other one hasn't fully run
+yet, meaning anything the not-yet-run module was supposed to export
+may not exist yet at the moment the first module needs it. Real
+bundlers handle this without crashing, but a circular import often
+signals a design problem worth fixing directly — usually by extracting
+whatever both files need into a third, shared module neither depends
+on the other for.
+
+## Failure modes
+
+| Failure mode                                                   | What it gets wrong                                                                                                                                                         |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Maintaining script-tag order by hand as a codebase grows       | Nothing enforces the order stays correct as dependencies change — it silently breaks the next time someone adds or reorders a file                                         |
+| Assuming a shared file included by two script tags is harmless | Either duplicates the file's code and global state, or silently relies on one copy loading first with no guarantee it does                                                 |
+| Treating tree-shaking as automatic regardless of code style    | It depends on the bundler being able to statically see what's actually imported — dynamic `require()`-style access can hide usage a bundler can't verify is safe to remove |
+| Assuming bundling and transpilation are the same problem       | Bundling combines files correctly; transpilation rewrites syntax for compatibility — a project can need one without needing the other                                      |
+| Introducing a circular import without noticing                 | The graph resolver won't crash, but the two modules can end up executing in an order where one isn't fully initialized when the other needs it                             |

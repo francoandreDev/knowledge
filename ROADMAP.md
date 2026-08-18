@@ -12,7 +12,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 02  | need-html-semantics-just-divs | Why do we need HTML semantics instead of just divs?                                                                     | done    |
 | 03  | css-cascade-specificity       | How do we style once and reuse everywhere? (CSS cascade & specificity)                                                  | done    |
 | 04  | dom-event-model               | How does a page react to user input without reloading? (the DOM event model)                                            | done    |
-| 05  | bundling                      | Why do we need a build step at all? (bundling, transpilation, module systems)                                           | planned |
+| 05  | bundling                      | Why do we need a build step at all? (bundling, transpilation, module systems)                                           | done    |
 | 06  | component-state               | How do we manage state across a page without global chaos? (component state, unidirectional data flow)                  | planned |
 | 07  | cors                          | Why does calling an API from the browser fail unpredictably? (CORS, async/await, error handling)                        | planned |
 | 08  | client-side-caching           | How do we keep the UI in sync with the server? (client-side caching, optimistic updates)                                | planned |
