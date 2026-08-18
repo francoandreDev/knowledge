@@ -1,0 +1,145 @@
+---
+title: "L3 — A real ancestor check, and a real rebase, on an actual commit graph"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Monday vs. Tuesday, modeled as real data">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📅</span> <strong>Monday</strong> — local made zero commits since last sync</div>
+      <div class="flex items-center gap-1.5"><span>📅</span> <strong>Tuesday</strong> — local made one commit locally before pulling again</div>
+      <div class="flex items-center gap-1.5"><span>🌳</span> <strong>Both days</strong> — remote had moved forward with its own new commit</div>
+    </div>
+  </Fragment>
+
+**Before reading further, predict: given only "local made a commit
+before pulling" as the one difference between Monday and Tuesday, is
+that alone enough to explain why Tuesday needed a merge commit and
+Monday didn't?**
+
+</Scenario>
+
+## Modeling commits as real data
+
+```js
+// commits.mjs — a commit graph as a plain object: id -> { id, parent, message }
+const commits = {
+  A: { id: "A", parent: null, message: "init" },
+  B: { id: "B", parent: "A", message: "setup project" },
+  C: { id: "C", parent: "B", message: "remote: add logging" }, // remote's new commit
+};
+```
+
+This is genuinely how git's history works underneath — every commit
+points at exactly one parent (ignoring merge commits, which have two),
+forming a chain back to the first commit.
+
+## A real ancestor check
+
+```js
+// isAncestor.mjs
+function isAncestor(commits, ancestorId, descendantId) {
+  let cur = descendantId;
+  while (cur !== null && cur !== undefined) {
+    if (cur === ancestorId) return true;
+    cur = commits[cur].parent;
+  }
+  return false;
+}
+
+function canFastForward(commits, localHead, remoteHead) {
+  return isAncestor(commits, localHead, remoteHead);
+}
+```
+
+`isAncestor` walks backwards from `descendantId` through parent
+pointers, checking at each step whether it's reached `ancestorId`. A
+fast-forward is possible exactly when local's current position is
+found somewhere in remote's ancestry — meaning local never diverged.
+
+## Monday: no local commits, fast-forward is possible
+
+```js
+const mondayCommits = {
+  A: { id: "A", parent: null, message: "init" },
+  B: { id: "B", parent: "A", message: "setup project" },
+  C: { id: "C", parent: "B", message: "remote: add logging" },
+};
+
+console.log(canFastForward(mondayCommits, "B", "C"));
+// true — local's HEAD (B) is a direct ancestor of remote's HEAD (C)
+```
+
+Local's `B` sits directly in `C`'s ancestry — nothing to reconcile,
+just move the pointer. This is exactly why Monday's pull stayed clean.
+
+## Tuesday: one local commit is enough to force divergence
+
+```js
+const tuesdayCommits = {
+  A: { id: "A", parent: null, message: "init" },
+  B: { id: "B", parent: "A", message: "setup project" },
+  C: { id: "C", parent: "B", message: "remote: add logging" }, // remote's new commit
+  D: { id: "D", parent: "B", message: "local: fix button color" }, // local's own new commit
+};
+
+console.log(canFastForward(tuesdayCommits, "D", "C"));
+// false — local's HEAD (D) is NOT an ancestor of remote's HEAD (C)
+```
+
+The single local commit `D` is what breaks the ancestor relationship —
+`B` now has two children (`C` and `D`), and neither is an ancestor of
+the other. This one structural fact, not anything about the size or
+content of the commit, is what forces git to create a merge commit on
+Tuesday.
+
+## A real rebase, replaying Tuesday's commit onto the new base
+
+```js
+// rebase.mjs
+function rebase(commits, localCommitIds, newBaseId) {
+  let newParent = newBaseId;
+  const rebased = [];
+  for (const oldId of localCommitIds) {
+    const old = commits[oldId];
+    const newId = old.id + "'"; // a real rebase gives each replayed commit a new hash
+    rebased.push({ id: newId, parent: newParent, message: old.message });
+    newParent = newId;
+  }
+  return rebased;
+}
+
+console.log(rebase(tuesdayCommits, ["D"], "C"));
+// [ { id: "D'", parent: "C", message: "local: fix button color" } ]
+```
+
+Instead of a merge commit, rebase produces a **new** commit (`D'`)
+with the same message and change, but a new parent (`C`) and a new id
+— `D` itself is never modified, a fresh commit is created that
+replays its content on top of the new base. Chaining this after `C`
+produces `A → B → C → D'`, a straight line with no branching visible
+at all.
+
+## Extend it: what if two local commits both needed rebasing?
+
+**Everything above rebased a single commit. What changes if local had
+made two commits, `D` and then `E` (with `E`'s parent being `D`),
+before pulling?** `rebase` already handles this — pass `["D", "E"]`
+as `localCommitIds` and it chains the replay: `D` gets replayed onto
+`C` as `D'`, then `E` gets replayed onto `D'` as `E'`, since
+`newParent` is updated after each step. Try
+`rebase(commits, ["D", "E"], "C")` and confirm it produces
+`[{ id: "D'", parent: "C", ... }, { id: "E'", parent: "D'", ... }]` —
+the exact same "one at a time, each on top of the last" process git
+performs, just made explicit here as a loop over an array.
+
+## Failure modes
+
+| Failure mode                                                              | What it gets wrong                                                                                                                             |
+| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Assuming a merge commit means something went wrong                        | A merge commit is git's correct, honest record that real divergence happened — it isn't an error                                               |
+| Rebasing commits that have already been pushed and pulled by someone else | Rewrites hashes, leaving anyone who already has the old commits with history that diverges from the new one                                    |
+| Treating merge vs. rebase as purely aesthetic                             | Rebase's rewritten hashes carry real risk on shared history that merge structurally avoids                                                     |
+| Assuming fast-forward depends on how big or risky the local change was    | It depends entirely on the ancestor relationship — one trivial local commit forces the same divergence as ten large ones                       |
+| Confusing "no merge commit" with "nothing was reconciled"                 | Rebase still reconciles content (and can still hit conflicts while replaying) — it just records the result differently, without a merge commit |
