@@ -1,0 +1,85 @@
+---
+title: "L2 — The properties every hash needs, and what a KDF deliberately breaks"
+---
+
+## What actually makes a function a cryptographic hash
+
+**Isn't any function that shrinks data down to a fixed size a "hash"?**
+Not a _cryptographic_ one — a checksum like a simple sum-of-bytes also
+produces a fixed-length output, but it's trivial to find two inputs that
+produce the same checksum, and trivial to construct an input that
+produces a chosen checksum. A cryptographic hash function needs to hold
+up under adversarial pressure, which means satisfying several properties
+at once, not just "compresses the input":
+
+| Property             | What it requires                                                                  |
+| -------------------- | --------------------------------------------------------------------------------- |
+| Deterministic        | Same input → same output, always, on any machine                                  |
+| Fixed-length output  | A one-byte input and a ten-gigabyte input both produce the same-size hash         |
+| Avalanche effect     | Flipping one input bit should flip roughly half the output bits, unpredictably    |
+| Preimage resistance  | Given a hash, it should be infeasible to find _any_ input that produces it        |
+| Collision resistance | It should be infeasible to find _two different_ inputs that produce the same hash |
+
+**Why does the avalanche effect matter for something like file
+integrity checking, specifically?** If a hash changed only a little for
+a small input change, an attacker tampering with a file could search for
+a modification that keeps the hash _close_ to the original and slip a
+change past a careless "looks about right" comparison. Avalanche makes
+"close" meaningless — any change at all produces a completely unrelated
+output, so the only useful comparison is exact equality.
+
+## Why collisions are inevitable, and why that's still fine
+
+```mermaid
+flowchart TD
+    Inputs["Infinitely many possible inputs\n(any file, any string, any size)"] --> Hash["Hash function"]
+    Hash --> Outputs["Fixed, finite set of possible outputs\n(e.g. 2^256 for SHA-256)"]
+    Outputs -->|pigeonhole principle| Collision["Collisions MUST exist somewhere —\nmore inputs than outputs"]
+```
+
+**If collisions are mathematically guaranteed to exist, doesn't that mean
+hash functions are broken?** No — collision _resistance_ doesn't claim
+collisions don't exist, only that finding one on purpose should take
+computationally infeasible effort (for SHA-256, roughly 2^128
+operations even accounting for the birthday paradox — a number large
+enough that "infeasible" holds in practice for the foreseeable future).
+A hash function is "broken" specifically when someone finds a way to
+locate collisions _faster_ than that brute-force baseline, the way
+MD5 and SHA-1 both eventually were.
+
+## What a key derivation function deliberately breaks
+
+**If speed is normally a hash function's whole point, why does
+`security/authentication-fundamentals` use `scrypt` instead of plain
+SHA-256 for passwords?** Because a stored password hash isn't being
+checked against _legitimate_ traffic at meaningful volume — it's a
+target for an attacker running billions of guesses per second against a
+stolen database, entirely offline, unrestricted by any rate limit. A
+fast general-purpose hash is exactly the wrong shape for that threat
+model: the faster the hash, the cheaper each guess is. A key derivation
+function deliberately sacrifices speed and adds a second lever an
+everyday hash doesn't have:
+
+| Lever               | What it does                                                      | Why an everyday hash doesn't need it                                                                               |
+| ------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Iteration/time cost | Repeats internal work thousands of times                          | File-integrity checks need speed, not slowness                                                                     |
+| Memory hardness     | Requires a large block of memory per attempt, not just CPU cycles | Forces attackers into expensive hardware (can't cheaply parallelize on cheap ASICs the way a pure-CPU hash can be) |
+
+**Does turning up a KDF's cost parameter forever make it more secure
+with no downside?** No — every legitimate login pays that same cost too.
+The parameter is a genuine trade-off, tuned to be annoying for an
+attacker running billions of attempts but imperceptible for one real
+user running exactly one attempt — L3 measures this trade-off directly
+rather than just asserting it.
+
+## The generalizable lesson
+
+**Is "hash it" ever a complete instruction on its own?** No — "hash it"
+only becomes a real design decision once paired with _which_ hash and
+_why_: a fast, general-purpose hash for integrity checks and content
+addressing, where speed at scale is the goal and there's no secret being
+protected; a slow, memory-hard KDF specifically for anything an attacker
+would want to brute-force offline, like a password. Picking the wrong
+one for the situation — a KDF for checksumming a large file, or a fast
+hash for a password — doesn't just underperform, it silently produces
+the wrong security properties for what's actually being protected.
