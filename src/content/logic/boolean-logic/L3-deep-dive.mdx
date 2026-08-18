@@ -1,0 +1,122 @@
+---
+title: "L3 — Proving the bug with a brute-force truth table, and fixing the negation"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="The access-control bug, as real code">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>💻</span> <strong>canEditBuggy</strong> — <code>(!isAdmin &amp;&amp; isLoggedIn) || isOwner</code></div>
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>canEditFixed</strong> — <code>!isAdmin &amp;&amp; (isLoggedIn || isOwner)</code></div>
+    </div>
+  </Fragment>
+
+**Before reading further, predict: for which combination of
+`isAdmin`, `isLoggedIn`, and `isOwner` do `canEditBuggy` and
+`canEditFixed` disagree — and which one is right, according to the
+spec "not an admin, and either logged in or the owner"?**
+
+</Scenario>
+
+## The two versions as real functions
+
+```js
+// access.mjs
+function canEditBuggy(isAdmin, isLoggedIn, isOwner) {
+  return (!isAdmin && isLoggedIn) || isOwner;
+}
+
+function canEditFixed(isAdmin, isLoggedIn, isOwner) {
+  return !isAdmin && (isLoggedIn || isOwner);
+}
+```
+
+`canEditBuggy` is exactly what `!isAdmin && isLoggedIn || isOwner`
+parses to without explicit parentheses — `&&` binds tighter than `||`,
+so `isOwner` sits outside the `!isAdmin` check entirely.
+`canEditFixed` makes the intended grouping explicit with parentheses.
+
+## Proving they differ, by brute force
+
+```js
+function allCombinations() {
+  const bools = [true, false];
+  const combos = [];
+  for (const a of bools) {
+    for (const l of bools) {
+      for (const o of bools) {
+        combos.push([a, l, o]);
+      }
+    }
+  }
+  return combos;
+}
+
+for (const [isAdmin, isLoggedIn, isOwner] of allCombinations()) {
+  const buggy = canEditBuggy(isAdmin, isLoggedIn, isOwner);
+  const fixed = canEditFixed(isAdmin, isLoggedIn, isOwner);
+  if (buggy !== fixed) {
+    console.log({ isAdmin, isLoggedIn, isOwner, buggy, fixed });
+  }
+}
+// { isAdmin: true, isLoggedIn: true,  isOwner: true,  buggy: true, fixed: false }
+// { isAdmin: true, isLoggedIn: false, isOwner: true,  buggy: true, fixed: false }
+```
+
+Both disagreements happen exactly when `isAdmin` is `true` and
+`isOwner` is `true` — an admin who owns the document. `canEditBuggy`
+returns `true` (edit allowed) because `isOwner` alone satisfies the
+`||`, regardless of `isAdmin`. `canEditFixed` returns `false`, matching
+the spec: an admin should never be allowed to edit, full stop. This is
+the exact bug the security review found — enumerating all eight
+combinations instead of testing a couple by hand is what makes it
+provable rather than just plausible.
+
+## Building the negation with De Morgan's laws
+
+```js
+function cannotEdit(isAdmin, isLoggedIn, isOwner) {
+  // negating canEditFixed: !(!isAdmin && (isLoggedIn || isOwner))
+  // step 1 (negate the &&):  isAdmin || !(isLoggedIn || isOwner)
+  // step 2 (negate the ||):  isAdmin || (!isLoggedIn && !isOwner)
+  return isAdmin || (!isLoggedIn && !isOwner);
+}
+
+for (const [isAdmin, isLoggedIn, isOwner] of allCombinations()) {
+  const matches =
+    cannotEdit(isAdmin, isLoggedIn, isOwner) ===
+    !canEditFixed(isAdmin, isLoggedIn, isOwner);
+  if (!matches) console.log("MISMATCH", { isAdmin, isLoggedIn, isOwner });
+}
+// (nothing logged — cannotEdit matches !canEditFixed for every combination)
+```
+
+Each De Morgan step flips exactly one operator: negating an `&&`
+produces an `||` of negated pieces, and negating that inner `||`
+produces an `&&` of negated pieces. Deriving it mechanically, one step
+at a time, is what makes `cannotEdit` provably the exact opposite of
+`canEditFixed` — not just "probably the opposite" from rewriting the
+sentence in your head.
+
+## Extend it: what if a careless negation skips the operator flip?
+
+**What would go wrong if someone negated `canEditFixed` by just adding
+`!` in front of each variable, without flipping the operators —
+`!isAdmin && (!isLoggedIn && !isOwner)`?** Try it against `allCombinations()`
+the same way `cannotEdit` was checked above: does it match
+`!canEditFixed(...)` for every combination, or only some? **What about
+a fourth field — say `isSuspended` — added to the original condition
+with another `&&`: does the two-step De Morgan derivation above still
+work if you have to negate three chained conditions instead of two,
+and what changes?**
+
+## Failure modes
+
+| Failure mode                                                            | What it gets wrong                                                                                  |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Reading a mixed AND/OR expression as matching a spoken "A and (B or C)" | AND binds tighter than OR, so it actually groups as "(A AND B) OR C"                                |
+| Testing only a couple of input combinations by hand                     | The one combination where two versions diverge can be exactly the one nobody tried                  |
+| Negating a compound condition by adding `!` without flipping operators  | De Morgan's laws require AND to become OR (or OR to become AND), not just each variable to negate   |
+| Assuming two boolean expressions that "look equivalent" are equivalent  | Only a full truth table (or a proof) confirms equivalence for every input, not just the tested ones |
+| Trusting short-circuit evaluation order to imply meaning                | Short-circuiting affects what gets _evaluated_, not what the final boolean _result_ is              |
