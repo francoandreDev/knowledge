@@ -1,0 +1,163 @@
+---
+title: "L3 — Measuring real growth exponents and reproducing the misleading benchmark"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same benchmark, now with real operation counts">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🧮</span> <strong>T(n) = 3n² + 100n</strong> — the algorithm's real operation count</div>
+      <div class="flex items-center gap-1.5"><span>📏</span> <strong>Measured at n = 5</strong> — small-scale benchmark</div>
+      <div class="flex items-center gap-1.5"><span>🏭</span> <strong>Measured at n = 100,000</strong> — production scale</div>
+    </div>
+  </Fragment>
+
+**Before reading the code, predict: if you measure the doubling ratio
+`T(2n)/T(n)` at n = 5 and again at n = 100,000 for the exact same
+function, will you get the same number both times?**
+
+</Scenario>
+
+## Counting real operations, not wall-clock time
+
+Wall-clock timing is noisy (JIT warm-up, GC pauses, background load).
+Counting actual basic operations — comparisons, increments — gives a
+number that's exactly reproducible, which is what a real growth-rate
+measurement needs.
+
+```js
+function countLinearScan(n) {
+  let ops = 0;
+  for (let i = 0; i < n; i++) ops++;
+  return ops;
+}
+
+function countNestedLoop(n) {
+  let ops = 0;
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) ops++;
+  }
+  return ops;
+}
+```
+
+```js
+console.log(countLinearScan(1000)); // 1000
+console.log(countNestedLoop(1000)); // 1000000
+```
+
+## Estimating the growth exponent from the doubling ratio
+
+If `T(n)` behaves like `n^k` for some exponent `k`, then
+`T(2n) / T(n) ≈ 2^k`, so `k ≈ log₂(T(2n) / T(n))`. This turns a single
+doubling measurement into an estimate of the exponent itself — the same
+number that appears in `O(n^k)`.
+
+```js
+function estimateGrowthExponent(countFn, baseN) {
+  const t1 = countFn(baseN);
+  const t2 = countFn(baseN * 2);
+  return Math.log2(t2 / t1);
+}
+
+function classifyGrowth(exponent) {
+  if (exponent < 0.3) return "O(1) / O(log n)";
+  if (exponent < 1.3) return "O(n) or O(n log n)";
+  if (exponent < 2.3) return "O(n^2)";
+  return "O(n^3) or worse";
+}
+```
+
+```js
+console.log(estimateGrowthExponent(countLinearScan, 1000).toFixed(3)); // 1.000
+console.log(estimateGrowthExponent(countNestedLoop, 1000).toFixed(3)); // 2.000
+console.log(classifyGrowth(1.0)); // "O(n) or O(n log n)"
+console.log(classifyGrowth(2.0)); // "O(n^2)"
+```
+
+Both come back exact — `1.000` and `2.000` — because these two functions
+are pure powers of `n` with no lower-order terms to muddy the ratio at any
+scale. The next function is where that stops being true.
+
+## Reproducing the misleading benchmark
+
+```js
+function misleadingT(n) {
+  return 3 * n * n + 100 * n;
+}
+
+console.log(estimateGrowthExponent(misleadingT, 5).toFixed(3)); // 1.177
+console.log(classifyGrowth(1.177)); // "O(n) or O(n log n)" — looks linear!
+
+console.log(estimateGrowthExponent(misleadingT, 100000).toFixed(3)); // 2.000
+console.log(classifyGrowth(2.0)); // "O(n^2)" — the true asymptotic class
+```
+
+Same function, same formula, same `estimateGrowthExponent` call — the
+only thing that changed is _where_ it was measured. At `n = 5`, the
+`100n` term is still large enough relative to `3n²` that the doubling
+ratio genuinely looks close to 2. By `n = 100,000`, `3n²` has completely
+overwhelmed `100n`, and the same measurement now reports the true
+quadratic exponent, matching L2's algebraic prediction exactly.
+
+## Confirming the algebraic prediction with a real (verified) sort
+
+`countMergeSortComparisons` counts actual comparisons made by a real
+merge sort, giving an independent check against the well-known `Θ(n log
+n)` bound (exponent should land between 1 and 2, closer to 1, and clearly
+below the quadratic nested-loop exponent):
+
+```js
+function countMergeSortComparisons(n) {
+  const arr = Array.from({ length: n }, (_, i) => (n - i) % 997);
+  let comparisons = 0;
+  function mergeSort(a) {
+    if (a.length <= 1) return a;
+    const mid = Math.floor(a.length / 2);
+    const left = mergeSort(a.slice(0, mid));
+    const right = mergeSort(a.slice(mid));
+    const merged = [];
+    let i = 0,
+      j = 0;
+    while (i < left.length && j < right.length) {
+      comparisons++;
+      if (left[i] <= right[j]) merged.push(left[i++]);
+      else merged.push(right[j++]);
+    }
+    while (i < left.length) merged.push(left[i++]);
+    while (j < right.length) merged.push(right[j++]);
+    return merged;
+  }
+  mergeSort(arr);
+  return comparisons;
+}
+
+console.log(estimateGrowthExponent(countMergeSortComparisons, 1000).toFixed(3));
+// 1.261 — between 1 (linear) and 2 (quadratic), consistent with n log n
+```
+
+An exponent of `1.261` isn't a clean integer because `n log n` isn't a
+pure power of `n` — the doubling ratio for `n log n` slowly drifts upward
+as `n` grows too (just far more slowly than `3n² + 100n`'s did), which is
+exactly what the `log n` factor predicts.
+
+## Extend it: what if the lower-order term were subtracted, not added?
+
+**Everything above used `T(n) = 3n² + 100n`, where the lower-order term
+made small-`n` measurements look _better_ than the true asymptotic class.
+What would `T(n) = 3n² − 100n` do to a small-`n` benchmark instead —
+would it also mislead, and in which direction?** (Try computing
+`estimateGrowthExponent` for this function at `n = 5` and compare to the
+`+100n` version above before assuming the direction of the error is
+always the same.)
+
+## Failure modes
+
+| Failure mode                                                                     | What it gets wrong                                                                                                                                                        |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Treating a doubling ratio measured at small `n` as proof of the asymptotic class | The ratio is itself a function of `n` for anything but a pure power — only large-`n` measurements approach the true asymptotic behavior                                   |
+| Using wall-clock timing instead of operation counts to estimate growth           | Timing noise (JIT, GC, scheduling) can swamp the actual signal, especially at small `n` where absolute times are tiny                                                     |
+| Calling something `O(n²)` when `Θ(n²)` is the true, tighter statement            | `O` alone only claims an upper bound — `Θ` is the stronger, more informative claim when both bounds actually hold                                                         |
+| Assuming the dominant term always makes things look worse at small `n`           | As the extension question above shows, a subtracted lower-order term can make small-`n` behavior look _better_ than the eventual truth just as easily as an added one can |
+| Skipping the algebraic dominant-term analysis in favor of measurement alone      | Measurement only samples specific `n` values; algebra tells you the crossover point and the true class for every `n`, not just the ones you happened to test              |
