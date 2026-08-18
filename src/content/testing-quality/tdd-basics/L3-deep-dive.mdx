@@ -1,0 +1,188 @@
+---
+title: "L3 — Building a password-strength checker through real red-green-refactor cycles"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Four cycles, one refactor, one design decision made early">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>1️⃣</span> <strong>Cycle 1</strong> — empty password</div>
+      <div class="flex items-center gap-1.5"><span>2️⃣</span> <strong>Cycle 2</strong> — too short</div>
+      <div class="flex items-center gap-1.5"><span>3️⃣</span> <strong>Cycles 3–4</strong> — missing uppercase, missing a number</div>
+      <div class="flex items-center gap-1.5"><span>🧹</span> <strong>Refactor</strong> — consolidate into a rule list, tests unchanged</div>
+    </div>
+  </Fragment>
+
+**Before reading further, predict: after the very first test is
+written — before any implementation exists — what does that one line
+already reveal about the shape `describePasswordStrength`'s return
+value has to take?**
+
+</Scenario>
+
+## Cycle 1: red
+
+```js
+// describePasswordStrength.test.mjs
+expect(describePasswordStrength("")).toEqual({
+  score: 0,
+  feedback: ["Password is required"],
+});
+```
+
+This fails immediately — `describePasswordStrength` doesn't exist yet.
+But notice what already got decided, before any code was written: the
+function returns an **object with `score` and `feedback`**, not a
+boolean, not a thrown error, not a printed message. That decision came
+directly from writing an assertion that needed something to compare
+against.
+
+## Cycle 1: green
+
+```js
+function describePasswordStrength(password) {
+  if (!password) {
+    return { score: 0, feedback: ["Password is required"] };
+  }
+  return { score: 0, feedback: [] }; // not yet correct for non-empty input — no test demands more yet
+}
+```
+
+The minimum code to pass exactly the one test that exists. The second
+`return` is a deliberate placeholder — nothing yet requires it to be
+correct for a non-empty password, so it isn't.
+
+## Cycle 2: red, then green
+
+```js
+expect(describePasswordStrength("short")).toEqual({
+  score: 0,
+  feedback: ["Add more characters (min 8)"],
+});
+```
+
+```js
+function describePasswordStrength(password) {
+  if (!password) {
+    return { score: 0, feedback: ["Password is required"] };
+  }
+  const feedback = [];
+  let score = 0;
+  if (password.length >= 8) score++;
+  else feedback.push("Add more characters (min 8)");
+  return { score, feedback };
+}
+```
+
+## Cycles 3 and 4: red, then green
+
+```js
+expect(describePasswordStrength("longenough")).toEqual({
+  score: 1,
+  feedback: ["Add an uppercase letter", "Add a number"],
+});
+expect(describePasswordStrength("Longenough1")).toEqual({
+  score: 3,
+  feedback: [],
+});
+```
+
+```js
+function describePasswordStrength(password) {
+  if (!password) {
+    return { score: 0, feedback: ["Password is required"] };
+  }
+  const feedback = [];
+  let score = 0;
+  if (password.length >= 8) score++;
+  else feedback.push("Add more characters (min 8)");
+  if (/[A-Z]/.test(password)) score++;
+  else feedback.push("Add an uppercase letter");
+  if (/[0-9]/.test(password)) score++;
+  else feedback.push("Add a number");
+  return { score, feedback };
+}
+
+console.log(describePasswordStrength(""));
+// { score: 0, feedback: [ 'Password is required' ] }
+console.log(describePasswordStrength("short"));
+// { score: 0, feedback: [ 'Add more characters (min 8)', 'Add an uppercase letter', 'Add a number' ] }
+console.log(describePasswordStrength("longenough"));
+// { score: 1, feedback: [ 'Add an uppercase letter', 'Add a number' ] }
+console.log(describePasswordStrength("Longenough1"));
+// { score: 3, feedback: [] }
+```
+
+All four tests pass. Every branch in this function exists because a
+specific test demanded it — there's no rule in here that isn't traced
+back to an assertion.
+
+## Refactor: consolidating into a rule list
+
+The three `if`/`else` checks repeat the same shape three times. With
+all four tests green, it's safe to restructure:
+
+```js
+const passwordRules = [
+  { check: (p) => p.length >= 8, message: "Add more characters (min 8)" },
+  { check: (p) => /[A-Z]/.test(p), message: "Add an uppercase letter" },
+  { check: (p) => /[0-9]/.test(p), message: "Add a number" },
+];
+
+function describePasswordStrength(password) {
+  if (!password) {
+    return { score: 0, feedback: ["Password is required"] };
+  }
+  const feedback = [];
+  let score = 0;
+  for (const rule of passwordRules) {
+    if (rule.check(password)) score++;
+    else feedback.push(rule.message);
+  }
+  return { score, feedback };
+}
+```
+
+Running all four tests again against this version produces byte-for-byte
+identical output to before — the refactor changed structure, not
+behavior, and the existing tests are exactly what makes that claim
+verifiable rather than just hoped for.
+
+## What the code-first version would likely have looked like
+
+**Compare this to the opening scenario's other engineer, who started
+with implementation and used `console.warn` to report problems.** That
+version might work identically from a terminal — but nothing about it
+can be asserted against directly; a test would have to capture console
+output, parse it, and infer pass/fail from text that was designed for a
+human to read, not a test to compare. The test-first version's
+`{ score, feedback }` return value wasn't chosen for elegance — it was
+the direct, immediate consequence of needing something an `expect(...)`
+call could compare against, decided in cycle 1 before any
+implementation existed to bias the choice.
+
+## Extend it: what changes if the next requirement is genuinely different, not just another rule?
+
+**Everything above assumed every new requirement was another
+independent rule, slotting cleanly into `passwordRules`. What if the
+next requirement were "reject the 100 most common passwords outright,
+regardless of score" — a check that doesn't fit the check/message
+shape at all?** The red-green-refactor loop doesn't change: write the
+failing test for that specific behavior first (`expect(describePasswordStrength("password123")).toEqual({ score: 0, feedback: ["This password is too common"] })`),
+then write the minimum code to pass it — which might mean the common-password
+check runs _before_ the rule loop, short-circuiting it entirely, since
+a common password shouldn't earn partial credit for happening to be 8
+characters long. The loop doesn't dictate that design decision; it just
+guarantees a concrete, specific test exists to validate whichever
+design gets chosen.
+
+## Failure modes
+
+| Failure mode                                                   | What it gets wrong                                                                                  |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Writing the test after the implementation, then calling it TDD | Skips the design pressure entirely — the interface is already fixed by the time the test is written |
+| Writing more code in green than the current test requires      | Adds untested behavior that no assertion actually demands or verifies                               |
+| Skipping refactor once tests pass                              | Leaves duplication or awkward structure in place with no forcing function to clean it up later      |
+| Writing a vague or tautological assertion just to reach green  | A test that can't meaningfully fail provides none of red's actual guarantee                         |
+| Assuming TDD alone guarantees good design                      | The design pressure only helps if an awkward interface, once noticed, actually gets changed         |
