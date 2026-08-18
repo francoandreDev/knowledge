@@ -1,0 +1,173 @@
+---
+title: "L3 — Finding exactly which pair of flags the 8 test cases missed"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="The 8 test cases, as real data">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🚩</span> <strong>4 flags</strong> — newCheckoutUI, applePay, promoCode, expressShipping</div>
+      <div class="flex items-center gap-1.5"><span>📋</span> <strong>8 test cases</strong> — picked by hand, felt like solid coverage</div>
+    </div>
+  </Fragment>
+
+**Before reading further, predict: with 4 independent flags, how many
+distinct _pairs_ of flags are there to check together — and does 8
+test cases sound like enough to guarantee every pair was tested in
+all 4 of its on/off combinations?**
+
+</Scenario>
+
+## Counting the full combination space
+
+```js
+// combinatorics.mjs
+function factorial(n) {
+  let result = 1;
+  for (let i = 2; i <= n; i++) result *= i;
+  return result;
+}
+
+function combinations(n, r) {
+  return factorial(n) / (factorial(r) * factorial(n - r));
+}
+
+function generateAllCombinations(flagNames) {
+  const n = flagNames.length;
+  const total = Math.pow(2, n);
+  const combos = [];
+  for (let i = 0; i < total; i++) {
+    const combo = {};
+    flagNames.forEach((name, idx) => {
+      combo[name] = Boolean(i & (1 << idx));
+    });
+    combos.push(combo);
+  }
+  return combos;
+}
+
+const flags = ["newCheckoutUI", "applePay", "promoCode", "expressShipping"];
+console.log(generateAllCombinations(flags).length); // 16
+console.log(combinations(4, 2)); // 6 — the number of distinct flag pairs
+```
+
+`generateAllCombinations` confirms the exhaustive space directly: 16
+total combinations for 4 flags, matching `2^4`. `combinations(4, 2)`
+confirms there are 6 distinct pairs of flags among the 4 — and each
+pair has 4 possible on/off states (`true/true`, `true/false`,
+`false/true`, `false/false`), which is the actual thing that needs
+covering, not just "8 combinations somewhere in the list."
+
+## Checking whether the 8 test cases actually covered every pair
+
+```js
+function isPairCovered(testCases, flagA, flagB) {
+  const seen = new Set();
+  for (const tc of testCases) {
+    seen.add(JSON.stringify([tc[flagA], tc[flagB]]));
+  }
+  return seen.size === 4;
+}
+
+function findUncoveredPairs(testCases, flagNames) {
+  const uncovered = [];
+  for (let i = 0; i < flagNames.length; i++) {
+    for (let j = i + 1; j < flagNames.length; j++) {
+      if (!isPairCovered(testCases, flagNames[i], flagNames[j])) {
+        uncovered.push([flagNames[i], flagNames[j]]);
+      }
+    }
+  }
+  return uncovered;
+}
+
+const adHocTestCases = [
+  {
+    newCheckoutUI: false,
+    applePay: false,
+    promoCode: false,
+    expressShipping: false,
+  },
+  {
+    newCheckoutUI: true,
+    applePay: false,
+    promoCode: false,
+    expressShipping: false,
+  },
+  {
+    newCheckoutUI: false,
+    applePay: true,
+    promoCode: false,
+    expressShipping: false,
+  },
+  {
+    newCheckoutUI: false,
+    applePay: false,
+    promoCode: true,
+    expressShipping: false,
+  },
+  {
+    newCheckoutUI: false,
+    applePay: false,
+    promoCode: false,
+    expressShipping: true,
+  },
+  {
+    newCheckoutUI: true,
+    applePay: true,
+    promoCode: false,
+    expressShipping: false,
+  },
+  {
+    newCheckoutUI: true,
+    applePay: false,
+    promoCode: false,
+    expressShipping: true,
+  },
+  {
+    newCheckoutUI: false,
+    applePay: false,
+    promoCode: true,
+    expressShipping: true,
+  },
+];
+
+console.log(findUncoveredPairs(adHocTestCases, flags));
+// [ [ 'newCheckoutUI', 'promoCode' ],
+//   [ 'applePay', 'promoCode' ],
+//   [ 'applePay', 'expressShipping' ] ]
+```
+
+Three of the six flag pairs were never fully covered by the 8
+hand-picked test cases — including `applePay`/`promoCode`, exactly the
+pair that broke checkout in production. Checking which specific
+on/off state was missing for that pair confirms it precisely:
+`applePay: true, promoCode: true` never appears anywhere in the list —
+the two features were simply never turned on _together_ in any test
+case, even though both were individually tested.
+
+## Extend it: what if a 9th test case were added to fix this?
+
+**Suppose one more test case is added:
+`{ newCheckoutUI: true, applePay: true, promoCode: true, expressShipping: false }`.
+Does `findUncoveredPairs` now report all six pairs as covered, or are
+some still missing?** Run it and check — not every gap closes from one
+added test case, since a single new test case can fill in the missing
+state for multiple pairs at once, but only for the pairs whose missing
+state happens to match what that one test case sets. **How many
+additional test cases, at minimum, would it take to guarantee all six
+pairs are fully covered, starting from zero? Is 6 × 4 = 24 test cases
+actually the minimum needed, or can specific combinations serve
+multiple pairs' coverage simultaneously — bringing the true minimum
+lower?**
+
+## Failure modes
+
+| Failure mode                                                                        | What it gets wrong                                                                              |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Treating "8 test cases" as inherently thorough                                      | Thoroughness depends on what those 8 actually cover, not how many there are                     |
+| Assuming flags combine additively (4 flags to 4 tests)                              | Independent flags combine multiplicatively — `2^n`, not `n`                                     |
+| Picking "important" combinations by intuition alone                                 | Intuition doesn't track which specific pairs got left uncovered                                 |
+| Confusing "each flag was tested individually" with "every pair was tested together" | A flag can appear in many test cases while never once appearing alongside a specific other flag |
+| Assuming more test cases always means better pairwise coverage                      | Coverage depends on which specific states the added test cases hit, not just the count          |
