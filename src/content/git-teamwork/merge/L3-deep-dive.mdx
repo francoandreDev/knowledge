@@ -1,0 +1,262 @@
+---
+title: "L3 — Building a real three-way merge algorithm and running it on Alex and Sam's file"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same setup, now with real file contents">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📄</span> <strong>Base</strong> — <code>const TAX_RATE = 0.08;</code></div>
+      <div class="flex items-center gap-1.5"><span>🌿</span> <strong>Ours (Alex)</strong> — adds a guard clause elsewhere in the file</div>
+      <div class="flex items-center gap-1.5"><span>🌿</span> <strong>Theirs (Sam)</strong> — changes the same constant twice, in two separate scenarios below</div>
+    </div>
+  </Fragment>
+
+**Before reading the code, predict: if Alex's change and Sam's change
+touch completely different lines, does the algorithm below need to do
+anything clever — or is "keep whichever side changed" already enough?**
+And separately: what should happen if both sides change `TAX_RATE`, but
+to the exact same new value?
+
+</Scenario>
+
+## Step 1 — diffing two versions against a shared base
+
+Real diff algorithms (including git's) use a longest-common-subsequence
+(LCS) approach: find the longest run of lines that appear, in order, in
+both versions, and treat everything else as an insertion or deletion
+around that run.
+
+```js
+function diffLines(a, b) {
+  const n = a.length,
+    m = b.length;
+  const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] =
+        a[i] === b[j]
+          ? dp[i + 1][j + 1] + 1
+          : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const ops = [];
+  let i = 0,
+    j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      ops.push({ type: "same", line: a[i] });
+      i++;
+      j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      ops.push({ type: "del", line: a[i] });
+      i++;
+    } else {
+      ops.push({ type: "add", line: b[j] });
+      j++;
+    }
+  }
+  while (i < n) {
+    ops.push({ type: "del", line: a[i] });
+    i++;
+  }
+  while (j < m) {
+    ops.push({ type: "add", line: b[j] });
+    j++;
+  }
+  return ops;
+}
+```
+
+This runs twice per merge — once for base→ours, once for base→theirs —
+exactly matching L2's diagram.
+
+## Step 2 — turning each diff into a per-base-line change map
+
+Each diff's ops are a flat sequence; the merge itself needs to ask, for
+each line of the _base_ file specifically: did this side keep it, change
+it, or delete it — and what did it insert right before it?
+
+```js
+function buildChangeMap(ops) {
+  const perBaseLine = [];
+  let baseIdx = -1;
+  let pendingAdds = [];
+  for (const op of ops) {
+    if (op.type === "same") {
+      perBaseLine.push({ baseIdx: ++baseIdx, kept: true, adds: pendingAdds });
+      pendingAdds = [];
+    } else if (op.type === "del") {
+      perBaseLine.push({
+        baseIdx: ++baseIdx,
+        kept: false,
+        adds: pendingAdds,
+      });
+      pendingAdds = [];
+    } else {
+      pendingAdds.push(op.line);
+    }
+  }
+  return { perBaseLine, trailingAdds: pendingAdds };
+}
+```
+
+## Step 3 — the merge itself
+
+```js
+function threeWayMerge(base, ours, theirs) {
+  const oursMap = buildChangeMap(diffLines(base, ours));
+  const theirsMap = buildChangeMap(diffLines(base, theirs));
+  const result = [];
+  let conflict = false;
+
+  function mergeAdds(oAdds, tAdds) {
+    if (oAdds.length && tAdds.length) {
+      if (JSON.stringify(oAdds) === JSON.stringify(tAdds)) {
+        result.push(...oAdds); // both sides inserted the same thing
+      } else {
+        conflict = true;
+        result.push(
+          "<<<<<<< ours",
+          ...oAdds,
+          "=======",
+          ...tAdds,
+          ">>>>>>> theirs",
+        );
+      }
+    } else {
+      result.push(...(oAdds.length ? oAdds : tAdds));
+    }
+  }
+
+  for (let k = 0; k < base.length; k++) {
+    const o = oursMap.perBaseLine[k];
+    const t = theirsMap.perBaseLine[k];
+    if (o.adds.length || t.adds.length) mergeAdds(o.adds, t.adds);
+    if (o.kept && t.kept) {
+      result.push(base[k]); // neither side touched this line
+    }
+    // if only one side changed/deleted the line, its replacement already
+    // arrived via mergeAdds above (or nothing, if it was a pure deletion) —
+    // the base line itself is correctly omitted either way.
+  }
+  mergeAdds(oursMap.trailingAdds, theirsMap.trailingAdds);
+  return { merged: result, conflict };
+}
+```
+
+## Running it: Alex and Sam's non-overlapping changes
+
+```js
+const base = [
+  "function calculateTotal(items) {",
+  "  return items.reduce((sum, i) => sum + i.price, 0);",
+  "}",
+  "const TAX_RATE = 0.08;",
+];
+const ours = [
+  "function calculateTotal(items) {",
+  "  if (!items) throw new Error('items required');",
+  "  return items.reduce((sum, i) => sum + i.price, 0);",
+  "}",
+  "const TAX_RATE = 0.08;",
+];
+const theirsUnrelated = [
+  "function calculateTotal(items) {",
+  "  return items.reduce((sum, i) => sum + i.price, 0);",
+  "}",
+  "const TAX_RATE = 0.0825;",
+];
+
+const result1 = threeWayMerge(base, ours, theirsUnrelated);
+console.log(result1.conflict); // false
+// result1.merged contains BOTH Alex's guard clause AND Sam's new tax rate
+```
+
+Alex's insertion and Sam's edit land on different base lines, so both
+survive in the merged output with no human involved — exactly the
+"auto-merge" row from L2's table.
+
+## Running it: the real conflict
+
+```js
+const theirsConflicting = [
+  "function calculateTotal(items) {",
+  "  return items.reduce((sum, i) => sum + i.price, 0);",
+  "}",
+  "const TAX_RATE = 0.075;",
+];
+const oursConflicting = [
+  "function calculateTotal(items) {",
+  "  return items.reduce((sum, i) => sum + i.price, 0);",
+  "}",
+  "const TAX_RATE = 0.0825;",
+];
+
+const result2 = threeWayMerge(base, oursConflicting, theirsConflicting);
+console.log(result2.conflict); // true
+console.log(result2.merged.join("\n"));
+// <<<<<<< ours
+// const TAX_RATE = 0.0825;
+// =======
+// const TAX_RATE = 0.075;
+// >>>>>>> theirs
+```
+
+Now both sides changed `TAX_RATE` to _different_ values — the algorithm
+correctly refuses to guess, and produces exactly the marker format git
+itself uses.
+
+## The case that surprises people: identical edits don't conflict
+
+```js
+const theirsIdentical = [
+  "function calculateTotal(items) {",
+  "  return items.reduce((sum, i) => sum + i.price, 0);",
+  "}",
+  "const TAX_RATE = 0.0825;",
+];
+
+const result3 = threeWayMerge(base, oursConflicting, theirsIdentical);
+console.log(result3.conflict); // false — both sides landed on 0.0825 independently
+```
+
+If Alex and Sam happened to fix the tax rate to the _same_ value
+(maybe finance sent both of them the same corrected number), git doesn't
+flag it — the merge logic explicitly checks whether the two replacements
+are identical before deciding there's anything to ask about.
+
+## What this simplified version leaves out
+
+Real git's merge (`git merge-file`, based on the classic `diff3`
+algorithm) is more careful about a few things this version isn't:
+whitespace-only changes, moved/renamed blocks, and merging changes that
+are _adjacent_ but not identical lines (git's `diff3` can sometimes
+combine those without conflict; this line-anchored version treats
+anything touching the same base line as a single unit). The core
+decision procedure — three-way diff, per-line ownership, conflict only on
+genuine disagreement — is the same one real git uses underneath.
+
+## Extend it: what if three branches merge at once, not two?
+
+**The scenarios above all involve exactly two branches merging into one.
+What would change if a third branch, based on the same original commit,
+also needed to be folded in — say, a third teammate who also touched
+`TAX_RATE`?** A single three-way merge only ever reconciles two sides
+against one base; three or more independent branches require running the
+merge repeatedly (merge branch A and B first, then merge that result
+against branch C) — and now the "base" for the second merge is a
+synthetic file that never actually existed as a commit, which is exactly
+why merging three-plus long-lived branches at once produces messier,
+harder-to-reason-about conflicts than merging one branch at a time.
+
+## Failure modes
+
+| Failure mode                                                                         | What it gets wrong                                                                                                                |
+| ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| Comparing the two branches directly instead of each against the base                 | Can't tell who made a given change, so can't safely auto-merge anything                                                           |
+| Treating "same line touched by both" as automatically a conflict                     | Misses the case where both sides made the identical edit and there's nothing to ask about                                         |
+| Assuming a resolved conflict marker means the logic is now correct                   | Git only verifies the _markers_ are gone, not that the chosen resolution actually behaves correctly — that still needs a test run |
+| Letting a branch live for weeks while other branches keep merging into the main line | Line-level overlap accumulates the longer a branch diverges, raising conflict odds — the mechanism from L2, not superstition      |
+| Assuming `git merge` always creates a merge commit                                   | A fast-forward merge (no divergence on the receiving side) creates no merge commit at all                                         |
