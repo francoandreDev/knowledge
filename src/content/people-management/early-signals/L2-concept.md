@@ -1,0 +1,74 @@
+---
+title: "L2 — What actually precedes a crisis, and why safety decides whether you see it"
+---
+
+## The signals that show up before a missed deadline
+
+**If a missed deadline is the last thing to happen, what actually
+comes first?** Almost never a dramatic announcement — usually a series
+of small, easy-to-miss behavioral shifts, weeks before the deadline
+itself is at risk:
+
+| Signal                                             | What it often means                                                          |
+| -------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Fewer updates in standup, or vaguer ones           | Something isn't going well and they aren't ready to say so directly          |
+| Camera off more often in calls                     | Withdrawal, low energy, or avoiding being "seen" while struggling            |
+| Fewer questions asked                              | Could mean confidence — or could mean they've stopped believing asking helps |
+| Quality dipping quietly, before the deadline slips | The work is already suffering; the deadline just hasn't caught up yet        |
+| Slower response times to messages                  | Disengagement, or being overwhelmed and avoiding the backlog                 |
+
+None of these alone is proof of a crisis — a quiet week happens for
+plenty of reasons. What matters is a _pattern_, sustained over more
+than a few days, especially in someone whose baseline was previously
+different.
+
+## Why psychological safety decides whether a manager ever sees any of this
+
+**If these signals are visible, why do so many managers still find
+out only when the deadline is missed?** Because visibility and
+_reporting_ are different things — a manager can only act on a signal
+they actually notice, and a struggling person's willingness to name
+the struggle out loud depends on whether they expect that to help or
+hurt them:
+
+```mermaid
+flowchart TD
+    A["A struggle begins\n(blocker, overload, personal issue)"] --> B{"Does this person feel safe\nnaming it out loud?"}
+    B -->|"Yes — high safety"| C["Flags it early,\nasks for help"]
+    B -->|"No — low safety"| D["Stays quiet,\nhopes to fix it alone"]
+    C --> E["Manager can intervene\nwhile it's still small"]
+    D --> F["Problem grows until\nit shows up as a missed deadline"]
+```
+
+Psychological safety isn't a soft add-on to management — it's the
+switch that determines which branch of this flowchart a struggling
+person takes. The behavioral signals in the table above still exist in
+the "stays quiet" branch, but nobody named them, so they only get
+interpreted retroactively, after the deadline, when it's too late to
+have mattered.
+
+## Low-safety vs. high-safety teams: what actually differs
+
+| What happens                                     | Low psychological safety                                     | High psychological safety                                                   |
+| ------------------------------------------------ | ------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| A blocker shows up mid-task                      | Handled alone, silently, often too late to ask for real help | Flagged within days, while there's still time to adjust                     |
+| A mistake is made                                | Hidden or minimized, out of fear of the reaction             | Disclosed directly, because the cost of hiding it is understood to be worse |
+| A manager asks "how's it going?"                 | Answered with a reflexive "fine" regardless of the truth     | Answered honestly, because honesty hasn't previously been punished          |
+| The first the manager hears about a real problem | The missed deadline itself                                   | Days or weeks earlier, directly from the person involved                    |
+
+The right-hand column isn't a personality trait some teams happen to
+have — it's built, deliberately, through how a manager actually
+responds the first few times someone takes the risk of saying "I'm
+struggling."
+
+## What this means for checking in
+
+**If psychological safety is what determines whether signals get
+reported, what's a manager actually supposed to do with that?**
+Checking in regularly, and specifically, is the practical lever: a
+generic "everything okay?" invites a reflexive "yeah, fine," but a
+specific, observational check-in — naming an actual change that was
+noticed — signals that the manager is actually paying attention, which
+is itself part of what builds the safety to answer honestly. L3 walks
+through exactly what that conversation sounds like, and what it
+doesn't.

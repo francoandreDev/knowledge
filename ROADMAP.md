@@ -291,7 +291,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 03  | delegation-levels             | How do I delegate work without either micromanaging or abandoning it? (delegation levels, trust but verify)                                      | done    |
 | 04  | sbi-framework                 | How do I give feedback that changes behavior instead of just being heard? (SBI framework, feedback timing, difficult conversations)              | done    |
 | 05  | goal-setting                  | How do I set goals for a team that actually align with what the org needs? (goal-setting, OKRs, translating strategy downward)                   | done    |
-| 06  | early-signals                 | How do I know if someone on my team is struggling before it's a crisis? (early signals, psychological safety, checking in)                       | planned |
+| 06  | early-signals                 | How do I know if someone on my team is struggling before it's a crisis? (early signals, psychological safety, checking in)                       | done    |
 | 07  | mediation                     | How do I handle conflict between two people on my team? (mediation, staying neutral, addressing root cause)                                      | planned |
 | 08  | defining-role                 | How do I hire well instead of just filling a seat? (defining the role, structured hiring loop, avoiding the halo effect)                         | planned |
 | 09  | onboarding-design             | How do I onboard someone so they're productive fast without overwhelming them? (onboarding design, ramp plans)                                   | planned |
