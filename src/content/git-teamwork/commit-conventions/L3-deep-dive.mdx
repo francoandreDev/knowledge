@@ -1,0 +1,129 @@
+---
+title: "L3 — Implementing bisect's binary search, then breaking it with a bundled commit"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same bug, two different commit histories">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Atomic history</strong> — 16 commits, one logical change each</div>
+      <div class="flex items-center gap-1.5"><span>📦</span> <strong>Bundled history</strong> — 8 atomic commits, plus 1 mega-commit covering what should have been 8 more</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — run real bisect logic against both, and measure the difference</div>
+    </div>
+  </Fragment>
+
+**Before reading the code below, predict: bisect on 16 atomic commits
+should take about `log2(16) = 4` tests to find the exact culprit. If 8
+of those 16 logical changes get bundled into a single mega-commit
+(leaving 9 total commits to search), roughly how many tests will
+bisect need — and will its answer still be as useful?**
+
+</Scenario>
+
+## Implementing bisect as binary search
+
+```js
+// commits: an array of commit ids, oldest first
+// isBad(commitId): simulates "run tests at this commit" -> true if broken
+function bisect(commits, isBad) {
+  let lo = 0; // known good
+  let hi = commits.length - 1; // assumed bad (the current, broken state)
+  let steps = 0;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    steps++;
+    if (isBad(commits[mid])) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  return { firstBadCommit: commits[lo], steps };
+}
+```
+
+This is genuinely how `git bisect` works underneath: repeatedly ask
+"good or bad?" at the midpoint of the remaining range, and narrow
+based on the answer, exactly like binary-searching a sorted array.
+
+## Atomic history: 16 commits, bug introduced at commit 11
+
+```js
+const atomicCommits = Array.from({ length: 16 }, (_, i) => `c${i}`);
+const bugIntroducedAt = 11;
+
+function isBadAtomic(commitId) {
+  return atomicCommits.indexOf(commitId) >= bugIntroducedAt;
+}
+
+console.log(bisect(atomicCommits, isBadAtomic));
+// { firstBadCommit: "c11", steps: 4 }
+```
+
+Verified: bisect finds `c11` — the exact commit that introduced the
+bug — in **4 steps**, matching `log2(16) = 4` exactly. Because each
+commit is atomic, "the commit bisect points to" and "the change that
+caused the bug" are the same thing. There's nothing left to search.
+
+## Bundled history: the same 16 logical changes, 8 of them merged into one commit
+
+```js
+const bundledCommits = [
+  "c0",
+  "c1",
+  "c2",
+  "c3",
+  "c4",
+  "c5",
+  "c6",
+  "c7",
+  "megaCommit",
+];
+// megaCommit bundles what should have been 8 separate atomic commits (logical changes 8-15)
+// the bug (originally at logical position 11) is somewhere inside it
+
+function isBadBundled(commitId) {
+  return bundledCommits.indexOf(commitId) >= 8; // megaCommit tests "bad"
+}
+
+console.log(bisect(bundledCommits, isBadBundled));
+// { firstBadCommit: "megaCommit", steps: 3 }
+```
+
+Verified: bisect correctly finds `megaCommit` in **3 steps** — bisect
+itself still works exactly as designed. But `megaCommit` bundles 8
+unrelated logical changes, and bisect has no way to search _inside_
+a single commit. Whichever of those 8 changes actually caused the bug
+still has to be found by manually reading the diff — the predicted
+outcome from the scenario above: fewer steps to find the commit,
+but the commit's answer isn't actually actionable on its own.
+
+## Extend it: what if the history were 64 commits instead of 16?
+
+**Using the same atomic-commit setup, how many steps would bisect need
+across 64 commits instead of 16?** Predict from the pattern first —
+`log2(64) = 6` — then verify:
+
+```js
+const commits64 = Array.from({ length: 64 }, (_, i) => `c${i}`);
+const bugAt64 = 50;
+console.log(bisect(commits64, (id) => commits64.indexOf(id) >= bugAt64));
+// { firstBadCommit: "c50", steps: 6 }
+```
+
+Verified: **6 steps**, exactly `log2(64)`. Quadrupling the history size
+from 16 to 64 only added 2 more tests, not 4x as many — this is the
+concrete payoff of binary search that makes bisect practical even
+across years of commit history, as long as the commits stay atomic
+enough for its answer to mean something.
+
+## Failure modes
+
+| Failure mode                                                                | What it gets wrong                                                                                                         |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Assuming bisect finding a commit means the investigation is done            | It's only done if that commit is atomic — a bundled commit still needs a manual search inside it                           |
+| Batching a work session into one commit for convenience                     | Feels efficient in the moment, but destroys the specificity that makes bisect's answer, code review, and revert all useful |
+| Writing a vague message because the commit already speaks for itself        | Someone reading `git log` later shouldn't have to open every diff just to know what kind of change each commit represents  |
+| Treating conventional commit types as a formatting rule with no real effect | The types are what makes scanning history fast — skipping them just moves that cost onto every future reader               |
+| Assuming atomic commits mean smaller commits, always                        | Atomic means "one logical change," which can still be large — the point is coherence, not commit size                      |
