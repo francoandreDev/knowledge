@@ -1,0 +1,152 @@
+---
+title: "L3 — Running both kinds of tests through a real internal refactor"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same refactor, two different test suites">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📦</span> <strong>V1</strong> — <code>ShoppingCart</code> backed by an array</div>
+      <div class="flex items-center gap-1.5"><span>🗺️</span> <strong>V2</strong> — the same public methods, backed by a <code>Map</code> instead</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — run both test styles against both versions</div>
+    </div>
+  </Fragment>
+
+**Before reading the code below, predict: `cart.items[0].name` and
+`cart.getItemCount()` are both ways of learning something about the
+cart's contents. Which one will still work after the array is replaced
+with a Map, and why does the answer depend on more than just "both are
+reading a property of the cart"?**
+
+</Scenario>
+
+## Version 1: array-backed cart
+
+```js
+class ShoppingCartV1 {
+  constructor() {
+    this.items = [];
+  }
+
+  addItem(name, price, quantity = 1) {
+    this.items.push({ name, price, quantity });
+  }
+
+  getItemCount() {
+    return this.items.reduce((sum, i) => sum + i.quantity, 0);
+  }
+
+  getTotal() {
+    return this.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  }
+}
+```
+
+## Version 2: Map-backed cart — same public methods, different internals
+
+```js
+class ShoppingCartV2 {
+  constructor() {
+    this.items = new Map(); // keyed by item name
+  }
+
+  addItem(name, price, quantity = 1) {
+    const existing = this.items.get(name);
+    if (existing) {
+      existing.quantity += quantity;
+    } else {
+      this.items.set(name, { name, price, quantity });
+    }
+  }
+
+  getItemCount() {
+    let total = 0;
+    for (const item of this.items.values()) total += item.quantity;
+    return total;
+  }
+
+  getTotal() {
+    let total = 0;
+    for (const item of this.items.values()) total += item.price * item.quantity;
+    return total;
+  }
+}
+```
+
+`addItem`, `getItemCount`, and `getTotal` behave identically from the
+outside in both versions — V2 even adds a small behavior improvement
+(adding the same item twice now merges quantities instead of creating
+a duplicate entry), while still exposing the same three methods.
+
+## Running implementation-coupled tests against both versions
+
+```js
+function testImplementationCoupled(CartClass) {
+  const cart = new CartClass();
+  cart.addItem("Widget", 10, 2);
+  cart.addItem("Gadget", 20, 1);
+  console.log("items.length === 2:", cart.items.length === 2);
+  console.log("items[0].name === Widget:", cart.items[0]?.name === "Widget");
+}
+
+testImplementationCoupled(ShoppingCartV1);
+// items.length === 2: true
+// items[0].name === Widget: true
+
+testImplementationCoupled(ShoppingCartV2);
+// items.length === 2: false   <- Map has no .length
+// items[0].name === Widget: false  <- Map isn't indexable by number
+```
+
+Verified: both assertions pass against V1, and **both fail against
+V2** — not because anything observable about the cart changed, but
+because `.length` and `[0]` are array-specific, and V2 doesn't use an
+array internally anymore.
+
+## Running behavior-based tests against both versions
+
+```js
+function testBehaviorBased(CartClass) {
+  const cart = new CartClass();
+  cart.addItem("Widget", 10, 2);
+  cart.addItem("Gadget", 20, 1);
+  console.log("getItemCount() === 3:", cart.getItemCount() === 3);
+  console.log("getTotal() === 40:", cart.getTotal() === 40);
+}
+
+testBehaviorBased(ShoppingCartV1);
+// getItemCount() === 3: true
+// getTotal() === 40: true
+
+testBehaviorBased(ShoppingCartV2);
+// getItemCount() === 3: true
+// getTotal() === 40: true
+```
+
+Verified: **both assertions pass against both versions, unchanged**.
+The predicted answer from the scenario above is confirmed —
+`cart.getItemCount()` survives because it goes through the public
+interface, which both versions implement identically; `cart.items[0]`
+doesn't survive because it depends on the array specifically being an
+array, a detail the refactor was explicitly free to change.
+
+## Extend it: what would a Given-When-Then version of these tests look like?
+
+**Using the terms from L2's table, how would you phrase the
+`getTotal()` behavior test as Given-When-Then?** One answer: _Given_ an
+empty cart, _When_ a Widget priced at 10 (quantity 2) and a Gadget
+priced at 20 (quantity 1) are added, _Then_ `getTotal()` returns 40.
+Notice this phrasing never mentions arrays, Maps, or any internal
+detail — it's the exact same test as `testBehaviorBased` above, just
+narrated in the Given-When-Then structure instead of plain assertions.
+
+## Failure modes
+
+| Failure mode                                                                    | What it gets wrong                                                                                                                       |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Asserting on a private field because it's convenient to reach                   | Convenience today creates a test that breaks on unrelated refactors tomorrow, for no real reason                                         |
+| Assuming "testing through the interface" means never inspecting return values   | The public interface includes what methods _return_, not just whether they were called — behavior tests should check outputs             |
+| Treating every failing test after a refactor as a regression                    | An implementation-coupled test failing after an internal-only change is a test problem, not evidence the refactor broke anything         |
+| Writing Given-When-Then as a formatting exercise without changing what's tested | Renaming an implementation-coupled assertion into three labeled lines doesn't make it a behavior test if it still reaches into internals |
+| Never refactoring internals because "it'll break the tests"                     | This is usually a sign the tests are coupled to implementation, not a real signal the refactor is risky                                  |
