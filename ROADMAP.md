@@ -77,7 +77,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 02  | status-updates-build-trust               | How do I explain a technical delay without sounding like an excuse? (status updates that build trust)                | done    |
 | 03  | reading-stakeholder-incentives           | Why did my "obviously right" proposal get rejected? (reading stakeholder incentives)                                 | done    |
 | 04  | pushback-frameworks                      | How do I say no to a request without burning the relationship? (pushback frameworks)                                 | done    |
-| 05  | building-credibility-ahead-ask           | How do I get buy-in before I need it? (building credibility ahead of the ask)                                        | planned |
+| 05  | building-credibility-ahead-ask           | How do I get buy-in before I need it? (building credibility ahead of the ask)                                        | done    |
 | 06  | decision-making-frameworks               | Why do meetings feel like they decide nothing? (decision-making frameworks: DACI/RACI)                               | planned |
 | 07  | executive-summaries                      | How do I write a doc that busy executives actually read? (executive summaries, BLUF)                                 | planned |
 | 08  | conflict-resolution                      | How do I navigate two teams that both think they own the same thing? (conflict resolution, escalation paths)         | planned |
