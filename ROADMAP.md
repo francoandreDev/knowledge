@@ -242,7 +242,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 03  | assertions-matter       | How do I write a test that actually catches bugs, not just exercises code? (assertions that matter, avoiding tautological tests)                      | done    |
 | 04  | tdd-basics              | Why does writing the test first change the design? (TDD basics, red-green-refactor)                                                                   | done    |
 | 05  | bdd                     | How do I test behavior instead of implementation? (BDD, testing through the public interface)                                                         | done    |
-| 06  | test-doubles            | How do I test something that depends on time, randomness, or external services? (test doubles: mocks/stubs/fakes, seams)                              | planned |
+| 06  | test-doubles            | How do I test something that depends on time, randomness, or external services? (test doubles: mocks/stubs/fakes, seams)                              | done    |
 | 07  | flaky-tests             | Why does my test suite pass locally but fail in CI? (flaky tests, non-determinism, environment leakage)                                               | planned |
 | 08  | mutation-testing        | How do I know if my tests are actually testing anything? (mutation testing, coverage as a signal, not a target)                                       | planned |
 | 09  | property-based-testing  | How do I test properties instead of examples? (property-based testing, generative testing)                                                            | planned |
