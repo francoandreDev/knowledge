@@ -1,0 +1,201 @@
+---
+title: "L3 — Reproducing the oversold-item bug, then fixing it two ways"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same bug, measured instead of described">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📦</span> <strong>Setup</strong> — an in-memory store starts with stock = 1</div>
+      <div class="flex items-center gap-1.5"><span>🔁</span> <strong>Test</strong> — two purchase requests fired concurrently with <code>Promise.all</code></div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — reproduce the bug, then make the count come out right</div>
+    </div>
+  </Fragment>
+
+**Before reading the code below, predict: JavaScript in Node.js is
+single-threaded — only one line of code runs at any instant. Given
+that, how can two concurrent requests possibly both read `stock = 1`
+before either one writes the update?**
+
+</Scenario>
+
+## The racy version
+
+This store simulates a real datastore round trip with a small delay on
+every read and write — exactly like a network call to a real database
+would behave.
+
+```js
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+class InventoryStore {
+  constructor(initialStock) {
+    this.stock = initialStock;
+  }
+
+  async getStock() {
+    await delay(5); // simulates a DB round trip
+    return this.stock;
+  }
+
+  async setStock(value) {
+    await delay(5); // simulates a DB round trip
+    this.stock = value;
+  }
+}
+
+async function purchaseRacy(store) {
+  const stock = await store.getStock();
+  if (stock <= 0) return { success: false };
+  await store.setStock(stock - 1);
+  return { success: true };
+}
+```
+
+Running two of these concurrently against a store that starts with 1
+unit:
+
+```js
+const store = new InventoryStore(1);
+const results = await Promise.all([purchaseRacy(store), purchaseRacy(store)]);
+console.log(results.filter((r) => r.success).length); // 2
+console.log(store.stock); // 0
+```
+
+This actually runs and produces exactly that: **2 successful
+purchases, final stock 0**. The predicted answer to the question above
+is the key insight: Node.js is single-threaded, but `await` is a
+**yield point** — every time a function hits an `await`, it hands
+control back to the event loop, which is free to run a different
+function's code before resuming this one. `purchaseRacy` hits `await
+store.getStock()` before it writes anything, so the event loop can run
+the _other_ call's `getStock()` in that gap — both see `stock = 1`
+before either one calls `setStock`.
+
+## Fix 1: make the critical section synchronous (atomic)
+
+If the check and the update never hit an `await` between them, there's
+no yield point for the event loop to interleave into — the whole
+operation runs as one uninterruptible step.
+
+```js
+class InventoryStore {
+  // ...same constructor...
+
+  purchaseAtomic() {
+    if (this.stock <= 0) return { success: false };
+    this.stock -= 1;
+    return { success: true };
+  }
+}
+```
+
+```js
+const store = new InventoryStore(1);
+const results = await Promise.all([
+  Promise.resolve(store.purchaseAtomic()),
+  Promise.resolve(store.purchaseAtomic()),
+]);
+console.log(results.filter((r) => r.success).length); // 1
+console.log(store.stock); // 0
+```
+
+Verified: **1 successful purchase, final stock 0** — correct. In a
+real system where the store genuinely lives behind a network call
+(a real database, not an in-memory object), the equivalent move is
+pushing the check into the write itself — a single conditional update
+like `UPDATE inventory SET stock = stock - 1 WHERE id = ? AND stock > 0`
+— so the database, not your application code, performs the check and
+the write as one atomic operation.
+
+## Fix 2: a lock, for when the critical section can't be made synchronous
+
+Sometimes the critical section genuinely needs an `await` in the
+middle — calling a payment API before committing the stock change, for
+example. A lock (mutex) forces every other call to wait outside the
+critical section instead of interleaving into it.
+
+```js
+class Mutex {
+  constructor() {
+    this.locked = false;
+    this.queue = [];
+  }
+
+  acquire() {
+    return new Promise((resolve) => {
+      if (!this.locked) {
+        this.locked = true;
+        resolve();
+      } else {
+        this.queue.push(resolve);
+      }
+    });
+  }
+
+  release() {
+    if (this.queue.length > 0) {
+      const next = this.queue.shift();
+      next(); // hand the lock straight to the next waiter
+    } else {
+      this.locked = false;
+    }
+  }
+}
+
+async function purchaseLocked(store, mutex) {
+  await mutex.acquire();
+  try {
+    const stock = await store.getStock();
+    if (stock <= 0) return { success: false };
+    await store.setStock(stock - 1);
+    return { success: true };
+  } finally {
+    mutex.release();
+  }
+}
+```
+
+Run with **three** concurrent buyers this time, against 1 unit of
+stock:
+
+```js
+const store = new InventoryStore(1);
+const mutex = new Mutex();
+const results = await Promise.all([
+  purchaseLocked(store, mutex),
+  purchaseLocked(store, mutex),
+  purchaseLocked(store, mutex),
+]);
+console.log(results.filter((r) => r.success).length); // 1
+console.log(store.stock); // 0
+```
+
+Verified: **1 successful purchase out of 3 concurrent attempts, final
+stock 0** — the two buyers who lost the race get a clean, correct "out
+of stock" instead of a false "success."
+
+## Extend it: does the atomic fix hold up with three buyers too?
+
+**The atomic fix (`purchaseAtomic`) was only tested with two concurrent
+buyers above. Does it still produce exactly 1 success with three
+concurrent buyers against 1 unit of stock, the same as the locked
+version did? Why would — or wouldn't — adding a third concurrent caller
+change the outcome, given what actually makes `purchaseAtomic` safe?**
+Running it confirms: **1 success, final stock 0**, identical to the
+locked version — because nothing about `purchaseAtomic` depends on how
+many callers are waiting, only on the fact that no caller can be
+interleaved mid-operation, no matter how many there are.
+
+## Failure modes
+
+| Failure mode                                                  | What it gets wrong                                                                                                          |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Adding a retry or a delay before the write                    | Changes the size of the timing gap, doesn't close it — the race can still happen, just less often                           |
+| Locking in application code while another process bypasses it | A lock only protects callers that acquire it — a second process writing directly to the same store isn't covered            |
+| Holding a lock across a slow, unrelated operation             | Serializes far more than necessary, turning a narrow fix into a throughput bottleneck                                       |
+| Assuming single-threaded means "no race conditions"           | `await` yield points let concurrent async operations interleave even on one thread, as this unit's bug shows                |
+| Fixing the symptom (oversold count) instead of the gap        | Reconciling stock after the fact treats damage already done; the fix has to prevent the interleaving, not clean up after it |
