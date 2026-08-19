@@ -1,0 +1,183 @@
+---
+title: "L3 — Simulating all three distributions, and checking the load balancer's numbers by hand"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Was server 3's 32% actually suspicious?">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — compute exactly how many standard deviations 64/200 is from the expected 50/200</div>
+      <div class="flex items-center gap-1.5"><span>🔔</span> <strong>Second goal</strong> — pick a defensible alert threshold for a 2%-failure-rate dependency</div>
+      <div class="flex items-center gap-1.5"><span>📶</span> <strong>Third goal</strong> — show that summed independent delays really do look normal</div>
+    </div>
+  </Fragment>
+
+**Before running the numbers: server 3 got 64 of 200 requests against
+an expected 50. Is that 14-request gap large or small, relative to
+what a fair 4-way random split naturally produces over 200 tries?**
+
+</Scenario>
+
+## Checking the load balancer: how many standard deviations is 64 from 50?
+
+For `n` independent trials each with probability `p`, the count of
+"successes" (here, "request went to server 3") has mean `n × p` and
+standard deviation `√(n × p × (1 − p))` — this is the binomial
+distribution's exact formula, not an approximation:
+
+```js
+function binomialStats(n, p) {
+  const mean = n * p;
+  const variance = n * p * (1 - p);
+  const stddev = Math.sqrt(variance);
+  return { mean, variance, stddev };
+}
+
+function zScore(observed, mean, stddev) {
+  return (observed - mean) / stddev;
+}
+
+const n = 200;
+const p = 0.25; // 1 of 4 servers
+const { mean, stddev } = binomialStats(n, p);
+const z = zScore(64, mean, stddev);
+
+console.log({ mean, stddev: stddev.toFixed(3), z: z.toFixed(3) });
+// { mean: 50, stddev: '6.124', z: '2.286' }
+```
+
+Verified: server 3's 64 hits are **2.286 standard deviations** above
+the expected 50. That's a real, noticeable deviation — worth watching
+if it persists — but it's not the kind of extreme outlier (5+ standard
+deviations) that would prove the random selection itself is broken. A
+purely fair 4-way split does occasionally produce results this
+lopsided over only 200 requests; the honest answer to the scenario's
+question is "keep watching, not yet conclusive," not a flat yes or no.
+
+## Setting a binomial alert threshold for a flaky dependency
+
+**If a downstream dependency independently fails 2% of the time, what
+failure count in the next 500 requests should actually trigger a
+page?** Computing the exact probability of "20 or more failures"
+requires the binomial probability mass function — the chance of
+exactly `k` successes in `n` trials:
+
+```js
+function logFactorial(x) {
+  let sum = 0;
+  for (let i = 2; i <= x; i++) sum += Math.log(i);
+  return sum;
+}
+
+function binomialPMF(n, p, k) {
+  const logCoefficient =
+    logFactorial(n) - logFactorial(k) - logFactorial(n - k);
+  return Math.exp(logCoefficient + k * Math.log(p) + (n - k) * Math.log(1 - p));
+}
+
+function probabilityAtLeast(n, p, k) {
+  let sum = 0;
+  for (let i = k; i <= n; i++) sum += binomialPMF(n, p, i);
+  return sum;
+}
+
+const n2 = 500;
+const p2 = 0.02;
+const prob20Plus = probabilityAtLeast(n2, p2, 20);
+console.log(prob20Plus.toFixed(5), "≈ 1 in", Math.round(1 / prob20Plus));
+// 0.00313 ≈ 1 in 320
+```
+
+(The log-factorial trick avoids computing `500!` directly, which would
+overflow — a `500 choose 20` computed the naive way isn't
+representable as a normal floating-point number, but its logarithm
+is.)
+
+Verified: under pure chance, 20+ failures out of 500 happens only
+about **0.31% of the time** — roughly 1 batch in 320. That rarity is
+exactly what makes 20 a defensible alert threshold: it's set far
+enough past the expected 10 ± 3.13 that crossing it is genuinely
+informative, not just noise from the dependency's normal 2% failure
+rate.
+
+## Demonstrating the Central Limit Theorem: summed delays look normal
+
+**If six independent hops each contribute a delay uniformly spread
+between 1ms and 5ms — not remotely bell-shaped on their own — what
+does their total look like after summing thousands of simulated
+requests?**
+
+```js
+function mulberry32(seed) {
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function simulateLatency(rand) {
+  let total = 0;
+  for (let i = 0; i < 6; i++) {
+    total += 1 + rand() * 4; // uniform(1, 5)
+  }
+  return total;
+}
+
+const rand = mulberry32(42);
+const samples = [];
+for (let i = 0; i < 20000; i++) samples.push(simulateLatency(rand));
+samples.sort((a, b) => a - b);
+
+const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
+const variance =
+  samples.reduce((a, b) => a + (b - mean) ** 2, 0) / samples.length;
+const p50 = samples[Math.floor(samples.length * 0.5)];
+const p99 = samples[Math.floor(samples.length * 0.99)];
+
+console.log({
+  mean: mean.toFixed(3),
+  variance: variance.toFixed(3),
+  p50: p50.toFixed(3),
+  p99: p99.toFixed(3),
+});
+// { mean: '18.026', variance: '7.977', p50: '18.004', p99: '24.483' }
+```
+
+Verified against the theoretical values: a single `uniform(1, 5)` has
+mean `3` and variance `(5 − 1)² / 12 ≈ 1.333`; summing 6 independent
+copies gives theoretical mean `6 × 3 = 18` and theoretical variance
+`6 × 1.333 ≈ 8` — matching the simulation's `18.026` and `7.977`
+almost exactly. None of the six individual delays was bell-shaped
+(each was flat, uniform), but their sum's `p50` (18.0) and `p99`
+(24.5) sit right where a normal distribution with that mean and
+variance would predict — this is the Central Limit Theorem showing up
+directly in a latency budget, which is why a `p99` latency SLO can
+often be reasoned about from its component hops rather than only
+measured after the fact.
+
+## Extend it: what if there were 20 hops instead of 6, each faster?
+
+**Using the same simulation shape, what would change about the
+resulting latency distribution if there were 20 hops instead of 6,
+each independently `uniform(0.5, 1.5)`ms — same total expected latency
+range, more, smaller pieces? Would the relative spread (`stddev /
+mean`) get wider or narrower than the 6-hop case, and why might that
+matter for how tight a `p99` SLO can realistically be set?** The
+Central Limit Theorem's guarantee gets _stronger_, not weaker, as more
+independent pieces are summed — try adjusting the loop bound and
+`rand()` range above and re-running to see the relative spread
+actually shrink.
+
+## Failure modes
+
+| Failure mode                                                                          | What it gets wrong                                                                                                                                        |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Treating any deviation from the exact expected value as a bug                         | A fair random process routinely produces uneven-looking results at small sample sizes — check standard deviations, not raw gaps                           |
+| Assuming a metric is "roughly normal" without checking why                            | Normal distributions arise from sums of independent effects (CLT) — a single skewed cause won't automatically look bell-shaped                            |
+| Picking an alert threshold from intuition instead of the distribution's actual spread | An intuitive-sounding threshold can trigger on pure noise, or miss real problems, depending on how far it actually is from the mean                       |
+| Assuming independence when trials aren't actually independent                         | Binomial math assumes each trial doesn't affect the next — correlated failures (e.g. a shared dependency having an outage) break this assumption entirely |
+| Confusing "uniform" (equally likely outcomes) with "evenly distributed in practice"   | Uniform describes the underlying process, not any single finite sample of it — small samples from a uniform process still look lumpy                      |
