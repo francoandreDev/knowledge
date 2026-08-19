@@ -1,0 +1,67 @@
+---
+title: "L1 — Why does calling an API from the browser fail unpredictably? (CORS, async/await, error handling)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="It works in Postman. It fails in the browser. Same request.">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Postman / curl</strong> — request succeeds, response comes back fine</div>
+      <div class="flex items-center gap-1.5"><span>❌</span> <strong>Browser</strong> — same request fails with a console error, no data</div>
+      <div class="flex items-center gap-1.5"><span>🌐</span> <strong>Server logs</strong> — show the request arrived and was handled successfully</div>
+    </div>
+  </Fragment>
+
+A frontend calls `fetch('https://api.example.com/users')` from a page
+served at `https://app.example.com`. In Postman, the exact same
+request works fine. In the browser, the JavaScript console shows an
+error and no data ever reaches the app — but the API's own server logs
+show the request arrived and was handled successfully, response and
+all. **The server did its job. Postman proves the request itself is
+fine. So what's actually failing, and where?**
+
+</Scenario>
+
+## The shape of the problem
+
+- The browser enforces a rule that tools like Postman and curl simply
+  don't: a page can freely talk to its own origin, but talking to a
+  _different_ origin is restricted by default — regardless of whether
+  the server would have happily responded.
+- This restriction is enforced entirely on the browser side. The
+  server can process the request and send back a perfectly valid
+  response, and the browser can still refuse to hand that response to
+  the page's JavaScript — which is exactly why server logs show
+  success while the console shows failure.
+- Separately, a common source of confusion sits right next to this:
+  `fetch()` only rejects its promise for network-level failures (like
+  a CORS block) — a normal HTTP error response like a 404 or 500
+  _resolves_ the promise, not rejects it. A `try/catch` around
+  `fetch()` alone won't catch an HTTP error status; that has to be
+  checked explicitly.
+
+## Key terms
+
+- **Same-origin policy** — the browser's default rule that JavaScript
+  on one origin (scheme + host + port) can't read responses from a
+  different origin, unless that origin explicitly opts in.
+- **CORS (Cross-Origin Resource Sharing)** — the mechanism a server
+  uses to opt in to cross-origin requests, by sending specific
+  response headers the browser checks before handing data to the page.
+- **Preflight request** — an automatic `OPTIONS` request the browser
+  sends _before_ certain cross-origin requests, asking the server
+  "would you allow this?" before sending the real one.
+- **`Access-Control-Allow-Origin`** — the response header a server
+  sends to tell the browser which origins are allowed to read its
+  responses.
+
+## What this unit covers
+
+L2 works through exactly when a preflight request happens, what makes
+a request "simple" versus one that needs preflight, and the separate
+`fetch()` resolve-vs-reject distinction that trips up async/await error
+handling. L3 implements both mechanics in real code — a CORS check
+simulator that reproduces the exact "blocked by CORS policy" failure
+and its fix, and a `fetch()` wrapper demonstrating the difference
+between catching a network failure and catching an HTTP error status.

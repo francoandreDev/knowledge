@@ -1,0 +1,232 @@
+---
+title: "L3 — Simulating the exact CORS block, then fixing the fetch() error-handling gap"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same request, misconfigured server vs. fixed server">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>Buggy config</strong> — reproduces L1's exact "works in Postman, fails in browser" bug</div>
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Fixed config</strong> — the one-line server fix that resolves it</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Second goal</strong> — show exactly why try/catch alone misses a 404</div>
+    </div>
+  </Fragment>
+
+**Before running the code: `app.example.com` calling
+`api.example.com` with an `Authorization` header — does this request
+need a preflight, given `GET` alone is a "simple" method? And if the
+server's CORS config is missing `app.example.com` from its allowed
+origins, at which point does the browser actually stop the request —
+before it reaches the server, or after?**
+
+</Scenario>
+
+## Determining whether a request needs a preflight
+
+```js
+const SIMPLE_HEADERS = [
+  "accept",
+  "accept-language",
+  "content-language",
+  "content-type",
+];
+const SIMPLE_CONTENT_TYPES = [
+  "application/x-www-form-urlencoded",
+  "multipart/form-data",
+  "text/plain",
+];
+const SIMPLE_METHODS = ["GET", "HEAD", "POST"];
+
+function needsPreflight(method, headers = {}) {
+  if (!SIMPLE_METHODS.includes(method.toUpperCase())) return true;
+  for (const key of Object.keys(headers)) {
+    if (!SIMPLE_HEADERS.includes(key.toLowerCase())) return true;
+  }
+  if (
+    headers["Content-Type"] &&
+    !SIMPLE_CONTENT_TYPES.includes(headers["Content-Type"])
+  ) {
+    return true;
+  }
+  return false;
+}
+
+console.log(needsPreflight("GET", {})); // false
+console.log(needsPreflight("GET", { Authorization: "Bearer x" })); // true
+console.log(needsPreflight("PUT", {})); // true
+console.log(needsPreflight("POST", { "Content-Type": "application/json" })); // true
+```
+
+Verified: `GET` with no headers is simple, but adding `Authorization`
+alone flips `needsPreflight` to `true` — confirming L1's scenario does
+require a preflight, even though `GET` by itself would have been fine.
+
+## Reproducing the exact CORS block, then fixing it
+
+```js
+function parseOrigin(url) {
+  return new URL(url).origin;
+}
+
+function isSameOrigin(pageOrigin, requestUrl) {
+  return parseOrigin(requestUrl) === pageOrigin;
+}
+
+function simulateCorsCheck(
+  pageOrigin,
+  requestUrl,
+  method,
+  headers,
+  serverConfig,
+) {
+  if (isSameOrigin(pageOrigin, requestUrl)) {
+    return { allowed: true, reason: "same-origin, no CORS check needed" };
+  }
+  const originAllowed =
+    serverConfig.allowedOrigins.includes("*") ||
+    serverConfig.allowedOrigins.includes(pageOrigin);
+
+  if (needsPreflight(method, headers)) {
+    if (!originAllowed) {
+      return {
+        allowed: false,
+        reason: `Preflight failed: ${pageOrigin} not in Access-Control-Allow-Origin`,
+      };
+    }
+    if (!serverConfig.allowedMethods.includes(method.toUpperCase())) {
+      return {
+        allowed: false,
+        reason: `Preflight failed: method ${method} not allowed`,
+      };
+    }
+    return { allowed: true, reason: "preflight passed, actual request sent" };
+  }
+
+  if (!originAllowed) {
+    return {
+      allowed: false,
+      reason: `Response blocked: ${pageOrigin} not in Access-Control-Allow-Origin (request still reached server)`,
+    };
+  }
+  return { allowed: true, reason: "simple request, origin allowed" };
+}
+
+const pageOrigin = "https://app.example.com";
+const requestUrl = "https://api.example.com/users";
+const headers = { Authorization: "Bearer xyz" };
+
+const buggyConfig = { allowedOrigins: [], allowedMethods: ["GET", "POST"] };
+console.log(
+  simulateCorsCheck(pageOrigin, requestUrl, "GET", headers, buggyConfig),
+);
+// { allowed: false, reason: 'Preflight failed: https://app.example.com not in Access-Control-Allow-Origin' }
+
+const fixedConfig = {
+  allowedOrigins: ["https://app.example.com"],
+  allowedMethods: ["GET", "POST"],
+};
+console.log(
+  simulateCorsCheck(pageOrigin, requestUrl, "GET", headers, fixedConfig),
+);
+// { allowed: true, reason: 'preflight passed, actual request sent' }
+```
+
+Verified: with `buggyConfig` (missing `app.example.com` from
+`allowedOrigins`), the check fails at the **preflight** step — the
+real `GET /users` never gets sent, matching L1's browser-side failure.
+Adding the correct origin to `allowedOrigins` is the entire fix; the
+check now passes and the real request proceeds.
+
+## Even a "simple" request gets blocked — just one step later
+
+```js
+console.log(simulateCorsCheck(pageOrigin, requestUrl, "GET", {}, buggyConfig));
+// { allowed: false, reason: 'Response blocked: ... (request still reached server)' }
+
+console.log(simulateCorsCheck(pageOrigin, requestUrl, "GET", {}, fixedConfig));
+// { allowed: true, reason: 'simple request, origin allowed' }
+```
+
+Verified: dropping the `Authorization` header makes this a simple
+request — no preflight — but the buggy config still blocks it, this
+time with the reason explicitly noting _the request still reached the
+server_. This is precisely why L1's server logs showed success: the
+request really did arrive and get handled; only the browser's decision
+to hand the response to JavaScript was ever in question.
+
+## The separate bug: `fetch()` resolving on a 404
+
+```js
+function mockFetch(status, networkFailure = false) {
+  return new Promise((resolve, reject) => {
+    if (networkFailure) {
+      reject(new TypeError("Failed to fetch"));
+    } else {
+      resolve({ ok: status >= 200 && status < 300, status });
+    }
+  });
+}
+
+async function getUserBuggy(status, networkFailure) {
+  try {
+    const response = await mockFetch(status, networkFailure);
+    return { success: true, status: response.status };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+console.log(await getUserBuggy(404, false));
+// { success: true, status: 404 }
+```
+
+Verified: `getUserBuggy` reports `success: true` for a **404
+response** — the `try/catch` never fires, because `fetch()` resolved
+normally. This is the exact gap from L2's table: an HTTP error status
+doesn't reject the promise.
+
+```js
+async function getUserFixed(status, networkFailure) {
+  try {
+    const response = await mockFetch(status, networkFailure);
+    if (!response.ok) {
+      throw new Error(`Request failed with status ${response.status}`);
+    }
+    return { success: true, status: response.status };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+console.log(await getUserFixed(404, false));
+// { success: false, error: 'Request failed with status 404' }
+console.log(await getUserBuggy(0, true));
+// { success: false, error: 'Failed to fetch' }
+```
+
+Verified: `getUserFixed` explicitly checks `response.ok` and throws,
+turning the 404 into a caught error — while a genuine network failure
+(`networkFailure: true`) was already being caught correctly in _both_
+versions, because that's the one case where `fetch()` actually
+rejects.
+
+## Extend it: what if the API returns a 401 instead of a 404?
+
+**Using `getUserFixed` above, would a `401 Unauthorized` response be
+caught the same way as the 404 case, or does the current `if
+(!response.ok)` check treat every non-2xx status identically?** Try
+adjusting `getUserFixed` to include the specific status code in a way
+that would let calling code distinguish "not found" from "not
+authorized" — what would need to change about what the function
+throws?
+
+## Failure modes
+
+| Failure mode                                                                 | What it gets wrong                                                                                                                      |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Assuming a CORS error means the server rejected the request                  | The server often processed it successfully — CORS is enforced by the browser, after the response already came back                      |
+| Adding `Access-Control-Allow-Origin: *` to "just make it work"               | Works for simple requests without credentials, but silently fails for anything requiring cookies/auth, and is a real security loosening |
+| Trusting `try/catch` around `fetch()` to catch all API errors                | It only catches network-level failures and CORS blocks — HTTP error statuses resolve normally and need an explicit `response.ok` check  |
+| Testing an API only with Postman/curl before shipping a frontend integration | Those tools don't enforce CORS at all, so a same-origin-policy bug can pass every manual test and still break in the browser            |
+| Assuming a preflight happens for every cross-origin request                  | Simple requests (plain GET/POST, standard headers) skip the preflight entirely — the browser still checks the response, just later      |
