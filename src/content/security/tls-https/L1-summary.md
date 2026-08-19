@@ -1,0 +1,77 @@
+---
+title: "L1 — Why doesn't a green padlock mean a site is safe? (TLS/HTTPS, certificate trust chains)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Two sites, two valid padlocks, one of them a trap">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🔒</span> <strong>paypal.com</strong> — valid TLS certificate, padlock shown</div>
+      <div class="flex items-center gap-1.5"><span>🔒</span> <strong>paypa1-secure-login.com</strong> — ALSO a valid TLS certificate, ALSO a padlock shown</div>
+      <div class="flex items-center gap-1.5"><span>🎣</span> <strong>Second site</strong> — a phishing page designed to steal login credentials</div>
+    </div>
+  </Fragment>
+
+**A user gets an email urging them to log in and verify their
+account. They click the link, land on `paypa1-secure-login.com`, and
+check for the padlock icon before typing their password — a habit
+they were taught is the sign of a "safe" site. The padlock is there.
+The connection is genuinely encrypted. And the site is a phishing
+page built to steal their credentials. How can the padlock be telling
+the truth and the user still be about to get robbed?**
+
+The padlock never promised the site was trustworthy — it only
+promises the connection to _whatever domain is in the address bar_ is
+encrypted, and that a certificate authority verified someone controls
+that specific domain. Nothing about that guarantees the domain
+belongs to the company the user thinks it does.
+
+</Scenario>
+
+## The shape of the problem
+
+- **TLS (Transport Layer Security)** encrypts the connection between
+  a browser and a server, so anyone intercepting the traffic in
+  transit (a coffee-shop Wi-Fi eavesdropper, an ISP) sees scrambled
+  bytes instead of readable data. This is a real, valuable guarantee
+  — but it's a guarantee about the _pipe_, not about who's on the
+  other end of it.
+- A **TLS certificate** binds a public key to a specific domain name
+  and is signed by a **certificate authority (CA)** — an organization
+  browsers already trust. The padlock appears when the browser can
+  verify that signature chains back to a CA it trusts, _for the exact
+  domain currently in the address bar_.
+- **Domain validation is not identity validation.** A CA issuing a
+  certificate for `paypa1-secure-login.com` isn't vouching that the
+  site is operated by PayPal — it's only certifying that whoever
+  requested the certificate could prove they control that domain.
+  Anyone can register a lookalike domain and get it a perfectly valid
+  certificate.
+
+## Key terms
+
+- **TLS (Transport Layer Security)** — the protocol that encrypts and
+  authenticates a connection between a client and server; HTTPS is
+  HTTP running over TLS.
+- **Certificate** — a signed document binding a public key to a
+  domain name, issued by a certificate authority.
+- **Certificate authority (CA)** — an organization whose signing key
+  is pre-trusted by browsers and operating systems; a certificate is
+  trusted if it chains back to one of these.
+- **Chain of trust** — the sequence of signatures from a leaf
+  certificate (the site's own) up through one or more intermediate
+  certificates to a trusted root certificate authority.
+- **Domain validation (DV)** — the most common, lightest-weight kind
+  of certificate, confirming only that the requester controls the
+  domain — not who they are or what they intend to use it for.
+
+## What this unit covers
+
+L2 works through how a certificate chain is actually verified —
+signatures linking leaf to intermediate to root — and exactly what
+that verification does and doesn't prove about the site on the other
+end. L3 implements a real, runnable chain-of-trust verifier in code,
+proving that a legitimate site and a phishing lookalike domain can
+both pass verification cleanly, and that tampering with a certificate
+after it's signed breaks verification immediately.

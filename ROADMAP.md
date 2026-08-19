@@ -114,7 +114,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 03  | authorization-models                   | How do we decide what an authenticated user is allowed to do? (authorization models: RBAC/ABAC)                                             | done    |
 | 04  | hashing                                | Why does storing a password in plain text guarantee disaster? (hashing, salting, key derivation)                                            | done    |
 | 05  | symmetric-asymmetric-encryption-basics | How do we keep data unreadable to anyone but the intended recipient? (symmetric vs. asymmetric encryption basics)                           | done    |
-| 06  | tls-https                              | Why doesn't a green padlock mean a site is safe? (TLS/HTTPS, certificate trust chains)                                                      | planned |
+| 06  | tls-https                              | Why doesn't a green padlock mean a site is safe? (TLS/HTTPS, certificate trust chains)                                                      | done    |
 | 07  | owasp-top-10                           | How does an attacker actually break into a web app? (OWASP top 10, in depth)                                                                | planned |
 | 08  | secrets-management                     | How do we stop leaking secrets into code and logs? (secrets management, environment hygiene)                                                | planned |
 | 09  | supply-chain-security                  | Why did a "trusted" open-source dependency compromise production? (supply chain security, SBOM, dependency scanning)                        | planned |
