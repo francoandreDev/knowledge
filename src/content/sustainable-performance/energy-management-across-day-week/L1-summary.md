@@ -1,0 +1,68 @@
+---
+title: "L1 — How do I manage energy, not just time? (energy management across a day/week, matching task type to energy state)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same two hours, two very different results">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🌅</span> <strong>9–11 AM</strong> — high focus energy, spent replying to routine messages</div>
+      <div class="flex items-center gap-1.5"><span>😴</span> <strong>2–4 PM</strong> — low focus energy (post-lunch dip), spent on the week's hardest problem</div>
+      <div class="flex items-center gap-1.5"><span>📉</span> <strong>Result</strong> — same 2 hours both times, wildly different output</div>
+    </div>
+  </Fragment>
+
+**Maya blocks two hours every morning and two hours every afternoon for
+"deep work." Some days the morning block produces her best thinking of
+the week. Other days — same two hours, same calendar block — she
+reads the same paragraph five times and gets nowhere. What changed
+if the time was identical both times?**
+
+What changed wasn't the time available — it was her energy state
+during that time. A calendar block guarantees a slot exists; it says
+nothing about what she'll be capable of inside it.
+
+</Scenario>
+
+## The shape of the problem
+
+- Time management treats every hour as interchangeable — an hour is
+  an hour. Energy management treats hours as _qualitatively
+  different_: the same clock hour can be a high-focus hour or a
+  low-focus hour depending on where it falls in a person's daily and
+  weekly energy pattern.
+- Most people's mental energy isn't flat across a day — it rises,
+  dips, and recovers in a fairly predictable shape (often called a
+  circadian or ultradian rhythm), and it also trends across a week
+  (fresher early in the week, more depleted by the end, with
+  recovery over a weekend or rest period).
+- The practical failure isn't "not having enough time" — it's
+  **task-energy mismatch**: scheduling the task that most needs sharp
+  focus into a slot where focus is naturally at its lowest, and
+  burning a high-energy slot on something that barely needed it.
+
+## Key terms
+
+- **Energy state** — a person's current capacity for focus,
+  decision-making, and creative effort, as distinct from how many
+  hours they have free.
+- **Circadian dip** — a predictable low point in alertness that most
+  people experience in the early-to-mid afternoon, regardless of how
+  much sleep they got the night before.
+- **Task-energy matching** — deliberately scheduling high-demand
+  cognitive work (writing, problem-solving, hard decisions) into
+  naturally high-energy windows, and low-demand work (routine replies,
+  filing, administrative tasks) into naturally low-energy windows.
+- **Weekly energy trend** — the slower rise-and-fall of overall
+  capacity across a week (or across a training block, a school term,
+  etc.), layered on top of the faster daily rhythm.
+
+## What this unit covers
+
+L2 works through why a fixed daily energy curve makes some hours
+worth more than others for a given task, and how to read your own
+curve instead of assuming a generic one. L3 works a full week's
+worth of scheduling decisions for one person, comparing a
+time-blocked-but-energy-blind schedule against an energy-matched one
+on the same set of tasks.
