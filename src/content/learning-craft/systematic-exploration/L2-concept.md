@@ -1,0 +1,84 @@
+---
+title: "L2 — Why folder order isn't execution order, and what each technique actually answers"
+---
+
+## Folder structure is not a map of what runs first
+
+**If you open a repo and see `routes/`, `controllers/`, `services/`,
+`models/`, and `tests/` folders — which one should you read first?**
+None of them, in that alphabetical order — folder structure describes
+how code is _organized_, not the order it actually _executes_ in for
+a given request. The real execution order is a chain determined by
+what calls what:
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Router as routes/orders.js
+    participant Controller as ordersController.js
+    participant Service as orderService.js
+    Client->>Router: POST /orders/:id/apply-discount
+    Router->>Controller: applyDiscount(req, res)
+    Controller->>Service: applyDiscount(order, code)
+    Service-->>Controller: updated order or thrown error
+    Controller-->>Client: 200 response or error response
+```
+
+This chain — router to controller to service — is the actual path a
+request takes, and it's what you need to follow, not the alphabetical
+folder listing. Reading `models/` before you've even found the route
+that triggers the bug spends time on code that may never come up in
+the actual trace.
+
+## Three techniques, three different questions
+
+**If exploring a whole codebase up front doesn't work, what's the
+minimum set of things worth doing instead?** Three techniques, each
+answering something the others don't:
+
+| Technique            | Question it answers                                                   | What it doesn't tell you                                                                        |
+| -------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Find the entry point | Where does this specific kind of request first reach the code?        | What that code actually does once execution moves past it                                       |
+| Trace execution      | What's the real sequence of function calls this one request triggers? | Whether that sequence is the _correct_ or _intended_ behavior                                   |
+| Read the tests first | What is this code _supposed_ to do, according to whoever wrote it?    | Whether the current implementation actually matches that intent (that's what tracing tells you) |
+
+Notice these three are complementary, not redundant — entry point
+narrows _where_ to start looking, tracing tells you _what actually
+happens_, and tests tell you _what's supposed to happen_. Skipping
+any one of them leaves a gap: tracing without reading tests first
+means you understand the current behavior but not whether it's a bug
+or a feature; reading tests without tracing means you know the intent
+but not whether the code lives up to it.
+
+## Why tests are read before implementation, not after
+
+**Why start with the test file instead of jumping straight into
+`orderService.js`?** A test suite, when it exists, is usually the
+most concentrated, example-driven description of intended behavior
+in the entire codebase — more reliable than a comment (which can go
+stale) and more concrete than a docstring (which describes intent in
+prose, not in a checkable example). A test like `expect(() =>
+applyDiscount(order, "FAKE")).toThrow()` tells you two things at
+once: unknown codes should be rejected, _and_ the codebase's
+established pattern for rejecting bad input (throwing, in this case)
+— a pattern worth matching when you write your own fix, rather than
+inventing a different error-handling style that clashes with the rest
+of the file.
+
+## Failure modes at this level
+
+- **Starting with the folder tree instead of a specific request.**
+  Without a concrete trigger (a specific request, a specific bug
+  report) to trace, "explore the codebase" has no natural stopping
+  point — you can read indefinitely without ever converging on the
+  part that matters.
+- **Tracing execution but skipping the tests.** You'll understand
+  what the code currently does, but not whether that's the bug itself
+  or intended behavior — you risk "fixing" something that was never
+  broken, or missing that the bug is exactly the thing the tests
+  already describe as wrong.
+- **Trusting comments over tests when they conflict.** A comment can
+  describe what the author _intended_ to write; a test describes what
+  the code is _actually checked_ to do. When they disagree, the test
+  is closer to ground truth, since it runs and fails if violated —
+  the comment doesn't.

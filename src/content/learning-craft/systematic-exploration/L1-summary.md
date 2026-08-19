@@ -1,0 +1,74 @@
+---
+title: "L1 — How do I learn a new codebase or system fast? (systematic exploration: entry points, tracing execution, reading tests first)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="A bug report, a codebase you've never seen, and a deadline">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>Bug report</strong> — applying a discount code twice isn't rejected, order gets double-discounted</div>
+      <div class="flex items-center gap-1.5"><span>📂</span> <strong>Codebase</strong> — new hire's second week, has never opened this repo before</div>
+      <div class="flex items-center gap-1.5"><span>⏱️</span> <strong>Two approaches</strong> — start reading files top to bottom vs. trace one real request end-to-end</div>
+    </div>
+  </Fragment>
+
+**You're two weeks into a new job. A bug report lands: applying the
+same discount code twice to an order isn't rejected — customers are
+getting double discounts. You've never opened this repository before.
+One instinct is to start reading files from the top of the folder
+tree, hoping the right code surfaces eventually. Another engineer on
+your team opens the exact same repo and has a fix out in twenty
+minutes. What's the difference in what they actually did first?**
+
+They didn't read more code than you — they read a specific, small
+slice of it, chosen deliberately: where the request enters the
+system, what path it follows through the code, and what the existing
+tests already say about how this kind of thing is supposed to behave.
+
+</Scenario>
+
+## The shape of the problem
+
+- An unfamiliar codebase is too large to read start to finish before
+  doing anything useful — reading linearly wastes time on code that
+  has nothing to do with the actual task.
+- **Systematic exploration** replaces "read everything" with three
+  targeted moves: find the **entry point** (where does this specific
+  kind of request first enter the code?), **trace execution** (follow
+  that one request through the layers it actually passes through),
+  and **read the tests first** (they document the intended behavior
+  more reliably than comments or your own guesses about what the code
+  "should" do).
+- The goal isn't full understanding of the whole system — it's just
+  enough understanding of the one path relevant to the task at hand,
+  built fast and confirmed against evidence (tests, actual execution)
+  rather than assumption.
+
+## Key terms
+
+- **Entry point** — the first piece of code a given kind of request
+  or event reaches: a route handler, an event listener, a CLI command
+  handler, a queue consumer.
+- **Tracing execution** — following one concrete request or input
+  through the actual sequence of function calls it triggers, layer by
+  layer, rather than trying to understand every layer in isolation
+  first.
+- **Reading tests first** — treating a codebase's existing test suite
+  as documentation of intended behavior, read before diving into
+  implementation code, since tests describe what the code is supposed
+  to do in a way comments and variable names often don't.
+- **Call graph** — the actual chain of function calls a request
+  triggers, as opposed to the folder structure, which often doesn't
+  match the real order code executes in.
+
+## What this unit covers
+
+L2 works through why folder structure is a poor map of execution
+order, and how entry points, tracing, and tests each answer a
+different question about an unfamiliar system. L3 walks the actual
+discount-bug scenario above in real code: finding the entry point,
+tracing the request through three layers, reading the existing tests
+to learn the codebase's validation pattern, and using that pattern to
+write a fix that matches the rest of the code rather than fighting
+it.
