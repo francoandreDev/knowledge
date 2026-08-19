@@ -148,7 +148,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 02  | asking-feedback               | How do I get useful feedback instead of vague praise? (asking for feedback, calibration)                                  | done    |
 | 03  | mentoring-fundamentals        | How do I help a junior teammate grow without doing their job for them? (mentoring fundamentals)                           | done    |
 | 04  | structured-interviewing       | How do I know if someone should get the job? (structured interviewing, avoiding bias)                                     | done    |
-| 05  | goal-setting                  | How do I build a growth plan that isn't just "work harder"? (goal-setting, skill gap analysis)                            | planned |
+| 05  | goal-setting                  | How do I build a growth plan that isn't just "work harder"? (goal-setting, skill gap analysis)                            | done    |
 | 06  | impact-scope-over-correctness | Why doesn't being technically right guarantee being seen as senior? (impact and scope over correctness)                   | planned |
 | 07  | documentation-career-tool     | How do I make my work visible without it feeling like bragging? (documentation as a career tool, brag docs)               | planned |
 | 08  | calibration-processes         | How do performance calibrations actually work? (calibration processes, promotion packets)                                 | planned |
