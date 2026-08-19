@@ -1,0 +1,169 @@
+---
+title: "L3 — Implementing a spread scheduler and a reconciliation loop, then running out of headroom"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same cluster, two different amounts of headroom">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🟢</span> <strong>Scenario A</strong> — 3 nodes, moderate load, one node fails</div>
+      <div class="flex items-center gap-1.5"><span>🔴</span> <strong>Scenario B</strong> — 2 nodes, fully packed, one node fails</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — run the same reconciliation logic against both, and see where it stops being enough</div>
+    </div>
+  </Fragment>
+
+**Before running the code: if a cluster's nodes are packed all the way
+to their capacity limit, and one of them fails, can the reconciliation
+loop actually recover everything it lost — or does "the loop is
+running correctly" stop being the same thing as "the app is fully
+back up"?**
+
+</Scenario>
+
+## Implementing a spread scheduler
+
+A scheduler needs to pick, for each pod, a node with enough remaining
+CPU and memory — and per L2, _spreading_ onto the node with the most
+free capacity (rather than packing the fullest node first) is what
+keeps one node's failure from taking out a disproportionate share of
+the fleet:
+
+```js
+function scheduleSpread(nodes, pods) {
+  const remaining = nodes.map((n) => ({
+    name: n.name,
+    cpu: n.cpu,
+    mem: n.mem,
+  }));
+  // schedule the biggest, hardest-to-place pods first
+  const sorted = [...pods].sort((a, b) => b.cpu - a.cpu || b.mem - a.mem);
+  const placements = [];
+  const pending = [];
+
+  for (const pod of sorted) {
+    const candidates = remaining.filter(
+      (n) => n.cpu >= pod.cpu && n.mem >= pod.mem,
+    );
+    if (candidates.length === 0) {
+      pending.push(pod.name);
+      continue;
+    }
+    // among nodes that fit, pick the one with the most free capacity
+    candidates.sort((a, b) => b.cpu - a.cpu || b.mem - a.mem);
+    const node = candidates[0];
+    node.cpu -= pod.cpu;
+    node.mem -= pod.mem;
+    placements.push({ pod: pod.name, node: node.name });
+  }
+
+  return { placements, pending, remaining };
+}
+```
+
+## Scenario A: 3 nodes, moderate load, one node fails
+
+```js
+const nodes3 = [
+  { name: "nodeA", cpu: 4, mem: 8 },
+  { name: "nodeB", cpu: 4, mem: 8 },
+  { name: "nodeC", cpu: 4, mem: 8 },
+];
+const pods6 = [
+  { name: "p1", cpu: 1, mem: 2 },
+  { name: "p2", cpu: 2, mem: 2 },
+  { name: "p3", cpu: 1, mem: 1 },
+  { name: "p4", cpu: 1, mem: 2 },
+  { name: "p5", cpu: 2, mem: 1 },
+  { name: "p6", cpu: 1, mem: 1 },
+];
+
+const initial = scheduleSpread(nodes3, pods6);
+console.log(initial.placements);
+// nodeA: p2, p6 · nodeB: p5, p3 · nodeC: p1, p4
+console.log(initial.remaining);
+// nodeA: {cpu:1,mem:5} · nodeB: {cpu:1,mem:6} · nodeC: {cpu:2,mem:4}
+```
+
+Verified: the spread scheduler distributes all 6 pods across all 3
+nodes rather than packing any single one, leaving real spare capacity
+on each.
+
+```js
+// nodeC fails — its 2 pods (p1, p4) are lost
+const lostPods = [pods6[0], pods6[3]]; // p1, p4
+const survivors = initial.remaining.filter((n) => n.name !== "nodeC");
+const reconciled = scheduleSpread(survivors, lostPods);
+
+console.log(reconciled.placements);
+// p1 -> nodeB, p4 -> nodeA
+console.log(reconciled.pending);
+// []
+```
+
+Verified: when `nodeC` fails, the reconciliation loop reschedules
+**both** lost pods onto `nodeA` and `nodeB`'s spare capacity, with
+nothing left `pending`. This is self-healing actually working — the
+spread scheduler's earlier decision to leave headroom on every node is
+exactly what makes this recovery possible.
+
+## Scenario B: extend it — what if there's no headroom left?
+
+**Using the same `scheduleSpread` and reconciliation logic, what
+happens if the cluster only has 2 nodes and they're packed all the way
+to capacity before anything fails?**
+
+```js
+const nodes2 = [
+  { name: "nodeA", cpu: 4, mem: 8 },
+  { name: "nodeB", cpu: 4, mem: 8 },
+];
+const podsTight = [
+  { name: "p1", cpu: 2, mem: 4 },
+  { name: "p2", cpu: 2, mem: 4 },
+  { name: "p3", cpu: 2, mem: 4 },
+  { name: "p4", cpu: 2, mem: 4 },
+];
+
+const initial2 = scheduleSpread(nodes2, podsTight);
+console.log(initial2.remaining);
+// nodeA: {cpu:0,mem:0} · nodeB: {cpu:0,mem:0} — fully packed, zero headroom
+
+const lostPods2 = [podsTight[1], podsTight[3]]; // p2, p4, both on nodeB
+const survivors2 = initial2.remaining.filter((n) => n.name !== "nodeB");
+const reconciled2 = scheduleSpread(survivors2, lostPods2);
+
+console.log(reconciled2.placements);
+// []
+console.log(reconciled2.pending);
+// ["p2", "p4"]
+```
+
+Verified: with zero headroom, the exact same reconciliation logic that
+fully recovered Scenario A produces **zero** successful placements
+here — both lost pods stay `pending` indefinitely, because `nodeA` has
+no CPU or memory left to give them. The reconciliation loop is
+correctly running and correctly reporting the gap — but "correctly
+running" and "the app is actually back up" have stopped being the same
+thing. **The loop never manufactures capacity that isn't there; it can
+only redistribute what's already spare.**
+
+## Extend it further: how much headroom would Scenario B have needed?
+
+**Given `podsTight`'s total demand (8 CPU, 16 memory across 4 pods)
+and 2 nodes of 4 CPU / 8 memory each, what's the minimum total cluster
+capacity that would let _any single node's_ failure be fully absorbed
+by the survivors — and does adding a 3rd identical node fix it, the
+way it did in Scenario A?** Try extending `nodes2` to 3 nodes with the
+same `podsTight` list and re-running the scheduler and reconciliation
+above to check.
+
+## Failure modes
+
+| Failure mode                                                                     | What it gets wrong                                                                                                                  |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Assuming an orchestrator itself guarantees recovery                              | It guarantees _detection and an attempt_ — recovery still depends on spare capacity actually existing somewhere                     |
+| Packing nodes to 100% utilization to "save money"                                | Maximizes cost efficiency at the exact expense of the headroom that makes single-node failures survivable                           |
+| Treating "pending" pods as a transient blip that will resolve itself             | A pod stays pending until capacity is freed or added — it does not eventually succeed on its own                                    |
+| Believing more nodes always fixes underprovisioning                              | Only helps if the added capacity is enough to absorb the specific failure being planned for, not just "some more"                   |
+| Confusing a scheduler that spreads load with one that guarantees fault tolerance | Spreading reduces the _blast radius_ of one node's failure; it doesn't eliminate the need for actual spare capacity to recover into |
