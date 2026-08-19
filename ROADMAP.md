@@ -185,7 +185,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 03  | who-holds-influence        | How do I read the informal org chart, not just the official one? (who actually holds influence, real decision networks)                                       | done    |
 | 04  | favor-economy              | How do I bank goodwill before I need to spend it? (the favor economy, relationship capital)                                                                   | done    |
 | 05  | strategic-ambiguity        | What is "gray" politics, and where's the line before it turns dishonest? (strategic ambiguity, selective disclosure, timing information)                      | done    |
-| 06  | framing                    | How do I control the narrative around my own work without lying? (framing, emphasis, owning the story honestly)                                               | planned |
+| 06  | framing                    | How do I control the narrative around my own work without lying? (framing, emphasis, owning the story honestly)                                               | done    |
 | 07  | subtext                    | How do I read a room or meeting for what's not being said? (subtext, unstated agendas, silence as signal)                                                     | planned |
 | 08  | credit-stealing            | What does "black" politics actually look like in practice? (credit-stealing, scapegoating, sabotage, weaponized rumors, manufactured urgency)                 | planned |
 | 09  | warning-signs              | How do I recognize I'm being set up to fail? (warning signs: shifting goalposts, exclusion from key threads, sudden isolation)                                | planned |
