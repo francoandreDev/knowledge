@@ -58,7 +58,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 04  | merge                   | How do two people edit the same file without destroying each other's work? (merge, conflicts)                                 | done    |
 | 05  | merge-rebase            | Why does `git pull` sometimes create a mess? (merge vs. rebase, fast-forward)                                                 | done    |
 | 06  | commit-conventions      | How do we keep history readable as a team? (commit conventions, atomic commits)                                               | done    |
-| 07  | branching-strategies    | How do we let many people ship to the same codebase safely? (branching strategies: trunk-based vs. gitflow)                   | planned |
+| 07  | branching-strategies    | How do we let many people ship to the same codebase safely? (branching strategies: trunk-based vs. gitflow)                   | done    |
 | 08  | prs                     | How do we catch mistakes before they reach main? (PRs, review culture, CI gating)                                             | planned |
 | 09  | shared-history          | Why did a "safe" force-push break someone else's day? (shared history, rewriting risk)                                        | planned |
 | 10  | feature-flags           | How do we ship fast without breaking main constantly? (feature flags, small PRs, trunk hygiene)                               | planned |
