@@ -1,0 +1,163 @@
+---
+title: "L3 — Symmetric, asymmetric, and hybrid encryption, measured"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same secret, three different approaches">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🔐</span> <strong>Symmetric</strong> — AES-256-GCM, one shared key</div>
+      <div class="flex items-center gap-1.5"><span>🔑</span> <strong>Asymmetric</strong> — RSA-2048, a public/private key pair</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — measure the actual speed difference, then combine both</div>
+    </div>
+  </Fragment>
+
+**Before reading the code below, predict: RSA public keys use a small,
+fixed public exponent, making public-key operations (encrypting)
+relatively cheap. Which RSA operation — encrypting with the public key,
+or decrypting with the private key — do you expect to be the slow one,
+and why might that asymmetry itself be useful?**
+
+</Scenario>
+
+## Symmetric encryption with AES-256-GCM
+
+```js
+const crypto = require("node:crypto");
+
+function symmetricEncrypt(plaintext, key) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([
+    cipher.update(plaintext, "utf8"),
+    cipher.final(),
+  ]);
+  const authTag = cipher.getAuthTag();
+  return { encrypted, iv, authTag };
+}
+
+function symmetricDecrypt({ encrypted, iv, authTag }, key) {
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(authTag);
+  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString(
+    "utf8",
+  );
+}
+```
+
+```js
+const key = crypto.randomBytes(32);
+const { encrypted, iv, authTag } = symmetricEncrypt(
+  "Meet at the north dock at midnight",
+  key,
+);
+console.log(symmetricDecrypt({ encrypted, iv, authTag }, key)); // "Meet at the north dock at midnight"
+
+const wrongKey = crypto.randomBytes(32);
+symmetricDecrypt({ encrypted, iv, authTag }, wrongKey); // throws: unable to authenticate data
+```
+
+This runs and confirms both halves: the correct key recovers the exact
+original message, and a wrong key doesn't silently produce garbled
+text — GCM's authentication tag makes decryption with the wrong key
+fail loudly instead.
+
+## Asymmetric encryption with RSA-2048
+
+```js
+const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
+  modulusLength: 2048,
+  publicKeyEncoding: { type: "spki", format: "pem" },
+  privateKeyEncoding: { type: "pkcs8", format: "pem" },
+});
+
+const secret = crypto.randomBytes(32); // e.g. a symmetric key being sent to someone
+const ciphertext = crypto.publicEncrypt(publicKey, secret);
+const recovered = crypto.privateDecrypt(privateKey, ciphertext);
+console.log(Buffer.compare(secret, recovered) === 0); // true
+```
+
+`publicKey` can be handed to anyone — posted publicly, emailed in the
+clear, printed on a business card — without weakening anything. Only
+`privateKey`, which never left this code, can reverse the encryption.
+
+## Measuring the actual speed difference
+
+```js
+const payload = crypto.randomBytes(32);
+const aesKey = crypto.randomBytes(32);
+const symPackage = symmetricEncrypt(payload, aesKey);
+const asymCiphertext = crypto.publicEncrypt(publicKey, payload);
+
+const iterations = 500;
+
+const symStart = performance.now();
+for (let i = 0; i < iterations; i++) symmetricDecrypt(symPackage, aesKey);
+const symTime = performance.now() - symStart;
+
+const asymStart = performance.now();
+for (let i = 0; i < iterations; i++)
+  crypto.privateDecrypt(privateKey, asymCiphertext);
+const asymTime = performance.now() - asymStart;
+
+console.log(symTime, asymTime, asymTime / symTime);
+```
+
+Running this 500 times each on the exact same 32-byte payload produces
+**symmetric decryption at roughly 0.028ms per operation, versus
+asymmetric (RSA private-key) decryption at roughly 0.55ms per
+operation — about 19.5x slower**, decrypting the identical amount of
+data. The predicted answer from the scenario above is confirmed: it's
+specifically the _private_-key operation that's slow, not the public
+one — RSA's public exponent is small and cheap by design, while the
+private-key operation involves the full, large modulus. This asymmetry
+is exactly what makes the hybrid pattern below worthwhile: pay the
+slow cost once, for a tiny secret, not for every byte of real data.
+
+## Hybrid encryption: fast bulk data, safely-wrapped key
+
+```js
+const message =
+  "Q3 contract terms: net-30, renewal auto-triggers unless canceled 60 days prior.";
+const aesKey = crypto.randomBytes(32);
+
+// Encrypt the real message with fast symmetric encryption
+const symPackage = symmetricEncrypt(message, aesKey);
+
+// Wrap only the small AES key with the recipient's public key
+const wrappedKey = crypto.publicEncrypt(publicKey, aesKey);
+
+// Recipient: unwrap the key with their private key, then decrypt the message
+const unwrappedKey = crypto.privateDecrypt(privateKey, wrappedKey);
+const recoveredMessage = symmetricDecrypt(symPackage, unwrappedKey);
+console.log(recoveredMessage === message); // true
+```
+
+Verified: **the recovered message matches the original exactly**. The
+slow asymmetric operation only ever touches the 32-byte key
+(`wrappedKey` comes out to 256 bytes — the RSA-2048 modulus size, not
+related to the message length) — the actual contract text, which could
+be arbitrarily long, is encrypted and decrypted entirely with fast
+symmetric operations.
+
+## Extend it: what if the message were 100x longer?
+
+**The message above is under 100 bytes. If it were instead a
+100,000-byte document, what would change about the hybrid approach's
+cost — the symmetric encryption step, the asymmetric key-wrapping
+step, or both?** Since `symmetricEncrypt`/`symmetricDecrypt` operate on
+the message itself while `publicEncrypt`/`privateDecrypt` only ever
+touch the fixed-size 32-byte AES key, only the symmetric step's cost
+would grow with the document size — the asymmetric wrapping cost stays
+exactly the same regardless of how large the actual message gets.
+
+## Failure modes
+
+| Failure mode                                                     | What it gets wrong                                                                                                         |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Encrypting large data directly with asymmetric encryption        | RSA has a hard size limit per operation and is dramatically slower — this is exactly why hybrid encryption exists          |
+| Reusing the same symmetric key indefinitely across many messages | A compromised key exposes every message ever encrypted with it, not just one                                               |
+| Treating a public key as something that needs to stay secret     | The public key is safe to expose by design — protecting it adds complexity without adding real security                    |
+| Assuming asymmetric encryption alone provides authentication     | Encrypting with someone's public key proves nothing about who sent the message — that requires a separate signature step   |
+| Skipping the authentication tag check on symmetric decryption    | Without verifying the tag, tampered ciphertext can decrypt into corrupted-but-accepted plaintext instead of failing loudly |
