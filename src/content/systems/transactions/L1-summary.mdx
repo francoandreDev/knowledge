@@ -1,0 +1,71 @@
+---
+title: 'L1 — Why did my request "succeed" but the data never saved? (transactions, ACID)'
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Stock went down. The order never showed up.">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>1️⃣</span> <strong>Step 1</strong> — decrement product stock by the ordered quantity</div>
+      <div class="flex items-center gap-1.5"><span>2️⃣</span> <strong>Step 2</strong> — insert the order record</div>
+      <div class="flex items-center gap-1.5"><span>💥</span> <strong>What happened</strong> — step 1 ran, step 2 failed; nobody undid step 1</div>
+    </div>
+  </Fragment>
+
+Placing an order does two things: decrement the product's stock count,
+then insert a new order record. A customer places an order, the stock
+count visibly drops — and then the order never shows up in their order
+history. Support pulls the logs: the stock decrement succeeded, but
+the order insert failed a moment later and nobody rolled the decrement
+back. **Two writes, one request, and only one of them actually
+happened. If the code ran exactly as written, what's actually missing
+— a bug in either step, or something neither step was ever responsible
+for?**
+
+</Scenario>
+
+## The shape of the problem
+
+- Most real actions aren't a single write — placing an order touches
+  stock _and_ the order table; transferring money touches one balance
+  _and_ another. If either write can fail independently of the other,
+  "partially done" is a real, reachable state, not a hypothetical one.
+- Neither individual write did anything wrong: the stock decrement
+  really did need to happen, and the order insert really did fail for
+  its own separate reason. The bug isn't in either step — it's that
+  nothing treated the two steps as one indivisible unit.
+- A **transaction** is exactly that: a way of saying "these operations
+  either all happen, or none of them do" — turning "partially done" from
+  a possible outcome into one the system refuses to leave you in.
+
+## Key terms
+
+- **Transaction** — a group of operations treated as a single unit:
+  they all succeed together, or the system undoes anything that
+  already happened and leaves the data as if none of them ran.
+- **ACID** — the four properties a real transaction system guarantees:
+  **A**tomicity (all-or-nothing), **C**onsistency (data-level rules,
+  like "stock can't go negative," always hold), **I**solation
+  (concurrent transactions don't see each other's half-finished work),
+  **D**urability (once a transaction reports success, that result
+  survives a crash immediately afterward).
+- **Rollback** — undoing every change made so far in a transaction,
+  restoring the exact state from before it started.
+- **Commit** — making a transaction's changes permanent and visible,
+  only once every operation in it has succeeded.
+- **Write-ahead log** — a durability mechanism: changes are written to
+  a persistent, append-only log _before_ the system reports success,
+  so a crash immediately after can still recover the change from the
+  log.
+
+## What this unit covers
+
+L2 works through what each of the four ACID properties actually
+guarantees, using the stock/order scenario above as the running
+example, plus what a transaction's lifecycle looks like from begin to
+commit-or-rollback. L3 implements a real, working transaction wrapper
+in code — reproducing the exact stock/order bug from a naive
+implementation, then fixing it with a version that rolls back cleanly
+on failure, and a small write-ahead-log simulation demonstrating
+durability across a simulated crash.

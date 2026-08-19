@@ -36,7 +36,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 04  | sockets                 | How do two programs talk to each other? (sockets, ports, protocols)                                                          | done    |
 | 05  | concurrency             | Why does my server fall over under load? (concurrency: threads, processes, async I/O)                                        | done    |
 | 06  | race-conditions         | How do we avoid two processes corrupting shared data? (race conditions, locks, atomicity)                                    | done    |
-| 07  | transactions            | Why did my request "succeed" but the data never saved? (transactions, ACID)                                                  | planned |
+| 07  | transactions            | Why did my request "succeed" but the data never saved? (transactions, ACID)                                                  | done    |
 | 08  | indexing                | How do we store data so it's fast to find later? (indexing, B-trees, hashing)                                                | planned |
 | 09  | query-planning          | Why does the database get slow as data grows? (query planning, normalization vs. denormalization)                            | planned |
 | 10  | timeouts                | How do we keep a service running when a dependency dies? (timeouts, retries, circuit breakers, backpressure)                 | planned |

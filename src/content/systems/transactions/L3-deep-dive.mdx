@@ -1,0 +1,204 @@
+---
+title: "L3 — Reproducing the partial-write bug, then fixing it with rollback and a durable log"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same failing order, three different levels of protection">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>Naive version</strong> — reproduces L1's exact bug</div>
+      <div class="flex items-center gap-1.5"><span>🔄</span> <strong>Transactional version</strong> — atomicity + consistency via rollback</div>
+      <div class="flex items-center gap-1.5"><span>💾</span> <strong>Durability</strong> — a write-ahead log surviving a simulated crash</div>
+    </div>
+  </Fragment>
+
+**Before running the code: if the same failing order (a missing
+`orderId`) is placed against both the naive version and the
+transactional version, will the stock count end up different between
+the two — or will both versions fail in the same way?**
+
+</Scenario>
+
+## Reproducing the bug: two separate writes, no transaction
+
+```js
+function createStore() {
+  return { stock: { widget: 10 }, orders: [] };
+}
+
+function placeOrderNaive(store, orderId, productId, qty) {
+  store.stock[productId] -= qty; // step 1
+  if (!orderId) {
+    throw new Error("Order insert failed: missing orderId");
+  }
+  store.orders.push({ orderId, productId, qty }); // step 2
+}
+
+const store1 = createStore();
+try {
+  placeOrderNaive(store1, null, "widget", 3);
+} catch (err) {
+  console.log("caught:", err.message);
+}
+console.log(store1.stock.widget); // 7
+console.log(store1.orders.length); // 0
+```
+
+Verified: stock drops to **7** but `orders` stays **empty** — the
+exact bug from L1. Step 1 already happened by the time step 2 threw,
+and nothing in `placeOrderNaive` knew to undo it.
+
+## The fix: wrap both steps in a transaction with rollback
+
+```js
+function deepClone(obj) {
+  return JSON.parse(JSON.stringify(obj));
+}
+
+function runTransaction(store, operation, invariant) {
+  const working = deepClone(store);
+  try {
+    operation(working);
+    if (invariant && !invariant(working)) {
+      throw new Error("Invariant violated");
+    }
+    Object.assign(store.stock, working.stock);
+    store.orders.length = 0;
+    store.orders.push(...working.orders);
+    return { committed: true };
+  } catch (err) {
+    // working was a separate clone — store was never touched
+    return { committed: false, error: err.message };
+  }
+}
+
+function stockNeverNegative(state) {
+  return Object.values(state.stock).every((qty) => qty >= 0);
+}
+
+const store2 = createStore();
+const result2 = runTransaction(
+  store2,
+  (working) => {
+    working.stock.widget -= 3;
+    if (!null) throw new Error("Order insert failed: missing orderId");
+    working.orders.push({ orderId: null, productId: "widget", qty: 3 });
+  },
+  stockNeverNegative,
+);
+
+console.log(result2); // { committed: false, error: 'Order insert failed: missing orderId' }
+console.log(store2.stock.widget); // 10
+console.log(store2.orders.length); // 0
+```
+
+Verified: with the identical failing order, the transactional
+version's stock stays at **10** — the exact same failure, but zero
+side effects instead of a silent partial write. All operations run
+against `working`, a clone; the real `store` is only ever touched by
+the commit step, which never runs if anything throws.
+
+## Consistency: rejecting a commit that would break an invariant
+
+```js
+const store3 = createStore();
+const result3 = runTransaction(
+  store3,
+  (working) => {
+    working.stock.widget -= 15; // more than the 10 available
+    working.orders.push({ orderId: "order-2", productId: "widget", qty: 15 });
+  },
+  stockNeverNegative,
+);
+
+console.log(result3); // { committed: false, error: 'Invariant violated' }
+console.log(store3.stock.widget); // 10, unchanged
+console.log(store3.orders.length); // 0
+```
+
+Verified: this order has no missing field and would have "worked" in
+the naive version, silently taking stock negative. The transaction's
+`invariant` check catches it _before_ commit and rolls back — this is
+consistency enforced structurally, not by hoping every caller
+remembers to check stock levels themselves.
+
+## A successful order still commits normally
+
+```js
+const store4 = createStore();
+const result4 = runTransaction(
+  store4,
+  (working) => {
+    working.stock.widget -= 3;
+    working.orders.push({ orderId: "order-1", productId: "widget", qty: 3 });
+  },
+  stockNeverNegative,
+);
+
+console.log(result4); // { committed: true }
+console.log(store4.stock.widget); // 7
+console.log(store4.orders.length); // 1
+```
+
+Verified: a valid order commits exactly as expected — the transaction
+wrapper adds safety on the failure paths without changing the outcome
+of a normal, successful order.
+
+## Durability: surviving a crash right after "success"
+
+```js
+function durableCommit(log, entry) {
+  // in a real database this write is fsync'd to disk before acknowledging
+  log.push(JSON.stringify(entry));
+  return { acknowledged: true };
+}
+
+function recoverFromLog(log) {
+  const state = createStore();
+  for (const entryStr of log) {
+    const entry = JSON.parse(entryStr);
+    state.stock[entry.productId] -= entry.qty;
+    state.orders.push(entry);
+  }
+  return state;
+}
+
+const log = [];
+durableCommit(log, { orderId: "order-1", productId: "widget", qty: 3 });
+durableCommit(log, { orderId: "order-2", productId: "widget", qty: 2 });
+
+// simulate a crash: the in-memory store object is gone entirely
+const recovered = recoverFromLog(log);
+console.log(recovered.stock.widget); // 5
+console.log(recovered.orders.length); // 2
+```
+
+Verified: even with the original in-memory `store` object completely
+discarded (simulating a crash), replaying the durable log reconstructs
+the exact same state — stock at **5**, both orders present. This is
+what durability actually buys: the guarantee isn't "the process never
+crashes," it's "a crash can't erase a result that was already reported
+as successful."
+
+## Extend it: what if two orders for the same product arrive at once?
+
+**The `runTransaction` above handles one transaction at a time
+correctly. If two separate calls to `runTransaction` ran concurrently
+against the same `store` — each cloning `store` into their own
+`working` copy before either one commits — could both transactions
+individually pass the `stockNeverNegative` check, yet still leave stock
+negative once both commits are applied?** This is exactly the gap
+isolation is meant to close — try sketching what a `lock`-based
+mechanism (only one transaction allowed to run against a given store
+at a time) would need to add to `runTransaction` to prevent this.
+
+## Failure modes
+
+| Failure mode                                                                     | What it gets wrong                                                                                                                 |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Treating "the code ran without an unhandled exception" as "it fully succeeded"   | A caught exception partway through a multi-step operation can still leave earlier steps' effects in place, unrolled back           |
+| Adding a rollback only for the specific bug that was just found                  | The next multi-step operation without transaction wrapping has the identical structural problem, just with a different bug         |
+| Assuming an in-memory success means the change survived                          | Without a durability mechanism (like a write-ahead log), a crash immediately after "success" can erase a change that was reported  |
+| Checking invariants only in the UI or API layer, not at the transaction boundary | Anything that writes directly to the data layer bypasses UI-level checks; the invariant has to be enforced where the write happens |
+| Assuming atomicity alone is enough                                               | Atomicity stops partial writes; it says nothing about two transactions racing each other — that's isolation's job                  |
