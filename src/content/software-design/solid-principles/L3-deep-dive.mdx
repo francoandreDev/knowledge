@@ -1,0 +1,154 @@
+---
+title: "L3 — Refactoring OrderService, then adding a third provider with zero changes"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same behavior, measured before and after">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🔒</span> <strong>Before</strong> — <code>OrderService</code> constructs <code>SendgridEmailClient</code> internally</div>
+      <div class="flex items-center gap-1.5"><span>🔓</span> <strong>After</strong> — <code>OrderService</code> receives any email client via its constructor</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — add a third provider and a fake for testing, without touching <code>OrderService</code></div>
+    </div>
+  </Fragment>
+
+**Before reading the code below, predict: after applying dependency
+inversion, how many lines of `OrderService`'s own code will need to
+change when a third email provider is added?**
+
+</Scenario>
+
+## Before: OrderService tightly coupled to one provider
+
+```js
+class SendgridEmailClient {
+  send(to, subject, body) {
+    // real API call to Sendgrid would go here
+    return { sent: true, provider: "sendgrid" };
+  }
+}
+
+class TightlyCoupledOrderService {
+  constructor() {
+    this.emailClient = new SendgridEmailClient();
+  }
+
+  placeOrder(order) {
+    // ...business logic to actually place the order...
+    return this.emailClient.send(
+      order.customerEmail,
+      "Order confirmed",
+      `Order ${order.id} confirmed`,
+    );
+  }
+}
+```
+
+```js
+const tight = new TightlyCoupledOrderService();
+console.log(tight.placeOrder({ id: 1, customerEmail: "a@b.com" }));
+// { sent: true, provider: "sendgrid" }
+```
+
+This works, but `OrderService`'s constructor is the exact pattern from
+L1 — it decides, internally, which concrete class to build. Switching
+providers, or testing this class without hitting a real API, both
+require editing this file directly.
+
+## After: OrderService depends on the abstraction
+
+```js
+class OrderService {
+  constructor(emailClient) {
+    this.emailClient = emailClient; // any object with a .send() method
+  }
+
+  placeOrder(order) {
+    return this.emailClient.send(
+      order.customerEmail,
+      "Order confirmed",
+      `Order ${order.id} confirmed`,
+    );
+  }
+}
+```
+
+Nothing about `OrderService` mentions Sendgrid, Postmark, or any
+specific vendor — it only assumes whatever it's given has a `.send()`
+method, which is the abstraction from L2's diagram.
+
+```js
+const withSendgrid = new OrderService(new SendgridEmailClient());
+console.log(withSendgrid.placeOrder({ id: 2, customerEmail: "c@d.com" }));
+// { sent: true, provider: "sendgrid" }
+```
+
+## Adding a third provider — zero changes to OrderService
+
+```js
+class PostmarkEmailClient {
+  send(to, subject, body) {
+    return { sent: true, provider: "postmark" };
+  }
+}
+
+const withPostmark = new OrderService(new PostmarkEmailClient());
+console.log(withPostmark.placeOrder({ id: 3, customerEmail: "e@f.com" }));
+// { sent: true, provider: "postmark" }
+```
+
+Verified: `OrderService`'s source code is character-for-character
+identical between the Sendgrid and Postmark examples above — confirmed
+by printing `OrderService.toString()` after both calls and comparing.
+The predicted answer to the question above is **zero lines** — the
+class that decides which provider is used was never `OrderService` in
+the first place, once the dependency was inverted.
+
+## Testing becomes trivial too
+
+```js
+class FakeEmailClient {
+  constructor() {
+    this.sentMessages = [];
+  }
+  send(to, subject, body) {
+    this.sentMessages.push({ to, subject, body });
+    return { sent: true, provider: "fake" };
+  }
+}
+
+const fake = new FakeEmailClient();
+const withFake = new OrderService(fake);
+withFake.placeOrder({ id: 4, customerEmail: "g@h.com" });
+console.log(fake.sentMessages);
+// [{ to: "g@h.com", subject: "Order confirmed", body: "Order 4 confirmed" }]
+```
+
+Verified: the fake client records exactly the message `OrderService`
+sent, with no real network call anywhere in the test. This is the
+testing row from L2's comparison table made concrete — a test can now
+substitute a fake that satisfies the same abstraction, instead of
+needing the real Sendgrid client or complex internal mocking.
+
+## Extend it: what changed about where the vendor decision lives?
+
+**In the tightly coupled version, the vendor decision was made inside
+`OrderService`'s constructor. In the inverted version, where does that
+decision actually get made now — and does that place still exist, or
+has the decision disappeared entirely?** The decision hasn't
+disappeared — it's moved to wherever `new OrderService(...)` is
+actually called (often called the "composition root," typically near
+application startup). The difference isn't that nobody decides
+anymore, it's that exactly one place decides, instead of the decision
+being duplicated across every class that needed to send an email.
+
+## Failure modes
+
+| Failure mode                                                                       | What it gets wrong                                                                                                            |
+| ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Applying dependency inversion to every class, regardless of need                   | Adds indirection without a real payoff when there's no genuine reason the concrete implementation would ever vary             |
+| Injecting the dependency but still importing the concrete class directly elsewhere | Only half-fixes the ripple — other places that construct the concrete class directly still need to change together            |
+| Making the abstraction too specific to one implementation's quirks                 | An abstraction shaped exactly like one vendor's API isn't a real abstraction — a second implementation won't fit cleanly      |
+| Treating "add an interface" as the whole fix                                       | The interface alone doesn't help if the class still constructs its own concrete dependency internally instead of receiving it |
+| Assuming DIP eliminates the need to ever decide on a concrete implementation       | The decision still has to be made somewhere — DIP concentrates it in one place, it doesn't remove it                          |
