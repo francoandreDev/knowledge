@@ -149,7 +149,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 03  | mentoring-fundamentals        | How do I help a junior teammate grow without doing their job for them? (mentoring fundamentals)                           | done    |
 | 04  | structured-interviewing       | How do I know if someone should get the job? (structured interviewing, avoiding bias)                                     | done    |
 | 05  | goal-setting                  | How do I build a growth plan that isn't just "work harder"? (goal-setting, skill gap analysis)                            | done    |
-| 06  | impact-scope-over-correctness | Why doesn't being technically right guarantee being seen as senior? (impact and scope over correctness)                   | planned |
+| 06  | impact-scope-over-correctness | Why doesn't being technically right guarantee being seen as senior? (impact and scope over correctness)                   | done    |
 | 07  | documentation-career-tool     | How do I make my work visible without it feeling like bragging? (documentation as a career tool, brag docs)               | planned |
 | 08  | calibration-processes         | How do performance calibrations actually work? (calibration processes, promotion packets)                                 | planned |
 | 09  | ic-em-tracks                  | How do I decide between staying an IC or moving into management? (IC vs. EM tracks, self-assessment)                      | planned |

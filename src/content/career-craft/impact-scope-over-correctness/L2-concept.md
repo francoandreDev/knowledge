@@ -1,0 +1,77 @@
+---
+title: "L2 — Correctness and scope are independent variables"
+---
+
+## Two axes, not one
+
+**If Priya and Sam were both correct, what actually separated their
+reviews?** Correctness and scope aren't the same axis — you can be
+right about something with almost no consequence, or right about
+something enormous. Plotting a few real examples on both axes at once
+makes the gap visible:
+
+| Example                                                                 | Correct? | Scope                                                                         |
+| ----------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------- |
+| Fixing a typo in an internal wiki page                                  | Yes      | Tiny — a handful of readers, no downstream effect                             |
+| Priya's debug-log off-by-one fix                                        | Yes      | Small — 2 internal engineers, no customer or revenue impact                   |
+| Renegotiating a cross-team API contract that three other teams build on | Yes      | Large — every team downstream inherits the new contract's guarantees or flaws |
+| Sam's billing bug catch                                                 | Yes      | Large — 3,100 customers, $186,000 in prevented erroneous charges              |
+| A beautifully refactored function nobody was going to touch again       | Yes      | Tiny — correctness and craft, but no one downstream was waiting on it         |
+
+Notice every row in that table is marked "Yes" under correctness —
+that column does no work at distinguishing the rows from each other.
+**Scope is the only column that actually explains why some of these
+read as more senior than others.** This is the core reason "being
+right" isn't a differentiator on its own: it's necessary, but it
+doesn't vary across the rows that matter most.
+
+## Estimating scope before the work is finished, not after
+
+**If scope is what matters, when do you actually find out how big a
+given bug or task is?** Not always at the end — often the scope
+question can be asked as soon as the problem is spotted, before a
+single line of the fix is written:
+
+```mermaid
+flowchart TD
+    A["Bug or task identified"] --> B{"Who else depends\non this being right?"}
+    B -->|"Nobody yet — isolated,\nnot yet shipped"| C["Small scope —\nfix it, move on,\nno special flagging needed"]
+    B -->|"Other systems, teams,\nor customers depend on it"| D{"What happens if\nthis stays wrong?"}
+    D -->|"Contained failure,\neasy to reverse"| E["Medium scope —\nfix it, mention it\nin the next update"]
+    D -->|"Spreads, compounds,\nor hard to reverse\nonce it happens"| F["Large scope —\nflag it immediately,\nfix it, and make the\nrisk visible to others"]
+```
+
+Sam's bug read as senior partly because Sam asked "what happens if
+this stays wrong" _before_ the batch job ran, not after a real
+customer complaint forced the question. Priya's fix never needed to
+ask this question at all — the debug-log path had no other consumers
+and no compounding failure mode, so "small scope" was the correct
+read of the situation, not a failure on Priya's part.
+
+## Why difficulty of the fix isn't the same thing as scope either
+
+**Doesn't a "harder" bug automatically matter more?** Not necessarily
+— difficulty measures how much skill the fix required; scope measures
+how much the outcome mattered. Sam's fix, in this scenario, was a
+single conditional check added to the batch job before it queried
+customer records — not a hard fix at all. What made it senior-level
+wasn't the difficulty of writing the fix; it was the judgment to look
+at a batch job most people treated as routine and ask what its
+blast radius actually was before it ran. A genuinely hard fix to a
+tiny-scope problem still reads as tiny-scope; a trivial fix to a
+large-scope problem still reads as large-scope, once someone actually
+does the work of tracing out the consequences.
+
+## Failure modes at this level
+
+- **Assuming difficulty and scope move together.** They don't — some
+  of the highest-scope catches are single-line fixes, and some of the
+  most technically impressive work touches nothing that matters.
+- **Waiting until impact is realized to describe it.** Scope can
+  often be estimated _before_ something breaks (as in Sam's case) —
+  waiting for an actual incident to happen before describing the risk
+  wastes the chance to get credit for prevention rather than cleanup.
+- **Treating "small scope" work as wasted effort.** Priya's fix was
+  still worth doing — cleaner debug logs help future debugging. Small
+  scope doesn't mean the work was pointless, only that it isn't the
+  work to lead a promotion case with.
