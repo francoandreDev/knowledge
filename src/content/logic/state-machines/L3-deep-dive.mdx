@@ -1,0 +1,168 @@
+---
+title: "L3 — Reproducing the boolean-flag bug, then making it structurally impossible"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same event sequence, two different implementations">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>Legacy version</strong> — 4 independent booleans, reproduces L1's exact bug</div>
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>State machine version</strong> — 1 state variable, explicit transition table</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — run the identical `START, SUCCESS` sequence against both</div>
+    </div>
+  </Fragment>
+
+**Before running the code: the legacy `SUCCESS` handler has a real
+bug — it sets `isSuccess = true` but forgets to reset `isUploading`
+back to `false`. Will the state machine version have "the same bug,"
+just expressed differently — or is there literally no way to write
+that particular mistake in a state machine?**
+
+</Scenario>
+
+## Reproducing the bug: the legacy boolean-flag version
+
+```js
+function createLegacyUploadState() {
+  return {
+    isUploading: false,
+    isPaused: false,
+    isSuccess: false,
+    isError: false,
+  };
+}
+
+function legacyHandleEvent(state, event) {
+  const next = { ...state };
+  if (event === "START") {
+    next.isUploading = true;
+  } else if (event === "PAUSE") {
+    next.isPaused = true;
+  } else if (event === "RESUME") {
+    next.isPaused = false;
+  } else if (event === "SUCCESS") {
+    // bug: forgets to reset isUploading back to false
+    next.isSuccess = true;
+  } else if (event === "FAIL") {
+    next.isUploading = false;
+    next.isError = true;
+  }
+  return next;
+}
+
+let legacyState = createLegacyUploadState();
+legacyState = legacyHandleEvent(legacyState, "START");
+legacyState = legacyHandleEvent(legacyState, "SUCCESS");
+
+console.log(legacyState);
+// { isUploading: true, isPaused: false, isSuccess: true, isError: false }
+```
+
+Verified: after `START` then `SUCCESS`, `isUploading` and `isSuccess`
+are **both `true`** — the exact impossible state from L1's bug report.
+Nothing in `legacyHandleEvent` prevented this; the `SUCCESS` branch
+simply didn't happen to reset a flag it should have. This is a single
+missing line, in a function that otherwise looks completely
+reasonable — which is exactly why it's easy to ship.
+
+## The fix: a state machine with an explicit transition table
+
+```js
+const transitions = {
+  idle: { START: "uploading" },
+  uploading: {
+    PAUSE: "paused",
+    SUCCESS: "success",
+    FAIL: "error",
+    CANCEL: "cancelled",
+  },
+  paused: { RESUME: "uploading", CANCEL: "cancelled" },
+  success: {},
+  error: { START: "uploading" },
+  cancelled: {},
+};
+
+function transition(state, event) {
+  const nextState = transitions[state] && transitions[state][event];
+  if (!nextState) {
+    throw new Error(`Invalid transition: cannot ${event} from ${state}`);
+  }
+  return nextState;
+}
+
+let fsmState = "idle";
+fsmState = transition(fsmState, "START");
+console.log(fsmState); // "uploading"
+fsmState = transition(fsmState, "SUCCESS");
+console.log(fsmState); // "success"
+```
+
+Verified: running the identical `START, SUCCESS` sequence produces a
+single state value, `"success"` — there is no `isUploading` variable
+left dangling `true`, because there's no `isUploading` variable at
+all. The bug isn't fixed by writing more careful code; it's fixed by
+removing the category of mistake the transition table can't represent.
+
+## The transition table also rejects genuinely invalid sequences
+
+```js
+try {
+  transition("success", "PAUSE");
+} catch (err) {
+  console.log(err.message);
+  // "Invalid transition: cannot PAUSE from success"
+}
+```
+
+Verified: attempting `PAUSE` from `success` throws immediately, rather
+than silently producing some new, undefined combination. Compare this
+to the legacy version, where calling `legacyHandleEvent(state,
+"PAUSE")` on an already-succeeded upload would happily set
+`isPaused: true` right next to `isSuccess: true` — another impossible
+combination the boolean version has no way to refuse.
+
+## Full paths through the state machine
+
+```js
+// idle -> uploading -> paused -> uploading -> success
+let s = "idle";
+for (const event of ["START", "PAUSE", "RESUME", "SUCCESS"]) {
+  s = transition(s, event);
+}
+console.log(s); // "success"
+
+// retry after a failure: idle -> uploading -> error -> uploading
+let retry = "idle";
+retry = transition(retry, "START");
+retry = transition(retry, "FAIL");
+console.log(retry); // "error"
+retry = transition(retry, "START");
+console.log(retry); // "uploading"
+```
+
+Verified: the pause/resume path and the retry-after-failure path both
+work exactly as the diagram in L2 describes — `error` isn't a dead
+end, `START` from `error` is an explicit, defined transition back to
+`uploading`.
+
+## Extend it: what changes if a "retry limit" needs to be added?
+
+**Suppose the real requirement is "allow retrying from `error` at most
+2 times before moving to a new `permanently-failed` state." Can this
+be expressed by adding states and transitions to the table above,
+without going back to independent boolean flags (like adding a
+`retryCount` boolean-style flag) to track it?** Try sketching the
+additional states and transitions this would need — what has to change
+about `transition`'s signature if the _next_ state depends on more
+than just the current state and the event?
+
+## Failure modes
+
+| Failure mode                                                                         | What it gets wrong                                                                                                                       |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Adding "just one more boolean flag" to an existing ad hoc flag set                   | Each new flag doubles the total combination count — the meaningful-to-meaningless ratio only gets worse                                  |
+| Assuming a missing `else` branch is a rare kind of bug                               | It's the _default_ failure mode of flag-based state — every handler has to remember every other flag, forever                            |
+| Treating a state machine's rejected transition as a crash to work around             | A thrown/rejected invalid transition is the system correctly refusing an impossible request — the fix is the calling code, not the table |
+| Believing a state diagram is just documentation, disconnected from the code          | In L3, the transition table _is_ the diagram — the code enforces exactly what the diagram claims, not a looser approximation of it       |
+| Using a state machine but still allowing extra, un-modeled boolean flags on the side | Any flag outside the state machine reopens the same "independent combinations" problem the state machine was meant to close              |

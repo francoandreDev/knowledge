@@ -1,0 +1,76 @@
+---
+title: "L2 — Counting the combinations a flag set allows, versus what a state machine allows"
+---
+
+## The truth table: how many combinations do 4 booleans actually allow?
+
+**If an upload widget uses 4 independent booleans (`isUploading`,
+`isPaused`, `isSuccess`, `isError`), how many distinct combinations of
+`true`/`false` can those 4 booleans be in?** Every boolean doubles the
+count of possible combinations — 4 independent booleans give
+`2⁴ = 16` combinations total, whether or not each one makes sense:
+
+| isUploading | isPaused | isSuccess | isError | Meaningful state?                                   |
+| ----------- | -------- | --------- | ------- | --------------------------------------------------- |
+| false       | false    | false     | false   | ✅ idle                                             |
+| true        | false    | false     | false   | ✅ uploading                                        |
+| false       | true     | false     | false   | ✅ paused                                           |
+| false       | false    | true      | false   | ✅ success                                          |
+| false       | false    | false     | true    | ✅ error                                            |
+| true        | false    | true      | false   | 🚫 the actual bug — uploading AND succeeded at once |
+| true        | true     | false     | true    | 🚫 uploading, paused, AND failed, simultaneously    |
+| ...         | ...      | ...       | ...     | 🚫 9 more combinations, none of them meaningful     |
+
+Only **5 of the 16** combinations correspond to a state the widget was
+ever meant to be in. The other 11 aren't prevented by anything in the
+code — they're just combinations nobody happened to write an event
+handler that produces, until one did.
+
+## The state machine: the same widget, one variable instead of four
+
+**If a single named state replaced all 4 booleans, how many of those
+11 meaningless combinations would even be possible to represent?**
+None — because there'd only be one variable, and its value would have
+to be one of a fixed, named list:
+
+```mermaid
+flowchart LR
+    idle -->|START| uploading
+    uploading -->|PAUSE| paused
+    paused -->|RESUME| uploading
+    uploading -->|SUCCESS| success
+    uploading -->|FAIL| error
+    error -->|START| uploading
+    uploading -->|CANCEL| cancelled
+    paused -->|CANCEL| cancelled
+```
+
+Every arrow is a **transition**: a specific state, a specific event,
+and the exact next state. There's no arrow for "PAUSE while in
+`success`" — which means, in this model, that transition simply
+doesn't exist. Not "is disallowed by a check somewhere" — doesn't
+exist, the same way "green" isn't a valid answer to "heads or tails."
+
+## What a state machine actually buys you
+
+| Property                                  | 4 independent booleans                                     | State machine (1 named state)                             |
+| ----------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------- |
+| Total representable combinations          | 16 (2⁴)                                                    | Exactly however many states are named (here, 6)           |
+| Combinations that are actually meaningful | 5 out of 16 — the rest are accidents waiting to happen     | All of them, by construction — there's nothing else to be |
+| What stops an invalid combination         | Nothing, unless every handler is written perfectly forever | The transition table itself — no rule, no transition      |
+| What a new event handler has to get right | Every flag it doesn't touch, correctly, every time         | Just which state(s) it's valid to fire from               |
+
+This is the core trade a state machine makes: instead of hoping every
+future code change respects an unwritten rule about which flag
+combinations are meaningful, the _shape of the data itself_ makes the
+meaningless combinations impossible to construct.
+
+## When this generalizes beyond UI widgets
+
+**Is this only a frontend concern?** No — anywhere a system has a
+handful of meaningfully distinct phases and specific rules about which
+phase can follow which, the same problem shows up: an order's
+lifecycle (placed, paid, shipped, delivered, cancelled), a TCP
+connection's handshake states, a CI pipeline's run status. Independent
+boolean flags scale the same way in all of these — badly, and quietly,
+until a genuinely impossible combination shows up in production.
