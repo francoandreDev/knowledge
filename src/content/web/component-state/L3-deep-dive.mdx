@@ -1,0 +1,158 @@
+---
+title: "L3 — Reproducing the two-badge bug, then fixing it with a store"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Same bug, measured instead of described">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🏷️</span> <strong>Badges</strong> — two plain objects standing in for DOM elements, each with a <code>textContent</code> field</div>
+      <div class="flex items-center gap-1.5"><span>🖱️</span> <strong>Actions</strong> — add from the product page, then add from quick buy</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — reproduce the mismatch, then make both badges agree no matter which action fires</div>
+    </div>
+  </Fragment>
+
+**Before reading the code below, predict: the quick-buy handler
+increments a `count` variable and updates the drawer badge. Why would
+the header badge end up wrong, given that `count` itself is being
+incremented correctly?**
+
+</Scenario>
+
+## The naive version
+
+Both badges are represented here as plain objects with a `textContent`
+field, standing in for real DOM elements — the bug has nothing to do
+with the DOM specifically, so this keeps the example focused on the
+actual problem.
+
+```js
+function createNaiveCart() {
+  let count = 0;
+  const headerBadge = { textContent: "0" };
+  const drawerBadge = { textContent: "0" };
+
+  function addFromProductCard() {
+    count += 1;
+    headerBadge.textContent = String(count);
+    drawerBadge.textContent = String(count);
+  }
+
+  function addFromQuickBuy() {
+    count += 1;
+    // BUG: forgot to update headerBadge here
+    drawerBadge.textContent = String(count);
+  }
+
+  return { headerBadge, drawerBadge, addFromProductCard, addFromQuickBuy };
+}
+```
+
+Running the exact sequence from L1's scenario:
+
+```js
+const naive = createNaiveCart();
+naive.addFromProductCard();
+naive.addFromQuickBuy();
+console.log(naive.headerBadge.textContent); // "1"
+console.log(naive.drawerBadge.textContent); // "2"
+```
+
+This actually runs and produces exactly that mismatch: **header stays
+at "1", drawer reaches "2"**. The predicted answer to the question
+above is the point of this example: `count` itself is perfectly
+correct after both calls — it really is 2. The bug isn't in the
+number, it's in the fact that updating a display was left as a manual
+step inside each individual handler, and `addFromQuickBuy` simply
+never includes that step for `headerBadge`.
+
+## The fix: a single store, every display subscribed
+
+```js
+function createCartStore(initialCount) {
+  let state = { count: initialCount };
+  const subscribers = [];
+
+  function getState() {
+    return state;
+  }
+
+  function setState(updater) {
+    state = updater(state);
+    subscribers.forEach((fn) => fn(state));
+  }
+
+  function subscribe(fn) {
+    subscribers.push(fn);
+  }
+
+  function addItem() {
+    setState((s) => ({ count: s.count + 1 }));
+  }
+
+  return { getState, setState, subscribe, addItem };
+}
+```
+
+Every display subscribes once, up front, instead of being updated by
+name inside individual handlers:
+
+```js
+const store = createCartStore(0);
+const headerBadge = { textContent: "0" };
+const drawerBadge = { textContent: "0" };
+
+store.subscribe((state) => {
+  headerBadge.textContent = String(state.count);
+});
+store.subscribe((state) => {
+  drawerBadge.textContent = String(state.count);
+});
+
+store.addItem(); // from the product card
+store.addItem(); // from quick buy
+console.log(headerBadge.textContent); // "2"
+console.log(drawerBadge.textContent); // "2"
+```
+
+Verified: **both badges read "2"** after the same two actions that
+produced a mismatch in the naive version. Neither action needed to
+know which badges exist — `addItem` only ever touches `state`, and
+every subscriber reacts to that one change the same way.
+
+## Extend it: adding a third display later
+
+**A "recently viewed" sidebar widget also needs to show the cart
+count, added by a different developer, months later, who has never
+seen the header or drawer badge code. In the naive version, what would
+they have to do correctly to avoid repeating this bug? In the store
+version, what do they actually have to do?** In the naive version,
+they'd need to find every existing handler that changes the count and
+add a line to each one — the same structural risk that caused the
+original bug. In the store version:
+
+```js
+const recentlyViewedBadge = { textContent: "0" };
+store.subscribe((state) => {
+  recentlyViewedBadge.textContent = String(state.count);
+});
+store.addItem();
+console.log(headerBadge.textContent); // "3"
+console.log(drawerBadge.textContent); // "3"
+console.log(recentlyViewedBadge.textContent); // "3"
+```
+
+Verified: **all three badges read "3"**, and the new widget required
+zero changes to `addFromProductCard`, `addFromQuickBuy`, or any other
+existing code — it only had to subscribe.
+
+## Failure modes
+
+| Failure mode                                                        | What it gets wrong                                                                                                        |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Adding a new display without subscribing it to the store            | Falls back into the exact structural risk unidirectional flow was meant to remove                                         |
+| Mutating `state` directly instead of going through `setState`       | Skips notifying subscribers, so the state changes but nothing re-renders — a silent, hard-to-spot desync                  |
+| Putting business logic inside a render function                     | Render should be a pure reflection of state — logic that decides state belongs in the action, not scattered into displays |
+| Assuming "single source of truth" means "one giant global variable" | The point is one authoritative value per piece of state, not collapsing all unrelated state into one shared object        |
+| Treating this as a framework-specific concept                       | The loop (action, state update, render) is the same whether it's hand-written, or built on a framework that automates it  |

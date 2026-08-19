@@ -13,7 +13,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 03  | css-cascade-specificity       | How do we style once and reuse everywhere? (CSS cascade & specificity)                                                  | done    |
 | 04  | dom-event-model               | How does a page react to user input without reloading? (the DOM event model)                                            | done    |
 | 05  | bundling                      | Why do we need a build step at all? (bundling, transpilation, module systems)                                           | done    |
-| 06  | component-state               | How do we manage state across a page without global chaos? (component state, unidirectional data flow)                  | planned |
+| 06  | component-state               | How do we manage state across a page without global chaos? (component state, unidirectional data flow)                  | done    |
 | 07  | cors                          | Why does calling an API from the browser fail unpredictably? (CORS, async/await, error handling)                        | planned |
 | 08  | client-side-caching           | How do we keep the UI in sync with the server? (client-side caching, optimistic updates)                                | planned |
 | 09  | render-performance            | Why does the app get slow as it grows? (render performance, virtual DOM diffing, reflow/repaint)                        | planned |
