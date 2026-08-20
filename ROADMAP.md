@@ -151,7 +151,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 05  | goal-setting                  | How do I build a growth plan that isn't just "work harder"? (goal-setting, skill gap analysis)                            | done    |
 | 06  | impact-scope-over-correctness | Why doesn't being technically right guarantee being seen as senior? (impact and scope over correctness)                   | done    |
 | 07  | documentation-career-tool     | How do I make my work visible without it feeling like bragging? (documentation as a career tool, brag docs)               | done    |
-| 08  | calibration-processes         | How do performance calibrations actually work? (calibration processes, promotion packets)                                 | planned |
+| 08  | calibration-processes         | How do performance calibrations actually work? (calibration processes, promotion packets)                                 | done    |
 | 09  | ic-em-tracks                  | How do I decide between staying an IC or moving into management? (IC vs. EM tracks, self-assessment)                      | planned |
 | 10  | peer-mentoring                | How do I mentor someone who is more senior than me in a different way? (peer mentoring, skip-level relationships)         | planned |
 | 11  | staff-scope                   | What does a staff engineer actually own that a senior doesn't? (staff scope: technical direction, org-level leverage)     | planned |
