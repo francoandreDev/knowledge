@@ -17,7 +17,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 07  | cors                          | Why does calling an API from the browser fail unpredictably? (CORS, async/await, error handling)                        | done    |
 | 08  | client-side-caching           | How do we keep the UI in sync with the server? (client-side caching, optimistic updates)                                | done    |
 | 09  | render-performance            | Why does the app get slow as it grows? (render performance, virtual DOM diffing, reflow/repaint)                        | done    |
-| 10  | xss                           | How do we protect users from malicious input? (XSS, CSRF, sanitization, CSP)                                            | planned |
+| 10  | xss                           | How do we protect users from malicious input? (XSS, CSRF, sanitization, CSP)                                            | done    |
 | 11  | cdn                           | How do we serve the same app to millions without falling over? (CDN, cache layers, edge)                                | planned |
 | 12  | stateless-auth                | Why do sessions break across multiple servers? (stateless auth, JWT, cookies, sessions)                                 | planned |
 | 13  | rest-graphql                  | How do we design an API contract that won't break clients as it evolves? (REST/GraphQL, versioning)                     | planned |
