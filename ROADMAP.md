@@ -98,7 +98,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 04  | boolean-logic                            | Why do two "correct" pieces of code produce different results? (boolean logic, precedence, De Morgan's laws)               | done    |
 | 05  | state-machines                           | How do I reason about a system with many possible states? (state machines, truth tables)                                   | done    |
 | 06  | edge-case-reasoning                      | How do I prove my code handles every case, not just the ones I tested? (edge case reasoning, invariants)                   | done    |
-| 07  | induction                                | How do I reason about something recursive without getting lost? (induction, recursion tracing)                             | planned |
+| 07  | induction                                | How do I reason about something recursive without getting lost? (induction, recursion tracing)                             | done    |
 | 08  | fermi-estimation                         | How do I estimate an answer when I can't compute the exact one? (Fermi estimation, back-of-envelope reasoning)             | planned |
 | 09  | expected-value                           | How do I make a decision under uncertainty? (expected value, probabilistic reasoning)                                      | planned |
 | 10  | correlation-causation                    | How do I avoid fooling myself with data? (correlation vs. causation, cognitive biases, base rate fallacy)                  | planned |
