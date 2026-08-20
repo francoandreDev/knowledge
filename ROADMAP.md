@@ -277,7 +277,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 02  | early-warning-signs                 | How do I recognize burnout before it takes me out completely? (early warning signs, tired vs. burned out)                                            | done    |
 | 03  | attention-management                | How do I protect focus time in a job full of interruptions? (attention management, deep work vs. shallow work)                                       | done    |
 | 04  | energy-management-across-day-week   | How do I manage energy, not just time? (energy management across a day/week, matching task type to energy state)                                     | done    |
-| 05  | sustainable-boundary-setting        | How do I say no to more work without it looking like I can't handle my job? (sustainable boundary-setting)                                           | planned |
+| 05  | sustainable-boundary-setting        | How do I say no to more work without it looking like I can't handle my job? (sustainable boundary-setting)                                           | done    |
 | 06  | recovery-practices-crunch           | How do I recover from a genuinely brutal period without carrying it forward? (recovery practices after crunch, incidents, layoffs)                   | planned |
 | 07  | sustainable-long-term-learning-pace | How do I keep growing technically without it consuming my whole identity? (sustainable long-term learning pace)                                      | planned |
 | 08  | long-horizon-sustainability         | How does a staff engineer sustain high output over a decade, not just a good quarter? (long-horizon sustainability, pacing a career like a marathon) | planned |
