@@ -1,0 +1,160 @@
+---
+title: "L3 — Three real vulnerabilities: injection, broken access control, SSRF"
+---
+
+## Injection: a search box that lets an attacker read the whole table
+
+**The product search endpoint builds SQL by concatenating the user's
+search term directly into the query string. What's actually wrong
+with that, mechanically?**
+
+```js
+function buildSearchQueryVulnerable(term) {
+  return `SELECT id, name, price FROM products WHERE name LIKE '%${term}%'`;
+}
+```
+
+A normal search for `"widget"` produces a harmless query. But the
+database has no way to tell the difference between "the user's search
+text" and "part of the SQL syntax" — it just sees one string. A
+search term like `' UNION SELECT username, password, 1 FROM users --`
+closes the original quote early and appends an entirely different
+query, and the database dutifully runs all of it.
+
+**How does parameterizing the query fix this, specifically?**
+
+```js
+function buildSearchQueryFixed(term) {
+  return {
+    sql: "SELECT id, name, price FROM products WHERE name LIKE ?",
+    params: [`%${term}%`],
+  };
+}
+```
+
+The `?` placeholder and the `term` value now travel to the database
+as two separate things: fixed SQL syntax, and an opaque data value.
+The database driver sends the value as data, never as SQL text — so
+no matter what characters the search term contains, it can never
+change the shape of the query. This isn't "sanitizing" the input
+(stripping dangerous characters, which is easy to get wrong); it's
+making the distinction between code and data structural, so there's
+nothing to sanitize.
+
+## Broken access control: an endpoint that checks _who_, not _what they can see_
+
+**The invoice endpoint checks that a request has a valid session.
+Is that the same as checking the request is allowed to see this
+specific invoice?**
+
+```js
+function getInvoiceVulnerable(db, session, invoiceId) {
+  if (!session || !session.userId) throw new Error("not authenticated");
+  const invoice = db.invoices.find((inv) => inv.id === invoiceId);
+  if (!invoice) throw new Error("not found");
+  return invoice; // any authenticated user, any invoice id
+}
+```
+
+No — authentication answers "is this a real, logged-in user?"
+Authorization answers "is _this_ user allowed to see _this_
+resource?" The function above only asks the first question, so any
+logged-in customer can read any other customer's invoice just by
+changing the `id` in the URL — this is a textbook **IDOR** (insecure
+direct object reference).
+
+**What does the fix actually add, and why is that enough?**
+
+```js
+function getInvoiceFixed(db, session, invoiceId) {
+  if (!session || !session.userId) throw new Error("not authenticated");
+  const invoice = db.invoices.find((inv) => inv.id === invoiceId);
+  if (!invoice) throw new Error("not found");
+  if (invoice.ownerId !== session.userId) throw new Error("forbidden");
+  return invoice;
+}
+```
+
+One extra comparison: does the record's owner match the requesting
+user? This turns "any valid session can read any invoice" into "a
+valid session can only read invoices it owns" — the missing
+authorization check, not the authentication, was the actual gap.
+
+## Server-side request forgery: a "preview this link" feature that reaches internal infrastructure
+
+**A feature fetches a URL the user pastes in, server-side, to
+generate a link preview. What's the attack if there's no restriction
+on which URLs the server will fetch?**
+
+Cloud providers expose an internal metadata endpoint at a fixed
+link-local address (`169.254.169.254`) that's only supposed to be
+reachable from inside the server's own network — it can hand out
+temporary cloud credentials to anything that asks. If the preview
+feature fetches whatever URL it's given, an attacker pastes
+`http://169.254.169.254/latest/meta-data/iam/credentials` instead of
+a real link, and the _server_ — which can reach that internal
+address even though the attacker's browser can't — fetches it and
+(if the response is shown back) leaks those credentials.
+
+```js
+function isPrivateOrLinkLocalIP(hostname) {
+  const parts = hostname.split(".").map(Number);
+  if (
+    parts.length !== 4 ||
+    parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)
+  ) {
+    return hostname === "localhost";
+  }
+  const [a, b] = parts;
+  if (a === 127) return true; // loopback
+  if (a === 10) return true; // private
+  if (a === 172 && b >= 16 && b <= 31) return true; // private
+  if (a === 192 && b === 168) return true; // private
+  if (a === 169 && b === 254) return true; // link-local (cloud metadata lives here)
+  return false;
+}
+
+function fetchUrlPreviewFixed(urlString, fetcher) {
+  const url = new URL(urlString);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("blocked: unsupported protocol");
+  }
+  if (isPrivateOrLinkLocalIP(url.hostname)) {
+    throw new Error("blocked: internal address");
+  }
+  return fetcher(urlString);
+}
+```
+
+**Why check the protocol at all — isn't the IP check enough?**
+Without the protocol check, a URL like `file:///etc/passwd` or
+`gopher://internal-service:1234/` could reach resources that have
+nothing to do with HTTP at all; restricting to `http:`/`https:`
+closes off a whole separate class of the same underlying mistake
+(the server fetching something the attacker chose without limits on
+_what kind_ of thing it's allowed to fetch, not just _where_).
+
+## What generalizes and what doesn't
+
+All three vulnerabilities share one shape: **the server trusted
+something the request supplied — a search term, a resource id, a
+URL — without a boundary check that made the trust conditional.**
+Injection is missing a data/code boundary; broken access control is
+missing an ownership boundary; SSRF is missing a
+reachable-destination boundary. What's specific to each: the exact
+fix (parameterized queries vs. an ownership comparison vs. an IP
+allowlist) doesn't transfer between them — a parameterized query does
+nothing for an IDOR. **Try extending it yourself:** the invoice
+example fixes reads (`GET /api/invoices/:id`). If the same API also
+had `DELETE /api/invoices/:id`, would the identical ownership check
+be sufficient, or does a destructive action need something extra on
+top of what a read needs?
+
+## Failure modes
+
+| Failure mode                                                                  | What it gets wrong                                                                                                                                                                                |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Trying to sanitize dangerous characters instead of parameterizing             | Blocklisting characters is easy to bypass (encoding, alternate syntax) — parameterization removes the ambiguity structurally instead                                                              |
+| Treating "the user is logged in" as "the user can access this record"         | Confuses authentication with authorization — every IDOR in production is this exact confusion                                                                                                     |
+| Allowlisting by hostname string instead of resolved IP                        | A hostname can resolve to a private IP via DNS even if the string itself looks public — the check needs to happen on the resolved address in a real deployment, not just the literal string typed |
+| Assuming SSRF only matters for "internal tools," not customer-facing features | Any server-side fetch of a user-supplied URL is a candidate — link previews, webhook testers, and PDF generators have all been real-world SSRF vectors                                            |
