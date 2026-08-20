@@ -1,0 +1,118 @@
+---
+title: "L3 — Building the canary router and error-rate monitor that would have caught the Scenario's bug"
+---
+
+## Routing a consistent percentage of users to the new version
+
+**A canary router needs two properties: a controllable percentage,
+and the same user consistently getting the same version throughout
+the rollout (not flipping back and forth on every request). Here's an
+implementation using a deterministic hash.**
+
+```js
+function hashUserId(userId) {
+  let hash = 0;
+  for (let i = 0; i < userId.length; i++) {
+    hash = (hash * 31 + userId.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+function assignVersion(userId, canaryPercent) {
+  const bucket = hashUserId(userId) % 100;
+  return bucket < canaryPercent ? "new" : "old";
+}
+```
+
+```js
+assignVersion("user-42", 25); // "new" or "old" — but always the same answer for user-42 at 25%
+assignVersion("user-42", 25) === assignVersion("user-42", 25); // true, every time
+```
+
+Hashing the user's id into a fixed bucket from 0–99, then comparing
+that bucket against the current canary percentage, gives both
+properties at once: the assignment is deterministic (the same user id
+always hashes to the same bucket), and the _percentage_ of users
+routed to "new" is controlled entirely by moving the threshold — no
+per-user state needs to be stored anywhere.
+
+## Measuring exactly how many users the Scenario's bug would have reached
+
+**At each canary stage, how many of the Scenario's users would
+actually have hit the bug, assuming it affects every user routed to
+the new version?**
+
+```js
+function usersAffectedByBug(users, canaryPercent) {
+  return users.filter((u) => assignVersion(u, canaryPercent) === "new").length;
+}
+```
+
+```js
+const users = makeUsers(100000);
+
+usersAffectedByBug(users, 5); // ~4,957
+usersAffectedByBug(users, 25); // ~24,988
+usersAffectedByBug(users, 100); // 100,000
+```
+
+At a 5% canary stage, roughly 5,000 of 100,000 users would have hit
+the bug — not zero, but two orders of magnitude fewer than the
+Scenario's actual 100,000. This is the concrete version of "progressive
+delivery doesn't prevent the bug, it limits exposure to it" — the
+same bug, the same code, radically different blast radius depending
+entirely on what percentage of traffic it reached before being caught.
+
+## Catching the bug automatically, not just limiting its reach
+
+**Limiting exposure only helps if something actually notices the
+problem at the small-percentage stage. What would an automatic halt
+check look like?**
+
+```js
+function shouldHaltRollout(errorCount, totalRequests, thresholdPercent) {
+  if (totalRequests === 0) return false;
+  const errorRate = (errorCount / totalRequests) * 100;
+  return errorRate > thresholdPercent;
+}
+```
+
+```js
+shouldHaltRollout(50, 1000, 2); // true — 5% error rate exceeds a 2% threshold
+shouldHaltRollout(5, 1000, 2); // false — 0.5% error rate is within threshold
+```
+
+At the 5% canary stage, even a relatively small absolute number of
+errors (50 out of 1,000 canary requests) produces an error rate high
+enough to trip a 2% threshold — which is exactly the point: catching
+a spike in a _rate_, computed only from the small canary population,
+rather than waiting for someone to notice a much larger absolute
+number of affected users at 100%.
+
+## What generalizes and what doesn't
+
+The core lesson — exposure to an undetected bug scales directly with
+what percentage of traffic reaches it, and an automatic rate-based
+check can catch a problem long before a human would notice it at full
+scale — generalizes to any staged rollout: mobile app releases,
+database migrations rolled out by shard, config changes rolled out by
+region. What's specific to this worked example: the exact hash
+function and bucket scheme is one particular way to implement
+consistent per-user routing — a different system might bucket by
+account, by region, or by request instead of by user id, depending on
+what "consistent experience" needs to mean for that specific product.
+**Try extending it yourself:** if the bug only affected users in a
+specific country, not uniformly across all users, would a
+percentage-based canary (routing an unbiased 5% of _all_ users)
+reliably catch it as fast as this unit's uniform-bug example — or does
+a non-uniform bug need a different kind of canary population to
+surface quickly?
+
+## Failure modes
+
+| Failure mode                                                                                    | What it gets wrong                                                                                                                                                      |
+| ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Using random assignment instead of a deterministic hash for canary routing                      | Random assignment means the same user can flip between old and new versions on different requests, producing an inconsistent experience and muddying monitoring signals |
+| Monitoring only crash/error-count in absolute terms, not as a rate                              | An absolute error count means nothing without knowing the traffic volume it came from — a rate-based threshold is what makes small-canary monitoring meaningful         |
+| Assuming a bug that's uniform across users will be caught by a percentage-based canary          | A bug that only affects a specific user segment might be underrepresented or absent entirely in a small percentage-based sample, delaying detection                     |
+| Treating a canary stage as time-based only ("wait 10 minutes") without an explicit health check | A canary stage advancing purely on elapsed time, with no explicit rate check, provides no actual protection — it's progressive delivery in name only                    |

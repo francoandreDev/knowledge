@@ -133,7 +133,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 04  | deployment-automation                    | Why do manual deploys eventually cause an outage? (deployment automation, repeatability)                                 | done    |
 | 05  | orchestration-basics                     | How do we run many containers reliably across many machines? (orchestration basics: Kubernetes concepts)                 | done    |
 | 06  | infrastructure-code                      | How do we change infrastructure without clicking through a console? (Infrastructure as Code)                             | done    |
-| 07  | progressive-delivery                     | How do we ship a risky change without risking everyone? (progressive delivery: canary, blue-green, feature flags)        | planned |
+| 07  | progressive-delivery                     | How do we ship a risky change without risking everyone? (progressive delivery: canary, blue-green, feature flags)        | done    |
 | 08  | rollback-strategy                        | How do we undo a bad deploy fast? (rollback strategy, deployment safety nets)                                            | planned |
 | 09  | config-management                        | Why does the same code behave differently in staging vs. prod? (config management, environment-specific behavior)        | planned |
 | 10  | infra-observability                      | How do we know if our infrastructure itself is healthy? (infra observability, SLOs/SLIs, alerting)                       | planned |
