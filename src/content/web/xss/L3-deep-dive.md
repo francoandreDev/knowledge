@@ -31,6 +31,14 @@ from user input; it just runs it, with access to that page's cookies
 (`document.cookie`), which is exactly the mechanism the Scenario
 describes.
 
+This isn't theoretical — it's what a real browser does with exactly
+these two functions' output, served as the initial page HTML (not
+inserted later via `innerHTML`, which browsers deliberately don't
+execute `<script>` tags from — only markup present when the page is
+first parsed runs):
+
+![Top: the vulnerable renderer's output loaded as a page — the injected script ran immediately and appended a visible "script executed" banner. Bottom: the fixed renderer's output — the same malicious text rendered as inert, visible text instead of running.](./images/vulnerable-vs-escaped.png)
+
 ## The fix: escape, don't insert
 
 **How does escaping the content prevent the script from executing?**
