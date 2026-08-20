@@ -39,7 +39,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 07  | transactions            | Why did my request "succeed" but the data never saved? (transactions, ACID)                                                  | done    |
 | 08  | indexing                | How do we store data so it's fast to find later? (indexing, B-trees, hashing)                                                | done    |
 | 09  | query-planning          | Why does the database get slow as data grows? (query planning, normalization vs. denormalization)                            | done    |
-| 10  | timeouts                | How do we keep a service running when a dependency dies? (timeouts, retries, circuit breakers, backpressure)                 | planned |
+| 10  | timeouts                | How do we keep a service running when a dependency dies? (timeouts, retries, circuit breakers, backpressure)                 | done    |
 | 11  | logging                 | How do we know something broke before the user tells us? (logging, metrics, tracing, observability)                          | planned |
 | 12  | horizontal-scaling      | How do we scale beyond one machine? (horizontal scaling, load balancing, statelessness)                                      | planned |
 | 13  | cap-theorem             | How do two datacenters agree on the truth? (CAP theorem, consistency models)                                                 | planned |

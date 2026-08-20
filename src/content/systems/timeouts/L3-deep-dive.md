@@ -1,0 +1,169 @@
+---
+title: "L3 — Implementing the timeout and circuit breaker that would have caught the Scenario's cascade"
+---
+
+## Capping how long a call can hold a resource
+
+**Here's a timeout wrapper using `Promise.race` — the call and a
+timer race, and whichever finishes first wins.**
+
+```js
+function withTimeout(promise, ms) {
+  const timeout = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]);
+}
+```
+
+```js
+function slowDependency(delayMs) {
+  return new Promise((resolve) => setTimeout(() => resolve("ok"), delayMs));
+}
+
+await withTimeout(slowDependency(5000), 100);
+// rejects after 100ms: "timed out after 100ms"
+
+await withTimeout(slowDependency(10), 100);
+// resolves quickly: "ok"
+```
+
+`Promise.race` resolves or rejects as soon as _either_ promise
+settles — if the real call takes longer than the timeout, the timeout
+promise rejects first, and the caller gets control back at the
+100ms mark instead of waiting for however long the dependency
+actually takes. This directly addresses the Scenario's mechanism:
+instead of a stuck request holding a connection indefinitely, it's
+released back to the pool after a bounded, known maximum time.
+
+**Does this timeout alone stop the order service's connection pool
+from ever filling up?** Only partially — if the inventory service
+stays slow indefinitely, new requests keep arriving, each one still
+occupies a connection for up to 100ms, and if requests arrive faster
+than they time out, the pool can still fill up — just slower than
+without any timeout at all, and bounded instead of unbounded.
+
+## Stopping requests to a dependency that's clearly failing
+
+**A circuit breaker adds the missing piece: stop attempting calls
+entirely once failures cross a threshold.**
+
+```js
+class CircuitBreaker {
+  constructor({ failureThreshold, cooldownMs }) {
+    this.failureThreshold = failureThreshold;
+    this.cooldownMs = cooldownMs;
+    this.state = "closed";
+    this.consecutiveFailures = 0;
+    this.openedAt = null;
+  }
+
+  canAttempt() {
+    if (this.state === "open") {
+      if (Date.now() - this.openedAt >= this.cooldownMs) {
+        this.state = "half-open";
+        return true;
+      }
+      return false;
+    }
+    return true;
+  }
+
+  recordSuccess() {
+    this.consecutiveFailures = 0;
+    this.state = "closed";
+  }
+
+  recordFailure() {
+    this.consecutiveFailures++;
+    if (this.consecutiveFailures >= this.failureThreshold) {
+      this.state = "open";
+      this.openedAt = Date.now();
+    }
+  }
+}
+```
+
+```js
+const breaker = new CircuitBreaker({ failureThreshold: 3, cooldownMs: 50 });
+
+breaker.canAttempt(); // true — starts closed
+
+breaker.recordFailure();
+breaker.recordFailure();
+breaker.recordFailure();
+breaker.state; // "open"
+breaker.canAttempt(); // false — refuses immediately, no network call attempted
+
+// after cooldownMs passes:
+breaker.canAttempt(); // true — moves to "half-open", allows one trial
+
+breaker.recordSuccess();
+breaker.state; // "closed" — back to normal
+```
+
+`canAttempt()` is checked _before_ making any actual call to the
+dependency — once open, it returns `false` immediately, so the caller
+never spends a connection or waits on a timeout for a call that's
+essentially guaranteed to fail. This is what a timeout alone can't
+provide: the timeout bounds how long a _single_ wasted call takes,
+while the circuit breaker prevents making the wasted call at all
+once there's clear evidence the dependency is down.
+
+## Combining both to address the Scenario directly
+
+**How would the order service actually use both together for a call
+to inventory?**
+
+```js
+async function callInventory(breaker, requestFn) {
+  if (!breaker.canAttempt()) {
+    throw new Error("inventory circuit open — failing fast");
+  }
+  try {
+    const result = await withTimeout(requestFn(), 100);
+    breaker.recordSuccess();
+    return result;
+  } catch (err) {
+    breaker.recordFailure();
+    throw err;
+  }
+}
+```
+
+Early in the degradation, the circuit is closed and calls go through
+normally, each bounded by the 100ms timeout. Once enough calls time
+out and the failure threshold is crossed, the breaker opens — every
+subsequent call fails instantly, in well under a millisecond, instead
+of tying up a connection for up to 100ms each. The order service's
+own connection pool stops draining, and it stays available for
+requests that don't depend on inventory at all — directly preventing
+the Scenario's cascading outage.
+
+## What generalizes and what doesn't
+
+The core lesson — bounding how long a call can hold a resource, and
+stopping attempts entirely once a dependency is clearly failing,
+together prevent one degraded dependency from exhausting an unrelated
+service's own resources — generalizes to any system with dependencies
+that can degrade: database connections, third-party APIs, internal
+microservices. What's specific to this worked example: the exact
+timeout value (100ms) and failure threshold (3) are tuned to this
+particular dependency's expected behavior — a dependency with
+naturally higher latency, or one where occasional single failures are
+expected and not alarming, needs its own, different thresholds tuned
+to its actual behavior. **Try extending it yourself:** if the order
+service retried a failed inventory call up to 2 times before giving
+up (with backoff between attempts), how would that interact with the
+circuit breaker's failure counting — should each retry count as a
+separate failure toward the threshold, or should the whole retried
+sequence count as one?
+
+## Failure modes
+
+| Failure mode                                                                    | What it gets wrong                                                                                                                         |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Setting a timeout much longer than the dependency's actual expected latency     | A generously long timeout still lets a flood of slow requests exhaust the connection pool, just more slowly than with no timeout at all    |
+| Checking circuit breaker state after attempting the call instead of before      | Attempting the call first defeats the purpose — the resource is already spent by the time the failure is recorded                          |
+| Setting the failure threshold so low that a single blip trips the breaker       | Opening on one transient failure can needlessly fail requests to a dependency that would have recovered on its own within the next attempt |
+| Never testing the half-open trial-request behavior, only closed and open states | A breaker that never correctly transitions back to closed after recovery leaves a fully-healthy dependency permanently blocked             |
