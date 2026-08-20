@@ -1,0 +1,138 @@
+---
+title: "L3 — The full mediation: two separate conversations, then one structured joint session"
+---
+
+## Stage 1: separate conversations, to hear each interest without an audience
+
+Before bringing Priya and Devon together, their manager, Sam, talks
+to each of them alone — not to gather ammunition for one side, but
+because neither person is likely to say their real interest out loud
+in front of the other person until some trust is established.
+
+**With Priya:**
+
+> Sam: "Walk me through what's been happening in reviews with Devon."
+>
+> Priya: "He leaves five comments on things that don't matter — variable
+> names, whether a helper function should be inline. It feels like
+> he's looking for reasons to slow me down."
+>
+> Sam: "What would it mean if that were true — that he's looking for
+> reasons to slow you down?"
+>
+> Priya: _(pause)_ "...Honestly? It would mean he doesn't think I know
+> what I'm doing. Which is frustrating, because I designed half of the
+> service he's commenting on."
+
+**With Devon:**
+
+> Sam: "Same question — walk me through what's been happening with
+> Priya."
+>
+> Devon: "I leave a comment, she pushes back immediately instead of
+> considering it, or just says 'that's a style preference' and moves
+> on. Most of my comments are about real edge cases, not style."
+>
+> Sam: "What does it feel like when she responds that way?"
+>
+> Devon: "Like my review doesn't count for anything. I spend real time
+> reading the diff carefully, and it gets waved off in one line."
+
+**Before reading further — what does each person's "so what does it
+mean to you" answer reveal that their opening complaint didn't?**
+Priya's opening complaint ("nitpicking") was a position about Devon's
+behavior; her deeper answer ("he doesn't think I know what I'm
+doing") is the actual interest — feeling her competence isn't
+respected. Devon's opening complaint ("she dismisses real issues") is
+also a position; his deeper answer ("my review doesn't count for
+anything") is the mirror-image interest — feeling _his_ competence
+and effort aren't respected either.
+
+## Stage 2: the structured joint conversation
+
+Sam brings them together with a specific structure, not an open-ended
+"talk it out": each person states their interest (not their position)
+while the other listens without responding, then they switch.
+
+> Sam: "I want to try something different from just going back over
+> specific comments. Priya, can you tell Devon what it feels like on
+> your end when he leaves a lot of comments on a PR — not the comments
+> themselves, just what it feels like?"
+>
+> Priya: "It feels like you don't trust my design decisions. Like
+> every comment is really saying 'I would have done this differently
+> and better.'"
+>
+> Sam: "Devon, don't respond yet — just take that in. Now, same
+> question for you: what does it feel like when your comments get
+> waved off?"
+>
+> Devon: "It feels like the time I spend reviewing carefully doesn't
+> matter to you. Like you've already decided the PR is right and I'm
+> just a formality."
+
+**Notice what happened structurally**: neither person had to concede
+their position was wrong. They each stated an interest, and — because
+Sam had already heard both privately — the mirror-image shape became
+visible to Priya and Devon themselves, for the first time, in the
+room together.
+
+> Devon: "...I didn't think you felt that way about my design
+> decisions. I actually think you're a strong engineer — I just leave
+> a lot of comments because that's how I review, on everything."
+>
+> Priya: "I didn't realize the pushback felt like dismissal to you.
+> I've just gotten used to defending decisions by default because it
+> felt like everything was being questioned."
+
+## Stage 3: addressing the actual root cause, not the comment count
+
+The resolution isn't "Devon will comment less" or "Priya will push
+back less" — those would just be new positions, and wouldn't survive
+the next stressful PR. Instead, Sam helps them agree on something
+that addresses the actual interest on both sides:
+
+> - Devon will flag which of his comments are "must address" versus
+>   "just a thought, your call" — so volume of comments stops reading
+>   as a verdict on Priya's competence.
+> - Priya will respond to comments with her reasoning instead of a
+>   one-line dismissal, even when she's confident in the original
+>   decision — so Devon's review effort gets engaged with rather than
+>   waved off.
+
+Both changes are small and easy to do. **What makes them likely to
+stick isn't that they're clever — it's that each one directly answers
+the interest the other person actually named**, not the surface
+behavior a "be nicer" message would have targeted.
+
+## What this mediation does and doesn't prove
+
+**Would the same structure (separate conversations, then a
+structured joint session naming interests) work for every team
+conflict?** The _structure_ generalizes — separate conversations to
+surface real interests, then a joint session where each person states
+interest rather than position — but the specific finding (a
+mirror-image competence-respect conflict) doesn't. Not every conflict
+has symmetric underlying interests; sometimes one person's interest
+is legitimate and reasonable and the other's stated position really
+is the core problem to address directly, not something to find
+a compromise around. The mediator's job is to find out which
+situation is actually in front of them, not to assume this one's
+shape in advance.
+
+**Try extending it yourself:** suppose Sam's separate conversations
+had instead revealed that Devon's comments really were largely about
+personal style preference, not real issues, and Priya's pushback was
+a reasonable response to that. Would the joint-conversation structure
+above still be the right tool, or does a legitimately one-sided
+conflict call for a different approach than mirror-image mediation?
+
+## Failure modes
+
+| Failure mode                                                                 | What it gets wrong                                                                                                                                                                                            |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Skipping the separate conversations and going straight to a joint meeting    | Neither person is likely to state their real interest cold, in front of the other, without some private space first — skipping this step usually just replays the position-level argument with an audience    |
+| Letting the joint conversation stay at the position level                    | If Priya and Devon had just re-argued "nitpicking" vs. "dismissive," the mirror-image interest underneath would never surface — the structure (state interest, other person listens) is what forces the shift |
+| Proposing the resolution before both interests are named                     | A manager who jumps to "Devon, comment less; Priya, push back less" is solving a problem neither person has actually explained yet — likely to address the wrong thing                                        |
+| Assuming every conflict is a misunderstanding with a mirror-image resolution | Some conflicts are genuinely one-sided — treating a real, one-directional problem as a symmetric miscommunication can let a legitimate grievance go unaddressed                                               |
+| Declaring the mediation done once the room feels calmer                      | A calmer room after the joint conversation is a sign the interests were heard, not proof the agreed changes will actually hold under the next stressful PR — a brief follow-up check-in matters               |
