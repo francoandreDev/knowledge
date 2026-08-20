@@ -1,0 +1,77 @@
+---
+title: "L1 — How do we store data so it's fast to find later? (indexing, B-trees, hashing)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Login used to take 2ms. Now it takes 400ms.">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🐣</span> <strong>500 users</strong> — `SELECT * FROM users WHERE email = ?` → 2ms</div>
+      <div class="flex items-center gap-1.5"><span>📈</span> <strong>2,000,000 users</strong> — same exact query → 400ms</div>
+      <div class="flex items-center gap-1.5"><span>❓</span> <strong>What changed</strong> — not the query, not the code, only the row count</div>
+    </div>
+  </Fragment>
+
+An app's login query — `SELECT * FROM users WHERE email = ?` —
+took 2 milliseconds when the `users` table had 500 rows. Nobody
+touched that query since. Two years and 2 million users later, the
+exact same query takes 400 milliseconds, and login feels broken.
+**The code didn't change. The query didn't change. What did, and
+why does more data make an unchanged query slower — is that just an
+unavoidable cost of growth, or is something fixable actually
+missing?**
+
+</Scenario>
+
+## The shape of the problem
+
+- Without help, a database finds a row by a **full table scan** —
+  checking every single row until it finds a match (or reaches the
+  end and finds none). Scan cost grows in direct proportion to the
+  number of rows: 4,000x more rows means roughly 4,000x more
+  checking.
+- An **index** is a separate structure, built ahead of time, that
+  lets the database jump close to the answer instead of checking
+  every row — the same trade every dictionary makes: the words on
+  each page aren't in a special order for their content, they're
+  sorted so you can find one without reading the whole book.
+- The trade-off is real, not free: an index takes disk space, and
+  every write to the indexed column has to update the index too — so
+  indexing isn't "always turn it on everywhere," it's "turn it on for
+  the columns that are actually looked up this way."
+
+## Key terms
+
+- **Full table scan** — checking every row in a table one by one
+  until a match is found; cost grows linearly with row count.
+- **Index** — a separate, ordered (or hashed) structure mapping
+  column values to row locations, built specifically to make lookups
+  on that column fast without scanning the whole table.
+- **B-tree** — the most common index structure: a balanced,
+  sorted tree where lookup cost grows with the _logarithm_ of the row
+  count, not the row count itself. Because it keeps values in sorted
+  order, it also supports range queries (`WHERE age > 30`) and
+  sorted output, not just exact matches.
+- **Hash index** — an index built on a hash table: average-case
+  constant-time exact-match lookups, but the hashing destroys value
+  order, so it can't answer range or "sorted by this column"
+  queries at all.
+- **Selectivity** — how much an index on a column actually narrows
+  the search. A column with mostly-unique values (like `email`) is
+  highly selective and indexes well; a column with only a few
+  distinct values (like `is_active: true/false` on its own) narrows
+  almost nothing and often isn't worth indexing by itself.
+
+## What this unit covers
+
+L2 works through why full-scan cost grows linearly while a B-tree's
+grows logarithmically — and what that difference actually means at
+2 million rows — plus when a hash index is the better (or the only
+usable) choice, and cases where an index quietly doesn't get used at
+all. L3 builds a real in-memory full scan, sorted-array binary
+search (a B-tree's lookup behavior without the on-disk tree
+machinery), and a hash index in code, benchmarks all three against
+the opening scenario's exact 500-vs-2,000,000-row jump, and shows
+concretely why the hash index can't answer a range query that the
+sorted structure answers for free.

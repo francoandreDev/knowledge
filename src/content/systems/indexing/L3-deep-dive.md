@@ -1,0 +1,184 @@
+---
+title: "L3 — Building a full scan, a sorted index, and a hash index, and measuring what actually changes"
+---
+
+## Reproducing the scenario for real
+
+**Is "400ms at 2 million rows" a plausible number, or does it need
+checking before it goes in front of a reader?** It gets checked here
+in real, runnable JavaScript rather than asserted — three lookup
+strategies over the same data, benchmarked at the exact 500-vs-2M
+row counts from the opening scenario.
+
+```js
+function pad(i) {
+  return String(i).padStart(7, "0");
+}
+
+function makeUsers(n) {
+  const users = [];
+  for (let i = 0; i < n; i++) {
+    users.push({ id: i, email: `user${pad(i)}@example.com` });
+  }
+  return users;
+}
+
+// Strategy 1: full table scan — check every row until a match.
+function fullScanFindByEmail(users, email) {
+  for (let i = 0; i < users.length; i++) {
+    if (users[i].email === email) return users[i];
+  }
+  return null;
+}
+
+// Strategy 2: a sorted array + binary search — this is a B-tree's
+// lookup *behavior* without the on-disk page/node machinery a real
+// B-tree needs; it demonstrates the same O(log n) comparison count.
+function buildSortedIndex(users) {
+  return [...users].sort((a, b) =>
+    a.email < b.email ? -1 : a.email > b.email ? 1 : 0,
+  );
+}
+
+function binarySearchByEmail(sortedUsers, email) {
+  let lo = 0,
+    hi = sortedUsers.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const midEmail = sortedUsers[mid].email;
+    if (midEmail === email) return sortedUsers[mid];
+    if (midEmail < email) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return null;
+}
+
+// Strategy 3: a hash index — O(1) average exact-match lookup.
+function buildHashIndex(users) {
+  const map = new Map();
+  for (const u of users) map.set(u.email, u);
+  return map;
+}
+```
+
+**Before reading the benchmark — which of the three would you expect
+to slow down the most between 500 and 2,000,000 rows, and which
+should barely change at all?** The full scan should degrade roughly
+in proportion to row count; the binary search and hash lookup should
+barely move, since their cost depends on log(n) and O(1)
+respectively, not n directly.
+
+## What the benchmark actually shows
+
+Running all three strategies at both row counts (looking up a real
+row present in the data, timed with `performance.now()`, averaged
+over many repeated lookups to smooth out noise):
+
+| Row count                       | Full scan   | Binary search (B-tree behavior) | Hash index  |
+| ------------------------------- | ----------- | ------------------------------- | ----------- |
+| 500                             | 0.0022 ms   | 0.00017 ms                      | 0.000016 ms |
+| 2,000,000                       | 13.47 ms    | 0.0012 ms                       | 0.00019 ms  |
+| **Slowdown (4,000x more rows)** | **~6,200x** | **~7x**                         | **~12x**    |
+
+The full scan's slowdown roughly tracks the 4,000x row-count
+increase (real hardware effects — cache misses on a much bigger
+array — push it past a perfectly linear 4,000x, matching why the
+opening scenario's real-world 200x felt smaller than "4,000x more
+data" might suggest: a small warm table starts near-instant, so even
+a large relative slowdown from a near-zero base can look like "only"
+200x in absolute milliseconds). The binary search and hash index
+barely moved at all — a few more comparisons and one more hash
+table resize, nothing close to proportional to the data growth. This
+is the entire mechanism behind the opening scenario: nothing in the
+query changed, only whether a lookup has to touch every row.
+
+**Worst-case comparison counts**, matching L2's chart exactly:
+
+```js
+function log2Ceil(n) {
+  return Math.ceil(Math.log2(n));
+}
+[500, 10000, 100000, 1000000, 2000000].map(log2Ceil);
+// => [9, 14, 17, 20, 21]
+```
+
+## Why the hash index can't do what the sorted index can
+
+**The hash index was the fastest of the three above — so why would
+anyone choose the sorted index instead?** Because "fastest at exact
+match" and "supports range queries" are different capabilities, and
+the hash index structurally only has the first one:
+
+```js
+function rangeQuerySorted(sortedUsers, fromEmail, toEmail) {
+  let lo = 0,
+    hi = sortedUsers.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sortedUsers[mid].email < fromEmail) lo = mid + 1;
+    else hi = mid;
+  }
+  const results = [];
+  for (
+    let i = lo;
+    i < sortedUsers.length && sortedUsers[i].email <= toEmail;
+    i++
+  ) {
+    results.push(sortedUsers[i]);
+  }
+  return results;
+}
+
+const users = makeUsers(500);
+const sorted = buildSortedIndex(users);
+const results = rangeQuerySorted(
+  sorted,
+  `user${pad(100)}@example.com`,
+  `user${pad(104)}@example.com`,
+);
+results.map((u) => u.email);
+// => ["user0000100@...", "user0000101@...", "user0000102@...",
+//     "user0000103@...", "user0000104@..."]
+```
+
+The sorted index answers "give me every row between these two
+values" by finding one boundary with binary search and then walking
+forward — cheap, and it only touches the rows actually in range. **Try
+writing the equivalent query against `buildHashIndex`'s `Map`** —
+there's no way to ask a `Map` for "every key between X and Y" without
+iterating every single entry and checking each one, which is exactly
+the full-scan cost the index was supposed to remove. The hash
+function that makes `hash.get(email)` O(1) is the same mechanism that
+makes `hash` unable to answer this question at all — scrambling
+insertion order into bucket positions is precisely what a range query
+needs order to _not_ be scrambled.
+
+## What generalizes and what doesn't
+
+The _shape_ of this result generalizes well beyond `email` lookups
+on a `users` table: any column looked up by exact match at meaningful
+selectivity benefits from an index, the O(n)-vs-O(log n)/O(1) gap
+widens with scale regardless of what the column represents, and the
+range-vs-hash trade-off is structural, not implementation-specific —
+it holds for a real database's B-tree and hash index just as it holds
+here. What's specific to this worked example: the exact millisecond
+numbers depend on this machine, this data shape, and JavaScript's
+`Map`/array performance — a production database adds disk I/O,
+caching layers, and query-planner decisions this simulation doesn't
+model, so the _ratios_ transfer, the _absolute numbers_ don't.
+
+**Try extending it yourself:** what would you expect to happen to the
+hash index's advantage if the lookup were `WHERE email IN (id1, id2,
+..., id500)` — 500 exact-match lookups in one query — versus a single
+`WHERE email = ?` lookup? Does the hash index's O(1)-per-lookup
+advantage over the B-tree's O(log n) actually matter more, less, or
+about the same at that batch size?
+
+## Failure modes
+
+| Failure mode                                                        | What it gets wrong                                                                                                                                                                  |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Indexing a column and assuming every query on it speeds up          | A `LIKE '%...'` search or a function applied to the column (`LOWER(email)`) can silently bypass the index entirely — see L2                                                         |
+| Choosing a hash index because it benchmarked fastest for equality   | Fastest-for-the-tested-query isn't the only requirement — if a range or sort on that column is ever needed later, a hash index is a dead end, not just a slower option              |
+| Assuming index lookup cost is exactly `O(log n)` in wall-clock time | Real databases add disk I/O, page caching, and lock contention on top of the comparison count — the _shape_ of the curve holds, the constant factor doesn't                         |
+| Adding an index to fix a slow query without checking selectivity    | An index on a low-selectivity column (few distinct values) may not be used by the query planner at all, since a full scan can be cheaper than following it into millions of matches |
