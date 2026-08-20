@@ -293,7 +293,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 05  | goal-setting                  | How do I set goals for a team that actually align with what the org needs? (goal-setting, OKRs, translating strategy downward)                   | done    |
 | 06  | early-signals                 | How do I know if someone on my team is struggling before it's a crisis? (early signals, psychological safety, checking in)                       | done    |
 | 07  | mediation                     | How do I handle conflict between two people on my team? (mediation, staying neutral, addressing root cause)                                      | done    |
-| 08  | defining-role                 | How do I hire well instead of just filling a seat? (defining the role, structured hiring loop, avoiding the halo effect)                         | planned |
+| 08  | defining-role                 | How do I hire well instead of just filling a seat? (defining the role, structured hiring loop, avoiding the halo effect)                         | done    |
 | 09  | onboarding-design             | How do I onboard someone so they're productive fast without overwhelming them? (onboarding design, ramp plans)                                   | planned |
 | 10  | calibration                   | How do I evaluate performance fairly across a team with different roles and levels? (calibration, avoiding recency/bias, writing honest reviews) | planned |
 | 11  | performance-improvement-plans | How do I have the conversation when someone isn't meeting the bar? (performance improvement plans, documentation, the conversation itself)       | planned |

@@ -1,0 +1,91 @@
+---
+title: "L3 — What a structured loop would have caught in the Scenario's rushed hire"
+---
+
+## Writing the role definition the Scenario never had
+
+**Before the first interview was ever scheduled, what should the team
+have written down?** A short, specific list of what this particular
+role actually requires — not adjectives, but things a candidate can
+demonstrate:
+
+1. Can independently diagnose a production incident from partial,
+   ambiguous logs — not just fix a bug once the cause is already
+   known.
+2. Can explain a technical trade-off clearly enough that a
+   non-technical stakeholder can make a decision from it.
+3. Can review a peer's code and identify the one change that matters
+   most, not just list every possible nitpick.
+
+None of these three signals is "seems smart" or "communicates well
+in general" — each one is specific enough that an interviewer could
+design a 45-minute exercise around it and come away with a genuine
+yes/no on whether it was demonstrated.
+
+## Mapping the loop to the signals
+
+**Given those three signals, what would a five-slot loop actually
+look like, compared to what the Scenario's team ran?**
+
+| Slot                  | Scenario's actual loop (what ran)                         | A structured loop mapped to the role definition                                                      |
+| --------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Interview 1           | Open-ended "get to know you" conversation                 | Same — rapport and basic fit, explicitly not scored against a specific signal                        |
+| Interview 2           | General technical chat, candidate described past projects | Live incident-diagnosis exercise, testing signal 1 specifically, scored independently                |
+| Interview 3 (skipped) | — cut short to make the offer faster                      | Stakeholder-communication exercise, testing signal 2, scored independently                           |
+| Interview 4 (skipped) | — cut short to make the offer faster                      | Code-review exercise, testing signal 3, scored independently                                         |
+| Debrief               | Informal "so, what did everyone think?" discussion        | Each interviewer reports their independent score against their assigned signal before any discussion |
+
+The Scenario's actual loop had every interviewer effectively re-running
+the same general impression-forming conversation, and the two slots
+most likely to catch the actual gap — incident diagnosis specifically
+— were the ones cut for speed. A structured loop doesn't necessarily
+take more total interviews; it takes the same number of slots
+deliberately pointed at different, specific signals.
+
+## What the debrief would have surfaced
+
+**If Interview 2 had actually run the incident-diagnosis exercise,
+what would the debrief conversation have looked like?** Instead of "I
+thought they were great overall," Interviewer 2 would report a
+specific, falsifiable observation: "given a partial log with three
+plausible causes, they picked the most likely one but couldn't
+explain why the other two were less likely — that's a gap on signal
+1." That's a concrete data point the hiring manager can weigh against
+how urgently the seat needs filling, rather than a vague good feeling
+that turns out three months later to have covered the wrong thing
+entirely.
+
+**Does catching this in the loop guarantee the team wouldn't still
+hire this candidate?** No — and it doesn't need to. The team might
+still make the offer, with eyes open, planning a specific onboarding
+focus on incident diagnosis. The value of the structured loop isn't
+that it produces a different hiring decision every time — it's that
+whatever decision gets made is based on what was actually
+demonstrated, not on an impression that happened to be dominated by
+one salient trait.
+
+## What generalizes and what doesn't
+
+The core lesson — a strong overall impression from multiple people is
+only meaningful if each person was independently testing something
+different, and the halo effect will otherwise make five interviews
+add up to one biased data point — generalizes to any panel-based
+evaluation: promotion committees, vendor selection panels, grant
+review boards. What's specific to this worked example: the exact
+three signals (incident diagnosis, stakeholder communication, code
+review focus) are this role's requirements — a different role (a
+designer, a salesperson, a support engineer) needs its own, equally
+specific list, not this one reused. **Try extending it yourself:** if
+this same team needed to hire a technical writer instead of an
+engineer, what would the three role-specific signals look like, and
+which of the halo-effect risks from L2 would still apply even though
+the skills being tested are completely different?
+
+## Failure modes
+
+| Failure mode                                                                | What it gets wrong                                                                                                                                |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cutting loop steps under time pressure without checking what signal is lost | Speed pressure is real, but skipping a slot should be a deliberate trade-off against a specific known signal, not a generic "we've seen enough"   |
+| Letting a strong early impression set the tone for later interviewers       | If earlier feedback reaches the rest of the panel before their own assessment, it can anchor scores regardless of what they actually observed     |
+| Writing a role definition once and never revisiting it                      | A role's real requirements can shift as the team or product changes — a stale role definition tests for what used to matter, not what matters now |
+| Treating a structured loop as bureaucracy rather than risk management       | The loop exists specifically to catch the kind of gap the Scenario hit — treating it as overhead to cut under pressure defeats its actual purpose |
