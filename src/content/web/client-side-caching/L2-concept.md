@@ -1,0 +1,110 @@
+---
+title: "L2 — What the user actually sees, millisecond by millisecond, with and without caching or optimistic updates"
+---
+
+## The timeline the user actually experiences
+
+**If the click handler and the server endpoint are both "working
+correctly," why does the checkbox still feel broken?** Because
+"working correctly" and "feels instant" are different requirements —
+a sequence diagram of the naive version shows exactly where the
+800ms goes:
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant UI as UI
+    participant S as Server
+
+    Note over U,S: Naive: wait for confirmation
+    U->>UI: Click checkbox
+    UI->>S: PATCH /tasks/1 {done: true}
+    Note over UI: Checkbox still shows unchecked
+    S-->>UI: 200 OK (800ms later)
+    UI->>U: Checkbox now shows checked
+```
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant UI as UI
+    participant S as Server
+
+    Note over U,S: Optimistic: update first, confirm after
+    U->>UI: Click checkbox
+    UI->>U: Checkbox shows checked immediately
+    UI->>S: PATCH /tasks/1 {done: true}
+    S-->>UI: 200 OK (800ms later)
+    Note over UI: Nothing visible changes — already correct
+```
+
+The server still takes exactly 800ms in both versions — nothing
+about the network changed. **What changed is when the UI shows the
+result of the click relative to when the server confirms it.** The
+optimistic version isn't faster; it's honest about something the
+naive version isn't: the user's intent is already known the instant
+they click, and the UI can reflect that intent immediately while the
+confirmation catches up in the background.
+
+## Two different problems, two different fixes
+
+**Is "the list re-fetches every time I revisit it" the same bug as
+"the checkbox takes 800ms to update"?** No — they look similar
+("the UI feels slow") but they're opposite directions of data flow:
+
+|                            | Client-side caching                  | Optimistic updates                                     |
+| -------------------------- | ------------------------------------ | ------------------------------------------------------ |
+| Direction                  | Reading data (GET)                   | Writing data (PATCH/POST/DELETE)                       |
+| Problem it solves          | Re-fetching data that hasn't changed | Waiting for a write to confirm before showing anything |
+| What's shown while waiting | The previously cached response       | The assumed post-write state                           |
+| Risk if wrong              | Cached data is stale                 | Optimistic state has to be rolled back                 |
+
+**Stale-while-revalidate**, the most common caching pattern, resolves
+the "reading" side: show the cached response immediately (even if
+it's a few seconds old), then quietly re-fetch in the background and
+update the UI if the fresh response actually differs.
+
+```mermaid
+flowchart LR
+    A["Revisit task list"] --> B{"Cached response\navailable?"}
+    B -->|"Yes"| C["Show cached data\ninstantly"]
+    C --> D["Re-fetch in background"]
+    D --> E{"Response\ndiffers?"}
+    E -->|"Yes"| F["Update UI with\nfresh data"]
+    E -->|"No"| G["Leave UI as-is —\nno visible change"]
+    B -->|"No"| H["Fetch, show\nloading state"]
+```
+
+## What has to be true for a rollback to be honest
+
+**If an optimistic update assumes success, what happens the moment it
+turns out to be wrong — does simply refreshing the page count as
+"handling" that case?** No — a rollback that isn't deliberately built
+either leaves the UI showing a false "checked" state indefinitely, or
+only gets corrected the next time the user happens to reload. A
+correct optimistic update needs three pieces, not just the first one:
+
+1. **Snapshot the prior state** before applying the optimistic change,
+   so there's something exact to restore.
+2. **Apply the optimistic change** immediately, so the UI reflects
+   the user's intent without waiting.
+3. **On failure, restore the snapshot and surface the failure** — silently
+   leaving the optimistic (wrong) state in place is worse than the
+   original 800ms wait, because now the UI is actively lying about
+   what the server actually has stored.
+
+## Failure modes at this level
+
+- **Treating optimistic updates as "just don't wait for the
+  response."** Without the rollback path, a failed write leaves the
+  UI permanently wrong until something else (a reload, a re-fetch)
+  happens to correct it.
+- **Caching without any invalidation.** A cache that's never
+  invalidated after a write becomes actively misleading — the whole
+  point of caching is to skip _redundant_ work, not to serve data
+  that's known to be outdated.
+- **Assuming stale-while-revalidate means the user never sees stale
+  data.** It means they see stale data _briefly and are corrected
+  automatically_ — for data where even a few seconds of staleness is
+  unacceptable (a live balance, a real-time price), this pattern is
+  the wrong choice.

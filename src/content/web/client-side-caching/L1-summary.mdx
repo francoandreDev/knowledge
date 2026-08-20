@@ -1,0 +1,72 @@
+---
+title: "L1 — How do we keep the UI in sync with the server? (client-side caching, optimistic updates)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Checking off a task takes 800ms to show a checkmark.">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>☑️</span> <strong>Click</strong> — user checks off "Buy milk"</div>
+      <div class="flex items-center gap-1.5"><span>⏳</span> <strong>Wait</strong> — 800ms round trip to the server</div>
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Then</strong> — checkmark finally appears</div>
+    </div>
+  </Fragment>
+
+A todo app sends every change straight to the server and only
+updates the checkbox once the server confirms it. On a fast
+connection this feels fine. On a slower one, checking off "Buy milk"
+leaves the checkbox looking unchecked for the better part of a
+second before it visibly ticks — long enough that some users click
+it a second time, thinking the first click didn't register.
+**Nothing about the click handler is broken. What's actually causing
+the delay the user perceives, and does the UI have to wait for the
+server before showing anything at all?**
+
+</Scenario>
+
+## The shape of the problem
+
+- A UI that shows nothing until the server confirms is trading
+  correctness-by-construction for a laggy feel — the server response
+  really did take 800ms, and showing "checked" before that response
+  arrives risks briefly lying about the true state.
+- Two different problems get bundled together under "keeping the UI
+  in sync," and they need different fixes: **re-fetching data you
+  already have** (revisiting the task list re-requests it every time,
+  even though nothing changed) and **waiting for a write to confirm**
+  (checking a box waits for the server before showing anything).
+- **Caching** solves the first — remember what was already fetched
+  and reuse it instead of re-asking. **Optimistic updates** solve the
+  second — update the UI immediately as if the write already
+  succeeded, then reconcile (or roll back) once the server actually
+  responds.
+
+## Key terms
+
+- **Cache** — a local copy of data already fetched from the server,
+  reused on a later request instead of fetching again.
+- **Cache invalidation** — marking cached data as no longer trustworthy
+  (because the underlying data changed) so the next read fetches fresh
+  data instead of serving the stale copy.
+- **Stale-while-revalidate** — showing the cached (possibly outdated)
+  data immediately, while a fresh request runs in the background to
+  update it — trading a moment of possible staleness for an instant
+  response instead of a blank/loading screen.
+- **Optimistic update** — updating the UI immediately as if a write
+  request already succeeded, without waiting for the server's
+  response first.
+- **Rollback** — undoing an optimistic update and restoring the
+  previous UI state, used when the server's actual response turns out
+  to be a failure or a rejection.
+
+## What this unit covers
+
+L2 works through the request/response timeline with and without
+caching and optimistic updates — what the user actually sees at each
+millisecond — plus what has to happen for a rollback to be honest
+rather than just hiding the failure. L3 builds a real, in-code task
+list: a naive version that re-fetches on every visit and waits on
+every checkbox click, then a fixed version with a response cache and
+an optimistic checkbox update that correctly rolls back when the
+server rejects the write.
