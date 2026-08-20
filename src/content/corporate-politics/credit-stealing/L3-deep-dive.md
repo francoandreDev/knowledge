@@ -1,0 +1,105 @@
+---
+title: "L3 — Telling a real pattern from an ambiguous one, and responding to the Scenario's credit-stealing"
+---
+
+## Is this one incident enough to call it credit-stealing?
+
+**In the Scenario, the colleague said "the approach I came up with"
+in front of leadership. Is that enough, on its own, to be certain
+this was deliberate?** Not with full certainty — but the specific
+wording matters. "I came up with" is a stronger, more specific claim
+than a passive omission like "here's the analysis" (which could
+plausibly be an oversight). Claiming direct authorship of someone
+else's three weeks of work is harder to explain as accidental,
+especially if the colleague was in meetings where the actual work was
+visibly being done.
+
+**What would make this clearly part of a pattern rather than an
+isolated incident?** If this is the first time it's happened, treat
+it seriously but not yet as proven intent. If it's the second or
+third time the same colleague has presented someone else's work as
+their own, the pattern itself becomes the evidence — no single
+incident needs to be airtight if three incidents point the same
+direction.
+
+## What responding in the moment actually looks like
+
+**Should the engineer correct the record out loud, right there in
+the executive meeting?** Usually not as a first move — a public
+correction in front of leadership can read as an interpersonal
+conflict playing out live, which often reflects worse on the person
+raising it than on the person who did the crediting, regardless of
+who's actually right. A better first move is calibrated and low-risk:
+
+> Engineer, in the meeting, calmly: "Glad the cost-modeling approach
+> landed well — happy to walk through the underlying assumptions if
+> useful, since I built that model."
+
+This doesn't accuse anyone of anything. It simply, factually places
+the engineer's name next to the work, in the same room, without
+confrontation — enough to correct the record for anyone paying
+attention, without escalating.
+
+## What happens after the meeting
+
+**Does a calm in-meeting correction mean the issue is fully
+resolved?** Not necessarily — it corrects the immediate record but
+doesn't address whether this was a one-time lapse or the start of a
+pattern. The next step is a direct, private conversation with the
+colleague, specific and non-accusatory:
+
+> Engineer, privately: "In the readout today, the pricing analysis
+> came across as your work. I built that model over the last three
+> weeks — can you help me understand what happened there?"
+
+This gives the colleague a real chance to explain (a genuine mistake,
+miscommunication about who was presenting what) before assuming the
+worst. **What's the value of asking this question privately instead
+of publicly?** It keeps the door open for a legitimate explanation
+while still making clear the engineer noticed — and if the same thing
+happens again after this conversation, that repeat is much stronger
+evidence of intent than the first incident alone.
+
+## When it becomes a pattern instead of an incident
+
+**If the same colleague does this again after the private
+conversation, what changes?** At that point, the ambiguity from the
+first incident is gone — a private conversation was already had, and
+it happened again anyway. This is when documentation (specific dates,
+specific claims, specific work products) starts to matter, both to
+have an accurate record for the engineer's own clarity and in case a
+manager or skip-level conversation becomes necessary. This unit
+doesn't go deep on the documentation itself or on a formal escalation
+conversation — those get full treatment in this track's later units
+on documentation discipline and calibrated confrontation — but the
+credit-stealing case itself is what makes clear _when_ that
+escalation is actually warranted versus premature.
+
+## What generalizes and what doesn't
+
+The core lesson — a single ambiguous incident calls for a calibrated,
+low-risk response, while a repeated pattern calls for a more direct
+one, and conflating the two in either direction (overreacting to one
+incident, or ignoring a real pattern because each instance is
+individually deniable) both fail — generalizes to the other four
+black-politics tactics from L2's table, not just credit-stealing. What's
+specific to this worked example: the exact in-meeting move ("happy to
+walk through the assumptions, since I built that model") only works
+for credit-stealing, where the fix is re-attaching a name to
+existing work — scapegoating or sabotage need a differently-shaped
+response, because there's no "just restate the fact" move that
+cleanly applies to being blamed for someone else's failure. **Try
+extending it yourself:** if instead of credit-stealing, this were a
+case of scapegoating — a colleague publicly blaming the engineer for
+a decision the engineer never actually made — would the same
+in-the-moment, low-confrontation move work, or does scapegoating need
+a different kind of immediate response?
+
+## Failure modes
+
+| Failure mode                                                                               | What it gets wrong                                                                                                                                             |
+| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Publicly confronting the colleague in the same meeting                                     | Often reads as an interpersonal conflict playing out live, which can reflect worse on the person raising it regardless of who's actually right                 |
+| Saying nothing at all and hoping it doesn't happen again                                   | Leaves the record uncorrected and gives no signal that the behavior was noticed, making a repeat more likely and harder to address later                       |
+| Treating the first incident as proof of a deliberate, established pattern                  | A single incident, even a fairly clear one, is weaker evidence than a repeated pattern — skipping the private conversation step assumes the worst too early    |
+| Escalating to a manager immediately after just one incident, before a private conversation | Premature escalation before giving the colleague a chance to explain can look reactive and burns credibility that a later, genuine pattern would actually need |
