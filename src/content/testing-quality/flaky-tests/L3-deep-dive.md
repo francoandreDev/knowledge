@@ -1,0 +1,169 @@
+---
+title: "L3 — Fixing shared-state leakage and an async race condition"
+---
+
+## The bug behind the Scenario: a module-level store nobody resets
+
+**Here's the shape of the failing suite. What makes it order-dependent
+rather than reliably broken or reliably fine?**
+
+```js
+let orderStore = [];
+
+function addOrder(order) {
+  orderStore.push(order);
+}
+
+function getPendingOrders() {
+  return orderStore.filter((o) => o.status === "pending");
+}
+
+function testAddsOnePendingOrder() {
+  addOrder({ id: 1, status: "pending" });
+  const pending = getPendingOrders();
+  if (pending.length !== 1)
+    throw new Error(`expected 1, got ${pending.length}`);
+}
+
+function testPendingStartsEmpty() {
+  const pending = getPendingOrders();
+  if (pending.length !== 0)
+    throw new Error(`expected 0, got ${pending.length}`);
+}
+```
+
+Both tests read and write the same module-level `orderStore` array —
+neither one resets it. Run `testPendingStartsEmpty` before
+`testAddsOnePendingOrder` and both pass, because the store really is
+empty at that point. Run them in the other order and
+`testPendingStartsEmpty` fails, because the previous test's order is
+still sitting in `orderStore`:
+
+```js
+// order A: passes
+orderStore = [];
+testPendingStartsEmpty(); // pending.length === 0 ✓
+testAddsOnePendingOrder(); // pending.length === 1 ✓
+
+// order B: testPendingStartsEmpty fails
+orderStore = [];
+testAddsOnePendingOrder(); // pending.length === 1 ✓
+testPendingStartsEmpty(); // pending.length === 1 ✗ — leftover from the previous test
+```
+
+Locally, a single developer's test runner tends to execute these two
+tests in the same order every time — so only one of the two orderings
+above ever actually runs, and the bug stays invisible. CI's shuffled
+or parallelized execution eventually hits the other ordering.
+
+## The fix: give every test its own store, not a shared one
+
+**What has to change so the outcome stops depending on order at
+all?**
+
+```js
+function makeStore() {
+  return [];
+}
+
+function addOrderTo(store, order) {
+  store.push(order);
+}
+
+function getPendingOrdersFrom(store) {
+  return store.filter((o) => o.status === "pending");
+}
+
+function testAddsOnePendingOrderFixed() {
+  const store = makeStore();
+  addOrderTo(store, { id: 1, status: "pending" });
+  const pending = getPendingOrdersFrom(store);
+  if (pending.length !== 1)
+    throw new Error(`expected 1, got ${pending.length}`);
+}
+
+function testPendingStartsEmptyFixed() {
+  const store = makeStore();
+  const pending = getPendingOrdersFrom(store);
+  if (pending.length !== 0)
+    throw new Error(`expected 0, got ${pending.length}`);
+}
+```
+
+Each test now calls `makeStore()` itself, so there is no shared object
+for one test's writes to leak into another test's read. This passes
+in every possible order, every time, because the tests no longer have
+anything to disagree about — they were never sharing state to begin
+with. (A real test framework's `beforeEach` hook that constructs a
+fresh store is the same idea — the point isn't "avoid module-level
+variables," it's "make sure every test starts from state it fully
+controls.")
+
+## The second common cause: asserting before an async operation finishes
+
+**A different flaky test in the same suite checks that an order gets
+marked `"processed"`. What makes this one flaky?**
+
+```js
+function processOrderAsync(order, delayMs) {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      order.status = "processed";
+      resolve(order);
+    }, delayMs);
+  });
+}
+
+async function testRaceFlaky() {
+  const order = { id: 1, status: "pending" };
+  processOrderAsync(order, 10); // BUG: the returned promise is never awaited
+  return order.status === "processed"; // runs immediately, before the timeout fires
+}
+```
+
+`processOrderAsync` returns a promise that resolves after a 10ms
+timeout, but the test never awaits it — it calls the function and
+immediately checks `order.status` on the very next line, which runs
+before the event loop has gotten anywhere near that timeout callback.
+The check almost always finds `"pending"`, not `"processed"` — but
+"almost always" is exactly the kind of window a slow CI machine, a
+GC pause, or a busy event loop can occasionally close, making this
+test's actual pass rate a matter of timing luck.
+
+```js
+async function testRaceFixed() {
+  const order = { id: 1, status: "pending" };
+  await processOrderAsync(order, 10); // fixed: waits for the promise to resolve
+  return order.status === "processed";
+}
+```
+
+Adding `await` makes the test actually wait for the operation it's
+asserting on to complete before checking the result — there's no
+longer a race, because there's no longer a window where the check can
+run before the thing it depends on has happened.
+
+## What generalizes and what doesn't
+
+Both bugs share the same underlying shape: **the test's outcome
+depended on something it didn't actually control** — shared state in
+the first case, real timing in the second. The fix in both cases is
+the same principle: give the test full, isolated control over
+everything its assertion depends on (its own store; an operation it
+actually waits for). What's specific to each: a shared-state fix
+means constructing fresh state per test, while a race-condition fix
+means awaiting the exact operation being asserted on — one doesn't
+substitute for the other. **Try extending it yourself:** if
+`processOrderAsync` also read from the same kind of shared
+`orderStore` this unit's first bug used, would fixing only the
+`await` (and not the shared store) be enough to make the test
+reliable, or would both fixes be needed together?
+
+## Failure modes
+
+| Failure mode                                                     | What it gets wrong                                                                                                                                            |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Re-running a flaky test in CI until it passes                    | Treats the symptom, not the cause — the shared-state or timing dependency is still there and will fail again unpredictably                                    |
+| Adding a longer delay to "fix" a race condition                  | Narrows the window without eliminating it — still non-deterministic, and now slower and harder to reproduce when it does eventually fail                      |
+| Assuming module-level state is fine because "it's just a helper" | Any state shared across test calls, regardless of how it's described, can leak between tests unless it's reset or reconstructed per test                      |
+| Fixing only the test that's currently flaky, not the pattern     | If one test shares state or races on an unawaited promise, other tests using the same helper or pattern are equally likely to be flaky, just not yet observed |
