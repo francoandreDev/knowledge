@@ -1,0 +1,110 @@
+---
+title: "L3 — Redesigning the Scenario's onboarding, and whether the same plan fits a senior transplant"
+---
+
+## Redesigning day 1
+
+**The Scenario's new hire got a 40-page wiki and a two-week gap
+before any check-in. What would day 1 look like under a ramp plan
+instead?**
+
+Day 1 has three concrete pieces, not a reading assignment:
+
+1. **Environment set up before anything else** — the new hire can run
+   the project locally and make a trivial change (even just a typo
+   fix) by the end of day 1. This isn't the real task yet; it
+   confirms the tools work before anything harder depends on them.
+2. **A small, real, scoped first task** — something genuinely useful,
+   deliberately chosen to be completable within the first few days
+   with only a fraction of the system's full context. For an
+   engineer, that might be a well-defined bug fix in one file with a
+   clear, testable definition of "done"; the task is chosen
+   specifically because it doesn't require understanding the whole
+   system to complete correctly.
+3. **A named buddy** — a specific teammate the new hire can message
+   directly with small questions, without needing to schedule
+   anything.
+
+**Why does the first task need to be "real," rather than a toy
+exercise built specifically for onboarding?** A toy exercise teaches
+the tools but not the system — the new hire learns nothing about how
+the actual codebase, review process, or team norms work. A small real
+task teaches those simultaneously, and shipping something real (even
+something small) is itself a confidence and trust signal, in both
+directions.
+
+## Weeks 1 through 4: expanding scope, not expanding reading
+
+**After the first task ships, what comes next — a bigger reading
+list, or something else?** The next task, not more reading. Each
+subsequent task is chosen to be a bit larger and to touch a bit more
+of the system than the last, so the new hire's context grows exactly
+in the direction their actual work is taking them:
+
+- **Week 1**: ship the day-1 task, with a pairing or review session
+  built in specifically so the new hire sees how feedback and review
+  norms actually work on this team — not read about them.
+- **Weeks 2–4**: progressively larger tasks that touch more of the
+  system, with the buddy's involvement gradually decreasing as the
+  new hire needs less hand-holding.
+- **A 30/60/90 checkpoint**: at each mark, compare actual progress
+  against what the plan expected, and adjust — a ramp plan is a
+  starting structure, not a fixed script that ignores how the new
+  hire is actually doing.
+
+**Where did the original 40-page wiki go?** It's still useful — just
+not as a day-1 assignment. Pieces of it become relevant exactly when
+a task the new hire is doing touches that part of the system, at
+which point pointing to the specific relevant section (not the whole
+document) is far more likely to actually be read and retained.
+
+## Does the same plan work for a senior transplant?
+
+**Suppose the new hire isn't junior at all — a senior engineer
+joining from another company, with real technical depth but zero
+context on this specific codebase and team. Does the identical ramp
+plan apply?**
+
+Partially, and the difference is instructive. The mechanism — small
+real task first, context introduced just-in-time, a low-overhead
+question channel — still holds regardless of seniority, because the
+underlying problem (unanchored information doesn't stick) doesn't go
+away just because someone is experienced. What changes is _where_
+the structure is needed: a senior transplant typically doesn't need
+as much hand-holding on the technical execution of the first task —
+they can often reason about unfamiliar code faster than a junior hire
+can. What they're usually missing instead is _org-context_: who
+actually makes which decisions, which parts of the system are
+considered fragile and why, which teams to loop in before touching
+what, and where the team's specific conventions diverge from what
+"good practice" would suggest elsewhere. A ramp plan for a senior
+transplant should shift structure toward that political and
+historical context, not away from structure altogether — treating
+seniority as a reason to skip the ramp plan entirely, rather than
+retarget it, is its own version of the Scenario's mistake.
+
+## What generalizes and what doesn't
+
+The core lesson — a small, real, scoped task early beats a large
+information dump, because context sticks when it's anchored to
+something the person is actually doing, and structure should expand
+gradually rather than arrive all at once or not at all — applies to
+onboarding anyone into anything unfamiliar: a new tool, a new team, a
+new codebase, even a new hobby. What's specific to this worked
+example: the exact shape of the tasks (an environment-setup step, a
+scoped bug fix, a 30/60/90 checkpoint) fits a software engineering
+new hire. **Try extending it yourself:** if the new hire were joining
+a support or operations role instead — where "shipping a small
+change" doesn't map onto a single well-defined task the same way a
+bug fix does — what would the equivalent of "a small, real, scoped
+first task" actually look like, and would the buddy's role change at
+all?
+
+## Failure modes
+
+| Failure mode                                                                 | What it gets wrong                                                                                                                            |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Treating a bigger or better-written document as the fix for a bad onboarding | Volume and quality of documentation aren't the issue if none of it is anchored to something the new hire is actually doing                    |
+| Giving a new hire no starting task at all, calling it autonomy               | Without a scoped first task, there's no way to tell what to explore first — this is the same lack of structure as a dump, from the other side |
+| Assuming seniority means a new hire needs no ramp plan at all                | A senior transplant still needs structure — just retargeted toward org-context and history rather than technical hand-holding                 |
+| Treating the ramp plan as a fixed script instead of checking it at 30/60/90  | A plan that doesn't get compared against how the new hire is actually doing can't catch and correct a gap the way a checkpoint would          |
