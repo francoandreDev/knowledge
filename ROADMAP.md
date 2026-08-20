@@ -80,7 +80,7 @@ Status legend: `planned` · `in-progress` · `done`. Update this file whenever a
 | 05  | building-credibility-ahead-ask           | How do I get buy-in before I need it? (building credibility ahead of the ask)                                        | done    |
 | 06  | decision-making-frameworks               | Why do meetings feel like they decide nothing? (decision-making frameworks: DACI/RACI)                               | done    |
 | 07  | executive-summaries                      | How do I write a doc that busy executives actually read? (executive summaries, BLUF)                                 | done    |
-| 08  | conflict-resolution                      | How do I navigate two teams that both think they own the same thing? (conflict resolution, escalation paths)         | planned |
+| 08  | conflict-resolution                      | How do I navigate two teams that both think they own the same thing? (conflict resolution, escalation paths)         | done    |
 | 09  | visibility-self-promotion                | How do I get credit for my work without appearing to seek it? (visibility without self-promotion)                    | planned |
 | 10  | informal-authority                       | How do I influence a decision I don't own? (informal authority, coalition-building)                                  | planned |
 | 11  | upward-disagreement                      | How do I tell someone senior "this plan will fail"? (upward disagreement, psychological safety)                      | planned |

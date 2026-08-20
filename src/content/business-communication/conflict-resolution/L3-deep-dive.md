@@ -1,0 +1,103 @@
+---
+title: "L3 — The interest-based conversation, and when it genuinely needs to escalate"
+---
+
+## The conversation that finds the real interests
+
+**Three days after the incident, the two team leads sit down. What
+does asking about interests instead of positions actually sound
+like?**
+
+> Platform lead: "Before we talk about who owns what, can I ask —
+> what do you actually need from this service that made this week's
+> change urgent for you?"
+>
+> Growth lead: "Honestly? We just need to ship onboarding experiments
+> on our own timeline. We don't care who reviews the code, we just
+> can't be stuck waiting two weeks in your team's queue."
+>
+> Platform lead: "That's useful — our concern isn't really about
+> _who_ makes changes, it's that unreviewed changes to this service
+> have taken down onboarding twice this year. If there were a way for
+> you to ship fast _and_ stay within guardrails we've already
+> checked, would that solve it for you?"
+
+**What did this exchange actually surface that "who owns it" never
+would have?** Neither team's real interest was "having their name on
+the service." Platform's interest was risk control; Growth's interest
+was shipping speed. Once both are named directly, a design question
+replaces an ownership argument: can Growth get a fast, self-service
+path that still respects the guardrails Platform actually cares
+about?
+
+## What changes once the interests are on the table
+
+**Given both interests, what's a concrete design that could satisfy
+both?**
+
+> Platform lead: "What if we define a small set of pre-approved
+> experiment types — safe changes within known limits — that your
+> team can ship without a review each time? Anything outside that
+> set still needs our sign-off."
+>
+> Growth lead: "That works for probably 90% of what we actually ship.
+> The other 10% we can live with a review queue for, if it's fast."
+
+This isn't a compromise where both teams get half of what they
+wanted — it's a design that gives Platform reliable guardrails
+(their real interest) and gives Growth fast, mostly-unblocked shipping
+(their real interest), because the conversation found what each side
+actually needed instead of staying stuck on who gets to claim the
+service.
+
+## When the same conversation hits a genuine, unresolvable disagreement
+
+**A month later, a new question comes up: which team is on-call when
+this service breaks at 2am. Does the same interest-based approach
+resolve this one too?** Not on its own — both teams have a
+legitimate interest in _not_ being on-call for a system they don't
+fully control end-to-end, and unlike the shipping-speed question,
+there's no design that lets both teams simultaneously not be on-call.
+This is a genuine trade-off, not a misunderstanding, which is exactly
+when escalation is the right move — not a failure of the
+conversation, but its correct outcome.
+
+> Platform lead: "I don't think we're going to resolve on-call
+> ownership between the two of us — we both have a real case, and
+> someone with visibility into both teams' broader load needs to make
+> this call. Can we bring this to Priya (the engineering director) at
+> next week's staff sync, with both our cases laid out?"
+
+**Why does this escalation work well, compared to an informal one?**
+It names a specific person with actual decision authority (not "I'll
+mention it to my manager"), a specific forum (an existing sync, not
+an ambush), and both sides agree in advance to present their actual
+interests rather than complaints about the other team. Priya isn't
+being asked to referee a personality conflict — she's being asked to
+make one specific, well-framed decision.
+
+## What generalizes and what doesn't
+
+The core lesson — positions create false zero-sum conflicts, naming
+interests often reveals a design that satisfies both sides, and a
+well-defined escalation path is a normal tool for genuine trade-offs,
+not a sign the conversation failed — generalizes to almost any
+cross-team disagreement: budget allocation, roadmap prioritization,
+shared infrastructure decisions. What's specific to this worked
+example: the exact design (pre-approved experiment types) solves
+_this_ interest pair (risk control vs. shipping speed) — a different
+conflict needs its own design built from its own underlying
+interests, not this one copy-pasted. **Try extending it yourself:**
+if a third team also depended on this same notification service and
+had yet another set of interests, would the two-team pre-approved-list
+solution still work as-is, or does adding a third stakeholder change
+what kind of solution is even possible?
+
+## Failure modes
+
+| Failure mode                                                               | What it gets wrong                                                                                                                                                  |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Escalating the shipping-speed disagreement without first naming interests  | Skips past a genuinely resolvable conversation, wasting the escalation path on something the two teams could likely have solved directly                            |
+| Treating the on-call disagreement as something more conversation could fix | Some disagreements are genuine trade-offs, not misunderstandings — pushing for more discussion when the real answer requires a decision-maker delays the resolution |
+| Bringing only complaints, not interests, to the escalation forum           | A decision-maker asked to referee "they're being difficult" has much less to work with than one asked to weigh two clearly stated, legitimate interests             |
+| Treating the interest-based solution as final and permanent                | Interests can change as teams and priorities evolve — a design that worked for this conflict may need revisiting, not treated as settled forever                    |
