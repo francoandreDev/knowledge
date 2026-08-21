@@ -8,6 +8,7 @@ export interface RoadmapUnit {
   number: string;
   slug: string;
   problem: string;
+  tags: string[];
   status: UnitStatus;
 }
 

@@ -111,33 +111,74 @@ async function main() {
     const isTableHeader =
       /^\|\s*#\s*\|/.test(line) || /^\|\s*#\s*\|\s*Slug\s*\|/.test(line);
     if (isTableHeader && currentTrack) {
-      outLines.push("| # | Slug | Problem | Status |");
-      outLines.push("|---|---|---|---|");
+      outLines.push("| # | Slug | Problem | Tags | Status |");
+      outLines.push("|---|---|---|---|---|");
       idx++; // skip the separator line under the original header
       continue;
     }
 
-    const rowNoSlug = line.match(
-      /^\|\s*(\d+)\s*\|\s*(.+?)\s*\|\s*(planned|in-progress|done)\s*\|$/,
-    );
-    const rowWithSlug = line.match(
-      /^\|\s*(\d+)\s*\|\s*([a-z0-9-]+)\s*\|\s*(.+?)\s*\|\s*(planned|in-progress|done)\s*\|$/,
-    );
-
-    if (currentTrack && rowWithSlug) {
-      const [, num, slug, problem, status] = rowWithSlug;
-      usedSlugsByTrack.get(currentTrack.name).add(slug);
-      currentTrack.units.push({ number: num, slug, problem, status });
-      outLines.push(`| ${num} | ${slug} | ${problem} | ${status} |`);
-      continue;
+    // Rows may still be in any of three shapes while this migration lands:
+    // num|problem|status (original), num|slug|problem|status (slug added),
+    // num|slug|problem|tags|status (target). Split on "|" and dispatch by
+    // cell count rather than one giant regex, since Problem text itself can
+    // contain commas/parens that would confuse a single greedy pattern.
+    const isRow = /^\|.*\|\s*(planned|in-progress|done)\s*\|$/.test(line);
+    let row = null;
+    if (currentTrack && isRow) {
+      const cells = line
+        .split("|")
+        .slice(1, -1)
+        .map((c) => c.trim());
+      if (cells.length === 5 && /^\d+$/.test(cells[0])) {
+        row = {
+          num: cells[0],
+          slug: cells[1],
+          problem: cells[2],
+          tags: cells[3],
+          status: cells[4],
+        };
+      } else if (cells.length === 4 && /^\d+$/.test(cells[0])) {
+        row = {
+          num: cells[0],
+          slug: cells[1],
+          problem: cells[2],
+          tags: "",
+          status: cells[3],
+        };
+      } else if (cells.length === 3 && /^\d+$/.test(cells[0])) {
+        row = {
+          num: cells[0],
+          slug: null,
+          problem: cells[1],
+          tags: "",
+          status: cells[2],
+        };
+      }
     }
 
-    if (currentTrack && rowNoSlug) {
-      const [, num, problem, status] = rowNoSlug;
+    if (currentTrack && row) {
       const used = usedSlugsByTrack.get(currentTrack.name);
-      const slug = uniqueSlug(deriveSlug(problem), used);
-      currentTrack.units.push({ number: num, slug, problem, status });
-      outLines.push(`| ${num} | ${slug} | ${problem} | ${status} |`);
+      const slug = row.slug || uniqueSlug(deriveSlug(row.problem), used);
+      used.add(slug);
+      const tags = row.tags
+        ? row.tags
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean)
+        : [];
+      if (tags.length === 0) {
+        console.warn(`Warning: ${currentTrack.name}/${slug} has no tags.`);
+      }
+      currentTrack.units.push({
+        number: row.num,
+        slug,
+        problem: row.problem,
+        tags,
+        status: row.status,
+      });
+      outLines.push(
+        `| ${row.num} | ${slug} | ${row.problem} | ${tags.join(", ")} | ${row.status} |`,
+      );
       continue;
     }
 
