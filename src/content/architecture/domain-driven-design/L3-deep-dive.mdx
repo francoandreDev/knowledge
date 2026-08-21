@@ -1,0 +1,364 @@
+---
+title: "L3 — Building the Order aggregate, its repository, and a domain event end to end"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="Fixing Order #4471 for real">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>The bug</strong> — two concurrent `addLine` calls, last write wins, credit limit silently violated</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>The fix</strong> — the aggregate root checks invariants on every mutation, and the repository detects the second writer's stale read</div>
+      <div class="flex items-center gap-1.5"><span>🧱</span> <strong>What we're building</strong> — Money (value object), OrderLine (entity), Order (aggregate root), OrderRepository, OrderPlaced (domain event), an anticorruption layer for a legacy stock system</div>
+    </div>
+  </Fragment>
+
+**Before reading the code: L2 said the fix isn't "wrap it in a
+transaction" — so what, concretely, does `Order.addLine()` need to check,
+and when, to make the exact race from L1 impossible rather than just
+less likely?**
+
+</Scenario>
+
+## Why TypeScript for this one
+
+Aggregates live and die by the invariants they enforce, and a good chunk
+of that enforcement is "this constructor can't be called with an invalid
+combination of arguments" — TypeScript's structural typing plus
+`readonly`/private fields let the *type checker* reject a fair number of
+invalid states before a single test runs, which is exactly the kind of
+guarantee DDD's tactical patterns are trying to build by hand. Any
+statically-typed OO language works for this; TypeScript is used here
+because it's common ground for both backend and frontend teams reading
+this site.
+
+## Money: a value object
+
+```ts
+// money.ts
+export class Money {
+  private constructor(
+    private readonly cents: number,
+    private readonly currency: "USD",
+  ) {}
+
+  static fromDollars(amount: number, currency: "USD" = "USD"): Money {
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new Error(`Invalid amount: ${amount}`);
+    }
+    return new Money(Math.round(amount * 100), currency);
+  }
+
+  add(other: Money): Money {
+    this.assertSameCurrency(other);
+    return new Money(this.cents + other.cents, this.currency);
+  }
+
+  isGreaterThan(other: Money): boolean {
+    this.assertSameCurrency(other);
+    return this.cents > other.cents;
+  }
+
+  // Value objects compare by content, never by reference.
+  equals(other: Money): boolean {
+    return this.cents === other.cents && this.currency === other.currency;
+  }
+
+  toDollars(): number {
+    return this.cents / 100;
+  }
+
+  private assertSameCurrency(other: Money): void {
+    if (this.currency !== other.currency) {
+      throw new Error(`Currency mismatch: ${this.currency} vs ${other.currency}`);
+    }
+  }
+}
+```
+
+**Why store cents as an integer instead of a `number` in dollars?**
+Floating-point dollars accumulate rounding error across enough `add()`
+calls — a value object's whole job is to be trustworthy every time it's
+compared, so the internal representation has to make `equals()` actually
+mean what it says. Note there's no setter anywhere: every operation
+returns a *new* `Money`, which is what "value objects are immutable"
+means in code, not just in a diagram.
+
+## OrderLine: an entity, scoped to this aggregate
+
+```ts
+// order-line.ts
+import { Money } from "./money";
+
+export class OrderLine {
+  constructor(
+    public readonly id: string, // identity — stable even if quantity changes
+    private readonly productId: string,
+    private quantity: number,
+    private readonly unitPrice: Money,
+  ) {
+    if (quantity <= 0) throw new Error("Quantity must be positive");
+  }
+
+  lineTotal(): Money {
+    let total = Money.fromDollars(0);
+    for (let i = 0; i < this.quantity; i++) total = total.add(this.unitPrice);
+    return total;
+  }
+
+  changeQuantity(newQuantity: number): void {
+    if (newQuantity <= 0) throw new Error("Quantity must be positive");
+    this.quantity = newQuantity; // still line `id` — identity persists
+  }
+}
+```
+
+`OrderLine`'s `id` only needs to be unique *within* one `Order` — it has
+no meaning to any other aggregate, which is why `Order` is free to
+generate it however it likes (a counter, a UUID) without coordinating
+with anything else in the system.
+
+## Order: the aggregate root
+
+```ts
+// order.ts
+import { Money } from "./money";
+import { OrderLine } from "./order-line";
+import { DomainEvent, OrderPlaced } from "./domain-events";
+
+type OrderStatus = "OPEN" | "PLACED";
+
+export class Order {
+  private lines: OrderLine[] = [];
+  private status: OrderStatus = "OPEN";
+  private pendingEvents: DomainEvent[] = [];
+  private nextLineId = 1;
+
+  constructor(
+    public readonly id: string,
+    private readonly creditLimit: Money,
+    public readonly version: number = 0, // optimistic concurrency, see below
+  ) {}
+
+  addLine(productId: string, quantity: number, unitPrice: Money): void {
+    if (this.status !== "OPEN") {
+      throw new Error("Cannot add a line to an order that's already placed");
+    }
+    const line = new OrderLine(String(this.nextLineId++), productId, quantity, unitPrice);
+    const prospectiveTotal = this.total().add(line.lineTotal());
+    if (prospectiveTotal.isGreaterThan(this.creditLimit)) {
+      throw new Error(
+        `Adding this line would bring the order to $${prospectiveTotal.toDollars()}, ` +
+          `over the $${this.creditLimit.toDollars()} credit limit`,
+      );
+    }
+    this.lines.push(line);
+  }
+
+  placeOrder(): void {
+    if (this.lines.length === 0) {
+      throw new Error("Cannot place an order with no lines");
+    }
+    if (this.status !== "OPEN") {
+      throw new Error("Order is already placed");
+    }
+    this.status = "PLACED";
+    this.pendingEvents.push(new OrderPlaced(this.id, this.total().toDollars()));
+  }
+
+  total(): Money {
+    return this.lines.reduce((sum, line) => sum.add(line.lineTotal()), Money.fromDollars(0));
+  }
+
+  // Drains and returns events raised since the last pull — called by the
+  // application layer right after a successful save, never before.
+  pullDomainEvents(): DomainEvent[] {
+    const events = this.pendingEvents;
+    this.pendingEvents = [];
+    return events;
+  }
+}
+```
+
+Both invariants from L1 — "no changes after placed" and "total ≤ credit
+limit" — are checked inside `addLine`, on every single call, with no
+code path that skips them. There is no `order.lines.push(...)` available
+from outside the class: `lines` is private, so the *only* way to add a
+line is through the method that enforces the rule.
+
+## The domain event
+
+```ts
+// domain-events.ts
+export interface DomainEvent {
+  readonly occurredAt: Date;
+}
+
+export class OrderPlaced implements DomainEvent {
+  readonly occurredAt = new Date();
+  constructor(
+    public readonly orderId: string,
+    public readonly total: number,
+  ) {}
+}
+```
+
+## The repository, and why it only ever handles whole aggregates
+
+```ts
+// order-repository.ts
+import { Order } from "./order";
+
+export interface OrderRepository {
+  findById(orderId: string): Promise<Order | undefined>;
+  // Note the signature: takes and persists an entire Order, never a
+  // single OrderLine. This is what keeps addLine's invariant checks from
+  // being bypassable — there is no lower-level save to fall back to.
+  save(order: Order): Promise<void>;
+}
+
+// A concurrency-conflict error the in-memory repo raises when a save's
+// expected version doesn't match what's currently stored — the actual
+// fix for L1's lost update, worked through below.
+export class ConcurrencyConflictError extends Error {
+  constructor(orderId: string) {
+    super(`Order ${orderId} was modified by another writer — reload and retry`);
+  }
+}
+```
+
+```ts
+// in-memory-order-repository.ts
+import { Order, OrderRepository, ConcurrencyConflictError } from "./order-repository";
+
+export class InMemoryOrderRepository implements OrderRepository {
+  private store = new Map<string, { order: Order; version: number }>();
+
+  async findById(orderId: string): Promise<Order | undefined> {
+    return this.store.get(orderId)?.order;
+  }
+
+  async save(order: Order): Promise<void> {
+    const existing = this.store.get(order.id);
+    // Optimistic concurrency: the writer must prove it read the version
+    // that's still current. If a second writer already committed since,
+    // this write is rejected instead of silently overwriting it.
+    if (existing && existing.version !== order.version) {
+      throw new ConcurrencyConflictError(order.id);
+    }
+    const nextVersion = (existing?.version ?? 0) + 1;
+    this.store.set(order.id, { order, version: nextVersion });
+  }
+}
+```
+
+## Replaying L1's race with the fix in place
+
+```ts
+const repo = new InMemoryOrderRepository();
+const order = new Order("order-4471", Money.fromDollars(100));
+await repo.save(order); // version 0 -> stored at version 1
+
+// Both requests load the SAME snapshot, at version 1.
+const forRequestA = await repo.findById("order-4471")!;
+const forRequestB = await repo.findById("order-4471")!;
+
+forRequestA.addLine("sku-1", 1, Money.fromDollars(10)); // total now $10, OK
+await repo.save(forRequestA); // succeeds, stored at version 2
+
+forRequestB.addLine("sku-2", 1, Money.fromDollars(8)); // computed against its OWN in-memory total ($8)
+await repo.save(forRequestB);
+// throws ConcurrencyConflictError: forRequestB still carries version 1,
+// but the store is now at version 2. Request B must reload the current
+// Order (now at $10, one line) and retry addLine against reality — at
+// which point it would correctly compute $18, still under the $100
+// limit, and succeed. If the retried total had exceeded the limit,
+// addLine's own invariant check would have rejected it.
+```
+
+**Why does raising an error on the second write count as "fixing" the
+race, rather than just moving the bug to a different line?** Because the
+failure is no longer silent. In L1, both writes "succeeded" and the
+system ended up in a state nobody chose. Here, exactly one write per
+conflicting pair succeeds, and the other gets a signal that tells it
+precisely what to do next — reload and retry against current reality,
+which is where `addLine`'s invariant check runs again and gets the
+chance to catch what the stale computation would have missed.
+
+## The anticorruption layer, in code
+
+L2's context map showed a legacy inventory system with no willingness to
+change its API. Its response shape has nothing to do with `Order`'s
+model — and the ACL's job is to make sure `Order` never has to know that:
+
+```ts
+// legacy-inventory-acl.ts
+
+// The legacy system's actual shape — undocumented field names, a status
+// code instead of a boolean, no concept of "reserved."
+interface LegacyStockRow {
+  sku_code: string;
+  qty_on_hand: string; // yes, a string — the legacy API returns numbers as text
+  stat: "A" | "B" | "D"; // Active / Backordered / Discontinued
+}
+
+export interface StockAvailability {
+  productId: string;
+  availableQuantity: number;
+  canFulfill: boolean;
+}
+
+export class LegacyInventoryAdapter {
+  constructor(private readonly legacyClient: { getStock(sku: string): Promise<LegacyStockRow> }) {}
+
+  async checkAvailability(productId: string): Promise<StockAvailability> {
+    const row = await this.legacyClient.getStock(productId);
+    return {
+      productId,
+      availableQuantity: Number.parseInt(row.qty_on_hand, 10),
+      canFulfill: row.stat === "A" && Number.parseInt(row.qty_on_hand, 10) > 0,
+    };
+  }
+}
+```
+
+`Order.addLine` (or an application service calling it) depends only on
+`StockAvailability` — a shape `Order`'s own context defines and owns.
+Nothing inside `order.ts` ever imports `LegacyStockRow`. If the legacy
+vendor renames `qty_on_hand` to `available_qty` next quarter, exactly one
+file changes.
+
+## Trade-offs, edge cases, failure modes
+
+| Situation                                                  | What goes wrong                                                                                             | The actual trade-off                                                                                   |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Aggregate drawn too large (e.g. `Order` contains `Customer`)    | Every order write contends for a lock on the customer record; unrelated customer edits block order placement       | Smaller aggregates reduce contention but push more rules into cross-aggregate coordination (below)          |
+| Aggregate drawn too small (e.g. `OrderLine` is its own aggregate) | The credit-limit invariant now spans two aggregates, which can't be checked atomically in one transaction          | Needs a domain service or a saga to check-then-compensate, trading strict consistency for availability       |
+| Publishing the event before the save commits                   | Downstream sees `OrderPlaced` for an order that then fails to persist                                               | Always publish from `pullDomainEvents()` after a successful `save()`, never from inside the constructor/method |
+| Save succeeds but the event never gets published (crash in between) | Order exists in storage but Billing never hears about it — a real "dual write" problem                        | An outbox table (write the event in the same transaction as the aggregate, publish it from a separate poller) trades some publish latency for guaranteed at-least-once delivery |
+| Retrying a `ConcurrencyConflictError` blindly, without reloading | The retry recomputes against the same stale snapshot and conflicts again, forever                                  | A retry must reload the current aggregate first — optimistic concurrency assumes the caller re-reads reality  |
+| Treating every relationship between contexts as "just an API"   | A genuine customer-supplier relationship (same org, negotiable) gets treated as conformist (no leverage assumed)   | Misclassifying the pattern means either wasted effort building unneeded translation, or missed leverage to negotiate a breaking change |
+
+## Extend it yourself
+
+**Everything above assumes a single order, single currency, single
+writer conflict.** Two directions worth working through on your own,
+using the same `Order` class as a starting point:
+
+1. What changes if `addLine` also needs to check *live* warehouse stock
+   (not just the credit limit) before accepting a line — would you call
+   `LegacyInventoryAdapter` synchronously from inside `addLine`, or does
+   putting a network call inside an aggregate root's method violate
+   something this unit already established about what an aggregate is
+   supposed to guard?
+2. What if the business rule got *worse* — not "total ≤ credit limit" but
+   "total ≤ credit limit, and no more than 3 orders per customer may be
+   `OPEN` at once"? That second clause needs data from *outside* this
+   aggregate (how many other open orders this customer has). Would you
+   pass that count in as a value at the time of the call (the same way
+   `creditLimit` is passed into the constructor), or does it change
+   which objects belong inside the aggregate boundary at all?
+
+The worked example above is one instance of the pattern, not the whole
+territory — a different invariant or a different concurrency profile can
+change which of these trade-offs is the right call.

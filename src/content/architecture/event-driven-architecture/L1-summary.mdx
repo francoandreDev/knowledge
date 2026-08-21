@@ -1,0 +1,110 @@
+---
+title: "L1 — How do services react to what happened without polling each other to death? (event-driven architecture, pub/sub, event sourcing, CQRS)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario label="The problem">
+  <Fragment slot="facts">
+    <div class="not-prose">
+      <div class="mb-1 flex items-baseline justify-between">
+        <span class="text-lg font-bold text-slate-800 dark:text-slate-100">86,400</span>
+        <span class="text-xs text-slate-400">polls/day, per consumer</span>
+      </div>
+      <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+        <div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 97%"></div>
+      </div>
+      <p class="mt-1 text-xs text-slate-400">~97% of those polls find nothing new</p>
+    </div>
+
+    <div class="not-prose mt-3 flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📦</span> Orders service polls Inventory every 1s for "is this order shipped yet?"</div>
+      <div class="flex items-center gap-1.5"><span>⏱️</span> Worst-case delay: up to 1 full poll interval, every time</div>
+      <div class="flex items-center gap-1.5"><span>💸</span> Load scales with (services × poll rate), not with actual shipments</div>
+    </div>
+
+    <p class="not-prose mt-3 mb-1 text-xs font-semibold tracking-wide text-slate-400 uppercase">The three patterns</p>
+    <div class="not-prose flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📣</span> Pub/sub — publisher and subscriber decoupled by a broker</div>
+      <div class="flex items-center gap-1.5"><span>📜</span> Event sourcing — state is a replay of an append-only log</div>
+      <div class="flex items-center gap-1.5"><span>🔀</span> CQRS — writes and reads split into separate models</div>
+    </div>
+
+  </Fragment>
+
+An e-commerce platform has an `Orders` service and a `Shipping` service. When
+`Shipping` finally marks a package as dispatched, `Orders` needs to know —
+so it can email the customer and unlock the "Track package" button.
+
+The team's first fix: every second, `Orders` asks `Shipping`, _"is order
+#4471 shipped yet?"_ Multiply that by every order in flight, every service
+that cares about shipping status, and every second of the day.
+
+| What the team wanted            | What polling actually gives them                                   |
+| -------------------------------- | ---------------------------------------------------------------- |
+| Near-instant reaction to events  | A reaction delayed by up to one full poll interval, every time     |
+| Low load                         | Load that scales with (services × poll rate), not with real events |
+| Simple code                      | A cron-like loop hammering an API that says "no" 97% of the time   |
+
+**Before reading on: if polling every second still isn't fast enough, why not just poll every 100ms — what actually breaks first, cost or correctness?**
+
+</Scenario>
+
+Polling makes the questioner pay for the answer whether or not anything
+changed. The fix is to flip who initiates: instead of the consumer asking
+_"did anything happen?"_ on a timer, the producer announces _"this
+happened"_ once, the moment it's true — and anyone who cares can react.
+
+- **Event-driven architecture (EDA)**: services communicate by publishing
+  facts about the past (`OrderShipped`, `PaymentFailed`) instead of one
+  service calling another directly or polling it. A producer doesn't know
+  or care who's listening.
+- **Pub/sub** is the delivery mechanism: producers publish events to a
+  broker (a queue or topic); consumers subscribe to the topics they care
+  about. The broker — not the producer — tracks who needs the message and
+  redelivers it if a consumer is down.
+- **Event sourcing** is a specific way to store state: instead of
+  overwriting a row (`status: shipped`), you append every state-changing
+  event to an immutable log (`OrderPlaced`, `PaymentReceived`,
+  `OrderShipped`) and derive current state by replaying it. The log _is_
+  the source of truth; the "current row" is just a cached projection of it.
+- **CQRS** (Command Query Responsibility Segregation) splits the model
+  that handles writes (commands) from the model that serves reads
+  (queries) — often paired with event sourcing, since the write side
+  appends events and one or more read-side projections rebuild
+  query-friendly views from those events asynchronously.
+- These three are related but separable: you can do pub/sub without event
+  sourcing (most message-queue systems), event sourcing without CQRS (one
+  model, rebuilt from the log), or CQRS without event sourcing (two
+  databases kept in sync some other way). This unit covers all three
+  because they solve overlapping instances of the same root problem —
+  reacting to change without polling — but you adopt them independently
+  based on which problem you actually have.
+- What you gain: producers and consumers don't need to know about each
+  other, consumers can be added later without touching the producer, and
+  a burst of events can queue up instead of getting dropped.
+- What you give up: **eventual consistency** (a consumer's view lags the
+  producer's by however long delivery + processing takes), and a much
+  harder debugging story — a request's effects are now spread across
+  whichever services happened to react to its events, not a single call
+  stack.
+
+```mermaid
+flowchart LR
+    subgraph Polling
+        C1["Orders"] -- "any update? (x86,400/day)" --> S1["Shipping"]
+        S1 -- "no / no / no / yes" --> C1
+    end
+    subgraph "Event-driven"
+        S2["Shipping"] -- "publish OrderShipped (once)" --> B["Broker / topic"]
+        B --> C2["Orders"]
+        B --> C3["Notifications"]
+        B --> C4["Analytics"]
+    end
+```
+
+| #   | Question                                            | What it decides                                        |
+| --- | ---------------------------------------------------- | ---------------------------------------------------------- |
+| 1   | Who initiates — the asker or the thing that changed? | Polling vs. event-driven                                   |
+| 2   | Is current state enough, or do you need the history? | A row you overwrite vs. an event-sourced log                |
+| 3   | Do reads and writes have different shapes/load?      | One shared model vs. CQRS's split read/write models          |

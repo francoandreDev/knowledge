@@ -2,7 +2,7 @@
 
 A self-study reference for growing from junior engineer to a solid staff-level engineer, built session by session.
 
-Covers sixteen tracks:
+Covers eighteen tracks:
 
 - `web/` — how the web works, from a single HTTP request to systems serving millions of users.
 - `systems/` — operating systems, distributed systems, databases, reliability.
@@ -18,6 +18,8 @@ Covers sixteen tracks:
 - `applied-math/` — what to measure, calculate, forecast, and estimate: probability/statistics, queueing theory, capacity math, graph theory, linear algebra, risk modeling — always tied back to real use in `web/` and `systems/`.
 - `testing-quality/` — the craft of testing: test pyramid, TDD/BDD, test doubles, flaky tests, mutation/property-based testing, contract testing, quality culture.
 - `software-design/` — the craft of maintainable code: SOLID, OOP vs. functional, design patterns, refactoring, technical debt, API design.
+- `architecture/` — system architecture above any single codebase: architectural styles, domain-driven design, build-vs-buy, ADR governance, platform engineering, technical strategy.
+- `design/` — product, UX, and UI design as its own discipline: design thinking, usability, information architecture, visual design, accessibility, design systems.
 - `sustainable-performance/` — the personal sustainability layer: energy/attention management, burnout recovery, boundaries, pacing a career over a decade.
 - `people-management/` — the mechanics of formally leading a team: 1:1s, delegation, feedback, hiring, performance management, terminations, org design, managing managers.
 

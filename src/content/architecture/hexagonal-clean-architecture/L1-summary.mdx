@@ -1,0 +1,67 @@
+---
+title: "L1 — How do I keep business logic from depending on the database or the framework? (ports & adapters, hexagonal/clean architecture)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+<Scenario>
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center justify-between">
+        <span class="flex items-center gap-1.5"><span>🐘</span> Test suite, real Postgres</span>
+        <span class="font-mono text-xs">≈ 45 ms / test</span>
+      </div>
+      <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+        <div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 100%"></div>
+      </div>
+      <div class="flex items-center justify-between">
+        <span class="flex items-center gap-1.5"><span>⚡</span> Test suite, in-memory fake</span>
+        <span class="font-mono text-xs">≈ 0.05 ms / test</span>
+      </div>
+      <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+        <div class="h-full rounded-full bg-emerald-500 animate-fill-bar" style="--target-width: 1%"></div>
+      </div>
+    </div>
+
+    <p class="not-prose mt-3 mb-1 text-xs font-semibold tracking-wide text-slate-400 uppercase">Symptoms</p>
+    <div class="not-prose flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🧪</span> Can't unit-test a discount rule without Docker running</div>
+      <div class="flex items-center gap-1.5"><span>🔌</span> Swapping Postgres → DynamoDB means touching the use case</div>
+      <div class="flex items-center gap-1.5"><span>🕸️</span> `import { Request } from "express"` shows up inside pricing logic</div>
+    </div>
+
+  </Fragment>
+
+`OrderService.placeOrder()` is 40 lines long. Fifteen of them are business rules — check stock, apply the discount, reject if the cart is empty. The other twenty-five are a raw SQL client, an Express `req`/`res` pair, and a try/catch around a connection pool. To unit-test the discount rule, you don't call a function — you spin up Docker, run migrations, seed rows, and hope the container is healthy before the test framework's timeout fires.
+
+**Before reading on: none of that infrastructure has anything to do with whether the discount rule is correct. So why does testing it require all of it?**
+
+</Scenario>
+
+Because the business rule and the database call live in the _same function_, with no seam between them — the rule can't run without dragging the database along, and nothing enforces that separation as the codebase grows.
+
+- **The core problem:** business logic (what an order _is_, what rules govern it) gets tangled with infrastructure logic (how to fetch it, store it, expose it over HTTP) inside the same functions and files. Neither can change, or be tested, without touching the other.
+- **Ports & adapters** (a.k.a. **hexagonal architecture**, Alistair Cockburn) and **clean architecture** (Robert Martin) are the same underlying idea wearing two different vocabularies — this unit treats them as one pattern:
+  - The **application core** holds the business logic and knows nothing about databases, HTTP, message queues, or any specific technology.
+  - A **port** is an interface the core defines and depends on — e.g. "something that can save an order" — without saying _how_.
+  - An **adapter** is a concrete implementation of a port — a Postgres adapter, an in-memory adapter for tests, an S3 adapter. The core never sees which one is plugged in.
+  - **Primary (driving) adapters** call into the core (an HTTP controller, a CLI command, a scheduled job). **Secondary (driven) adapters** are called by the core through a port (a database repository, an email sender, a payment gateway).
+- **The one rule that makes it work: dependencies point inward, always.** Adapters depend on the core's port interfaces; the core never imports an adapter, a framework, or a driver. This is the same **dependency inversion** idea from SOLID, applied at the architecture scale instead of the single-class scale — this unit assumes that principle and focuses on the ports/adapters pattern it enables, not on re-deriving SOLID from scratch.
+- **What this buys you:** the discount rule becomes a plain function you call with plain objects — test it with an in-memory fake in microseconds, no container required. Swapping Postgres for DynamoDB means writing one new adapter; the core doesn't change a line.
+- **What it costs:** an interface, a wiring/composition point, and more files for what might otherwise be one. For a five-endpoint CRUD app with no real business rules, that overhead can cost more than it returns — see L3 for when to actually reach for this.
+
+```mermaid
+flowchart LR
+    HTTP["HTTP controller<br/>(primary adapter)"] -->|calls| Core["Application core<br/>(business rules)"]
+    CLI["CLI command<br/>(primary adapter)"] -->|calls| Core
+    Core -->|through a port| DB["Postgres repository<br/>(secondary adapter)"]
+    Core -->|through a port| Mem["In-memory repository<br/>(test adapter)"]
+    Core -->|through a port| Mail["Email sender<br/>(secondary adapter)"]
+```
+
+| Adapter kind        | Direction        | Examples                                  |
+| -------------------- | ----------------- | ------------------------------------------ |
+| Primary (driving)    | Calls _into_ core  | HTTP controller, CLI command, cron job     |
+| Secondary (driven)   | Called _by_ core, through a port | DB repository, email sender, payment API |
+
+Dependencies never point outward from the core — every arrow into infrastructure crosses through a port the core itself defined.

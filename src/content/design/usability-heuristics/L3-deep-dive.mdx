@@ -1,0 +1,119 @@
+---
+title: "L3 — Auditing a real interface against the heuristics, and where strict compliance backfires"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+
+## The interface under audit
+
+<Scenario label="The interface">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>👥</span> Team Settings — Members tab, B2B SaaS admin panel</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> User: a team admin, not an engineer, removing a departed employee</div>
+    </div>
+    <p class="not-prose mt-3 mb-1 text-xs font-semibold tracking-wide text-slate-400 uppercase">Layout (as shipped)</p>
+    <pre class="not-prose rounded border border-slate-300 bg-slate-50 p-2 text-[11px] leading-tight dark:border-slate-600 dark:bg-slate-900">
+Members (14)
+------------------------------
+[avatar] Priya Shah      Admin   [Remove]
+[avatar] Jon Alcott       Member  [Remove]
+[avatar] dev-bot-3        Bot     [Remove]
+------------------------------
+    </pre>
+  </Fragment>
+
+A B2B SaaS product has a **Team Settings → Members** page. An admin, not an engineer, uses it to manage who has access. It looks like this:
+
+```
+Members (14)
+------------------------------
+[avatar] Priya Shah       Admin    [Remove]
+[avatar] Jon Alcott        Member   [Remove]
+[avatar] dev-bot-3         Bot      [Remove]
+------------------------------
+```
+
+Clicking **[Remove]** immediately deletes that person's access — no confirmation, no undo, no toast. The row just disappears. A support ticket comes in: an admin meant to remove a departed contractor, misclicked on the row above, and revoked the company's own billing admin instead. It took four days and two support tickets to restore.
+
+**Before reading the audit below: this single button click touches at least three heuristics at once. Which three, and in what order would you fix them?**
+
+</Scenario>
+
+## Auditing the click, heuristic by heuristic
+
+A misclick shouldn't cost four days. Walking backward from the incident: at which exact point could this have been stopped, and which heuristic governs that point?
+
+| Point in the flow                        | What happens today                          | Heuristic violated                                              |
+| ------------------------------------------ | ---------------------------------------------- | ------------------------------------------------------------------- |
+| Before the click                          | No warning that this action is destructive     | Error prevention                                                    |
+| At the click                              | No "are you sure?" — action is instant         | User control and freedom                                            |
+| Right after the click                     | Row vanishes, no confirmation of what happened | Visibility of system status                                         |
+| After the misclick is discovered         | No way to reverse it from the UI               | User control and freedom (again — recovery, not just prevention)    |
+| While escalating to support               | No log entry the admin can point to            | Help users recognize, diagnose, and recover from errors             |
+
+Five distinct failures, from one button. This is normal — a single bad interaction is rarely one heuristic violated once; it's usually several stacked at the same point, because the same missing design decision (no thought given to "what if this is a mistake?") breaks several heuristics simultaneously.
+
+## The fix, one heuristic at a time
+
+Fixing all five at once as a single redesign is possible, but walking through them individually shows *why* each change is doing its own specific job — not just "make it feel safer."
+
+**1. Error prevention.** Before the click even happens, the interface can raise the cost of a destructive action relative to a routine one. Concretely: move `[Remove]` out of the same row alignment as neutral actions, and require a second, deliberate step (a small trash icon that only appears on hover, rather than a permanently visible button) — this doesn't stop a determined removal, but it stops the "clicked the wrong row without looking" case that caused the incident.
+
+**2. User control and freedom, at the point of action.** Add a confirmation step naming the specific consequence, not a generic yes/no:
+
+```
+Remove Priya Shah from this team?
+She'll lose access to all workspaces immediately.
+This account is currently the billing admin.
+                                  [Cancel]  [Remove]
+```
+
+Notice the confirmation surfaces the one fact — "currently the billing admin" — that would have stopped the actual incident. A generic "Are you sure?" would have been clicked through just as fast as the original button; the fix isn't "add a confirmation," it's "add a confirmation that says something the user didn't already know."
+
+**3. Visibility of system status, right after.** Once confirmed, show a toast: `Removed Jon Alcott from Members. [Undo]` — with the undo live for a real window (10–15 seconds is a common default), not just a fade-out animation implying "done, nothing more to see."
+
+**4. User control and freedom, for recovery.** The undo above covers the immediate window; for after that window closes, the fix is a **Recently removed** list scoped to the last 30 days, with a one-click "Restore access" — this is the same heuristic as #2, applied to a longer time horizon.
+
+**5. Error recognition/diagnosis/recovery, for support.** An audit log entry — `Priya Shah removed by [admin name] at [timestamp]` — visible to admins, not buried in a backend log only engineering can query. This turns "I think I might have done something" into "yes, here's exactly what happened and when," cutting the four-day resolution to a self-service one.
+
+None of these five fixes required new backend logic beyond an audit table and a soft-delete window — the underlying "remove access" operation didn't change. What changed is entirely how the interface communicates around that operation.
+
+## Where strict compliance backfires
+
+Every one of the five fixes above added a step, a message, or a delay. If "add more confirmations and more messages" were free, every interface would already be maximally cautious — so what's actually stopping teams from doing that everywhere?
+
+Two real tensions:
+
+- **Confirmation fatigue vs. error prevention.** A confirmation dialog is only as good as the rate of genuine "wait, no" moments it catches. If *every* action in an interface gets the same "Are you sure?" — including reversible, low-stakes ones like renaming a tag — users learn to click through them without reading, and the dialog stops preventing anything. The fix isn't "confirm everything," it's reserving confirmation for actions that are both destructive *and* hard to reverse; a rename doesn't qualify, revoking someone's billing access does.
+- **Minimalism vs. status visibility.** Nielsen's own heuristic 8 says don't clutter the interface with information the user doesn't need — but heuristic 1 says keep the user informed. A toast on every single save, on every field, in a form with twenty fields, would violate minimalism in the name of visibility. The resolution most interfaces land on: visibility scales with the stakes and reversibility of the action, not with a blanket rule applied everywhere. Silent auto-save for a draft is fine; silent removal of a person's access is not — same "give feedback" heuristic, different weight depending on what's at stake.
+
+This is the general shape of the trade-off: **the heuristics aren't independent dials to max out — they trade against each other, and the right setting depends on the stakes and reversibility of the specific action**, not a fixed rule applied uniformly across an entire product.
+
+## Common misapplications
+
+Knowing the ten heuristics by name doesn't prevent misusing them. Two failure modes show up often enough to name directly:
+
+- **Citing a heuristic as a veto without naming the actual user cost.** "This violates minimalism" is not itself an argument — it has to be paired with what specifically gets worse (slower scanning, more misclicks, more support load). A heuristic name used without a concrete consequence is a rhetorical shortcut, not an evaluation.
+- **Applying heuristics uniformly regardless of stakes.** Treating a rename and an irreversible account deletion as needing the identical confirmation UI (see above) is technically "following" user control and freedom while missing its actual point, which is proportioning friction to consequence.
+
+## Extending the audit
+
+The Members-page audit above was built around one user population — an admin with reasonable technical fluency, on a desktop screen, in a B2B tool where mistakes have organizational consequences. That's one case, not the whole territory.
+
+**Before moving on: if this exact same "remove a person" pattern appeared in a consumer social app — removing a follower, say, aimed at a much less technical, often mobile-only audience — which of the five fixes above would you keep as-is, which would you change, and why?** (A hint on scope, not the full answer: an audit log visible to the user makes far less sense when the "admin" and the "removed person" are the same trust tier, but the confirmation step arguably matters *more* on a small touchscreen where misclicks are physically easier to make.)
+
+## A short table for reference
+
+| Heuristic                                                | One-line test                                                    |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------- |
+| 1. Visibility of system status                              | Does the user always know what state things are in?                    |
+| 2. Match between system and the real world                  | Does the interface speak the user's language, not the system's?         |
+| 3. User control and freedom                                 | Is there a clear way out of a wrong turn?                                |
+| 4. Consistency and standards                                 | Does the same word/color/pattern always mean the same thing?             |
+| 5. Error prevention                                          | Could this mistake have been made impossible, not just recoverable?      |
+| 6. Recognition rather than recall                            | Is the needed information visible, or does the user have to remember it? |
+| 7. Flexibility and efficiency of use                          | Can an experienced user go faster without the novice path getting worse? |
+| 8. Aesthetic and minimalist design                            | Is every element on screen earning its place?                            |
+| 9. Help recognize, diagnose, recover from errors              | Plain language, specific problem, suggested fix — no bare codes?         |
+| 10. Help and documentation                                    | If needed, is it searchable and scoped to the actual task?               |

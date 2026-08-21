@@ -1,0 +1,750 @@
+{
+  "items": [
+    {
+      "type": "quiz",
+      "id": "l1-lost-update-1",
+      "poolId": "l1-lost-update",
+      "level": 1,
+      "prompt": "Two services both write to `orders.total` inside their own valid SQL transactions, and a lost update still lets an order exceed its credit limit. What does that show?",
+      "choices": [
+        "SQL transactions don't actually guarantee atomicity",
+        "A transaction protects one write's atomicity, but has no idea which combined states are valid for your domain",
+        "The bug means neither service was using transactions correctly",
+        "This can only happen with a database that doesn't support isolation levels"
+      ],
+      "correctIndex": 1,
+      "explanation": "Each write was atomic on its own — that's exactly what a transaction guarantees. What was missing was a rule enforced across the writes: 'total must never exceed the credit limit.' No transaction knows your business rules; only your model does.",
+      "reference": "<div class='grid grid-cols-2 gap-2 text-xs'><div class='rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950'><p class='font-semibold text-rose-600 dark:text-rose-400'>No aggregate</p>Two writers read the same total, both compute independently, last write wins</div><div class='rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950'><p class='font-semibold text-emerald-600 dark:text-emerald-400'>Aggregate root</p>Every write re-checks the invariant against current state, inside one method</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> a valid SQL transaction only guarantees one write is atomic — it says nothing about a rule that spans several rows at once.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l1-lost-update-2",
+      "poolId": "l1-lost-update",
+      "level": 1,
+      "prompt": "Request A and Request B both read an order's total as $95 at the same instant, then each independently compute and write a new total. What kind of bug is this?",
+      "choices": [
+        "A lost update — one writer's change is silently overwritten because neither read the other's in-flight change",
+        "A deadlock — both requests are blocked waiting on each other",
+        "A SQL injection vulnerability",
+        "A currency rounding error"
+      ],
+      "correctIndex": 0,
+      "explanation": "This is a classic lost update: both writers computed their new value from the same stale snapshot, so whichever writes last wins and the other writer's change vanishes with no error raised anywhere.",
+      "reference": "<div class='grid grid-cols-2 gap-2 text-xs'><div class='rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950'><p class='font-semibold text-rose-600 dark:text-rose-400'>No aggregate</p>Two writers read the same total, both compute independently, last write wins</div><div class='rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950'><p class='font-semibold text-emerald-600 dark:text-emerald-400'>Aggregate root</p>Every write re-checks the invariant against current state, inside one method</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> a valid SQL transaction only guarantees one write is atomic — it says nothing about a rule that spans several rows at once.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l1-lost-update-3",
+      "poolId": "l1-lost-update",
+      "level": 1,
+      "prompt": "An order ships with 2 line items but a total that only reflects 1 of them, and the credit limit was never actually checked against the true total. What was the underlying design gap?",
+      "choices": [
+        "No single place enforced 'total plus every added line must stay under the credit limit' on every write",
+        "The credit limit itself was set too low",
+        "The two services should have used the same programming language",
+        "The order table was missing a foreign key constraint"
+      ],
+      "correctIndex": 0,
+      "explanation": "The gap wasn't a missing constraint on one table — it was that no single piece of code owned checking the combined invariant (total vs. credit limit) every time something changed it.",
+      "reference": "<div class='grid grid-cols-2 gap-2 text-xs'><div class='rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950'><p class='font-semibold text-rose-600 dark:text-rose-400'>No aggregate</p>Two writers read the same total, both compute independently, last write wins</div><div class='rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950'><p class='font-semibold text-emerald-600 dark:text-emerald-400'>Aggregate root</p>Every write re-checks the invariant against current state, inside one method</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> a valid SQL transaction only guarantees one write is atomic — it says nothing about a rule that spans several rows at once.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l1-agg-root-1",
+      "poolId": "l1-aggregate-root-role",
+      "level": 1,
+      "prompt": "What is an aggregate root's main job?",
+      "choices": [
+        "Being the single entry point for changes to the cluster of objects it owns, checking invariants on every mutation",
+        "Storing the aggregate's data in a single database table",
+        "Formatting the aggregate's fields for display in an API response",
+        "Logging every read of the aggregate for auditing"
+      ],
+      "correctIndex": 0,
+      "explanation": "The aggregate root is the gatekeeper: every change to any object inside the aggregate goes through one of its methods, and that's where invariants get checked, every time, with no other way in.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>🚪</span> One entry point: the root's methods</div><div class='flex items-center gap-1.5'><span>🔒</span> Children (like OrderLine) are never edited directly from outside</div><div class='flex items-center gap-1.5'><span>✅</span> Invariants checked inside every mutating method</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> if anything outside the aggregate can mutate a child directly, the root's invariant checks are just one of several ways in — and the cheapest one to accidentally bypass wins.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l1-agg-root-2",
+      "poolId": "l1-aggregate-root-role",
+      "level": 1,
+      "prompt": "In the Order example, why can't code elsewhere in the system just call `orderLine.setQuantity(5)` directly on a line inside an order?",
+      "choices": [
+        "Because OrderLine objects are read-only by the database",
+        "Because that would bypass Order's invariant checks entirely — the whole point of routing changes through the root",
+        "Because OrderLine doesn't have a setQuantity method in any language",
+        "Because quantities can only be set when the order is first created"
+      ],
+      "correctIndex": 1,
+      "explanation": "If anything outside the aggregate can mutate a child object directly, the root's invariant-checking methods become optional rather than mandatory — and the shortest path through the code wins over the safe one.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>🚪</span> One entry point: the root's methods</div><div class='flex items-center gap-1.5'><span>🔒</span> Children (like OrderLine) are never edited directly from outside</div><div class='flex items-center gap-1.5'><span>✅</span> Invariants checked inside every mutating method</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> if anything outside the aggregate can mutate a child directly, the root's invariant checks are just one of several ways in — and the cheapest one to accidentally bypass wins.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l1-agg-root-3",
+      "poolId": "l1-aggregate-root-role",
+      "level": 1,
+      "prompt": "Which of these best describes an 'aggregate' as DDD uses the term?",
+      "choices": [
+        "A cluster of objects that must be treated as one consistency unit because a business rule spans more than one of them",
+        "Any group of database tables that are joined together in a query",
+        "A cached, denormalized read model used for reporting",
+        "A microservice that owns more than one REST endpoint"
+      ],
+      "correctIndex": 0,
+      "explanation": "An aggregate is a modeling decision, not a database or infrastructure concept — it's about which objects have to be checked together, every time, because at least one rule depends on more than one of them at once.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>🚪</span> One entry point: the root's methods</div><div class='flex items-center gap-1.5'><span>🔒</span> Children (like OrderLine) are never edited directly from outside</div><div class='flex items-center gap-1.5'><span>✅</span> Invariants checked inside every mutating method</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> if anything outside the aggregate can mutate a child directly, the root's invariant checks are just one of several ways in — and the cheapest one to accidentally bypass wins.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l1-ev-basic-1",
+      "poolId": "l1-entity-value-basic",
+      "level": 1,
+      "prompt": "`OrderLine #7`'s quantity changes from 2 to 3. Is it still considered line 7, or a new object?",
+      "choices": [
+        "Still line 7 — its identity persists across the change, which is what makes it an entity",
+        "A new object — any change to its fields creates a different line",
+        "It depends on whether the database assigns a new primary key",
+        "Neither — OrderLine has no identity at all"
+      ],
+      "correctIndex": 0,
+      "explanation": "An entity's defining trait is that its identity survives changes to its other fields. Line 7 stays line 7 even after its quantity changes — that's exactly what makes it an entity rather than a value object.",
+      "reference": "<div class='grid grid-cols-2 gap-2 text-xs'><div class='rounded border border-slate-300 p-1.5 dark:border-slate-600'><p class='font-semibold text-slate-500'>Entity</p>Has identity; same thing even after it changes (OrderLine #7 stays #7)</div><div class='rounded border border-sky-300 bg-sky-50 p-1.5 dark:border-sky-700 dark:bg-sky-950'><p class='font-semibold text-sky-600'>Value object</p>No identity; compared by content only (two $10s are just equal)</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> the question to ask is \"does WHICH ONE matter, or only WHAT IT EQUALS\" — that answer decides identity vs. value.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l1-ev-basic-2",
+      "poolId": "l1-entity-value-basic",
+      "level": 1,
+      "prompt": "Two separate `Money($10)` objects exist in the system. Are they 'the same one' or just equal?",
+      "choices": [
+        "Just equal — value objects have no identity, they're compared purely by their contents",
+        "The same one — there can only be one instance of any given amount",
+        "It depends on which one was created first",
+        "Neither — Money objects can't be compared at all"
+      ],
+      "correctIndex": 0,
+      "explanation": "Value objects are interchangeable by design: you never ask 'which $10 is this, specifically,' only 'does this amount equal that one.' That's the whole distinction from an entity.",
+      "reference": "<div class='grid grid-cols-2 gap-2 text-xs'><div class='rounded border border-slate-300 p-1.5 dark:border-slate-600'><p class='font-semibold text-slate-500'>Entity</p>Has identity; same thing even after it changes (OrderLine #7 stays #7)</div><div class='rounded border border-sky-300 bg-sky-50 p-1.5 dark:border-sky-700 dark:bg-sky-950'><p class='font-semibold text-sky-600'>Value object</p>No identity; compared by content only (two $10s are just equal)</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> the question to ask is \"does WHICH ONE matter, or only WHAT IT EQUALS\" — that answer decides identity vs. value.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l1-repo-basic-1",
+      "poolId": "l1-repository-purpose-basic",
+      "level": 1,
+      "prompt": "What does a repository do in this pattern?",
+      "choices": [
+        "It's the only door in and out of an aggregate's storage — it loads and saves whole aggregates, never a lone child object",
+        "It's a folder in the codebase where all the domain classes live",
+        "It's a caching layer that sits in front of the database for performance",
+        "It converts domain objects into HTML for rendering"
+      ],
+      "correctIndex": 0,
+      "explanation": "A repository's defining feature here isn't caching or performance — it's that it only exposes whole-aggregate operations, closing off any path that would let code save a child object without going through the root.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>📦</span> save(order) — the WHOLE aggregate, every time</div><div class='flex items-center gap-1.5'><span>🚫</span> No OrderLineRepository — that door doesn't exist</div><div class='flex items-center gap-1.5'><span>🔍</span> findById(id) returns the whole aggregate too</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> a repository that could save a single child object would let code bypass the aggregate root's invariant checks entirely.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l1-repo-basic-2",
+      "poolId": "l1-repository-purpose-basic",
+      "level": 1,
+      "prompt": "Why is there no `OrderLineRepository` in this design, even though `OrderLine` is stored in its own database table?",
+      "choices": [
+        "Because giving OrderLine its own repository would let code save a line without ever going through Order's invariant checks",
+        "Because OrderLine data doesn't actually need to be persisted",
+        "Because a repository can only exist for the very first class defined in a file",
+        "Because OrderLine and Order must always share a single database table"
+      ],
+      "correctIndex": 0,
+      "explanation": "The absence is deliberate: exposing a repository for a child object would recreate exactly the bug from L1 — a write path that skips the aggregate root's invariant checks entirely.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>📦</span> save(order) — the WHOLE aggregate, every time</div><div class='flex items-center gap-1.5'><span>🚫</span> No OrderLineRepository — that door doesn't exist</div><div class='flex items-center gap-1.5'><span>🔍</span> findById(id) returns the whole aggregate too</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> a repository that could save a single child object would let code bypass the aggregate root's invariant checks entirely.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l1-event-basic-1",
+      "poolId": "l1-domain-event-basic",
+      "level": 1,
+      "prompt": "What is a domain event, in this pattern?",
+      "choices": [
+        "A record, raised from inside the aggregate root, of something that actually happened — published for other parts of the system to react to",
+        "A log line written to a monitoring dashboard",
+        "A scheduled cron job that runs periodic maintenance",
+        "A validation error returned to the caller when an invariant is violated"
+      ],
+      "correctIndex": 0,
+      "explanation": "A domain event captures something the aggregate root decided genuinely happened (like OrderPlaced) — it's raised from inside the aggregate, then published afterward so other contexts can react without the aggregate calling them directly.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>1️⃣</span> Order.placeOrder() records OrderPlaced internally</div><div class='flex items-center gap-1.5'><span>2️⃣</span> repository.save(order) commits</div><div class='flex items-center gap-1.5'><span>3️⃣</span> only THEN: pullDomainEvents() + publish</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> publishing before commit risks telling other contexts about a change that then fails to persist.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l1-event-basic-2",
+      "poolId": "l1-domain-event-basic",
+      "level": 1,
+      "prompt": "Why doesn't `Order.placeOrder()` just call Billing's API directly instead of raising a domain event?",
+      "choices": [
+        "Calling Billing directly would couple Order to Billing's availability and shape — exactly what bounded contexts exist to avoid",
+        "Because Order objects aren't allowed to make network calls under any circumstances",
+        "Because Billing's API doesn't accept order data in any format",
+        "Because domain events are faster than API calls, and that's the only reason to prefer them"
+      ],
+      "correctIndex": 0,
+      "explanation": "If Order called Billing directly, Order would depend on Billing's uptime and API shape. Raising an event and letting Billing subscribe keeps that dependency one-directional and optional from Order's side.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>1️⃣</span> Order.placeOrder() records OrderPlaced internally</div><div class='flex items-center gap-1.5'><span>2️⃣</span> repository.save(order) commits</div><div class='flex items-center gap-1.5'><span>3️⃣</span> only THEN: pullDomainEvents() + publish</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> publishing before commit risks telling other contexts about a change that then fails to persist.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l1-event-basic-3",
+      "poolId": "l1-domain-event-basic",
+      "level": 1,
+      "prompt": "At what point should a domain event actually be published to the rest of the system?",
+      "choices": [
+        "After the aggregate's own change has successfully been saved, not before",
+        "The instant the event is recorded inside the aggregate root's method",
+        "Only once a day, in a scheduled batch",
+        "Before the save, so downstream systems can veto the change"
+      ],
+      "correctIndex": 0,
+      "explanation": "Publishing before the save commits risks telling other contexts about a change that then fails to persist. Publishing only after a successful save keeps the event trustworthy — if it was published, it's true.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>1️⃣</span> Order.placeOrder() records OrderPlaced internally</div><div class='flex items-center gap-1.5'><span>2️⃣</span> repository.save(order) commits</div><div class='flex items-center gap-1.5'><span>3️⃣</span> only THEN: pullDomainEvents() + publish</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> publishing before commit risks telling other contexts about a change that then fails to persist.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l2-boundary-1",
+      "poolId": "l2-consistency-boundary",
+      "level": 2,
+      "prompt": "A single SQL transaction guarantees a write is atomic. Why isn't that enough to prevent an aggregate's invariant from being violated?",
+      "choices": [
+        "Atomicity only protects one write from being partially applied — it says nothing about what combination of values across multiple writes is actually valid for your domain",
+        "SQL transactions are inherently unreliable and randomly fail",
+        "Atomicity and consistency are the same guarantee, so this shouldn't be possible",
+        "Because transactions only work within a single table"
+      ],
+      "correctIndex": 0,
+      "explanation": "A transaction's guarantee is narrow and mechanical: this one write either fully happens or doesn't. Nothing about that tells the database which combined states are meaningful — that has to come from code that models the rule explicitly.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>⚛️</span> Transaction = one write is all-or-nothing</div><div class='flex items-center gap-1.5'><span>🧩</span> Aggregate = which objects must stay consistent WITH EACH OTHER</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> a transaction has no idea what your business rules are — only your model, expressed as an aggregate boundary, does.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l2-boundary-2",
+      "poolId": "l2-consistency-boundary",
+      "level": 2,
+      "prompt": "Why is an aggregate boundary described as a 'modeling decision' rather than a database concept?",
+      "choices": [
+        "Because it's chosen based on which business rules span multiple objects at once, not based on how tables happen to be structured",
+        "Because aggregates only exist in NoSQL databases",
+        "Because the database schema always dictates the aggregate boundary automatically",
+        "Because it's an arbitrary choice with no consequences either way"
+      ],
+      "correctIndex": 0,
+      "explanation": "The boundary is drawn around 'the smallest cluster of objects that must be consistent with each other on every write' — a decision about the domain's rules, which a schema can support but doesn't determine on its own.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>⚛️</span> Transaction = one write is all-or-nothing</div><div class='flex items-center gap-1.5'><span>🧩</span> Aggregate = which objects must stay consistent WITH EACH OTHER</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> a transaction has no idea what your business rules are — only your model, expressed as an aggregate boundary, does.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l2-gatekeeper-1",
+      "poolId": "l2-aggregate-root-gatekeeper",
+      "level": 2,
+      "prompt": "If `addLine`'s credit-limit check were moved to a separate validation step run just before `placeOrder`, instead of inside `addLine` itself, what would break?",
+      "choices": [
+        "The order could sit in an invalid state (over the limit) for however long it takes to reach that separate check, and any code reading it in between would see an impossible value",
+        "Nothing — validating at the end is equivalent to validating on every step",
+        "The order's total would be calculated incorrectly",
+        "The domain event would fire twice"
+      ],
+      "correctIndex": 0,
+      "explanation": "Checking only at the end means the aggregate can be observably invalid in between changes. Checking inside the same method that performs the change is what makes 'never observably invalid' actually true.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>🚪</span> One entry point: the root's methods</div><div class='flex items-center gap-1.5'><span>🔒</span> Children (like OrderLine) are never edited directly from outside</div><div class='flex items-center gap-1.5'><span>✅</span> Invariants checked inside every mutating method</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> if anything outside the aggregate can mutate a child directly, the root's invariant checks are just one of several ways in — and the cheapest one to accidentally bypass wins.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l2-gatekeeper-2",
+      "poolId": "l2-aggregate-root-gatekeeper",
+      "level": 2,
+      "prompt": "Why is `Customer` modeled as a separate aggregate from `Order`, referenced only by ID, instead of nested inside it?",
+      "choices": [
+        "Customer has its own lifecycle and write volume; folding it into Order would mean every order write also contends for a lock on the customer record",
+        "Because Customer and Order are always owned by different teams",
+        "Because a single aggregate can never reference more than one other object",
+        "Because Order doesn't need any information about the customer at all"
+      ],
+      "correctIndex": 0,
+      "explanation": "The aggregate boundary is drawn around what must be consistent together on every write, not around everything a feature happens to touch. Order needs the credit limit as an input value, not permanent joint custody of Customer.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>🚪</span> One entry point: the root's methods</div><div class='flex items-center gap-1.5'><span>🔒</span> Children (like OrderLine) are never edited directly from outside</div><div class='flex items-center gap-1.5'><span>✅</span> Invariants checked inside every mutating method</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> if anything outside the aggregate can mutate a child directly, the root's invariant checks are just one of several ways in — and the cheapest one to accidentally bypass wins.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l2-ev-deep-1",
+      "poolId": "l2-entity-value-deep",
+      "level": 2,
+      "prompt": "What real cost comes from modeling `Money` as an entity instead of a value object?",
+      "choices": [
+        "You'd end up writing identity-tracking and mutation code that nothing in the domain actually needs",
+        "Money amounts would no longer be able to support addition",
+        "The application would run measurably slower due to extra database calls",
+        "There would be no cost — the two models are functionally identical"
+      ],
+      "correctIndex": 0,
+      "explanation": "Money never needs to answer 'which one, specifically' — only 'what does it equal.' Giving it identity means building machinery (tracking, mutation, equality-by-reference) to solve a problem the domain doesn't have.",
+      "reference": "<div class='grid grid-cols-2 gap-2 text-xs'><div class='rounded border border-slate-300 p-1.5 dark:border-slate-600'><p class='font-semibold text-slate-500'>Entity</p>Has identity; same thing even after it changes (OrderLine #7 stays #7)</div><div class='rounded border border-sky-300 bg-sky-50 p-1.5 dark:border-sky-700 dark:bg-sky-950'><p class='font-semibold text-sky-600'>Value object</p>No identity; compared by content only (two $10s are just equal)</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> the question to ask is \"does WHICH ONE matter, or only WHAT IT EQUALS\" — that answer decides identity vs. value.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l2-ev-deep-2",
+      "poolId": "l2-entity-value-deep",
+      "level": 2,
+      "prompt": "What real cost comes from modeling `OrderLine` as a value object instead of an entity?",
+      "choices": [
+        "You'd lose the ability to say 'update line 7's quantity' — any change would just produce a different, unrelated value with no continuity to the original line",
+        "OrderLine would no longer be able to store a product ID",
+        "The order's total would be computed incorrectly",
+        "There would be no cost — OrderLine's quantity never changes in practice"
+      ],
+      "correctIndex": 0,
+      "explanation": "Entities are what let you talk about 'the same thing, changed' — a value object has no such continuity. Without identity, 'change line 7's quantity' has no meaning; you'd just have two unrelated values.",
+      "reference": "<div class='grid grid-cols-2 gap-2 text-xs'><div class='rounded border border-slate-300 p-1.5 dark:border-slate-600'><p class='font-semibold text-slate-500'>Entity</p>Has identity; same thing even after it changes (OrderLine #7 stays #7)</div><div class='rounded border border-sky-300 bg-sky-50 p-1.5 dark:border-sky-700 dark:bg-sky-950'><p class='font-semibold text-sky-600'>Value object</p>No identity; compared by content only (two $10s are just equal)</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> the question to ask is \"does WHICH ONE matter, or only WHAT IT EQUALS\" — that answer decides identity vs. value.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l2-ev-deep-3",
+      "poolId": "l2-entity-value-deep",
+      "level": 2,
+      "prompt": "Two `OrderLine` objects have identical productId, quantity, and unitPrice. Are they the same line?",
+      "choices": [
+        "Not necessarily — as entities, their identity (their id) is what determines sameness, not whether their other fields happen to match",
+        "Yes, always — identical fields always mean identical entities",
+        "It depends on which database column is marked UNIQUE",
+        "Entities can never have identical field values"
+      ],
+      "correctIndex": 0,
+      "explanation": "This is exactly the entity/value-object distinction in practice: two entities with identical field values are still different entities if their identities differ, unlike a value object where identical fields mean identical objects.",
+      "reference": "<div class='grid grid-cols-2 gap-2 text-xs'><div class='rounded border border-slate-300 p-1.5 dark:border-slate-600'><p class='font-semibold text-slate-500'>Entity</p>Has identity; same thing even after it changes (OrderLine #7 stays #7)</div><div class='rounded border border-sky-300 bg-sky-50 p-1.5 dark:border-sky-700 dark:bg-sky-950'><p class='font-semibold text-sky-600'>Value object</p>No identity; compared by content only (two $10s are just equal)</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> the question to ask is \"does WHICH ONE matter, or only WHAT IT EQUALS\" — that answer decides identity vs. value.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l2-repo-whole-1",
+      "poolId": "l2-repository-whole-aggregate",
+      "level": 2,
+      "prompt": "Why does `OrderRepository.save()` take an entire `Order`, rather than accepting a smaller update like 'append this OrderLine'?",
+      "choices": [
+        "A narrower save operation would let code persist a change to order_items without ever going through Order's invariant-checking methods",
+        "Saving a whole object is always faster than saving a partial update",
+        "TypeScript interfaces cannot express partial update methods",
+        "It's purely a stylistic convention with no functional consequence"
+      ],
+      "correctIndex": 0,
+      "explanation": "The repository's real job is guaranteeing there's no lower-level door into storage than 'save the whole, already-valid aggregate.' A partial-update method would reopen exactly the gap the aggregate root exists to close.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>📦</span> save(order) — the WHOLE aggregate, every time</div><div class='flex items-center gap-1.5'><span>🚫</span> No OrderLineRepository — that door doesn't exist</div><div class='flex items-center gap-1.5'><span>🔍</span> findById(id) returns the whole aggregate too</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> a repository that could save a single child object would let code bypass the aggregate root's invariant checks entirely.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l2-repo-whole-2",
+      "poolId": "l2-repository-whole-aggregate",
+      "level": 2,
+      "prompt": "An ORM makes it easy to call `.save()` directly on a single `OrderLine` row. Why is using that convenience a problem here, even if it's technically simpler code?",
+      "choices": [
+        "It bypasses the aggregate root's invariant checks entirely, recreating the same class of bug the aggregate boundary was introduced to prevent",
+        "ORMs are always slower than hand-written SQL",
+        "OrderLine rows cannot be represented in a relational database",
+        "It would violate the database's foreign key constraints"
+      ],
+      "correctIndex": 0,
+      "explanation": "The convenience is exactly the risk: any write path that reaches storage without going through the aggregate root's methods reopens the door to invalid, inconsistent state — regardless of how simple that code looks.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>📦</span> save(order) — the WHOLE aggregate, every time</div><div class='flex items-center gap-1.5'><span>🚫</span> No OrderLineRepository — that door doesn't exist</div><div class='flex items-center gap-1.5'><span>🔍</span> findById(id) returns the whole aggregate too</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> a repository that could save a single child object would let code bypass the aggregate root's invariant checks entirely.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l2-event-commit-1",
+      "poolId": "l2-domain-event-after-commit",
+      "level": 2,
+      "prompt": "Why does the sequence publish `OrderPlaced` only after `repository.save(order)` succeeds, rather than the instant the event is recorded inside `placeOrder()`?",
+      "choices": [
+        "If the save then failed, downstream contexts would already have been told about a change that was never actually persisted",
+        "Events recorded before a save are always lost by the runtime",
+        "Publishing early would violate TypeScript's type system",
+        "There's no real difference — both orderings behave identically"
+      ],
+      "correctIndex": 0,
+      "explanation": "Publishing only after a successful commit is what keeps a published event trustworthy: if Billing hears OrderPlaced, the order genuinely exists in storage, with no window where that isn't true.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>1️⃣</span> Order.placeOrder() records OrderPlaced internally</div><div class='flex items-center gap-1.5'><span>2️⃣</span> repository.save(order) commits</div><div class='flex items-center gap-1.5'><span>3️⃣</span> only THEN: pullDomainEvents() + publish</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> publishing before commit risks telling other contexts about a change that then fails to persist.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l2-event-commit-2",
+      "poolId": "l2-domain-event-after-commit",
+      "level": 2,
+      "prompt": "In the sequence diagram, `pullDomainEvents()` is called by the application layer, not from inside `placeOrder()` itself. Why keep that split?",
+      "choices": [
+        "It lets the aggregate root record what happened without deciding when or whether it's safe to actually announce it to the rest of the system — that call belongs after persistence succeeds",
+        "Because aggregate roots aren't allowed to have private fields",
+        "Because pullDomainEvents() must always run on a separate thread",
+        "There's no reason — the two could be merged into one call safely"
+      ],
+      "correctIndex": 0,
+      "explanation": "Separating 'record that this happened' from 'announce it externally' is what allows the announcement to be deferred until after the save is confirmed — the aggregate itself has no way to know if persistence will succeed.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>1️⃣</span> Order.placeOrder() records OrderPlaced internally</div><div class='flex items-center gap-1.5'><span>2️⃣</span> repository.save(order) commits</div><div class='flex items-center gap-1.5'><span>3️⃣</span> only THEN: pullDomainEvents() + publish</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> publishing before commit risks telling other contexts about a change that then fails to persist.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l2-strategic-1",
+      "poolId": "l2-strategic-context-mapping",
+      "level": 2,
+      "prompt": "Two teams in the same company: Team B's context depends on Team A's model, and Team B can file requests that influence Team A's roadmap. Which context-mapping pattern is this?",
+      "choices": [
+        "Customer-supplier — both answer to the same organization, so downstream's needs can feed upstream's priorities",
+        "Conformist — downstream must adopt whatever upstream provides with no influence",
+        "Shared kernel — both teams jointly own a single piece of the model",
+        "Anticorruption layer — this describes a translation technique, not a relationship type"
+      ],
+      "correctIndex": 0,
+      "explanation": "Customer-supplier specifically describes a relationship where the downstream team has real standing to prioritize its needs against the upstream team's backlog — something only possible when both report to the same organization.",
+      "reference": "<div class='grid grid-cols-2 gap-2 text-xs'><div class='rounded border border-slate-300 p-1.5 dark:border-slate-600'><p class='font-semibold text-slate-500'>Customer-supplier</p>Same org, downstream's needs feed upstream's backlog</div><div class='rounded border border-amber-300 bg-amber-50 p-1.5 dark:border-amber-700 dark:bg-amber-950'><p class='font-semibold text-amber-600'>Open host service</p>One stable published contract for many consumers, instead of N bespoke ones</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> misreading which pattern actually governs a relationship means either filing requests nobody will act on, or building a translation layer nobody needed.</p>"
+    },
+    {
+      "type": "quiz",
+      "id": "l2-strategic-2",
+      "poolId": "l2-strategic-context-mapping",
+      "level": 2,
+      "prompt": "A context is consumed by many different downstream teams, each with slightly different needs. What does an open host service / published language do about that?",
+      "choices": [
+        "Exposes one stable, versioned contract for everyone, instead of building a bespoke integration per consumer",
+        "Forces every downstream team to build their own anticorruption layer against a different private API",
+        "Merges all the downstream teams into a single bounded context",
+        "Requires every consumer to poll the database directly instead of using an API"
+      ],
+      "correctIndex": 0,
+      "explanation": "Open host service / published language trades N custom integrations for one shared, stable contract — worthwhile specifically when many consumers need the same upstream data, rather than one bespoke relationship at a time.",
+      "reference": "<div class='grid grid-cols-2 gap-2 text-xs'><div class='rounded border border-slate-300 p-1.5 dark:border-slate-600'><p class='font-semibold text-slate-500'>Customer-supplier</p>Same org, downstream's needs feed upstream's backlog</div><div class='rounded border border-amber-300 bg-amber-50 p-1.5 dark:border-amber-700 dark:bg-amber-950'><p class='font-semibold text-amber-600'>Open host service</p>One stable published contract for many consumers, instead of N bespoke ones</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> misreading which pattern actually governs a relationship means either filing requests nobody will act on, or building a translation layer nobody needed.</p>"
+    },
+    {
+      "type": "code",
+      "id": "l3-money-equals-1",
+      "poolId": "l3-money-value-equality",
+      "level": 3,
+      "prompt": "Implement `Money.equals(other)` so two Money instances with the same amount and currency are considered equal, using cents internally to avoid floating point drift.",
+      "starterCode": "class Money {\n  constructor(cents, currency) {\n    this.cents = cents;\n    this.currency = currency;\n  }\n  static fromDollars(amount, currency = \"USD\") {\n    return new Money(Math.round(amount * 100), currency);\n  }\n  equals(other) {\n    // TODO: implement\n  }\n}\n",
+      "tests": [
+        {
+          "description": "equal dollar amounts compare equal",
+          "expr": "expect(Money.fromDollars(10).equals(Money.fromDollars(10))).toBe(true)"
+        },
+        {
+          "description": "different amounts compare unequal",
+          "expr": "expect(Money.fromDollars(10).equals(Money.fromDollars(10.01))).toBe(false)"
+        },
+        {
+          "description": "different currencies compare unequal even with same amount",
+          "expr": "expect(Money.fromDollars(10, \"USD\").equals(Money.fromDollars(10, \"EUR\"))).toBe(false)"
+        }
+      ],
+      "solution": "class Money {\n  constructor(cents, currency) {\n    this.cents = cents;\n    this.currency = currency;\n  }\n  static fromDollars(amount, currency = \"USD\") {\n    return new Money(Math.round(amount * 100), currency);\n  }\n  equals(other) {\n    return this.cents === other.cents && this.currency === other.currency;\n  }\n}\n",
+      "explanation": "Comparing integer cents (not floating-point dollars) avoids rounding drift across repeated arithmetic, and comparing both cents and currency is what makes equals() actually mean 'the same value,' the defining trait of a value object.",
+      "reference": "<div class='grid grid-cols-2 gap-2 text-xs'><div class='rounded border border-slate-300 p-1.5 dark:border-slate-600'><p class='font-semibold text-slate-500'>Entity</p>Has identity; same thing even after it changes (OrderLine #7 stays #7)</div><div class='rounded border border-sky-300 bg-sky-50 p-1.5 dark:border-sky-700 dark:bg-sky-950'><p class='font-semibold text-sky-600'>Value object</p>No identity; compared by content only (two $10s are just equal)</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> the question to ask is \"does WHICH ONE matter, or only WHAT IT EQUALS\" — that answer decides identity vs. value.</p>"
+    },
+    {
+      "type": "code",
+      "id": "l3-money-equals-2",
+      "poolId": "l3-money-value-equality",
+      "level": 3,
+      "prompt": "Implement `Money.add(other)` so it returns a NEW Money instance (never mutates `this`), throwing if the currencies differ.",
+      "starterCode": "class Money {\n  constructor(cents, currency) {\n    this.cents = cents;\n    this.currency = currency;\n  }\n  static fromDollars(amount, currency = \"USD\") {\n    return new Money(Math.round(amount * 100), currency);\n  }\n  add(other) {\n    // TODO: implement — must not mutate `this`\n  }\n}\n",
+      "tests": [
+        {
+          "description": "adds two amounts correctly",
+          "expr": "expect(Money.fromDollars(10).add(Money.fromDollars(5)).cents).toBe(1500)"
+        },
+        {
+          "description": "does not mutate the original",
+          "expr": "const a = Money.fromDollars(10); a.add(Money.fromDollars(5)); expect(a.cents).toBe(1000)"
+        },
+        {
+          "description": "throws on currency mismatch",
+          "expr": "expect(() => Money.fromDollars(10, \"USD\").add(Money.fromDollars(5, \"EUR\"))).toThrow()"
+        }
+      ],
+      "solution": "class Money {\n  constructor(cents, currency) {\n    this.cents = cents;\n    this.currency = currency;\n  }\n  static fromDollars(amount, currency = \"USD\") {\n    return new Money(Math.round(amount * 100), currency);\n  }\n  add(other) {\n    if (this.currency !== other.currency) throw new Error(\"Currency mismatch\");\n    return new Money(this.cents + other.cents, this.currency);\n  }\n}\n",
+      "explanation": "Returning a new instance instead of mutating `this` is what 'value objects are immutable' means concretely — every operation produces a new value rather than changing an existing one in place.",
+      "reference": "<div class='grid grid-cols-2 gap-2 text-xs'><div class='rounded border border-slate-300 p-1.5 dark:border-slate-600'><p class='font-semibold text-slate-500'>Entity</p>Has identity; same thing even after it changes (OrderLine #7 stays #7)</div><div class='rounded border border-sky-300 bg-sky-50 p-1.5 dark:border-sky-700 dark:bg-sky-950'><p class='font-semibold text-sky-600'>Value object</p>No identity; compared by content only (two $10s are just equal)</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> the question to ask is \"does WHICH ONE matter, or only WHAT IT EQUALS\" — that answer decides identity vs. value.</p>"
+    },
+    {
+      "type": "code",
+      "id": "l3-invariant-max-1",
+      "poolId": "l3-order-invariant-max-total",
+      "level": 3,
+      "prompt": "Implement `Order.addLine(unitPriceCents, quantity)` (a simplified version working in integer cents) so it throws if adding the line would push the total over `creditLimitCents`.",
+      "starterCode": "class Order {\n  constructor(creditLimitCents) {\n    this.creditLimitCents = creditLimitCents;\n    this.lineTotals = [];\n  }\n  total() {\n    return this.lineTotals.reduce((sum, t) => sum + t, 0);\n  }\n  addLine(unitPriceCents, quantity) {\n    // TODO: throw if this line would exceed creditLimitCents; otherwise push unitPriceCents*quantity\n  }\n}\n",
+      "tests": [
+        {
+          "description": "accepts a line within the limit",
+          "expr": "const o = new Order(10000); o.addLine(3000, 2); expect(o.total()).toBe(6000)"
+        },
+        {
+          "description": "rejects a line that would exceed the limit",
+          "expr": "const o = new Order(10000); expect(() => o.addLine(6000, 2)).toThrow()"
+        },
+        {
+          "description": "a rejected line is not partially added",
+          "expr": "const o = new Order(10000); o.addLine(3000, 1); try { o.addLine(9000, 1); } catch (e) {} expect(o.total()).toBe(3000)"
+        }
+      ],
+      "solution": "class Order {\n  constructor(creditLimitCents) {\n    this.creditLimitCents = creditLimitCents;\n    this.lineTotals = [];\n  }\n  total() {\n    return this.lineTotals.reduce((sum, t) => sum + t, 0);\n  }\n  addLine(unitPriceCents, quantity) {\n    const lineTotal = unitPriceCents * quantity;\n    if (this.total() + lineTotal > this.creditLimitCents) {\n      throw new Error(\"Would exceed credit limit\");\n    }\n    this.lineTotals.push(lineTotal);\n  }\n}\n",
+      "explanation": "Checking the prospective total BEFORE pushing the line (and throwing instead of pushing) is what keeps the aggregate from ever being observably over the limit, even momentarily.",
+      "reference": "<div class='grid grid-cols-2 gap-2 text-xs'><div class='rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950'><p class='font-semibold text-rose-600 dark:text-rose-400'>No aggregate</p>Two writers read the same total, both compute independently, last write wins</div><div class='rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950'><p class='font-semibold text-emerald-600 dark:text-emerald-400'>Aggregate root</p>Every write re-checks the invariant against current state, inside one method</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> a valid SQL transaction only guarantees one write is atomic — it says nothing about a rule that spans several rows at once.</p>"
+    },
+    {
+      "type": "code",
+      "id": "l3-invariant-max-2",
+      "poolId": "l3-order-invariant-max-total",
+      "level": 3,
+      "prompt": "Implement `Order.addLine` so that, in addition to the credit limit check, it rejects a quantity of zero or less.",
+      "starterCode": "class Order {\n  constructor(creditLimitCents) {\n    this.creditLimitCents = creditLimitCents;\n    this.lineTotals = [];\n  }\n  total() {\n    return this.lineTotals.reduce((sum, t) => sum + t, 0);\n  }\n  addLine(unitPriceCents, quantity) {\n    // TODO: throw for quantity <= 0, AND throw if it would exceed creditLimitCents\n  }\n}\n",
+      "tests": [
+        {
+          "description": "rejects zero quantity",
+          "expr": "const o = new Order(10000); expect(() => o.addLine(1000, 0)).toThrow()"
+        },
+        {
+          "description": "rejects negative quantity",
+          "expr": "const o = new Order(10000); expect(() => o.addLine(1000, -1)).toThrow()"
+        },
+        {
+          "description": "still enforces the credit limit",
+          "expr": "const o = new Order(1000); expect(() => o.addLine(2000, 1)).toThrow()"
+        }
+      ],
+      "solution": "class Order {\n  constructor(creditLimitCents) {\n    this.creditLimitCents = creditLimitCents;\n    this.lineTotals = [];\n  }\n  total() {\n    return this.lineTotals.reduce((sum, t) => sum + t, 0);\n  }\n  addLine(unitPriceCents, quantity) {\n    if (quantity <= 0) throw new Error(\"Quantity must be positive\");\n    const lineTotal = unitPriceCents * quantity;\n    if (this.total() + lineTotal > this.creditLimitCents) {\n      throw new Error(\"Would exceed credit limit\");\n    }\n    this.lineTotals.push(lineTotal);\n  }\n}\n",
+      "explanation": "A well-formed aggregate rejects every invalid input at the same gate — quantity sanity and the credit-limit invariant are both checked inside the one method that's allowed to mutate state, with no partial application of either check.",
+      "reference": "<div class='grid grid-cols-2 gap-2 text-xs'><div class='rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950'><p class='font-semibold text-rose-600 dark:text-rose-400'>No aggregate</p>Two writers read the same total, both compute independently, last write wins</div><div class='rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950'><p class='font-semibold text-emerald-600 dark:text-emerald-400'>Aggregate root</p>Every write re-checks the invariant against current state, inside one method</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> a valid SQL transaction only guarantees one write is atomic — it says nothing about a rule that spans several rows at once.</p>"
+    },
+    {
+      "type": "code",
+      "id": "l3-invariant-max-3",
+      "poolId": "l3-order-invariant-max-total",
+      "level": 3,
+      "prompt": "Implement `Order.remainingCredit()` which returns how much more (in cents) can still be added before hitting the credit limit.",
+      "starterCode": "class Order {\n  constructor(creditLimitCents) {\n    this.creditLimitCents = creditLimitCents;\n    this.lineTotals = [];\n  }\n  total() {\n    return this.lineTotals.reduce((sum, t) => sum + t, 0);\n  }\n  addLine(unitPriceCents, quantity) {\n    const lineTotal = unitPriceCents * quantity;\n    if (this.total() + lineTotal > this.creditLimitCents) throw new Error(\"Would exceed credit limit\");\n    this.lineTotals.push(lineTotal);\n  }\n  remainingCredit() {\n    // TODO: implement\n  }\n}\n",
+      "tests": [
+        {
+          "description": "full limit remaining on an empty order",
+          "expr": "expect(new Order(10000).remainingCredit()).toBe(10000)"
+        },
+        {
+          "description": "reduces after a line is added",
+          "expr": "const o = new Order(10000); o.addLine(3000, 1); expect(o.remainingCredit()).toBe(7000)"
+        }
+      ],
+      "solution": "class Order {\n  constructor(creditLimitCents) {\n    this.creditLimitCents = creditLimitCents;\n    this.lineTotals = [];\n  }\n  total() {\n    return this.lineTotals.reduce((sum, t) => sum + t, 0);\n  }\n  addLine(unitPriceCents, quantity) {\n    const lineTotal = unitPriceCents * quantity;\n    if (this.total() + lineTotal > this.creditLimitCents) throw new Error(\"Would exceed credit limit\");\n    this.lineTotals.push(lineTotal);\n  }\n  remainingCredit() {\n    return this.creditLimitCents - this.total();\n  }\n}\n",
+      "explanation": "remainingCredit() is a read-only query derived from the same total() the invariant check already uses — keeping one source of truth for 'how much has been committed so far' instead of tracking it separately and risking drift.",
+      "reference": "<div class='grid grid-cols-2 gap-2 text-xs'><div class='rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950'><p class='font-semibold text-rose-600 dark:text-rose-400'>No aggregate</p>Two writers read the same total, both compute independently, last write wins</div><div class='rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950'><p class='font-semibold text-emerald-600 dark:text-emerald-400'>Aggregate root</p>Every write re-checks the invariant against current state, inside one method</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> a valid SQL transaction only guarantees one write is atomic — it says nothing about a rule that spans several rows at once.</p>"
+    },
+    {
+      "type": "code",
+      "id": "l3-no-modify-1",
+      "poolId": "l3-no-modify-after-placed",
+      "level": 3,
+      "prompt": "Implement `Order.placeOrder()` and update `addLine()` so that once an order is placed, no further lines can be added.",
+      "starterCode": "class Order {\n  constructor() {\n    this.lineTotals = [];\n    this.status = \"OPEN\";\n  }\n  addLine(amount) {\n    // TODO: throw if status is not OPEN\n    this.lineTotals.push(amount);\n  }\n  placeOrder() {\n    // TODO: implement — require at least one line, then set status\n  }\n}\n",
+      "tests": [
+        {
+          "description": "can add lines while open",
+          "expr": "const o = new Order(); o.addLine(100); expect(o.lineTotals.length).toBe(1)"
+        },
+        {
+          "description": "cannot add a line after placing",
+          "expr": "const o = new Order(); o.addLine(100); o.placeOrder(); expect(() => o.addLine(50)).toThrow()"
+        },
+        {
+          "description": "cannot place an order with no lines",
+          "expr": "const o = new Order(); expect(() => o.placeOrder()).toThrow()"
+        }
+      ],
+      "solution": "class Order {\n  constructor() {\n    this.lineTotals = [];\n    this.status = \"OPEN\";\n  }\n  addLine(amount) {\n    if (this.status !== \"OPEN\") throw new Error(\"Order already placed\");\n    this.lineTotals.push(amount);\n  }\n  placeOrder() {\n    if (this.lineTotals.length === 0) throw new Error(\"Cannot place an empty order\");\n    if (this.status !== \"OPEN\") throw new Error(\"Already placed\");\n    this.status = \"PLACED\";\n  }\n}\n",
+      "explanation": "The status check inside addLine is what makes 'no changes after placed' an invariant rather than a convention — it's enforced at the only entry point for mutation, not left to callers to remember.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>🚪</span> One entry point: the root's methods</div><div class='flex items-center gap-1.5'><span>🔒</span> Children (like OrderLine) are never edited directly from outside</div><div class='flex items-center gap-1.5'><span>✅</span> Invariants checked inside every mutating method</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> if anything outside the aggregate can mutate a child directly, the root's invariant checks are just one of several ways in — and the cheapest one to accidentally bypass wins.</p>"
+    },
+    {
+      "type": "code",
+      "id": "l3-no-modify-2",
+      "poolId": "l3-no-modify-after-placed",
+      "level": 3,
+      "prompt": "Implement `Order.placeOrder()` so calling it twice on the same order throws, instead of silently succeeding the second time.",
+      "starterCode": "class Order {\n  constructor() {\n    this.lineTotals = [100];\n    this.status = \"OPEN\";\n  }\n  placeOrder() {\n    // TODO: throw if already PLACED\n  }\n}\n",
+      "tests": [
+        {
+          "description": "first placeOrder succeeds",
+          "expr": "const o = new Order(); o.placeOrder(); expect(o.status).toBe(\"PLACED\")"
+        },
+        {
+          "description": "second placeOrder throws",
+          "expr": "const o = new Order(); o.placeOrder(); expect(() => o.placeOrder()).toThrow()"
+        }
+      ],
+      "solution": "class Order {\n  constructor() {\n    this.lineTotals = [100];\n    this.status = \"OPEN\";\n  }\n  placeOrder() {\n    if (this.status === \"PLACED\") throw new Error(\"Already placed\");\n    this.status = \"PLACED\";\n  }\n}\n",
+      "explanation": "A silent no-op on the second call would hide a caller's bug (calling placeOrder twice usually signals a logic error upstream) — throwing surfaces it immediately instead of masking it.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>🚪</span> One entry point: the root's methods</div><div class='flex items-center gap-1.5'><span>🔒</span> Children (like OrderLine) are never edited directly from outside</div><div class='flex items-center gap-1.5'><span>✅</span> Invariants checked inside every mutating method</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> if anything outside the aggregate can mutate a child directly, the root's invariant checks are just one of several ways in — and the cheapest one to accidentally bypass wins.</p>"
+    },
+    {
+      "type": "code",
+      "id": "l3-repo-inmem-1",
+      "poolId": "l3-repository-in-memory",
+      "level": 3,
+      "prompt": "Implement `InMemoryOrderRepository.save(order)` and `findById(id)` for a repository keyed by `order.id`.",
+      "starterCode": "class InMemoryOrderRepository {\n  constructor() {\n    this.store = new Map();\n  }\n  save(order) {\n    // TODO: implement\n  }\n  findById(id) {\n    // TODO: implement\n  }\n}\n",
+      "tests": [
+        {
+          "description": "saved order can be found by id",
+          "expr": "const repo = new InMemoryOrderRepository(); repo.save({ id: \"o1\", total: 100 }); expect(repo.findById(\"o1\").total).toBe(100)"
+        },
+        {
+          "description": "unknown id returns undefined",
+          "expr": "const repo = new InMemoryOrderRepository(); expect(repo.findById(\"missing\")).toBe(undefined)"
+        },
+        {
+          "description": "saving again with the same id overwrites",
+          "expr": "const repo = new InMemoryOrderRepository(); repo.save({ id: \"o1\", total: 100 }); repo.save({ id: \"o1\", total: 200 }); expect(repo.findById(\"o1\").total).toBe(200)"
+        }
+      ],
+      "solution": "class InMemoryOrderRepository {\n  constructor() {\n    this.store = new Map();\n  }\n  save(order) {\n    this.store.set(order.id, order);\n  }\n  findById(id) {\n    return this.store.get(id);\n  }\n}\n",
+      "explanation": "save() and findById() are the only two operations exposed — there is deliberately no method that touches anything smaller than a whole Order, which is what keeps the repository from becoming a bypass around the aggregate root.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>📦</span> save(order) — the WHOLE aggregate, every time</div><div class='flex items-center gap-1.5'><span>🚫</span> No OrderLineRepository — that door doesn't exist</div><div class='flex items-center gap-1.5'><span>🔍</span> findById(id) returns the whole aggregate too</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> a repository that could save a single child object would let code bypass the aggregate root's invariant checks entirely.</p>"
+    },
+    {
+      "type": "code",
+      "id": "l3-repo-inmem-2",
+      "poolId": "l3-repository-concurrency",
+      "level": 3,
+      "prompt": "Extend `InMemoryOrderRepository.save(order)` to throw a `ConcurrencyConflictError` if the stored order's `version` doesn't match the incoming order's `version` (optimistic concurrency).",
+      "starterCode": "class ConcurrencyConflictError extends Error {}\nclass InMemoryOrderRepository {\n  constructor() {\n    this.store = new Map();\n  }\n  save(order) {\n    const existing = this.store.get(order.id);\n    // TODO: if existing exists and existing.version !== order.version, throw ConcurrencyConflictError\n    // otherwise store a copy with version incremented by 1\n  }\n  findById(id) {\n    return this.store.get(id);\n  }\n}\n",
+      "tests": [
+        {
+          "description": "first save of a new order succeeds",
+          "expr": "const repo = new InMemoryOrderRepository(); repo.save({ id: \"o1\", version: 0 }); expect(repo.findById(\"o1\").version).toBe(1)"
+        },
+        {
+          "description": "saving with a stale version throws",
+          "expr": "const repo = new InMemoryOrderRepository(); repo.save({ id: \"o1\", version: 0 }); expect(() => repo.save({ id: \"o1\", version: 0 })).toThrow()"
+        },
+        {
+          "description": "saving with the current version succeeds",
+          "expr": "const repo = new InMemoryOrderRepository(); repo.save({ id: \"o1\", version: 0 }); repo.save({ id: \"o1\", version: 1 }); expect(repo.findById(\"o1\").version).toBe(2)"
+        }
+      ],
+      "solution": "class ConcurrencyConflictError extends Error {}\nclass InMemoryOrderRepository {\n  constructor() {\n    this.store = new Map();\n  }\n  save(order) {\n    const existing = this.store.get(order.id);\n    if (existing && existing.version !== order.version) {\n      throw new ConcurrencyConflictError(order.id);\n    }\n    const nextVersion = (existing ? existing.version : 0) + 1;\n    this.store.set(order.id, { ...order, version: nextVersion });\n  }\n  findById(id) {\n    return this.store.get(id);\n  }\n}\n",
+      "explanation": "This is the actual fix for the lost-update race from L1: rejecting a save whose version is stale turns a silent overwrite into a visible error the caller must reload and retry against.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>📖</span> Both writers read version 1</div><div class='flex items-center gap-1.5'><span>✅</span> First save succeeds → store moves to version 2</div><div class='flex items-center gap-1.5'><span>❌</span> Second save still carries version 1 → rejected, must reload</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> rejecting the stale write turns a silent lost update into a visible signal to reload and retry against current reality.</p>"
+    },
+    {
+      "type": "code",
+      "id": "l3-event-collect-1",
+      "poolId": "l3-domain-event-collection",
+      "level": 3,
+      "prompt": "Implement `Order.placeOrder()` to push an `{ type: \"OrderPlaced\", orderId }` event onto `this.pendingEvents`, and `pullDomainEvents()` to drain and return them.",
+      "starterCode": "class Order {\n  constructor(id) {\n    this.id = id;\n    this.pendingEvents = [];\n  }\n  placeOrder() {\n    // TODO: push { type: \"OrderPlaced\", orderId: this.id } onto pendingEvents\n  }\n  pullDomainEvents() {\n    // TODO: return and clear pendingEvents\n  }\n}\n",
+      "tests": [
+        {
+          "description": "placeOrder records an event",
+          "expr": "const o = new Order(\"o1\"); o.placeOrder(); expect(o.pullDomainEvents().length).toBe(1)"
+        },
+        {
+          "description": "the event has the right shape",
+          "expr": "const o = new Order(\"o1\"); o.placeOrder(); expect(o.pullDomainEvents()[0].type).toBe(\"OrderPlaced\")"
+        },
+        {
+          "description": "pulling drains the events — a second pull is empty",
+          "expr": "const o = new Order(\"o1\"); o.placeOrder(); o.pullDomainEvents(); expect(o.pullDomainEvents().length).toBe(0)"
+        }
+      ],
+      "solution": "class Order {\n  constructor(id) {\n    this.id = id;\n    this.pendingEvents = [];\n  }\n  placeOrder() {\n    this.pendingEvents.push({ type: \"OrderPlaced\", orderId: this.id });\n  }\n  pullDomainEvents() {\n    const events = this.pendingEvents;\n    this.pendingEvents = [];\n    return events;\n  }\n}\n",
+      "explanation": "Draining (returning, then clearing) rather than just returning a reference is what prevents the same event from being re-published if pullDomainEvents() is accidentally called twice.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>➕</span> record() pushes onto a private pendingEvents array</div><div class='flex items-center gap-1.5'><span>🚰</span> pullDomainEvents() drains it and returns the events</div><div class='flex items-center gap-1.5'><span>🧹</span> Called once, right after a successful save</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> draining rather than peeking prevents the same event from being published twice if pullDomainEvents() is called again.</p>"
+    },
+    {
+      "type": "code",
+      "id": "l3-event-collect-2",
+      "poolId": "l3-domain-event-collection",
+      "level": 3,
+      "prompt": "Extend `Order` so `addLine()` does NOT raise any event (only `placeOrder()` should), even though both methods mutate the aggregate.",
+      "starterCode": "class Order {\n  constructor(id) {\n    this.id = id;\n    this.lines = [];\n    this.pendingEvents = [];\n  }\n  addLine(amount) {\n    this.lines.push(amount);\n    // TODO: make sure this does NOT push any event\n  }\n  placeOrder() {\n    this.pendingEvents.push({ type: \"OrderPlaced\", orderId: this.id });\n  }\n  pullDomainEvents() {\n    const events = this.pendingEvents;\n    this.pendingEvents = [];\n    return events;\n  }\n}\n",
+      "tests": [
+        {
+          "description": "addLine alone raises no events",
+          "expr": "const o = new Order(\"o1\"); o.addLine(10); expect(o.pullDomainEvents().length).toBe(0)"
+        },
+        {
+          "description": "placeOrder still raises exactly one event",
+          "expr": "const o = new Order(\"o1\"); o.addLine(10); o.placeOrder(); expect(o.pullDomainEvents().length).toBe(1)"
+        }
+      ],
+      "solution": "class Order {\n  constructor(id) {\n    this.id = id;\n    this.lines = [];\n    this.pendingEvents = [];\n  }\n  addLine(amount) {\n    this.lines.push(amount);\n  }\n  placeOrder() {\n    this.pendingEvents.push({ type: \"OrderPlaced\", orderId: this.id });\n  }\n  pullDomainEvents() {\n    const events = this.pendingEvents;\n    this.pendingEvents = [];\n    return events;\n  }\n}\n",
+      "explanation": "Not every mutation is a domain event — only the ones another context genuinely needs to react to. Raising an event on every internal change would flood subscribers with noise nobody asked for.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>➕</span> record() pushes onto a private pendingEvents array</div><div class='flex items-center gap-1.5'><span>🚰</span> pullDomainEvents() drains it and returns the events</div><div class='flex items-center gap-1.5'><span>🧹</span> Called once, right after a successful save</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> draining rather than peeking prevents the same event from being published twice if pullDomainEvents() is called again.</p>"
+    },
+    {
+      "type": "code",
+      "id": "l3-event-collect-3",
+      "poolId": "l3-domain-event-collection",
+      "level": 3,
+      "prompt": "Implement `pullDomainEvents()` to include an `occurredAt` timestamp field (any Date) on each event pushed by `placeOrder()`.",
+      "starterCode": "class Order {\n  constructor(id) {\n    this.id = id;\n    this.pendingEvents = [];\n  }\n  placeOrder() {\n    // TODO: push an event with type, orderId, AND an occurredAt Date\n    this.pendingEvents.push({ type: \"OrderPlaced\", orderId: this.id });\n  }\n  pullDomainEvents() {\n    const events = this.pendingEvents;\n    this.pendingEvents = [];\n    return events;\n  }\n}\n",
+      "tests": [
+        {
+          "description": "event carries an occurredAt Date",
+          "expr": "const o = new Order(\"o1\"); o.placeOrder(); expect(o.pullDomainEvents()[0].occurredAt instanceof Date).toBe(true)"
+        }
+      ],
+      "solution": "class Order {\n  constructor(id) {\n    this.id = id;\n    this.pendingEvents = [];\n  }\n  placeOrder() {\n    this.pendingEvents.push({ type: \"OrderPlaced\", orderId: this.id, occurredAt: new Date() });\n  }\n  pullDomainEvents() {\n    const events = this.pendingEvents;\n    this.pendingEvents = [];\n    return events;\n  }\n}\n",
+      "explanation": "A timestamp on the event itself (not just on the row it might get persisted to) means any subscriber can reason about ordering and staleness without a round trip back to the aggregate that raised it.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>➕</span> record() pushes onto a private pendingEvents array</div><div class='flex items-center gap-1.5'><span>🚰</span> pullDomainEvents() drains it and returns the events</div><div class='flex items-center gap-1.5'><span>🧹</span> Called once, right after a successful save</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> draining rather than peeking prevents the same event from being published twice if pullDomainEvents() is called again.</p>"
+    },
+    {
+      "type": "code",
+      "id": "l3-acl-1",
+      "poolId": "l3-acl-translate-legacy-stock",
+      "level": 3,
+      "prompt": "Implement `LegacyInventoryAdapter.toStockAvailability(row)` translating a legacy `{ qty_on_hand: string, stat: \"A\"|\"B\"|\"D\" }` row into `{ availableQuantity: number, canFulfill: boolean }`. `canFulfill` is true only when stat is \"A\" and quantity is greater than 0.",
+      "starterCode": "class LegacyInventoryAdapter {\n  toStockAvailability(row) {\n    // TODO: implement\n  }\n}\n",
+      "tests": [
+        {
+          "description": "active with stock can fulfill",
+          "expr": "expect(new LegacyInventoryAdapter().toStockAvailability({ qty_on_hand: \"5\", stat: \"A\" }).canFulfill).toBe(true)"
+        },
+        {
+          "description": "active with zero stock cannot fulfill",
+          "expr": "expect(new LegacyInventoryAdapter().toStockAvailability({ qty_on_hand: \"0\", stat: \"A\" }).canFulfill).toBe(false)"
+        },
+        {
+          "description": "backordered cannot fulfill even with a positive quantity string",
+          "expr": "expect(new LegacyInventoryAdapter().toStockAvailability({ qty_on_hand: \"5\", stat: \"B\" }).canFulfill).toBe(false)"
+        },
+        {
+          "description": "availableQuantity is parsed as a number, not left as a string",
+          "expr": "expect(new LegacyInventoryAdapter().toStockAvailability({ qty_on_hand: \"5\", stat: \"A\" }).availableQuantity).toBe(5)"
+        }
+      ],
+      "solution": "class LegacyInventoryAdapter {\n  toStockAvailability(row) {\n    const qty = Number.parseInt(row.qty_on_hand, 10);\n    return {\n      availableQuantity: qty,\n      canFulfill: row.stat === \"A\" && qty > 0,\n    };\n  }\n}\n",
+      "explanation": "The adapter is the one place that knows the legacy field names and status codes exist at all — everything downstream of it only ever sees the clean, domain-owned StockAvailability shape.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>🏚️</span> Legacy shape: qty_on_hand (string), stat (A/B/D)</div><div class='flex items-center gap-1.5'><span>🔁</span> Adapter translates it into StockAvailability</div><div class='flex items-center gap-1.5'><span>🧼</span> Order never imports the legacy shape</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> if the vendor renames a field, exactly one file — the adapter — has to change.</p>"
+    },
+    {
+      "type": "code",
+      "id": "l3-acl-2",
+      "poolId": "l3-acl-translate-legacy-stock",
+      "level": 3,
+      "prompt": "The legacy system was updated: discontinued items now report stat \"D\" but sometimes still have a nonzero qty_on_hand (leftover warehouse stock not for sale). Update `toStockAvailability` so discontinued items are never fulfillable, regardless of quantity.",
+      "starterCode": "class LegacyInventoryAdapter {\n  toStockAvailability(row) {\n    const qty = Number.parseInt(row.qty_on_hand, 10);\n    return {\n      availableQuantity: qty,\n      canFulfill: qty > 0, // TODO: also require stat === \"A\", excluding \"D\" even with stock\n    };\n  }\n}\n",
+      "tests": [
+        {
+          "description": "active with stock can fulfill",
+          "expr": "expect(new LegacyInventoryAdapter().toStockAvailability({ qty_on_hand: \"5\", stat: \"A\" }).canFulfill).toBe(true)"
+        },
+        {
+          "description": "discontinued with leftover stock cannot fulfill",
+          "expr": "expect(new LegacyInventoryAdapter().toStockAvailability({ qty_on_hand: \"5\", stat: \"D\" }).canFulfill).toBe(false)"
+        }
+      ],
+      "solution": "class LegacyInventoryAdapter {\n  toStockAvailability(row) {\n    const qty = Number.parseInt(row.qty_on_hand, 10);\n    return {\n      availableQuantity: qty,\n      canFulfill: row.stat === \"A\" && qty > 0,\n    };\n  }\n}\n",
+      "explanation": "Because Order only ever depends on the adapter's output shape, absorbing this legacy quirk (discontinued-but-in-stock) took a one-line change in a single file — nothing in Order's own model had to change at all.",
+      "reference": "<div class='not-prose flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300'><div class='flex items-center gap-1.5'><span>🏚️</span> Legacy shape: qty_on_hand (string), stat (A/B/D)</div><div class='flex items-center gap-1.5'><span>🔁</span> Adapter translates it into StockAvailability</div><div class='flex items-center gap-1.5'><span>🧼</span> Order never imports the legacy shape</div></div><p class='mt-2 text-xs text-slate-500 dark:text-slate-400'><strong>Why:</strong> if the vendor renames a field, exactly one file — the adapter — has to change.</p>"
+    }
+  ]
+}

@@ -1,0 +1,209 @@
+---
+title: "L2 — Aggregates as consistency boundaries, and how contexts become real code"
+---
+
+## Why the database transaction alone didn't save Order #4471
+
+**Each individual write in L1's race was inside a valid SQL transaction.
+So why wasn't "wrap it in a transaction" the fix?** A transaction
+guarantees that *one* write either fully happens or doesn't — it says
+nothing about which writes are even allowed to happen, or what has to
+stay true across several of them at once. `AddItemService` and
+`PlaceOrderService` each had their own perfectly valid transaction; there
+was simply no rule, anywhere, saying "before you commit, check the
+combined total against the credit limit." A transaction protects
+*atomicity*. It doesn't know what "consistent" means for your domain —
+only your code can define that.
+
+That's what an **aggregate** actually is: not a database concept, a
+**modeling decision** about which objects have to be checked together,
+every time, because a business rule spans more than one of them.
+
+```mermaid
+flowchart TB
+    subgraph Aggregate["Order aggregate (one consistency unit)"]
+        Root["Order (aggregate root)"]
+        L1e["OrderLine #1"]
+        L2e["OrderLine #2"]
+        Root --> L1e
+        Root --> L2e
+    end
+    Cust["Customer\n(referenced by CustomerId only—separate aggregate)"]
+    Aggregate -. "credit limit checked\nvia a value passed in,\nnot a live join" .-> Cust
+```
+
+**Why isn't `Customer` inside the same aggregate, if the credit limit
+check needs its data too?** Because `Customer` has its own lifecycle,
+its own invariants (address changes, plan upgrades), and its own write
+volume — folding it into `Order` would mean every order write also locks
+the customer record, and every customer write has to worry about
+in-flight orders. The aggregate boundary is drawn around *the smallest
+cluster of objects that must be consistent with each other on every
+single write* — not around "everything this feature happens to touch."
+`Order` needs the customer's credit limit as an input value at the
+moment of the check, not permanent joint custody of the `Customer`
+object.
+
+## The aggregate root is the only door in
+
+**If `Order` and `OrderLine` are one consistency unit, what stops some
+other part of the codebase from reaching in and editing an `OrderLine`
+directly, the same way the old `AddItemService` reached into
+`order_items`?** Nothing technical — this is a modeling discipline, not a
+language feature. The rule: external code never holds a mutable
+reference to a child object inside an aggregate. It only ever calls
+methods on the root, and the root is the one place invariants are
+checked, on every mutation:
+
+```
+class Order (aggregate root):
+    lines: OrderLine[]
+    status: PLACED | OPEN
+    creditLimit: Money
+
+    method addLine(product, quantity, unitPrice):
+        assert status == OPEN                      # invariant: no changes after placed
+        newTotal = total() + unitPrice * quantity
+        assert newTotal <= creditLimit              # invariant: never exceed the limit
+        lines.append(OrderLine(product, quantity, unitPrice))
+
+    method placeOrder():
+        assert lines.length > 0
+        status = PLACED
+        record(OrderPlaced(orderId, total()))        # domain event, see below
+```
+
+**What would go wrong if `addLine` just appended the line and left the
+credit-limit check to a separate validation step run before "place
+order"?** The order could sit in an invalid state — over the limit — for
+however long it takes someone to call that separate check, and any other
+code path that reads the order in between sees a value that shouldn't be
+possible. Checking the invariant *inside* the same method that changes
+the state is what makes "the aggregate is never observably invalid"
+true, not just usually true.
+
+## Entity vs. value object: which of these needs an identity?
+
+**`OrderLine #7`'s quantity changes from 2 to 3 — is it still line 7, or
+a different line now?** Still line 7: it has an identity that persists
+across changes, which makes it an **entity** (locally, inside the
+aggregate — it doesn't need an ID meaningful outside `Order`). **Two
+separate `$10` amounts in the system — are they "the same $10" or just
+two things that happen to be equal?** Just equal — `Money($10)` has no
+identity to track; you never ask "which $10 is this?", only "is this
+amount equal to that one?" That's a **value object**: interchangeable,
+immutable, compared purely by its fields.
+
+| Question to ask                                    | Entity                                    | Value object                                    |
+| ----------------------------------------------------- | -------------------------------------------- | --------------------------------------------------- |
+| Does "which one, specifically" matter?                | Yes — tracked by an ID                       | No — only "what does it equal"                       |
+| Can it change over time and stay the same thing?      | Yes (`OrderLine #7`'s quantity can change)   | No — a change produces a *new* value, not a mutation |
+| Two instances with identical fields — same or equal?  | Different, even with identical fields        | The same, by definition                              |
+
+Getting this backwards has a real cost: modeling `Money` as an entity
+means writing identity-tracking and mutation code nothing needs, and
+modeling `OrderLine` as a value object means losing the ability to say
+"update line 7's quantity" without it silently becoming a different
+line.
+
+## Repositories: the aggregate's only door to storage
+
+**Now that `Order` guards its own invariants, what happens if the
+persistence layer lets something save just one `OrderLine` row without
+going through `Order` at all — an ORM `.save()` call on the line
+directly?** The whole point of the aggregate root collapses: the
+invariant-checking code path gets bypassed entirely, and you're back to
+L1's bug with extra steps. A **repository** exists specifically to close
+that door — it's an interface that only ever loads and saves whole
+aggregates:
+
+```
+interface OrderRepository:
+    findById(orderId) -> Order
+    save(order: Order) -> void
+```
+
+**Why not just let each aggregate's fields be `public` and skip a whole
+interface for what's really a `SELECT`/`UPDATE`?** Because the
+repository's job isn't fetching rows — it's guaranteeing that the *only*
+way to persist a change to `order_items` is by first going through
+`Order`'s methods, then handing the entire, now-valid aggregate to
+`save()`. There's no `OrderLineRepository`. That absence is deliberate.
+
+## Domain events: telling the rest of the system what happened, without reaching into it
+
+**`Order.placeOrder()` needs to notify Billing and Fulfillment. Should it
+just call their APIs directly from inside the method?** No — that would
+make `Order` depend on every downstream context's availability and
+shape, the exact coupling bounded contexts exist to prevent. Instead,
+the aggregate root records that something happened — `OrderPlaced` — and
+hands that record off *after* the transaction that changed its own state
+commits. Other contexts subscribe to the event; `Order` never learns they
+exist.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Order as Order (aggregate root)
+    participant Repo as OrderRepository
+    participant Bus as Event publisher
+    Client->>Order: placeOrder()
+    Order->>Order: check invariants, set status=PLACED
+    Order->>Order: record(OrderPlaced)
+    Client->>Repo: save(order)
+    Repo-->>Client: committed
+    Client->>Bus: publish(order.pullDomainEvents())
+    Bus-->>Billing: OrderPlaced
+    Bus-->>Fulfillment: OrderPlaced
+```
+
+**Why publish *after* the save commits, instead of the instant
+`record()` is called?** Because if the save then fails — a constraint
+violation, a dropped connection — you'd have already told Billing an
+order exists that was never actually persisted. Publishing after commit
+means the event is only ever true.
+
+## From contexts to code: what a context map actually compiles into
+
+L1's aggregate lives inside one bounded context (Order Management).
+**Once you have several contexts, what does the boundary between them
+actually look like in a real codebase — a folder? A package? A
+service?** All three, at different points of a system's growth, and the
+context map's job is to say which:
+
+| Context map pattern                          | What it looks like in code                                                                 | When it fits                                                              |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| (already known) Anticorruption layer           | A dedicated adapter module at the boundary, translating one context's model into another's     | The two contexts' models carry genuinely different guarantees                  |
+| (already known) Conformist                     | Downstream just imports/deserializes the upstream shape directly, no translation module        | No leverage to negotiate the upstream model (e.g. a third-party API)           |
+| **Customer-supplier**                          | Upstream team's release process has a formal input — a ticket queue, a contract test suite — that the downstream team's needs feed into | Both teams answer to the same organization and can prioritize each other's asks |
+| **Open host service / published language**     | Upstream context exposes one stable, versioned API/schema (a "published language") instead of many bespoke integrations per consumer | Many downstream contexts need the same upstream data; one stable contract beats N custom ones |
+
+**Why does it matter which pattern a given relationship actually is,
+instead of just calling everything "an API"?** Because each implies a
+different failure mode if ignored: treating a *conformist* relationship
+like a *customer-supplier* one means filing feature requests a
+third-party vendor will never see; treating a genuine
+*customer-supplier* relationship like *conformist* means quietly eating
+breaking changes you actually had standing to negotiate against.
+
+```mermaid
+flowchart LR
+    subgraph OrderCtx["Order Management context\n(own repo / service / deployment unit)"]
+        OrderAgg["Order aggregate"]
+    end
+    subgraph BillingCtx["Billing context"]
+        Bill["Invoice aggregate"]
+    end
+    subgraph LegacyERP["Legacy Inventory (3rd party, no leverage)"]
+        Legacy["Flat stock records"]
+    end
+    OrderAgg -- "OrderPlaced\n(published language—versioned event schema)" --> BillingCtx
+    LegacyERP -- "raw stock rows\n(conformist: adapt, don't negotiate)" --> ACL["Inventory anticorruption layer"] --> OrderAgg
+```
+
+A context's boundary is drawn once, in the design conversation. It gets
+*enforced* every day by: which repo/package the code lives in, which
+service owns the deployment, and which of these four patterns governs
+each edge on the map. L3 builds the `Order` aggregate, its repository,
+its domain event, and an anticorruption layer against a legacy inventory
+system, end to end.

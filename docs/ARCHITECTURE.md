@@ -14,7 +14,7 @@ Growth from junior to staff doesn't happen because someone hands you a "senior" 
 
 Nowhere does a document say "you are now senior." The reader infers their own growth from the fact that the problems they can now reason about used to be out of reach.
 
-## The sixteen tracks
+## The eighteen tracks
 
 - **`web/`** — how the web actually works, from a single HTTP request to systems serving millions of users.
 - **`systems/`** — operating systems, distributed systems, databases, reliability — the substrate everything else runs on.
@@ -30,12 +30,18 @@ Nowhere does a document say "you are now senior." The reader infers their own gr
 - **`applied-math/`** — what to measure, calculate, forecast, and estimate, and how to do it rigorously: probability and statistics, queueing theory, capacity math, graph theory, linear algebra, and quantitative risk modeling — always tied back to where it actually shows up in `web/` and `systems/` (load prediction, capacity planning, latency budgets, ML/graphics transforms, cost modeling).
 - **`testing-quality/`** — the craft of testing itself: the test pyramid, TDD/BDD, test doubles, flaky tests, mutation and property-based testing, contract testing, and building a culture where quality isn't someone else's job.
 - **`software-design/`** — the craft of designing maintainable code: cohesion/coupling, SOLID, OOP vs. functional trade-offs, design patterns (and their misuse), refactoring, technical debt, API design, evolutionary design.
+- **`architecture/`** — system architecture at the macro level, above any single codebase: architectural styles (hexagonal, event-driven, microservices), domain-driven design, build-vs-buy, ADR governance, platform engineering, multi-tenant systems, and the technical-strategy work of a staff/principal engineer setting direction across an org.
+- **`design/`** — product, UX, and UI design as its own discipline: design thinking, usability heuristics, information architecture, visual design fundamentals, accessibility, design systems, and the design-engineering handoff — the human-facing counterpart to `software-design/`'s code-facing craft.
 - **`sustainable-performance/`** — the personal sustainability layer: energy and attention management, recognizing and recovering from burnout, boundary-setting, and pacing a career over a decade rather than a good quarter.
 - **`people-management/`** — the mechanics of formally managing people: 1:1s, delegation, feedback, hiring, performance management, terminations, org design, and eventually managing managers. Added specifically because the user plans to lead teams — it's the one track scoped to a management path rather than a pure individual-contributor one, and is not a prerequisite for the "staff engineer" framing the rest of the roadmap uses.
 
 `learning-craft/` is transversal in the same sense `logic/` is (see below) — it doesn't sit "above" the other tracks so much as run through all of them: every unit in this project is, itself, an exercise in the skills `learning-craft/` documents. `applied-math/` is transversal in a narrower, more concrete sense: `logic/` is about reasoning correctly in general; `applied-math/` is about reasoning _quantitatively_ — putting a real number on a claim instead of a hunch — and its later units point back explicitly at `systems/` and `web/` units where the same math is load-bearing (capacity planning, latency/throughput trade-offs, statistical significance in an A/B test, cost modeling for infrastructure).
 
 `testing-quality/` and `software-design/` sit in a similar relationship to `web/` and `systems/` as `applied-math/` does: they document crafts that get _used_ throughout implementation-heavy units in those tracks but are general enough (language- and domain-agnostic) to deserve their own sequence rather than being repeated piecemeal inside every unit that needs them.
+
+`architecture/` is distinct from `systems/` and `software-design/`, though all three share the `architecture` tag: `systems/` teaches the substrate (distributed systems, databases, reliability mechanics) that any architecture runs on; `software-design/` teaches how to structure a single codebase well; `architecture/` is the layer above both — choosing a style, modeling a domain, and making the org-level, multi-year calls (build vs. buy, platform investment, technical strategy) that a single codebase's design can't answer on its own.
+
+`design/` is distinct from `software-design/` and `product-domain/`: `software-design/` is about designing code so it's maintainable; `product-domain/` is about understanding the business domain well enough to build the right thing and sell its value; `design/` is about the human-facing craft in between — how the thing actually looks, feels, and gets used, from information architecture and visual design to accessibility and usability testing.
 
 `sustainable-performance/` is distinct from `career-craft/`: `career-craft/` is about the mechanics of growing and being recognized (mentoring, interviewing, calibration, negotiation); `sustainable-performance/` is about the personal capacity that makes any of that possible to sustain — energy, attention, recovery, boundaries. A staff engineer who burns out is not solving the problems `career-craft/` describes.
 
