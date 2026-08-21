@@ -1,0 +1,150 @@
+---
+// A single shared <dialog>, reused across every track's "what is this,
+// really?" trigger button on the page (homepage track grid, roadmap track
+// headers) — one modal in the DOM, content swapped by JS on open rather
+// than one dialog per track. Include this component once per page; trigger
+// buttons anywhere on that page with [data-myth-trigger="<track-name>"]
+// open it populated with that track's copy.
+import { X, Sparkles } from "lucide-astro";
+import { roadmap } from "../data/roadmap";
+import { TRACK_TEASERS } from "../data/track-teasers";
+
+const teaserData = roadmap.tracks
+  .filter((t) => TRACK_TEASERS[t.name])
+  .map((t) => ({
+    track: t.name,
+    myth: TRACK_TEASERS[t.name].myth,
+    reality: TRACK_TEASERS[t.name].reality,
+  }));
+---
+
+<dialog
+  data-myth-modal
+  class="m-auto w-full max-w-lg rounded-xl border border-slate-200 bg-white p-0 text-slate-900 backdrop:bg-slate-950/60 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
+>
+  <div class="p-6">
+    <div class="flex items-start justify-between gap-4">
+      <p
+        class="inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-500"
+      >
+        <Sparkles class="h-3.5 w-3.5" aria-hidden="true" />
+        <span data-myth-track></span>
+      </p>
+      <button
+        type="button"
+        data-myth-close
+        aria-label="Close"
+        class="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+      >
+        <X class="h-4 w-4" aria-hidden="true" />
+      </button>
+    </div>
+
+    <div class="mt-4 space-y-4">
+      <div class="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+        <p
+          class="text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-500"
+        >
+          What you'd assume
+        </p>
+        <p
+          class="mt-1 text-sm text-slate-600 dark:text-slate-400"
+          data-myth-text
+        >
+        </p>
+      </div>
+      <div class="scenario-box rounded-lg border p-3">
+        <p
+          class="scenario-box-label text-xs font-semibold tracking-wide uppercase"
+        >
+          What it actually is
+        </p>
+        <p
+          class="mt-1 text-sm text-slate-800 dark:text-slate-200"
+          data-reality-text
+        >
+        </p>
+      </div>
+    </div>
+
+    <a
+      data-myth-cta
+      href="#"
+      class="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold hover:underline"
+      style="color: var(--accent-text)"
+    >
+      Explore this track →
+    </a>
+  </div>
+</dialog>
+
+<script
+  type="application/json"
+  id="myth-teaser-data"
+  set:html={JSON.stringify(teaserData)}
+/>
+
+<script>
+  interface Teaser {
+    track: string;
+    myth: string;
+    reality: string;
+  }
+
+  function initMythModal() {
+    const dialog =
+      document.querySelector<HTMLDialogElement>("[data-myth-modal]");
+    const dataEl = document.getElementById("myth-teaser-data");
+    if (!dialog || !dataEl) return;
+    if (dialog.dataset.wired === "true") return;
+    dialog.dataset.wired = "true";
+
+    let teasers: Teaser[];
+    try {
+      teasers = JSON.parse(dataEl.textContent || "[]");
+    } catch {
+      teasers = [];
+    }
+    const byTrack = new Map(teasers.map((t) => [t.track, t]));
+
+    const trackEl = dialog.querySelector<HTMLElement>("[data-myth-track]");
+    const mythEl = dialog.querySelector<HTMLElement>("[data-myth-text]");
+    const realityEl = dialog.querySelector<HTMLElement>("[data-reality-text]");
+    const ctaEl = dialog.querySelector<HTMLAnchorElement>("[data-myth-cta]");
+    const closeButton = dialog.querySelector<HTMLElement>("[data-myth-close]");
+
+    function openFor(track: string) {
+      const teaser = byTrack.get(track);
+      if (!teaser || !trackEl || !mythEl || !realityEl || !ctaEl) return;
+      trackEl.textContent = track;
+      mythEl.textContent = teaser.myth;
+      realityEl.textContent = teaser.reality;
+      ctaEl.href = `/${track}/`;
+      dialog!.showModal();
+    }
+
+    document
+      .querySelectorAll<HTMLElement>("[data-myth-trigger]")
+      .forEach((trigger) => {
+        if (trigger.dataset.mythWired === "true") return;
+        trigger.dataset.mythWired = "true";
+        trigger.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const track = trigger.dataset.mythTrigger;
+          if (track) openFor(track);
+        });
+      });
+
+    closeButton?.addEventListener("click", () => dialog!.close());
+    // Native <dialog> only closes on a backdrop click if we detect the
+    // click landed on the dialog element itself (its padding box is the
+    // backdrop area once ::backdrop is excluded from hit-testing).
+    dialog.addEventListener("click", (e) => {
+      if (e.target === dialog) dialog.close();
+    });
+  }
+
+  initMythModal();
+  document.addEventListener("astro:page-load", initMythModal);
+</script>
