@@ -20,8 +20,9 @@ const tracksStarted = roadmap.tracks.filter(
 ).length;
 
 // Client-side "continue learning" needs to resolve a bare track/slug key
-// (localStorage's progress:<track>/<slug>) back to a title + href — embed
-// the minimal lookup table it needs rather than shipping the whole roadmap.
+// (pStorage's progress:<track>/<slug>, scoped to the active profile) back
+// to a title + href — embed the minimal lookup table it needs rather than
+// shipping the whole roadmap.
 const unitLookup = roadmap.tracks.flatMap((t) =>
   t.units
     .filter((u) => writtenByTrack.get(t.name) && u.status !== "planned")
@@ -30,6 +31,17 @@ const unitLookup = roadmap.tracks.flatMap((t) =>
       slug: u.slug,
       problem: u.problem,
     })),
+);
+
+// Per-track tag vocabulary, embedded as a data attribute below — lets the
+// client-side personalization script (see the bottom script block) decide
+// which track cards match the active profile's interests without shipping
+// the whole roadmap again.
+const trackTags = new Map<string, string[]>(
+  roadmap.tracks.map((t) => [
+    t.name,
+    Array.from(new Set(t.units.flatMap((u) => u.tags))),
+  ]),
 );
 ---
 
@@ -130,12 +142,14 @@ const unitLookup = roadmap.tracks.flatMap((t) =>
     </a>
   </section>
 
-  <div class="mt-10 grid gap-4 sm:grid-cols-2">
+  <div data-track-grid class="mt-10 grid gap-4 sm:grid-cols-2">
     {
       roadmap.tracks.map((track, i) => {
         const written = writtenByTrack.get(track.name) ?? 0;
         return (
           <div
+            data-track-card
+            data-tags={(trackTags.get(track.name) ?? []).join(" ")}
             style={`animation-delay: ${Math.min(i, 10) * 40}ms`}
             class="animate-fade-slide-in group relative overflow-hidden rounded-xl border border-slate-200 transition duration-200 hover:-translate-y-0.5 hover:border-slate-400 hover:shadow-md dark:border-slate-800 dark:hover:border-slate-600"
           >
@@ -148,6 +162,13 @@ const unitLookup = roadmap.tracks.flatMap((t) =>
               track={track.name}
               class="pointer-events-none rounded-none border-0 border-b border-slate-200 dark:border-slate-800"
             />
+            <span
+              data-interest-badge
+              class="pointer-events-none absolute top-2 right-2 z-10 hidden items-center gap-1 rounded-full bg-slate-900/90 px-2 py-1 text-[10px] font-semibold text-white shadow-sm dark:bg-slate-100/90 dark:text-slate-900"
+            >
+              <Sparkles class="h-3 w-3" aria-hidden="true" />
+              For you
+            </span>
             <div class="pointer-events-none flex items-start gap-4 p-5">
               <div class="rounded-lg bg-slate-100 p-2.5 text-slate-600 transition group-hover:bg-slate-900 group-hover:text-white dark:bg-slate-800 dark:text-slate-400 dark:group-hover:bg-slate-100 dark:group-hover:text-slate-900">
                 <TrackIcon track={track.name} class="h-5 w-5" />
@@ -193,6 +214,8 @@ const unitLookup = roadmap.tracks.flatMap((t) =>
   />
 
   <script>
+    import { pStorage, getActiveProfile } from "../lib/profile";
+
     interface ProgressState {
       done: boolean;
       doneAt?: number;
@@ -235,13 +258,13 @@ const unitLookup = roadmap.tracks.flatMap((t) =>
       let bestNotDone: { key: string; at: number } | null = null;
       let bestDone: { key: string; at: number } | null = null;
 
-      for (const key of Object.keys(localStorage)) {
+      for (const key of pStorage.keys()) {
         if (!key.startsWith("progress:")) continue;
         const unitKey = key.slice("progress:".length);
         if (!byKey.has(unitKey)) continue;
         let state: ProgressState;
         try {
-          state = JSON.parse(localStorage.getItem(key) || "{}");
+          state = JSON.parse(pStorage.getItem(key) || "{}");
         } catch {
           continue;
         }
@@ -266,5 +289,42 @@ const unitLookup = roadmap.tracks.flatMap((t) =>
 
     initContinueLearning();
     document.addEventListener("astro:page-load", initContinueLearning);
+
+    function initInterestPersonalization() {
+      const grid = document.querySelector<HTMLElement>("[data-track-grid]");
+      if (!grid || grid.dataset.wired === "true") return;
+      grid.dataset.wired = "true";
+
+      const interests = new Set(getActiveProfile()?.interests ?? []);
+      if (interests.size === 0) return;
+
+      const cards = Array.from(
+        grid.querySelectorAll<HTMLElement>("[data-track-card]"),
+      );
+      const matched: HTMLElement[] = [];
+      const rest: HTMLElement[] = [];
+      for (const card of cards) {
+        const tags = (card.dataset.tags ?? "").split(" ").filter(Boolean);
+        const isMatch = tags.some((tag) => interests.has(tag));
+        if (isMatch) {
+          card
+            .querySelector<HTMLElement>("[data-interest-badge]")
+            ?.classList.remove("hidden");
+          card
+            .querySelector<HTMLElement>("[data-interest-badge]")
+            ?.classList.add("flex");
+          matched.push(card);
+        } else {
+          rest.push(card);
+        }
+      }
+      if (matched.length === 0) return;
+      // Re-append in matched-first order — appending an already-attached
+      // element moves it rather than duplicating it, so this reorders the
+      // grid in place without touching each card's own markup.
+      for (const card of [...matched, ...rest]) grid.append(card);
+    }
+    initInterestPersonalization();
+    document.addEventListener("astro:page-load", initInterestPersonalization);
   </script>
 </Layout>

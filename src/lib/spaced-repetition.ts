@@ -1,7 +1,9 @@
-// Client-side only (uses localStorage) — imported directly by component
-// <script> tags, never by server-rendered .astro frontmatter. Deliberately
-// framework-free so it works the same whether or not View Transitions are
-// ever added later.
+// Client-side only (uses localStorage, via the per-profile pStorage
+// wrapper) — imported directly by component <script> tags, never by
+// server-rendered .astro frontmatter. Deliberately framework-free so it
+// works the same whether or not View Transitions are ever added later.
+
+import { pStorage } from "./profile";
 
 export interface ProgressState {
   done: boolean;
@@ -28,7 +30,7 @@ function exerciseKey(
 }
 
 export function getProgress(track: string, unitSlug: string): ProgressState {
-  const raw = localStorage.getItem(progressKey(track, unitSlug));
+  const raw = pStorage.getItem(progressKey(track, unitSlug));
   if (!raw) return { done: false, stage: 0 };
   try {
     const parsed = JSON.parse(raw);
@@ -44,7 +46,7 @@ export function getProgress(track: string, unitSlug: string): ProgressState {
 }
 
 function saveProgress(track: string, unitSlug: string, state: ProgressState) {
-  localStorage.setItem(progressKey(track, unitSlug), JSON.stringify(state));
+  pStorage.setItem(progressKey(track, unitSlug), JSON.stringify(state));
 }
 
 export function isReviewDue(state: ProgressState): boolean {
@@ -80,7 +82,7 @@ export function getExerciseState(
   unitSlug: string,
   exerciseId: string,
 ): "passed" | "failed" | null {
-  const raw = localStorage.getItem(exerciseKey(track, unitSlug, exerciseId));
+  const raw = pStorage.getItem(exerciseKey(track, unitSlug, exerciseId));
   return raw === "passed" || raw === "failed" ? raw : null;
 }
 
@@ -90,7 +92,7 @@ export function setExerciseState(
   exerciseId: string,
   state: "passed" | "failed",
 ) {
-  localStorage.setItem(exerciseKey(track, unitSlug, exerciseId), state);
+  pStorage.setItem(exerciseKey(track, unitSlug, exerciseId), state);
 }
 
 export function allExercisesPassed(
@@ -126,8 +128,8 @@ export function checkAndApplyReviewDue(
 
   saveProgress(track, unitSlug, { ...state, done: false });
   const prefix = exerciseKey(track, unitSlug, "");
-  for (const key of Object.keys(localStorage)) {
-    if (key.startsWith(prefix)) localStorage.removeItem(key);
+  for (const key of pStorage.keys()) {
+    if (key.startsWith(prefix)) pStorage.removeItem(key);
   }
   return true;
 }

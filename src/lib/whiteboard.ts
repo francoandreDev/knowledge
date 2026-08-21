@@ -8,9 +8,16 @@
 // lets the board style toggle without losing or repainting existing
 // strokes, and lets the eraser use real destination-out erasing instead of
 // a same-colour-as-background hack.
+//
+// Drawings are per-learner data, so they're persisted via the per-profile
+// `pStorage` wrapper — not raw `localStorage` — while the board-style
+// preference (white/green) is a device-level UI choice and intentionally
+// stays on raw `localStorage`, shared across every profile.
+
+import { pStorage } from "./profile";
 
 interface WhiteboardOptions {
-  /** localStorage key this drawing persists under. Must be unique per block. */
+  /** pStorage key this drawing persists under. Must be unique per block. */
   storageKey: string;
   /** Trusted, already-authored HTML — a distilled, structured recap of the
    * block's key facts (not a duplicate of what's already on the page). */
@@ -245,7 +252,7 @@ function buildDrawer(opts: WhiteboardOptions): { open: () => void } {
     const ctx = canvas.getContext("2d")!;
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
 
-    const saved = localStorage.getItem(opts.storageKey) || previous;
+    const saved = pStorage.getItem(opts.storageKey) || previous;
     if (saved) {
       const img = new Image();
       img.onload = () => ctx.drawImage(img, 0, 0, rect.width, rect.height);
@@ -254,7 +261,7 @@ function buildDrawer(opts: WhiteboardOptions): { open: () => void } {
   }
 
   function save() {
-    localStorage.setItem(opts.storageKey, canvas.toDataURL("image/png"));
+    pStorage.setItem(opts.storageKey, canvas.toDataURL("image/png"));
   }
 
   eraserButton.addEventListener("click", () => setTool("eraser"));
@@ -262,7 +269,7 @@ function buildDrawer(opts: WhiteboardOptions): { open: () => void } {
   clearButton.addEventListener("click", () => {
     commitActiveInput();
     clearCanvas();
-    localStorage.removeItem(opts.storageKey);
+    pStorage.removeItem(opts.storageKey);
   });
 
   function commitActiveInput() {
