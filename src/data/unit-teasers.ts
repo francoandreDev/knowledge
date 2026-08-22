@@ -1131,4 +1131,48 @@ export const UNIT_TEASERS: Record<string, UnitTeaser> = {
     reality:
       "It's second-order leadership — setting culture and judgment at scale through other managers, a genuinely different job than managing individual output directly.",
   },
+
+  // architecture/
+  "architecture/architecture-styles": {
+    myth: "Architectural styles are fixed templates you pick from a catalog before writing code.",
+    reality:
+      "Layered, hexagonal, event-driven, and microservices are trade-off shapes, not buzzwords — the right one depends on team size and change patterns, not which sounds most modern.",
+  },
+  "architecture/domain-driven-design": {
+    myth: "DDD just means naming your classes after business terms.",
+    reality:
+      "The tactical patterns — aggregates as consistency boundaries, repositories, domain events — are what actually keep a complex domain model from silently corrupting itself.",
+  },
+  "architecture/hexagonal-clean-architecture": {
+    myth: "Wrapping the database in an interface is basically the same as hexagonal architecture.",
+    reality:
+      "The point is the dependency direction: business logic can't know adapters exist at all — that's what makes swapping the database a non-event instead of a rewrite.",
+  },
+  "architecture/event-driven-architecture": {
+    myth: "Event-driven just means services calling each other over a queue instead of HTTP.",
+    reality:
+      "It's a different consistency model entirely — ordering, replay, and idempotency become the architecture's real problems, not just a transport swap.",
+  },
+
+  // design/
+  "design/design-thinking-process": {
+    myth: "Design thinking is a soft, unstructured way of brainstorming ideas.",
+    reality:
+      "It's a disciplined loop — empathize, define, ideate, prototype, test — specifically built to catch that you're solving the wrong problem before you've built anything.",
+  },
+  "design/usability-heuristics": {
+    myth: "If a feature works without crashing, it's usable.",
+    reality:
+      "Working and feeling right are separate axes — Nielsen's heuristics name the specific, checkable ways an interface can technically function and still frustrate someone.",
+  },
+  "design/information-architecture": {
+    myth: "Information architecture just means designing the nav menu.",
+    reality:
+      "It's organizing content around how users actually categorize things, not how the org chart does — get the mental model wrong and no menu design fixes it.",
+  },
+  "design/visual-design-fundamentals": {
+    myth: "Visual design is subjective taste — some people are just naturally good at it.",
+    reality:
+      "Type scale, contrast ratios, and spacing rhythm are measurable levers with real math (like WCAG contrast) behind them, not just an eye for style.",
+  },
 };

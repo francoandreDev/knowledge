@@ -89,4 +89,14 @@ export const TRACK_TEASERS: Record<string, TrackTeaser> = {
     reality:
       "It's the harder work of calibration, feedback, and trust that decides whether a team's output is more — or less — than the sum of its parts.",
   },
+  architecture: {
+    myth: "Architecture is just drawing boxes and arrows before the real work starts.",
+    reality:
+      "It's the set of org-level, hard-to-reverse calls — style, boundaries, build vs. buy — that a single codebase's design can't undo later.",
+  },
+  design: {
+    myth: "Design is just making things look nice at the end.",
+    reality:
+      "It's understanding the human on the other side of the screen well enough that the interface disappears and the task doesn't fight them.",
+  },
 };
