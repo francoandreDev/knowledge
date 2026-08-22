@@ -74,21 +74,61 @@ correct summary, zero console errors across the run. See "Known issues"
 for two things found and fixed during this pass, and one browser-automation
 false alarm that is _not_ a real bug.
 
-### Phase 2 — Full enemy roster + difficulty curve — not started
+### Phase 2 — Full enemy roster + difficulty curve ✅ done, validated in-browser
 
 From GAME-DESIGN.md "Enemies":
 
-- Add Bat, Skeleton, Ghost, Ogre, and the Reaper boss.
-- Fixed absolute-time spawn-pool unlocks (0:00/1:00/2:00/3:00/4:00).
-- Boss trigger at `total_duration - 20s`, floored to `0:20`.
-- Uncapped exponential-ish spawn-density curve for the full run — this is
-  where the "don't overload the machine" instruction matters most: profile
-  before shipping, keep collision checks cheap (still fine as O(enemies ×
-  projectiles) linear scans at expected counts; revisit with a spatial grid
-  only if a real perf problem shows up, not preemptively).
-- Enemy tiers (Normal/Veteran/Elite) — gate tier-weighting on `powerIndex`
-  from the shop, which doesn't exist until Phase 5, so tiers can be stubbed
-  at "always Normal" until then, or built together with Phase 5.
+- Added Bat (fast erratic flight), Skeleton (higher HP, straight approach),
+  Ghost (keeps distance, fires a slow homing-less bolt), Ogre (telegraphed
+  slam attack, rare via low spawn weight), and the Reaper boss (ring burst +
+  dash attack patterns, contact damage).
+- Fixed absolute-time spawn-pool unlocks: Zombie 0:00, Bat 1:00, Skeleton
+  2:00, Ghost 3:00, Ogre 4:00 (`ENEMY_DEFS[].unlockAtS` in `engine.ts`) — a
+  short 90s test run only ever sees Zombie + the start of Bat, matching the
+  design doc's "quick reward run" intent.
+- Boss trigger at `max(20, TEST_RUN_DURATION_S - 20)`, so with the current
+  90s placeholder duration it spawns at 70s.
+- Spawn density ramp (`currentSpawnIntervalMs()`): interval halves every 45s
+  of elapsed run time, **floored at 150ms** and enemy count **capped at 60
+  alive** — a deliberate simplification of the design doc's literally-
+  uncapped curve, per the explicit "don't overload the machine" instruction.
+  Revisit the floor/cap only if real playtesting shows it's too tame, not
+  preemptively.
+- Enemy tiers (Normal/Veteran/Elite) are **stubbed at "always Normal"** —
+  they depend on `powerIndex` from the Phase 5 shop, which doesn't exist
+  yet. `EnemyDef` has no tier field at all right now; tiers will be added as
+  part of Phase 5.
+
+**Validated 2026-08-22** via `claude --chrome` against a local
+`astro preview`, using a temporary in-file edit (unlock thresholds shrunk to
+5/10/15/20s, `TEST_RUN_DURATION_S` shrunk to 50s) to observe the full
+roster + boss inside a short, watchable window without changing the shipped
+balance numbers — reverted immediately after, confirmed via `git diff`
+before committing. Observed: `spawn:enemy`/`hit:enemy`/`kill:enemy` firing
+for the roster, `boss:spawned` firing at the expected relative time, contact
+damage from multiple enemy kinds, gem pickups, and a correct death→game-over
+transition (25 kills, run ended by HP loss, results text rendered). Zero
+errors from our own code (`[game:...]` namespaces) across the run; the only
+console noise was an unrelated Chrome extension exception, not app code.
+
+**Browser-automation gotcha found and documented, not a game bug:** midway
+through this test, `document.visibilityState` flipped to `"hidden"` (the tab
+lost real OS focus even though the automation's `screenshot`/`click` calls
+still showed it as the active tab), which suspends Kontra's
+`requestAnimationFrame` loop — HUD stopped updating and no new logs
+appeared for several seconds. Confirmed via `document.hasFocus()` returning
+`false` while `visibilityState` still read `"visible"`. Resolved by having
+the user click "Start run" directly instead of a synthetic click, which
+gives the tab real focus. **Future sessions testing this game: prefer a
+real user-driven click over a synthetic one for anything timing-sensitive,
+and check `document.hasFocus()` (not just `visibilityState`) if the loop
+seems stalled.** Separately: the engine has no `dt` clamp on the frame after
+a real (non-automation) tab-backgrounding gap, so a real player who
+backgrounds the tab mid-run and returns will see one large catch-up frame
+(elapsed time jumps, but spawning/collision logic held up fine under this
+during validation — at most one enemy spawns per frame regardless of how
+large the time jump is). Worth a small `dt` clamp in a later polish phase if
+it ever proves disorienting in practice; not blocking for Phase 2.
 
 ### Phase 3 — Full weapon roster + leveling/card system — not started
 
@@ -160,21 +200,30 @@ From GAME-DESIGN.md "Coins and the shop," "Technical foundations":
 
 ## Current state
 
-**Phase 1 complete and validated.** Phases 2-8 not started. Next session
-should confirm scope with the user before starting Phase 2 (per this
-project's usual "confirm scope in 1-2 sentences before writing" workflow),
-since Phase 2 and Phase 3 are both large and either could reasonably go
-first.
+**Phase 1 and Phase 2 complete and validated.** Phases 3-8 not started. Next
+session should confirm scope with the user before starting Phase 3 (full
+weapon roster + leveling/card system) — it's explicitly called out as the
+biggest remaining chunk, likely 2+ sessions on its own.
 
-## Deliberate simplifications (Phase 1, intentional — not bugs)
+## Deliberate simplifications (intentional — not bugs)
 
-- Zombie spawns on a **fixed interval**, not the real exponential curve —
-  the point of Phase 1 was validating the loop and logging cheaply before
-  paying for real wave-scaling math.
-- Fixed 90s run duration instead of the real token-derived formula.
-- Single weapon, single enemy type.
-- `ZOMBIE_MAX_ALIVE = 25` hard cap — keeps Phase 1 perf predictable
-  regardless of curve tuning later.
+Phase 1:
+
+- Fixed 90s run duration instead of the real token-derived formula (still
+  true — real formula is Phase 4).
+- Single weapon (stand-in "Bolt"), no leveling — that's Phase 3.
+
+Phase 2:
+
+- Spawn density ramp is exponential-ish but **floored at 150ms** between
+  spawns and **capped at 60 alive enemies**, not literally uncapped as the
+  design doc specifies — a deliberate perf tradeoff, see the Phase 2 section
+  above.
+- Enemy tiers (Normal/Veteran/Elite) stubbed at "always Normal" — no
+  `powerIndex` exists until Phase 5.
+- No coin drops yet (Phase 5) — enemies still only drop XP gems on kill.
+- No `dt` clamp on a real tab-backgrounding gap — see the Phase 2 "gotcha"
+  note above.
 
 ## Known issues / follow-ups
 
