@@ -130,20 +130,78 @@ during validation — at most one enemy spawns per frame regardless of how
 large the time jump is). Worth a small `dt` clamp in a later polish phase if
 it ever proves disorienting in practice; not blocking for Phase 2.
 
-### Phase 3 — Full weapon roster + leveling/card system — not started
+### Phase 3 — Full weapon roster + leveling/card system ✅ done (Lv1-5 only), validated in-browser
 
-From GAME-DESIGN.md "Weapons" and "Level-up card pool":
+From GAME-DESIGN.md "Weapons" and "Level-up card pool", scoped down for this
+session per the "biggest chunk, likely 2+ sessions" note below — **Lv6
+weapon evolutions are explicitly deferred to a follow-up session**, tracked
+as a new sub-item under Phase 3 rather than folded into Phase 6:
 
-- Blade Arc, Bolt (already prototyped, needs real Lv1-5 progression),
-  Orbit Shield, Nova Pulse, Homing Dart — Lv1-5 progression + Lv6 evolution
-  each.
-- XP gems actually feed a level counter; level-up pauses the loop and
-  offers 3-4 cards (owned-weapon upgrade/evolution, new-weapon if <4
-  equipped, temporary run-only stat cards).
-- Max 4 of 5 weapons equipped.
-- This is the biggest chunk of remaining gameplay code — likely worth 2+
-  sessions on its own (pause/resume state machine, card UI, weapon behavior
-  differentiation).
+- Real XP/leveling: `xpForNextLevel(level) = 20 + (level-1)*12`, gems grant
+  `GEM_XP_VALUE` XP, `addXp()` loops so multiple level-ups from one pickup
+  all queue correctly (`pendingLevelUps`).
+- Pause/level-up state machine: a third `status` value, `"levelup"`,
+  alongside `"running"`/`"gameover"` — reuses the loop's existing
+  `if (status !== "running") return;` guard, so no separate pause logic was
+  needed elsewhere in `update()`.
+- Card pool (`buildCardPool()`/`drawCards()`): shuffles and takes up to 4
+  cards from three sources — owned-weapon upgrades (while
+  `level < WEAPON_MAX_LEVEL`), new-weapon offers (while
+  `ownedWeapons.length < MAX_EQUIPPED_WEAPONS`), and temporary run-only stat
+  cards (while under `maxStacks`). Picking a card resumes the run if it was
+  the last pending level-up, otherwise immediately re-presents another card
+  draw for the next pending level.
+- All 5 weapons implemented with real Lv1-5 progression via a per-weapon
+  `updateWeapon()` dispatch (mirrors Phase 2's per-enemy-kind behavior
+  dispatch): Blade Arc (melee sweep, arc widens + damage/attack speed scale
+  with level), Bolt (pierce unlocks at Lv4, 2nd/3rd projectile at Lv3/5),
+  Orbit Shield (continuous, 2nd orbiter at Lv3, per-enemy hit cooldown),
+  Nova Pulse (periodic AoE burst, radius/damage/frequency scale), Homing
+  Dart (turn-rate-limited steering toward a captured target, 2nd dart at
+  Lv3). Weapon visual feedback (orbiter dots, arc-sweep flash, pulse-ring
+  flash) is drawn as raw `context.arc()`/`stroke()` calls with time-based
+  fading alpha, not Kontra sprites — kept cheap on purpose.
+- Max 4 of 5 weapons equipped — enforced in `buildCardPool()` by only
+  offering unowned-weapon cards while under the cap.
+
+**Validated 2026-08-22** via `claude --chrome` against a local
+`astro preview`, using the same temp-shrink-then-revert methodology as
+Phase 2 (`GEM_XP_VALUE` temporarily set to `50` to force rapid level-ups,
+reverted to `4` before commit, confirmed via `git diff` afterward). Watched
+a run play out live to a natural 90s timer expiry: reached **Lv 30, 135
+kills**, HUD level/XP/weapons text tracked correctly throughout, multiple
+weapons (Bolt, Orbit Shield, Nova Pulse) fired and leveled up correctly in
+combination, the level-up overlay paused the run and presented a real card
+pool each time (upgrade / new-weapon / stat cards all observed), and the
+game-over screen fired at `Time: 0.0s` with the correct summary text
+("survived 90.0s, 135 kills, reached Lv 30").
+
+**Real bug found and fixed during this pass:** choosing a "New: `<weapon>`"
+card once resulted in that weapon being pushed into `ownedWeapons` **twice**
+(observed as `novaPulse L5, novaPulse L1` sitting side-by-side in the HUD).
+Root cause: `applyCard`'s `weaponUpgrade` branch does `ownedWeapons.find()`,
+which always resolves to the _first_ matching entry — so once a duplicate
+existed, all further "Upgrade Nova Pulse" cards silently leveled the first
+entry while the second sat frozen at Lv1, and `buildCardPool()` (which loops
+over every `ownedWeapons` entry independently) kept generating a second,
+stale "Upgrade Nova Pulse — Lv 2" card even after the real one had already
+reached Lv 5 — i.e. an upgrade card advertising a level _lower than the
+weapon's current level_, exactly the symptom that surfaced it. Fixed at the
+source: `applyCard`'s `newWeapon` branch now checks
+`ownedWeapons.some((w) => w.id === card.weaponId)` and refuses to push (with
+a `log.warn`) if that weapon is already owned — this is the only code path
+that ever pushes into `ownedWeapons`, so a duplicate can no longer be
+created. Also hardened `onLevelUp` in `index.astro` with a `chosen` flag so
+a second click on any level-up card (e.g. a double-fired click event) is a
+no-op regardless — belt-and-suspenders on the same class of bug. The most
+likely real trigger was two click events (one queued from an earlier
+browser-automation focus stall, one synthetic) landing on the same button
+in quick succession; both fixes make that scenario safe even if it recurs.
+
+**Deferred to a follow-up session:** Lv6 weapon evolutions (Whirlwind,
+Piercing Lance, Barrier Storm, Shockwave, Swarm) from GAME-DESIGN.md's
+weapons table — `WEAPON_MAX_LEVEL` is currently `5` with no evolution path
+past it; cards simply stop offering further upgrades for a maxed weapon.
 
 ### Phase 4 — Real gating + lobby + results screen — not started
 
@@ -200,10 +258,11 @@ From GAME-DESIGN.md "Coins and the shop," "Technical foundations":
 
 ## Current state
 
-**Phase 1 and Phase 2 complete and validated.** Phases 3-8 not started. Next
-session should confirm scope with the user before starting Phase 3 (full
-weapon roster + leveling/card system) — it's explicitly called out as the
-biggest remaining chunk, likely 2+ sessions on its own.
+**Phases 1-3 complete and validated** (Phase 3 at Lv1-5 only — see its
+section above for the deferred Lv6-evolutions sub-item). Phases 4-8 not
+started, plus the Phase 3 Lv6-evolutions follow-up. Next session should
+confirm scope with the user: either the Lv6 evolutions follow-up, or moving
+on to Phase 4 (real gating + lobby + results screen).
 
 ## Deliberate simplifications (intentional — not bugs)
 
@@ -224,6 +283,22 @@ Phase 2:
 - No coin drops yet (Phase 5) — enemies still only drop XP gems on kill.
 - No `dt` clamp on a real tab-backgrounding gap — see the Phase 2 "gotcha"
   note above.
+
+Phase 3:
+
+- No Lv6 weapon evolutions yet — deferred to a follow-up session, see the
+  Phase 3 section above.
+- Level-up card draws always attempt to fill 4 slots
+  (`shuffle(pool).slice(0, 4)`) rather than strictly randomizing between 3-4
+  as GAME-DESIGN.md's "3-4 random cards" phrasing allows — a harmless
+  simplification since the pool is large enough in practice that this
+  rarely under-fills anyway.
+- `luckyStar`'s "+10% extra coin drop" stat card accumulates into
+  `extraCoinChance` but is a no-op — coins don't exist until Phase 5.
+- Orbiter/arc/pulse weapon visuals are simple raw-canvas draws, not
+  sprite-based — consistent with the project's "keep the math cheap"
+  instruction, revisit only if Phase 8's visual polish pass wants richer
+  effects.
 
 ## Known issues / follow-ups
 
