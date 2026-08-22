@@ -130,12 +130,9 @@ during validation — at most one enemy spawns per frame regardless of how
 large the time jump is). Worth a small `dt` clamp in a later polish phase if
 it ever proves disorienting in practice; not blocking for Phase 2.
 
-### Phase 3 — Full weapon roster + leveling/card system ✅ done (Lv1-5 only), validated in-browser
+### Phase 3 — Full weapon roster + leveling/card system ✅ done (Lv1-6, evolutions included), validated in-browser
 
-From GAME-DESIGN.md "Weapons" and "Level-up card pool", scoped down for this
-session per the "biggest chunk, likely 2+ sessions" note below — **Lv6
-weapon evolutions are explicitly deferred to a follow-up session**, tracked
-as a new sub-item under Phase 3 rather than folded into Phase 6:
+From GAME-DESIGN.md "Weapons" and "Level-up card pool":
 
 - Real XP/leveling: `xpForNextLevel(level) = 20 + (level-1)*12`, gems grant
   `GEM_XP_VALUE` XP, `addXp()` loops so multiple level-ups from one pickup
@@ -163,6 +160,21 @@ as a new sub-item under Phase 3 rather than folded into Phase 6:
   fading alpha, not Kontra sprites — kept cheap on purpose.
 - Max 4 of 5 weapons equipped — enforced in `buildCardPool()` by only
   offering unowned-weapon cards while under the cap.
+- **Lv6 evolutions** (`WEAPON_MAX_LEVEL = 6`): each weapon gains a distinct
+  evolved behavior at its final level, dispatched via an `isEvolved = w.level
+  > = WEAPON_MAX_LEVEL`flag inside each`updateWeapon()` case rather than a
+separate code path — Blade Arc → **Whirlwind** (continuous 360° tick,
+facing-independent, faster interval, no arc-angle check), Bolt → **Piercing
+Lance** (`pierce = Infinity`, projectile drawn 1.8x size via a new
+`sizeMult`param on`spawnPlayerProjectile()`), Orbit Shield → **Barrier
+Storm** (orbiters drop trail points every 80ms into a capped-lifetime
+`orbitTrails`array that also damages enemies at half the orbiter's
+contact damage, rendered as fading yellow dots), Nova Pulse → **Shockwave**
+(2x damage, plus a fixed-distance knockback push on every enemy hit),
+Homing Dart → **Swarm** (fires 5 darts in a spread instead of the normal
+1-2 count formula).`buildCardPool()`'s upgrade-card title/description
+switches to "Evolve `<name>`→`<evolved name>`" + a evolution-specific
+blurb exactly when `w.level + 1 === WEAPON_MAX_LEVEL`.
 
 **Validated 2026-08-22** via `claude --chrome` against a local
 `astro preview`, using the same temp-shrink-then-revert methodology as
@@ -198,10 +210,24 @@ likely real trigger was two click events (one queued from an earlier
 browser-automation focus stall, one synthetic) landing on the same button
 in quick succession; both fixes make that scenario safe even if it recurs.
 
-**Deferred to a follow-up session:** Lv6 weapon evolutions (Whirlwind,
-Piercing Lance, Barrier Storm, Shockwave, Swarm) from GAME-DESIGN.md's
-weapons table — `WEAPON_MAX_LEVEL` is currently `5` with no evolution path
-past it; cards simply stop offering further upgrades for a maxed weapon.
+**Lv6 evolutions validated 2026-08-22** in a second in-browser pass, same
+temp-shrink-then-revert methodology (`GEM_XP_VALUE` temporarily `60` and
+`GEM_PICKUP_RADIUS` temporarily `900` to force fast, reliable gem collection
+under scripted auto-play; both reverted before commit, confirmed via
+`git diff`). Drove the run with a scripted auto-picker (always chooses a
+"Bolt" card when offered) plus synthetic movement, and let it play to a
+natural conclusion: **Bolt reached Lv6 (Piercing Lance)** and **Blade Arc
+reached Lv6 (Whirlwind)** mid-run with no console errors and stable HP, then
+the run survived the full 90s including the boss encounter, ending at
+**Lv 36, 131 kills**, correct game-over summary text. Confirms the
+`isEvolved` dispatch branches run without crashing, the evolution-labeled
+level-up cards render correctly, and normal (non-evolved) weapons/stat cards
+continue to interleave correctly in the same run (Orbit Shield/Nova Pulse
+leveled normally, a `thickSkin` stat pick visibly raised max HP). Did not
+individually confirm Orbit Shield/Nova Pulse/Homing Dart evolutions in this
+pass (run ended before they reached Lv6) — the four cases share the same
+`isEvolved` pattern and passed `typecheck`/`build`, but a future session
+should watch for those three specifically if anything looks off in play.
 
 ### Phase 4 — Real gating + lobby + results screen — not started
 
@@ -258,11 +284,9 @@ From GAME-DESIGN.md "Coins and the shop," "Technical foundations":
 
 ## Current state
 
-**Phases 1-3 complete and validated** (Phase 3 at Lv1-5 only — see its
-section above for the deferred Lv6-evolutions sub-item). Phases 4-8 not
-started, plus the Phase 3 Lv6-evolutions follow-up. Next session should
-confirm scope with the user: either the Lv6 evolutions follow-up, or moving
-on to Phase 4 (real gating + lobby + results screen).
+**Phases 1-3 complete and validated**, including Lv6 weapon evolutions.
+Phases 4-8 not started. Next session should confirm scope with the user —
+Phase 4 (real gating + lobby + results screen) is the natural next step.
 
 ## Deliberate simplifications (intentional — not bugs)
 
@@ -286,8 +310,6 @@ Phase 2:
 
 Phase 3:
 
-- No Lv6 weapon evolutions yet — deferred to a follow-up session, see the
-  Phase 3 section above.
 - Level-up card draws always attempt to fill 4 slots
   (`shuffle(pool).slice(0, 4)`) rather than strictly randomizing between 3-4
   as GAME-DESIGN.md's "3-4 random cards" phrasing allows — a harmless

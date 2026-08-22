@@ -14,9 +14,9 @@
 // leveling up pauses the loop and offers 3-4 cards drawn from a pool of
 // owned-weapon upgrades, new-weapon offers (max 4 equipped), and temporary
 // run-only stat cards. All 5 weapons (Blade Arc, Bolt, Orbit Shield, Nova
-// Pulse, Homing Dart) are implemented with real Lv1-5 progression. Lv6
-// evolutions from GAME-DESIGN.md are deliberately deferred to a follow-up
-// session — see docs/GAME-PROGRESS.md's Phase 3 section.
+// Pulse, Homing Dart) are implemented with real Lv1-5 progression, plus a
+// Lv6 evolution per weapon (Whirlwind, Piercing Lance, Barrier Storm,
+// Shockwave, Swarm) per GAME-DESIGN.md.
 //
 // Spawn/collision math is kept intentionally cheap (linear scans over small
 // arrays, no quadtree) and the density ramp is floored at a minimum interval
@@ -186,7 +186,23 @@ const UPGRADE_BLURB: Record<WeaponId, string> = {
   homingDart: "+dart, +damage, -cooldown",
 };
 
-const WEAPON_MAX_LEVEL = 5;
+const EVOLVED_NAMES: Record<WeaponId, string> = {
+  bladeArc: "Whirlwind",
+  bolt: "Piercing Lance",
+  orbitShield: "Barrier Storm",
+  novaPulse: "Shockwave",
+  homingDart: "Swarm",
+};
+
+const EVOLUTION_BLURB: Record<WeaponId, string> = {
+  bladeArc: "Continuous 360° spin — hits everything in range, no facing needed",
+  bolt: "Infinite pierce, larger bolt",
+  orbitShield: "Orbiters leave a damaging trail behind them",
+  novaPulse: "2x damage + knockback on burst",
+  homingDart: "Fires 5 homing darts in a spread",
+};
+
+const WEAPON_MAX_LEVEL = 6; // level 6 is each weapon's evolved form
 const MAX_EQUIPPED_WEAPONS = 4;
 
 const BLADE_ARC_RADIUS = 60;
@@ -195,6 +211,11 @@ const ARC_EFFECT_DURATION_MS = 180;
 const ORBIT_HIT_RADIUS = 10;
 const ORBIT_VISUAL_RADIUS = 6;
 const ORBIT_HIT_COOLDOWN_MS = 400;
+const ORBIT_TRAIL_DROP_INTERVAL_MS = 80; // Barrier Storm evolution (Lv6)
+const ORBIT_TRAIL_LIFETIME_MS = 900;
+const ORBIT_TRAIL_VISUAL_RADIUS = 5;
+
+const SHOCKWAVE_KNOCKBACK = 40; // Nova Pulse evolution (Lv6)
 
 const PULSE_EFFECT_DURATION_MS = 300;
 
@@ -338,6 +359,12 @@ interface PulseEffect {
   createdAt: number;
 }
 
+interface OrbitTrailPoint {
+  x: number;
+  y: number;
+  createdAt: number;
+}
+
 interface InternalCard {
   id: string;
   kind: "weaponUpgrade" | "newWeapon" | "stat";
@@ -431,6 +458,8 @@ export function startGame(canvas: HTMLCanvasElement, callbacks: GameCallbacks) {
   const gems: Gem[] = [];
   const arcEffects: ArcEffect[] = [];
   const pulseEffects: PulseEffect[] = [];
+  const orbitTrails: OrbitTrailPoint[] = [];
+  let lastOrbitTrailDropAt = -Infinity;
   let orbiterPositions: { x: number; y: number }[] = [];
 
   // --- Phase 3: weapons, leveling, run-only stat modifiers ---
@@ -576,12 +605,13 @@ export function startGame(canvas: HTMLCanvasElement, callbacks: GameCallbacks) {
     damage: number,
     pierce: number,
     source: string,
+    sizeMult = 1,
   ): Projectile {
     const projectile = Sprite({
       x: player.x,
       y: player.y,
-      width: PROJECTILE_RADIUS * 2,
-      height: PROJECTILE_RADIUS * 2,
+      width: PROJECTILE_RADIUS * 2 * sizeMult,
+      height: PROJECTILE_RADIUS * 2 * sizeMult,
       anchor: { x: 0.5, y: 0.5 },
       color: source === "homingDart" ? "#38bdf8" : "#fbbf24",
       dx: Math.cos(angle) * speed,
@@ -722,12 +752,17 @@ export function startGame(canvas: HTMLCanvasElement, callbacks: GameCallbacks) {
     const pool: InternalCard[] = [];
     for (const w of ownedWeapons) {
       if (w.level < WEAPON_MAX_LEVEL) {
+        const isEvolution = w.level + 1 === WEAPON_MAX_LEVEL;
         pool.push({
           id: `weaponUpgrade:${w.id}`,
           kind: "weaponUpgrade",
           weaponId: w.id,
-          title: `Upgrade ${WEAPON_NAMES[w.id]} — Lv ${w.level + 1}`,
-          description: UPGRADE_BLURB[w.id],
+          title: isEvolution
+            ? `Evolve ${WEAPON_NAMES[w.id]} → ${EVOLVED_NAMES[w.id]}`
+            : `Upgrade ${WEAPON_NAMES[w.id]} — Lv ${w.level + 1}`,
+          description: isEvolution
+            ? EVOLUTION_BLURB[w.id]
+            : UPGRADE_BLURB[w.id],
         });
       }
     }
@@ -799,14 +834,21 @@ export function startGame(canvas: HTMLCanvasElement, callbacks: GameCallbacks) {
   function updateWeapon(w: WeaponRuntime, dt: number) {
     switch (w.id) {
       case "bolt": {
-        const interval = 550 - (w.level - 1) * 60;
+        const isEvolved = w.level >= WEAPON_MAX_LEVEL; // Piercing Lance
+        const interval = isEvolved ? 350 : 550 - (w.level - 1) * 60;
         if (elapsedMs - w.lastActionAt >= interval) {
           const target = findNearestEnemy();
           if (target) {
             w.lastActionAt = elapsedMs;
             const damage = (6 + (w.level - 1) * 2) * damageMult;
-            const pierce = w.level >= 4 ? 1 : 0;
-            const count = w.level >= 5 ? 3 : w.level >= 3 ? 2 : 1;
+            const pierce = isEvolved ? Infinity : w.level >= 4 ? 1 : 0;
+            const count = isEvolved
+              ? 1
+              : w.level >= 5
+                ? 3
+                : w.level >= 3
+                  ? 2
+                  : 1;
             const baseAngle = Math.atan2(
               target.y - player.y,
               target.x - player.x,
@@ -820,6 +862,7 @@ export function startGame(canvas: HTMLCanvasElement, callbacks: GameCallbacks) {
                 damage,
                 pierce,
                 "bolt",
+                isEvolved ? 1.8 : 1,
               );
             }
           }
@@ -827,23 +870,27 @@ export function startGame(canvas: HTMLCanvasElement, callbacks: GameCallbacks) {
         break;
       }
       case "bladeArc": {
-        const interval = 700 - (w.level - 1) * 70;
+        const isEvolved = w.level >= WEAPON_MAX_LEVEL; // Whirlwind
+        const interval = isEvolved ? 250 : 700 - (w.level - 1) * 70;
         if (elapsedMs - w.lastActionAt >= interval) {
           const target = findNearestEnemy();
           const facing = target
             ? Math.atan2(target.y - player.y, target.x - player.x)
             : 0;
           w.lastActionAt = elapsedMs;
-          const arcDeg = 70 + (w.level - 1) * 15;
-          const halfArc = (arcDeg * Math.PI) / 180 / 2;
+          const arcDeg = isEvolved ? 360 : 70 + (w.level - 1) * 15;
+          const halfArc = isEvolved ? Math.PI : (arcDeg * Math.PI) / 180 / 2;
           const damage = (10 + (w.level - 1) * 3) * damageMult;
           for (const e of enemies) {
             if (!e.alive) continue;
             const d = distance(player, e);
             if (d > BLADE_ARC_RADIUS) continue;
-            const angleToE = Math.atan2(e.y - player.y, e.x - player.x);
-            const diff = Math.abs(normalizeAngle(angleToE - facing));
-            if (diff <= halfArc) damageEnemy(e, damage, "bladeArc");
+            if (!isEvolved) {
+              const angleToE = Math.atan2(e.y - player.y, e.x - player.x);
+              const diff = Math.abs(normalizeAngle(angleToE - facing));
+              if (diff > halfArc) continue;
+            }
+            damageEnemy(e, damage, "bladeArc");
           }
           arcEffects.push({
             x: player.x,
@@ -858,11 +905,16 @@ export function startGame(canvas: HTMLCanvasElement, callbacks: GameCallbacks) {
         break;
       }
       case "orbitShield": {
+        const isEvolved = w.level >= WEAPON_MAX_LEVEL; // Barrier Storm
         w.orbitAngle = (w.orbitAngle ?? 0) + (1.5 + (w.level - 1) * 0.3) * dt;
         const count = w.level >= 3 ? 2 : 1;
         const radius = 50 + (w.level - 1) * 6;
         const damage = (5 + (w.level - 1) * 2) * damageMult;
         const positions: { x: number; y: number }[] = [];
+        const shouldDropTrail =
+          isEvolved &&
+          elapsedMs - lastOrbitTrailDropAt >= ORBIT_TRAIL_DROP_INTERVAL_MS;
+        if (shouldDropTrail) lastOrbitTrailDropAt = elapsedMs;
         for (let i = 0; i < count; i++) {
           const angle = w.orbitAngle + i * ((Math.PI * 2) / count);
           const ox = player.x + Math.cos(angle) * radius;
@@ -880,20 +932,51 @@ export function startGame(canvas: HTMLCanvasElement, callbacks: GameCallbacks) {
               }
             }
           }
+          if (shouldDropTrail)
+            orbitTrails.push({ x: ox, y: oy, createdAt: elapsedMs });
         }
         orbiterPositions = positions;
+        if (isEvolved) {
+          for (let i = orbitTrails.length - 1; i >= 0; i--) {
+            const t = orbitTrails[i];
+            if (elapsedMs - t.createdAt >= ORBIT_TRAIL_LIFETIME_MS) {
+              orbitTrails.splice(i, 1);
+              continue;
+            }
+            for (const e of enemies) {
+              if (!e.alive) continue;
+              if (distance(t, e) < ORBIT_HIT_RADIUS + e.radius) {
+                if (
+                  elapsedMs - (e.lastOrbitHitAt ?? -Infinity) >=
+                  ORBIT_HIT_COOLDOWN_MS
+                ) {
+                  e.lastOrbitHitAt = elapsedMs;
+                  damageEnemy(e, damage * 0.5, "orbitShield-trail");
+                }
+              }
+            }
+          }
+        }
         break;
       }
       case "novaPulse": {
+        const isEvolved = w.level >= WEAPON_MAX_LEVEL; // Shockwave
         const interval = 2500 - (w.level - 1) * 250;
         if (elapsedMs - w.lastActionAt >= interval) {
           w.lastActionAt = elapsedMs;
           const radius = 70 + (w.level - 1) * 12;
-          const damage = (8 + (w.level - 1) * 3) * damageMult;
+          let damage = (8 + (w.level - 1) * 3) * damageMult;
+          if (isEvolved) damage *= 2;
           for (const e of enemies) {
             if (!e.alive) continue;
-            if (distance(player, e) <= radius)
+            if (distance(player, e) <= radius) {
               damageEnemy(e, damage, "novaPulse");
+              if (isEvolved && e.alive) {
+                const angle = Math.atan2(e.y - player.y, e.x - player.x);
+                e.x += Math.cos(angle) * SHOCKWAVE_KNOCKBACK;
+                e.y += Math.sin(angle) * SHOCKWAVE_KNOCKBACK;
+              }
+            }
           }
           pulseEffects.push({
             x: player.x,
@@ -901,14 +984,15 @@ export function startGame(canvas: HTMLCanvasElement, callbacks: GameCallbacks) {
             radius,
             createdAt: elapsedMs,
           });
-          log.log("weapon:novaPulse:burst", { radius });
+          log.log("weapon:novaPulse:burst", { radius, isEvolved });
         }
         break;
       }
       case "homingDart": {
-        const interval = 1200 - (w.level - 1) * 100;
+        const isEvolved = w.level >= WEAPON_MAX_LEVEL; // Swarm
+        const interval = isEvolved ? 1400 : 1200 - (w.level - 1) * 100;
         if (elapsedMs - w.lastActionAt >= interval) {
-          const count = w.level >= 3 ? 2 : 1;
+          const count = isEvolved ? 5 : w.level >= 3 ? 2 : 1;
           const candidates = enemies.filter((e) => e.alive);
           if (candidates.length > 0) {
             w.lastActionAt = elapsedMs;
@@ -916,12 +1000,14 @@ export function startGame(canvas: HTMLCanvasElement, callbacks: GameCallbacks) {
             for (let i = 0; i < count; i++) {
               const target =
                 candidates[Math.floor(Math.random() * candidates.length)];
-              const angle = Math.atan2(
+              const baseAngle = Math.atan2(
                 target.y - player.y,
                 target.x - player.x,
               );
+              const spread =
+                isEvolved && count > 1 ? (i - (count - 1) / 2) * 0.15 : 0;
               const p = spawnPlayerProjectile(
-                angle,
+                baseAngle + spread,
                 HOMING_DART_SPEED,
                 damage,
                 0,
@@ -1264,6 +1350,15 @@ export function startGame(canvas: HTMLCanvasElement, callbacks: GameCallbacks) {
       for (const p of projectiles) p.render();
       for (const p of enemyProjectiles) p.render();
       player.render();
+
+      for (const t of orbitTrails) {
+        const age = elapsedMs - t.createdAt;
+        const alpha = Math.max(0, 1 - age / ORBIT_TRAIL_LIFETIME_MS);
+        context.fillStyle = `rgba(250,204,21,${alpha * 0.5})`;
+        context.beginPath();
+        context.arc(t.x, t.y, ORBIT_TRAIL_VISUAL_RADIUS, 0, Math.PI * 2);
+        context.fill();
+      }
 
       context.fillStyle = "#facc15";
       for (const pos of orbiterPositions) {
