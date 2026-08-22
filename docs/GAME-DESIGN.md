@@ -16,15 +16,15 @@ The five hooks the design is built around, from the original request:
 
 ## Gating: how playing connects to studying
 
-- Every time `ProgressToggle` marks an individual level (L1, L2, or L3) of any unit as `done`, the player earns **1 token**.
+- Every time `ProgressToggle` marks a unit as `done`, the player earns **1 token**.
+  - **Implementation note (Phase 4):** the site's actual progress model is one `done` flag per _unit_, not per level — `ProgressToggle` renders once per unit page and gates on every exercise pool across whichever levels that unit has, not once per L1/L2/L3 individually. This doc originally assumed per-level marking; the real mechanic is 1 token per unit-done event (initial or re-mark), which also makes the run-duration rule below collapse into "units currently marked done" rather than a separate all-three-levels check.
 - A token is one play attempt; it is consumed when a run starts, not on death.
 - Tokens accumulate **without limit and never expire** — deliberately, to reward binge study sessions with a stockpile of runs.
-- Re-marking a level `done` again (e.g. after a spaced-repetition reset forces a re-take) also grants a token — this rewards review, not just first-time completion.
-- Completing all three levels of a unit is what counts toward run _duration_ (see below) — a distinct, separate mechanic from token-earning.
+- Re-marking a unit `done` again (e.g. after a spaced-repetition reset forces a re-take) also grants a token — this rewards review, not just first-time completion.
 
 ## Run duration
 
-`duration = base (60-90s) + 30s × (number of units with L1+L2+L3 all currently done)`, **uncapped**.
+`duration = base (60s) + 30s × (number of units currently marked done)`, **uncapped**.
 
 - Recalculated live at the moment a run starts, by reading the current state of `localStorage` (`progress:<track>/<unit-slug>`).
 - If spaced-repetition later resets a unit (the 7/30/90-day cycle un-marks `done` and clears exercise state), the next run is shorter again until that unit is re-passed — this pushes toward keeping up with review, not only chasing new units.
@@ -170,6 +170,7 @@ A dynamic virtual joystick: the base circle spawns at the exact point the player
 
 - **Game engine**: Kontra.js (lightweight, ~7kb) for the game loop, sprite pooling, vector math, and collision — avoids re-implementing that layer by hand while staying dependency-light.
 - **Persistence**: IndexedDB (via a small promise wrapper, e.g. `idb`) for all game-owned state — tokens, coin balance, permanent upgrade levels, best time. The game _reads_ (never writes) the existing `localStorage` progress keys (`progress:<track>/<unit-slug>`) to compute tokens and run duration; it does not interfere with the site's existing `progress:`/`exercise:` localStorage keys.
+  - **Implementation note (Phase 4):** the IndexedDB wrapper is Phase 5 work (alongside coins/shop). Until then, tokens and best-time live in `pStorage` (`src/lib/game/tokens.ts`) — the same profile-namespaced `localStorage` wrapper `progress:`/`exercise:` keys already use, since they're equally per-learner data. Migrate to `idb` in Phase 5 without changing the read-only relationship with `progress:`/`exercise:` keys.
 - **Route**: a dedicated page, `src/pages/game/index.astro`.
 
 ## Open items deferred to implementation time

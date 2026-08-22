@@ -17,6 +17,10 @@
 // Pulse, Homing Dart) are implemented with real Lv1-5 progression, plus a
 // Lv6 evolution per weapon (Whirlwind, Piercing Lance, Barrier Storm,
 // Shockwave, Swarm) per GAME-DESIGN.md.
+// Phase 4 scope, layered on top: the fixed 90s placeholder duration is gone
+// — startGame() now takes the run's length in seconds from its caller (see
+// GameOptions), computed live by src/lib/game/tokens.ts's
+// computeRunDurationS() from the site's own progress state.
 //
 // Spawn/collision math is kept intentionally cheap (linear scans over small
 // arrays, no quadtree) and the density ramp is floored at a minimum interval
@@ -50,7 +54,7 @@ const GEM_PULL_SPEED = 260;
 const GEM_COLLECT_DISTANCE = 14;
 const GEM_XP_VALUE = 4; // placeholder — see "Deliberate simplifications"
 
-const TEST_RUN_DURATION_S = 90; // fixed placeholder; real formula is Phase 4
+const DEFAULT_RUN_DURATION_S = 90; // fallback only if a caller omits durationS
 
 // --- Phase 2: spawn density ramp ---
 const BASE_SPAWN_INTERVAL_MS = 1400;
@@ -298,6 +302,11 @@ export interface GameCallbacks {
   onLevelUp: (cards: LevelUpCard[], choose: (cardId: string) => void) => void;
 }
 
+export interface GameOptions {
+  /** Total run length in seconds — see tokens.ts's computeRunDurationS(). */
+  durationS?: number;
+}
+
 interface Enemy extends GameObject {
   kind: EnemyKind;
   hp: number;
@@ -435,8 +444,17 @@ function pickEnemyDef(elapsedS: number): EnemyDef {
   return unlocked[unlocked.length - 1];
 }
 
-export function startGame(canvas: HTMLCanvasElement, callbacks: GameCallbacks) {
-  log.log("startGame() called", { width: canvas.width, height: canvas.height });
+export function startGame(
+  canvas: HTMLCanvasElement,
+  callbacks: GameCallbacks,
+  options: GameOptions = {},
+) {
+  const runDurationS = options.durationS ?? DEFAULT_RUN_DURATION_S;
+  log.log("startGame() called", {
+    width: canvas.width,
+    height: canvas.height,
+    runDurationS,
+  });
 
   const { context } = init(canvas);
   initKeys();
@@ -490,7 +508,7 @@ export function startGame(canvas: HTMLCanvasElement, callbacks: GameCallbacks) {
   let hudAccumulatorMs = 0;
   const HUD_UPDATE_INTERVAL_MS = 100; // throttle DOM writes, not every frame
 
-  const bossSpawnAtS = Math.max(20, TEST_RUN_DURATION_S - 20);
+  const bossSpawnAtS = Math.max(20, runDurationS - 20);
   let bossSpawned = false;
   const unlockedPools = new Set<string>();
 
@@ -498,7 +516,7 @@ export function startGame(canvas: HTMLCanvasElement, callbacks: GameCallbacks) {
     callbacks.onHudUpdate({
       hp: player.hp,
       maxHp: effectiveMaxHp(),
-      timeRemaining: Math.max(0, TEST_RUN_DURATION_S - elapsedMs / 1000),
+      timeRemaining: Math.max(0, runDurationS - elapsedMs / 1000),
       kills,
       gems: gemsCollected,
       status,
@@ -1133,7 +1151,7 @@ export function startGame(canvas: HTMLCanvasElement, callbacks: GameCallbacks) {
   function endGame(reason: "death" | "timer") {
     if (status === "gameover") return;
     status = "gameover";
-    const survivedS = Math.min(elapsedMs / 1000, TEST_RUN_DURATION_S);
+    const survivedS = Math.min(elapsedMs / 1000, runDurationS);
     log.log("game:over", {
       reason,
       survivedS: survivedS.toFixed(1),
@@ -1331,7 +1349,7 @@ export function startGame(canvas: HTMLCanvasElement, callbacks: GameCallbacks) {
       }
 
       // --- timer ---
-      if (elapsedS >= TEST_RUN_DURATION_S) {
+      if (elapsedS >= runDurationS) {
         endGame("timer");
         return;
       }
@@ -1407,7 +1425,7 @@ export function startGame(canvas: HTMLCanvasElement, callbacks: GameCallbacks) {
   log.log("loop starting", {
     BASE_SPAWN_INTERVAL_MS,
     MAX_ALIVE_ENEMIES,
-    TEST_RUN_DURATION_S,
+    runDurationS,
     bossSpawnAtS,
     startingWeapons: ownedWeapons.map((w) => w.id),
   });

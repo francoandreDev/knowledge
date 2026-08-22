@@ -7,9 +7,11 @@ const STORAGE_KEY = "game:debug";
 function isEnabled(): boolean {
   if (typeof localStorage === "undefined") return false;
   const stored = localStorage.getItem(STORAGE_KEY);
-  // Default ON during early implementation phases (Phase 1-2) — this file's
-  // default flips to "false" once the game is validated and polished.
-  return stored === null ? true : stored === "true";
+  // Defaulted ON through Phase 1-3 while mechanics were still being
+  // validated; flipped to default OFF in Phase 4 now that tokens gate real
+  // play — still flippable via localStorage.setItem("game:debug", "true")
+  // for future debugging sessions.
+  return stored === null ? false : stored === "true";
 }
 
 export function setDebug(enabled: boolean): void {

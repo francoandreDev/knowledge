@@ -14,24 +14,27 @@ of every session that touches game code, before stopping.
 3. `bun run astro preview --port <port> --background`, open `/game/`,
    actually play a run before writing new code — don't assume the last
    session's state from reading code alone.
-4. Debug logging is on by default right now (`localStorage["game:debug"]`
-   unset → treated as `true`, see `src/lib/game/logger.ts`). Leave it on
-   through Phase 3-ish while the mechanics are still being validated; flip
-   the default to `false` once a phase's mechanics are confirmed solid and
-   the console volume starts being more noise than signal (Phase 4+ is the
-   likely point — see "Known issues / follow-ups").
+4. Debug logging defaults to **off** as of Phase 4
+   (`localStorage["game:debug"]` unset → treated as `false`, see
+   `src/lib/game/logger.ts`) — flip it on with
+   `localStorage.setItem("game:debug", "true")` when actively debugging.
 
 ## Files
 
 - `src/lib/game/logger.ts` — namespaced `console.log` wrapper, gated by
   `localStorage["game:debug"]`.
 - `src/lib/game/engine.ts` — the actual game: Kontra bootstrap, entities,
-  the `update`/`render` loop. `startGame(canvas, callbacks)` is the only
-  export the page needs; `callbacks.onHudUpdate`/`onGameOver` are how the
-  DOM-side HUD stays in sync without the engine touching the DOM directly.
-- `src/pages/game/index.astro` — the route. DOM HUD + canvas + start
-  button; wires `startGame()` to button clicks the same wire-once way
-  `ProgressToggle`/`ExercisePanel` do (`dataset.wired` guard).
+  the `update`/`render` loop. `startGame(canvas, callbacks, options)` is the
+  only export the page needs; `callbacks.onHudUpdate`/`onGameOver` are how
+  the DOM-side HUD stays in sync without the engine touching the DOM
+  directly, and `options.durationS` sets the run's length (Phase 4).
+- `src/lib/game/tokens.ts` — token/run-duration/best-time bookkeeping
+  (Phase 4), backed by `pStorage` (see that file's header for why, not raw
+  `localStorage` or IndexedDB yet).
+- `src/pages/game/index.astro` — the route: a lobby screen, the play area
+  (HUD + canvas + start button), and a results screen, shown/hidden as
+  three sibling containers. Wires `startGame()` to button clicks the same
+  wire-once way `ProgressToggle`/`ExercisePanel` do (`dataset.wired` guard).
 
 ## Phases
 
@@ -229,24 +232,89 @@ pass (run ended before they reached Lv6) — the four cases share the same
 `isEvolved` pattern and passed `typecheck`/`build`, but a future session
 should watch for those three specifically if anything looks off in play.
 
-### Phase 4 — Real gating + lobby + results screen — not started
+### Phase 4 — Real gating + lobby + results screen ✅ done, validated in-browser
 
 From GAME-DESIGN.md "Gating," "Run duration," "HUD":
 
-- Tokens: read `progress:<track>/<unit-slug>` keys from `localStorage` on
-  `ProgressToggle`'s mark-done, +1 token per level marked done (including
-  re-marks after spaced-repetition reset).
-- Real run-duration formula: `60-90s base + 30s × (units with all 3 levels
-done)`, computed live at run start from `localStorage`.
-- Lobby screen (token count, coin balance, shop entry, 0-token message
-  linking to `/roadmap`).
-- Results screen per spec (time survived, kills, level reached, coins
-  earned, best-time record via IndexedDB).
-- Site nav icon with token-count badge (`Layout.astro`).
-- **This is the point to reconsider the debug-logging default** — once
-  tokens gate play for real, constant console spam stops being useful to a
-  real user and `game:debug` should probably default to `false`, kept
-  flippable for future debugging sessions.
+- **New `src/lib/game/tokens.ts`** — all token/duration/best-time logic,
+  using `pStorage` (the same profile-namespaced `localStorage` wrapper
+  `progress:`/`exercise:` keys already use) rather than raw `localStorage`
+  or IndexedDB, since tokens/best-time are equally per-learner data. Real
+  IndexedDB migration (per GAME-DESIGN.md's "Technical foundations") is
+  still Phase 5, alongside coins/shop.
+  - `addToken()` / `consumeToken()` — a simple counter, dispatches
+    `document`-level `"game:tokens-changed"` so any page's nav badge
+    updates live without a reload.
+  - `computeRunDurationS()` — `60s base + 30s × (units currently marked
+done)`, recomputed live at run start from `pStorage` progress keys.
+  - `getBestTimeS()` / `recordRunResult()` — persists the longest
+    `survivedS` seen, returns whether a given run just beat it.
+- **Real deviation from GAME-DESIGN.md, documented in that file too:** the
+  design doc's gating section assumed `ProgressToggle` marks individual
+  levels (L1/L2/L3) done independently. The site's actual data model is one
+  `done` flag per **unit** (`ProgressToggle` renders once per unit page,
+  gating on every exercise pool across whichever levels exist) — there is no
+  per-level granularity to hook into. So a token is earned once per
+  unit-done event (initial mark or a spaced-repetition re-mark), not once
+  per level, and the run-duration bonus is simply "units currently marked
+  done" rather than a separate all-three-levels check (marking done already
+  implies that).
+- **`ProgressToggle.astro`** calls `addToken()` right after `markDone()` in
+  its click handler — the only place a unit ever gets marked done, so the
+  only place a token needs to be granted.
+- **`Layout.astro`** gained a `Gamepad2` (`lucide-astro`) nav link to
+  `/game/` with a numeric badge (`data-nav-game-badge`) that renders only
+  when tokens ≥ 1, listening for `"game:tokens-changed"` and
+  `astro:page-load` so it stays correct across navigation without a reload.
+- **`src/pages/game/index.astro`** restructured into three explicit
+  screens (`data-lobby` / `data-play-area` / `data-results`, shown/hidden
+  via the same `hidden`/`flex` class-toggle pattern used elsewhere on the
+  site) instead of always showing the canvas:
+  - **Lobby**: token count, computed run length, best time, a 0-token
+    message linking to `/roadmap`, and a "Start run (1 token)" button
+    disabled at 0 tokens. Clicking it calls `consumeToken()`, computes
+    `durationS` via `computeRunDurationS()`, and passes it into
+    `startGame()`.
+  - **Play area**: unchanged HUD/canvas/level-up overlay from Phase 1-3,
+    just wrapped in a show/hide container.
+  - **Results**: time survived (`X.Xs / durationS s`), kills, level
+    reached, a "New best time!" callout (via `recordRunResult()`), a note
+    that coins/shop are a future update, and a single "Back to lobby"
+    button (no direct retry, per spec) that stops the active loop and
+    re-renders the lobby's live stats.
+- **`src/lib/game/engine.ts`**: `startGame()` now takes a third `options:
+GameOptions` argument (`{ durationS }`) instead of the old fixed
+  `TEST_RUN_DURATION_S` constant — every internal reference (boss-spawn
+  timing, HUD countdown, game-over `survivedS` clamp, the timer-expiry
+  check) now reads the per-run `runDurationS` local instead. A
+  `DEFAULT_RUN_DURATION_S = 90` fallback only applies if a caller omits
+  `durationS` (kept so the function still has a sane standalone default,
+  though the page always passes one now).
+- **`game:debug` default flipped to `false`** (from `true`) in
+  `logger.ts`, per the plan recorded here last session — tokens gate play
+  for real now, so constant console spam stops being useful to an actual
+  player. Still flippable via
+  `localStorage.setItem("game:debug", "true")` for future debugging.
+
+**Partially validated in-browser 2026-08-22** via `claude --chrome` against
+a local `astro preview`: confirmed the 0-token lobby state (start button
+disabled, zero-token message shown, nav badge hidden), granted tokens
+directly through the profile-namespaced `localStorage` key the same way
+`addToken()` writes to it, confirmed the nav badge updates live off the
+`"game:tokens-changed"` event without a reload, and confirmed a reload
+re-renders the lobby correctly (2 tokens, 60s computed run length, start
+button enabled, zero-message hidden). **Found and fixed a real rendering
+bug** during this pass: the lobby's intro paragraph had `(see` on one line
+and `<code>docs/GAME-DESIGN.md</code>` starting the next — Astro's
+whitespace handling collapsed the newline between them to nothing rather
+than a space, rendering as "(seedocs/GAME-DESIGN.md)"; fixed by moving the
+`<code>` tag onto the same logical line with explicit `<code\n  >...</code\n>`
+whitespace-suppression syntax. **Not yet confirmed in this pass:** actually
+clicking "Start run," playing a run to completion, and checking the results
+screen (time/kills/level/new-record callout) render correctly and that
+"Back to lobby" correctly stops the loop and re-renders live stats — the
+session was interrupted before that step. A future session should do this
+before considering Phase 4 fully validated, the same rigor Phases 1-3 got.
 
 ### Phase 5 — Coins, shop, IndexedDB persistence — not started
 
@@ -285,15 +353,17 @@ From GAME-DESIGN.md "Coins and the shop," "Technical foundations":
 ## Current state
 
 **Phases 1-3 complete and validated**, including Lv6 weapon evolutions.
-Phases 4-8 not started. Next session should confirm scope with the user —
-Phase 4 (real gating + lobby + results screen) is the natural next step.
+**Phase 4 implemented and partially validated** — lobby gating/nav badge
+confirmed live in-browser, but the actual play → results → back-to-lobby
+flow still needs a real in-browser pass (see Phase 4's validation note).
+Phases 5-8 not started. Next session should first finish validating Phase 4
+in-browser, then confirm scope with the user for Phase 5 (coins, shop,
+IndexedDB persistence).
 
 ## Deliberate simplifications (intentional — not bugs)
 
 Phase 1:
 
-- Fixed 90s run duration instead of the real token-derived formula (still
-  true — real formula is Phase 4).
 - Single weapon (stand-in "Bolt"), no leveling — that's Phase 3.
 
 Phase 2:
