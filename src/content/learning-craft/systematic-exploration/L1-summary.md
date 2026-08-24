@@ -28,6 +28,23 @@ tests already say about how this kind of thing is supposed to behave.
 
 </Scenario>
 
+## If you have never seen a web backend before
+
+Think of the request like a person walking into an office with a form:
+
+| Code word  | Everyday version                                                       |
+| ---------- | ---------------------------------------------------------------------- |
+| Client     | The person asking for something                                        |
+| Request    | The form they submit                                                   |
+| Route      | The front desk that decides who should handle this kind of form        |
+| Controller | The receptionist who translates the form into an internal work request |
+| Service    | The department that actually applies the business rule                 |
+| Test       | A written example of what the office is supposed to do in a known case |
+
+The point of systematic exploration is not memorizing the whole office
+building. It is following this one form from the front desk to the exact
+department that changes the order total.
+
 ## The shape of the problem
 
 - An unfamiliar codebase is too large to read start to finish before
@@ -57,7 +74,10 @@ tests already say about how this kind of thing is supposed to behave.
 - **Reading tests first** — treating a codebase's existing test suite
   as documentation of intended behavior, read before diving into
   implementation code, since tests describe what the code is supposed
-  to do in a way comments and variable names often don't.
+  to do in a way comments and variable names often don't. Tests are
+  still partial evidence, not magic: they can be missing the exact case
+  that broke, which is why tracing and adding a new regression test
+  matter too.
 - **Call graph** — the actual chain of function calls a request
   triggers, as opposed to the folder structure, which often doesn't
   match the real order code executes in.

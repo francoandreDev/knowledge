@@ -65,9 +65,9 @@ module.exports = { applyDiscount };
 Three layers, three responsibilities: the route maps a URL to a
 function, the controller translates HTTP request/response into plain
 function calls, the service holds the actual business logic. **The
-bug has to live in `orderService.applyDiscount` — it's the only layer
-that touches `order.total` or `appliedDiscounts` at all**, which
-tracing just confirmed rather than assumed.
+most relevant place to inspect is `orderService.applyDiscount` — it's
+the only layer that touches `order.total` or `appliedDiscounts` at all**,
+which tracing just confirmed rather than assumed.
 
 ## Step 3: reading the existing tests before touching anything
 
@@ -140,8 +140,33 @@ try {
 // "Discount already applied" 90 — total stayed at the single-discount value
 ```
 
-Total time spent: reading one route registration, two small files,
-and a four-test file — not the whole repository.
+## Step 5: adding the missing regression test
+
+The old test file had two tests. The fix should add the third case that
+was missing, so this same bug cannot silently come back:
+
+```js
+test("rejects applying the same discount code twice", () => {
+  const order = { total: 100, appliedDiscounts: [] };
+  applyDiscount(order, "SAVE10");
+
+  expect(() => applyDiscount(order, "SAVE10")).toThrow(
+    "Discount already applied",
+  );
+  expect(order.total).toBe(90);
+  expect(order.appliedDiscounts).toEqual(["SAVE10"]);
+});
+```
+
+The last two expectations matter because they prove rejection happened
+before mutation: the total stayed at the single-discount value, and the
+code was not pushed into `appliedDiscounts` a second time. In JavaScript,
+`.includes(code)` means "is this value already in the array?", `.push()`
+adds a value to the array, and `throw new Error(...)` stops the operation
+with a visible failure instead of silently continuing.
+
+Total time spent: reading one route registration, two small files, and a
+small focused test file — not the whole repository.
 
 ## What this trace does and doesn't prove
 

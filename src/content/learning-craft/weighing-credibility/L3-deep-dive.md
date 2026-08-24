@@ -22,6 +22,19 @@ no stake in the answer. Mechanic B's diagnosis, by contrast, runs
 _against_ their own financial interest — which is a real, if modest,
 point in its favor.
 
+## Applying the track-record check
+
+In this scenario, the driver does not have strong personal history with
+either shop. That does not make track record useless; it means the signal
+is weak unless the driver can find something specific. A review saying
+"great service" adds little. A pattern like "three reviewers mention this
+shop correctly finding small exhaust rattles that another shop called
+brake problems" would add more, because it matches the claim at hand and
+was later checkable.
+
+If the only available track record is vague, mark it as weak rather than
+pretending it is absent or decisive.
+
 ## Applying the specificity check
 
 **Which of the two original diagnoses names a more checkable
@@ -71,10 +84,29 @@ same answer). If checking the heat shield doesn't resolve the noise,
 the brake diagnosis is still on the table — this process improved
 the odds, it didn't eliminate the need to actually check.
 
+## Does recency matter here?
+
+Recency matters only a little in the car example. The mechanics listened
+to the same current noise, and the basic parts involved in brakes,
+exhaust, and heat shields have not changed overnight. But if this were a
+medical treatment, a tax rule, or software performance advice, the age of
+the claim could matter much more. Recency is part of the framework; it is
+just not the strongest signal in this specific story.
+
+## Signal summary
+
+| Signal       | Favors                  | Why                                                   | What it does not prove                                 |
+| ------------ | ----------------------- | ----------------------------------------------------- | ------------------------------------------------------ |
+| Incentive    | Mechanic B, modestly    | The cheap fix runs against a stronger sales incentive | That Mechanic A is dishonest or wrong                  |
+| Track record | Neither, unless checked | No concrete past pattern is given                     | That vague reputation is enough                        |
+| Specificity  | Mechanic B              | "Loose heat shield" names a look-for-able mechanism   | That the mechanism is definitely present               |
+| Consensus    | Mechanic B after C      | C agrees independently, without hearing prior claims  | That agreement replaces checking the actual car        |
+| Recency      | Mostly neutral here     | The diagnosis is current and the mechanism is stable  | That recency would be neutral in faster-moving domains |
+
 ## What generalizes and what doesn't
 
 The four signals (incentive, track record, specificity, consensus)
-generalize to any situation where you're weighing conflicting expert
+plus the optional recency check generalize to any situation where you're weighing conflicting expert
 claims you can't personally verify — a second medical opinion, two
 analysts disagreeing about a stock, two contractors quoting different
 repairs for a house. What's specific to this worked example: the
@@ -89,6 +121,13 @@ low-cost mechanic disagreed, would consensus now point toward
 trusting the brake diagnosis — and how would you weigh that against
 the fact that all three mechanics share a similar incentive to find
 paid work?
+
+One practical move in that harder case is to buy back independence: ask
+for a paid inspection from a shop that will not do the repair, ask the
+third mechanic without revealing prior opinions, or ask each shop to show
+the observable part that supports the diagnosis. That keeps the framework
+from collapsing into "majority wins" when the majority may share the same
+incentive.
 
 ## Failure modes
 

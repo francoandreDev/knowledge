@@ -48,6 +48,12 @@ is actually checkable (specific past claims that were later verified
 true or false) rather than just a vague reputation ("everyone says
 they're good").
 
+Useful track record is concrete: "three customers say this shop diagnosed
+a loose part, another shop confirmed it, and the cheap repair fixed the
+noise." Weak track record is vague: "people online say they're honest."
+The first gives you a pattern that could be checked; the second is just
+reputation fog with nicer packaging.
+
 ## Specificity: does the claim name a checkable mechanism?
 
 **Between "it's your brakes" and "it's a loose heat shield rattling
@@ -59,6 +65,20 @@ brakes" could mean pads, rotors, calipers, or something else
 entirely, and offers nothing you could check even in principle. "A
 loose heat shield rattling against the exhaust" names an exact
 physical cause you (or anyone) could look for.
+
+Falsifiable does not mean false. It means there is a clear way the claim
+could fail: if the heat shield is not loose, that specific explanation
+loses weight. A vague claim is harder to test because it can slide around
+afterward: "brakes" could mean too many different parts.
+
+## Recency: does age matter for this claim?
+
+Recency is a signal only when the relevant facts change fast enough. A
+mechanic's diagnosis of the same rattling car from yesterday is not very
+stale; a ten-year-old review of a shop's honesty might still be useful if
+the same people run it; a ten-year-old medical guideline or software
+benchmark may be dangerously outdated. The question is not "is this old?"
+by itself. The question is "does this kind of claim go stale quickly?"
 
 ## Consensus vs. individual claim: does independent agreement exist?
 
