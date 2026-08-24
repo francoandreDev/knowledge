@@ -28,6 +28,22 @@ const ICON_PULSE = `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="2" fill="curre
 
 const ICON_DART = `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/></svg>`;
 
+// Phase 15 — three dots connected by a jagged bolt line, "chain lightning"
+// (the locked 6th weapon). Distinct from ICON_BOLT (a single filled
+// lightning-bolt shape) since this weapon's whole identity is jumping
+// between multiple targets, not a straight single-target shot.
+const ICON_CHAIN = `<svg ${ICON_ATTRS}><circle cx="4" cy="19" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="6" r="2" fill="currentColor" stroke="none"/><circle cx="20" cy="16" r="2" fill="currentColor" stroke="none"/><polyline points="4 19 9 11 12 8"/><polyline points="12 8 16 14 20 16"/></svg>`;
+
+// Phase 15 — a tombstone with a small rising wisp, "necromancy" (the locked
+// run-time ability). Distinct from ICON_SKULL (the kills stat, a literal
+// skull) — this represents raising the dead, not a body count.
+const ICON_NECROMANCY = `<svg ${ICON_ATTRS}><path d="M6 21V11a6 6 0 0 1 12 0v10Z"/><line x1="6" y1="21" x2="18" y2="21"/><line x1="10" y1="10" x2="14" y2="10"/><line x1="12" y1="8" x2="12" y2="12"/></svg>`;
+
+// Phase 15 — a closed padlock, shown on shop unlock rows before purchase
+// (chainLightning/necromancy) so "not owned yet" reads at a glance, same
+// icon-first convention as everything else in this file.
+const ICON_LOCK = `<svg ${ICON_ATTRS}><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`;
+
 const ICON_SPARKLE = `<svg ${ICON_ATTRS} stroke-linejoin="round"><path d="M12 2 L13.5 9 L21 12 L13.5 15 L12 22 L10.5 15 L3 12 L10.5 9 Z" fill="currentColor" stroke="none"/></svg>`;
 
 // heart — HP-related (Vigor / Thick Skin)
@@ -84,7 +100,12 @@ const ICON_TRENDING_UP = `<svg ${ICON_ATTRS}><polyline points="3 17 9 11 13 15 2
 const ICON_WARNING = `<svg ${ICON_ATTRS}><path d="M12 3 L22 20 L2 20 Z"/><line x1="12" y1="9" x2="12" y2="14"/><circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="currentColor"/></svg>`;
 
 export const WEAPON_ICON: Record<
-  "bladeArc" | "bolt" | "orbitShield" | "novaPulse" | "homingDart",
+  | "bladeArc"
+  | "bolt"
+  | "orbitShield"
+  | "novaPulse"
+  | "homingDart"
+  | "chainLightning",
   string
 > = {
   bladeArc: ICON_BLADE,
@@ -92,6 +113,7 @@ export const WEAPON_ICON: Record<
   orbitShield: ICON_SHIELD,
   novaPulse: ICON_PULSE,
   homingDart: ICON_DART,
+  chainLightning: ICON_CHAIN,
 };
 
 export const EVOLUTION_ICON = ICON_SPARKLE;
@@ -139,6 +161,8 @@ export const UI_ICON = {
   play: ICON_PLAY,
   threat: ICON_TRENDING_UP,
   warning: ICON_WARNING,
+  necromancy: ICON_NECROMANCY,
+  lock: ICON_LOCK,
 } as const;
 
 // Injects a size/utility class onto an icon string's root <svg> tag —

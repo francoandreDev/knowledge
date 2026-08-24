@@ -16,6 +16,7 @@ export const ENEMY_SHAPE: Record<EnemyKind, Shape> = {
   ghost: "circle",
   ogre: "square",
   reaper: "circle",
+  lich: "diamond", // Phase 15 — distinct silhouette from the Reaper's circle
 };
 
 interface ShapeOptions {
@@ -273,6 +274,46 @@ export function drawEnemy(
       const glowEye = "rgba(250,204,21,0.9)";
       drawDot(ctx, x - radius * 0.22, y - radius * 0.15, eyeR * 1.4, glowEye);
       drawDot(ctx, x + radius * 0.22, y - radius * 0.15, eyeR * 1.4, glowEye);
+      break;
+    }
+    case "lich": {
+      // Phase 15 — a hood like the Reaper's, but green-eyed and topped with
+      // a small three-point "crown" (a Lich King reads differently than a
+      // straight Reaper reskin), on the diamond silhouette from ENEMY_SHAPE.
+      ctx.save();
+      ctx.fillStyle = "rgba(15,23,42,0.55)";
+      ctx.beginPath();
+      ctx.moveTo(x, y - radius * 0.75);
+      ctx.lineTo(x - radius * 0.65, y + radius * 0.2);
+      ctx.lineTo(x + radius * 0.65, y + radius * 0.2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      const glowEye = "rgba(74,222,128,0.9)";
+      drawDot(ctx, x - radius * 0.2, y - radius * 0.05, eyeR * 1.3, glowEye);
+      drawDot(ctx, x + radius * 0.2, y - radius * 0.05, eyeR * 1.3, glowEye);
+      const crownY = y - radius * 0.95;
+      drawDot(
+        ctx,
+        x,
+        crownY - radius * 0.15,
+        eyeR * 0.8,
+        "rgba(226,232,240,0.85)",
+      );
+      drawDot(
+        ctx,
+        x - radius * 0.25,
+        crownY,
+        eyeR * 0.6,
+        "rgba(226,232,240,0.85)",
+      );
+      drawDot(
+        ctx,
+        x + radius * 0.25,
+        crownY,
+        eyeR * 0.6,
+        "rgba(226,232,240,0.85)",
+      );
       break;
     }
   }

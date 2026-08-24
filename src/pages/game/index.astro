@@ -97,8 +97,16 @@ import Layout from "../../layouts/Layout.astro";
         ></button>
       </div>
 
-      <div data-shop-panel class="hidden w-full flex-col gap-2 text-left">
+      <div data-shop-panel class="hidden w-full flex-col gap-3 text-left">
         <div data-shop-rows class="flex w-full flex-col gap-2"></div>
+        <div class="flex flex-col gap-2">
+          <p
+            class="text-xs font-medium tracking-wide text-slate-500 uppercase dark:text-slate-400"
+          >
+            Unlocks
+          </p>
+          <div data-shop-unlock-rows class="flex w-full flex-col gap-2"></div>
+        </div>
       </div>
     </div>
 
@@ -269,6 +277,7 @@ import Layout from "../../layouts/Layout.astro";
     } from "../../lib/game/tokens";
     import {
       UPGRADES,
+      UNLOCKS,
       getCoinBalance,
       addCoins,
       getUpgradeLevel,
@@ -276,6 +285,8 @@ import Layout from "../../layouts/Layout.astro";
       purchaseUpgrade,
       computePowerIndex,
       getUpgradeEffects,
+      isUnlocked,
+      purchaseUnlock,
     } from "../../lib/game/shop";
     import { unlockAudio, isMuted, toggleMuted } from "../../lib/game/audio";
     import {
@@ -290,6 +301,7 @@ import Layout from "../../layouts/Layout.astro";
       UI_ICON,
       sizedIcon,
     } from "../../lib/game/icons";
+    import type { WeaponId } from "../../lib/game/engine";
 
     const log = createLogger("page");
 
@@ -337,6 +349,9 @@ import Layout from "../../layouts/Layout.astro";
         document.querySelector<HTMLElement>("[data-shop-panel]");
       const shopRowsEl =
         document.querySelector<HTMLElement>("[data-shop-rows]");
+      const shopUnlockRowsEl = document.querySelector<HTMLElement>(
+        "[data-shop-unlock-rows]",
+      );
       const resultsHeadline = document.querySelector<HTMLElement>(
         "[data-results-headline]",
       );
@@ -405,6 +420,7 @@ import Layout from "../../layouts/Layout.astro";
         !motionToggle ||
         !shopPanel ||
         !shopRowsEl ||
+        !shopUnlockRowsEl ||
         !resultsHeadline ||
         !resultsTime ||
         !resultsKills ||
@@ -532,6 +548,62 @@ import Layout from "../../layouts/Layout.astro";
           }
           row.append(iconBadge, info, buyButton);
           shopRowsEl!.appendChild(row);
+        }
+        renderUnlocks();
+      }
+
+      // Phase 15: one-time unlock rows (Chain Lightning, Necromancy) —
+      // structurally similar to the leveled UPGRADES rows above, but no
+      // progress bar (nothing to level, it's owned or not) and the button
+      // reads "Owned" (disabled) once purchased instead of "MAX".
+      const UNLOCK_ICON: Record<string, string> = {
+        chainLightning: WEAPON_ICON.chainLightning,
+        necromancy: UI_ICON.necromancy,
+      };
+      function renderUnlocks() {
+        const balance = getCoinBalance();
+        shopUnlockRowsEl!.innerHTML = "";
+        for (const def of UNLOCKS) {
+          const owned = isUnlocked(def.id);
+          const row = document.createElement("div");
+          row.className =
+            "animate-fade-slide-in flex items-center gap-3 rounded border border-slate-200 px-2 py-1.5 text-sm dark:border-slate-800";
+          const iconBadge = document.createElement("span");
+          iconBadge.className = owned
+            ? "flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fuchsia-100 text-fuchsia-600 dark:bg-fuchsia-500/10 dark:text-fuchsia-400"
+            : "flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500";
+          iconBadge.innerHTML = sizedIcon(
+            owned ? (UNLOCK_ICON[def.id] ?? "") : UI_ICON.lock,
+            "h-4 w-4",
+          );
+          const info = document.createElement("div");
+          info.className = "min-w-0 flex-1";
+          info.innerHTML = `
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-medium">${def.label}</span>
+              <span class="shrink-0 text-xs ${owned ? "text-fuchsia-600 dark:text-fuchsia-400" : "text-slate-500 dark:text-slate-400"}">${owned ? "Owned" : "Locked"}</span>
+            </div>
+            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">${def.effectLabel}</p>
+          `;
+          const buyButton = document.createElement("button");
+          buyButton.type = "button";
+          buyButton.className =
+            "shrink-0 rounded-full border border-slate-300 px-3 py-1 text-xs font-medium hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:hover:border-slate-500";
+          if (owned) {
+            buyButton.textContent = "Owned";
+            buyButton.disabled = true;
+          } else {
+            buyButton.textContent = `Buy (${def.cost})`;
+            buyButton.disabled = balance < def.cost;
+            buyButton.addEventListener("click", () => {
+              if (purchaseUnlock(def.id)) {
+                log.log("shop:unlock", { id: def.id });
+                renderLobby();
+              }
+            });
+          }
+          row.append(iconBadge, info, buyButton);
+          shopUnlockRowsEl!.appendChild(row);
         }
       }
 
@@ -679,6 +751,12 @@ import Layout from "../../layouts/Layout.astro";
         const durationS = computeRunDurationS();
         const upgradeEffects = getUpgradeEffects();
         const powerIndex = computePowerIndex();
+        // Phase 15: shop unlocks that expand this run's available content —
+        // see engine.ts's GameOptions.unlockedWeaponIds/abilityUnlocked.
+        const unlockedWeaponIds: WeaponId[] = isUnlocked("chainLightning")
+          ? ["chainLightning"]
+          : [];
+        const abilityUnlocked = isUnlocked("necromancy");
         activeGame?.stop();
         activeGame = startGame(
           canvas,
@@ -748,18 +826,24 @@ import Layout from "../../layouts/Layout.astro";
                     ? "border-emerald-600/60 bg-emerald-950/20 hover:border-emerald-400"
                     : card.kind === "stat"
                       ? "border-violet-600/60 bg-slate-900/80 hover:border-violet-400"
-                      : "border-sky-600/60 bg-slate-900/80 hover:border-sky-400";
+                      : card.kind === "ability"
+                        ? "border-fuchsia-600/60 bg-fuchsia-950/20 hover:border-fuchsia-400"
+                        : "border-sky-600/60 bg-slate-900/80 hover:border-sky-400";
                 const iconBg = card.isEvolution
                   ? "bg-amber-500/20 text-amber-300"
                   : card.kind === "newWeapon"
                     ? "bg-emerald-500/20 text-emerald-300"
                     : card.kind === "stat"
                       ? "bg-violet-500/20 text-violet-300"
-                      : "bg-sky-500/20 text-sky-300";
+                      : card.kind === "ability"
+                        ? "bg-fuchsia-500/20 text-fuchsia-300"
+                        : "bg-sky-500/20 text-sky-300";
                 const icon =
                   card.kind === "stat"
                     ? (STAT_ICON[card.statId ?? ""] ?? "")
-                    : (WEAPON_ICON[card.weaponId ?? "bolt"] ?? "");
+                    : card.kind === "ability"
+                      ? UI_ICON.necromancy
+                      : (WEAPON_ICON[card.weaponId ?? "bolt"] ?? "");
                 btn.className = `animate-fade-slide-in w-full rounded-lg border ${accent} px-3 py-2 text-left text-sm text-white`;
                 btn.innerHTML = `
                   <span class="flex items-center gap-3">
@@ -803,6 +887,8 @@ import Layout from "../../layouts/Layout.astro";
             upgradeEffects,
             powerIndex,
             reduceMotion: isReducedMotion(),
+            unlockedWeaponIds,
+            abilityUnlocked,
           },
         );
       });

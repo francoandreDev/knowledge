@@ -34,6 +34,11 @@ of every session that touches game code, before stopping.
   cosmetic 1-5 readout of that same ramp. Phase 14 added floating
   `DamageNumber`s, `GameHudState.lowHp`, `GameCallbacks.onBossIncoming`, and
   a `cause` string on `onGameOver`'s summary (via `describeDeathCause()`).
+  Phase 15 added a 6th weapon (`chainLightning`, gated by
+  `GameOptions.unlockedWeaponIds`), a one-time "ability" level-up card kind
+  (`GameOptions.abilityUnlocked`) that flips `bossVariant` to `"lich"`, and
+  the Lich boss itself (`spawnBoss()`'s variant branch, `spawnMinion()`,
+  enemy-side homing via `Projectile.homingPlayer`).
 - `src/lib/game/tokens.ts` — token/run-duration/best-time bookkeeping
   (Phase 4), backed by `pStorage` (see that file's header for why, not raw
   `localStorage`).
@@ -41,7 +46,9 @@ of every session that touches game code, before stopping.
   5), also backed by `pStorage` — see GAME-DESIGN.md's "Implementation note
   (Phase 5)" for why the `idb` migration was skipped rather than deferred.
   Exposes `getUpgradeEffects()`/`computePowerIndex()`, consumed by
-  `engine.ts`'s `GameOptions`.
+  `engine.ts`'s `GameOptions`. Phase 15 added a parallel one-time-purchase
+  system — `UNLOCKS`/`isUnlocked()`/`purchaseUnlock()` — for content that's
+  owned or not (no levels), distinct from the leveled `UPGRADES` above.
 - `src/lib/game/audio.ts` — Phase 6 synthesized SFX (Web Audio API
   oscillators/envelopes, no audio files). Exposes `unlockAudio()` (call from
   a user-gesture handler — browsers block autoplay otherwise),
@@ -58,7 +65,10 @@ of every session that touches game code, before stopping.
   `flashAlpha` option on `drawShape()` (a white hit-flash overlay, traced via
   a shared `traceShapePath()` helper), a `drawCloak()` used by `drawPlayer()`
   for a subtle trailing character silhouette, and `drawImpactBurst()` for a
-  short radiating-line spark at a weapon-hit point.
+  short radiating-line spark at a weapon-hit point. Phase 15 added a
+  `"lich"` case to `ENEMY_SHAPE`/`drawEnemy()` — a diamond silhouette,
+  green hood/eyes, and a small dot "crown," distinct from the Reaper's
+  circle/magenta hood.
 - `src/lib/game/icons.ts` — Phase 10's hand-authored inline SVG icon set
   (weapons, an evolution sparkle, and 6 shared concept icons reused across
   run-only temp stats and permanent shop upgrades), plus `sizedIcon()` for
@@ -68,7 +78,9 @@ of every session that touches game code, before stopping.
   for the lobby/HUD/results chrome. Phase 13 added a trending-up-line icon
   (`UI_ICON.threat`) for the new threat-tier HUD chip/toast. Phase 14 added
   a triangle-exclamation icon (`UI_ICON.warning`) for the boss-incoming
-  banner.
+  banner. Phase 15 added a chain-bolt icon (`WEAPON_ICON.chainLightning`), a
+  tombstone icon (`UI_ICON.necromancy`), and a padlock icon (`UI_ICON.lock`)
+  for not-yet-purchased shop unlock rows.
 - `src/lib/game/settings.ts` — Phase 8's reduce-motion setting
   (`isReducedMotion()`/`setReducedMotion()`/`toggleReducedMotion()`),
   persisted via `pStorage` (`game:reduce-motion`) — mirrors `audio.ts`'s
@@ -997,7 +1009,7 @@ built) and identified four genre-standard feedback gaps worth closing:
   `index.astro` toggles a `data-lowhp-vignette` overlay (an inset red
   `box-shadow` div, absolutely positioned over the canvas wrapper only, not
   the whole page) and a new looping `animate-pulse-warn` CSS keyframe
-  (`global.css`) — the game's first *looping* animation, unlike every prior
+  (`global.css`) — the game's first _looping_ animation, unlike every prior
   one-shot (`fade-slide-in`/`shake`/`pop`), since it needs to keep signaling
   "still low," not mark a single moment. Gated off (no `animate-pulse-warn`
   class) when `reduceMotion` is on, matching the canvas glow/idle-bob
@@ -1034,6 +1046,7 @@ spaced with real `setTimeout` delays (not instantaneous) kept the tab
 genuinely focused across several full runs, avoiding the
 `visibilityState: "hidden"` wall documented in every earlier phase. Directly
 confirmed, live:
+
 - **Damage numbers**: patched `CanvasRenderingContext2D.prototype.fillText`
   to log calls matching `/^\d+$/` before triggering combat — 318 real calls
   observed with the correct per-hit damage value ("6", Bolt's base damage)
@@ -1049,7 +1062,95 @@ confirmed, live:
 - **Death cause**: three separate real deaths across the session all showed
   "Caught by a Zombie" on the results screen (matching the actual killer in
   each case), alongside the existing "New best time!" callout.
-Zero console errors across the whole session.
+  Zero console errors across the whole session.
+
+### Phase 15 — Shop-gated content unlocks: a locked weapon, a locked ability, an alternate boss ✅ done, validated in-browser (user playtest)
+
+The user asked for "something new" purchasable in the shop that's fully
+locked until bought — a weapon that becomes another equip option once
+unlocked, and separately an ability that, if picked mid-run, swaps in a
+different boss with its own stats and attack pattern. Two new one-time
+`UNLOCKS` in `shop.ts`, distinct from the existing leveled `UPGRADES`:
+
+- **Chain Lightning** (200 coins) — a locked 6th weapon
+  (`WeaponId: "chainLightning"`). `BASE_WEAPON_IDS` (the original 5) is now
+  separate from the full `WeaponId` union — a run's new-weapon level-up
+  offers only draw from `availableWeaponIds = [...BASE_WEAPON_IDS,
+...options.unlockedWeaponIds]`, so Chain Lightning simply never appears in
+  the pool until `shop.ts`'s `isUnlocked("chainLightning")` is true and
+  `index.astro` passes it through at run start. Behavior
+  (`chainLightningStrike()`): strikes the nearest enemy, then keeps jumping
+  to the nearest not-yet-hit enemy within `CHAIN_LIGHTNING_JUMP_RANGE`
+  (140px), up to a level-scaled jump count (2 at Lv1-2, up to unlimited at
+  the Lv6 evolution "Storm Chain"), each jump dealing 25% less than the one
+  before it (balance: uncapped multi-target damage at full value would
+  out-damage every single-target weapon at the same level). Draws a fading
+  cyan `ChainEffect` line per jump.
+- **Necromancy** (350 coins) — a locked run-time ability. Once owned,
+  `buildCardPool()` can offer a one-time, non-stacking "Embrace Necromancy"
+  card (`LevelUpCard.kind: "ability"`, new alongside
+  `weaponUpgrade`/`newWeapon`/`stat`) — only while the boss hasn't spawned
+  yet and only once (picking it flips `bossVariant` from `"reaper"` to
+  `"lich"` for the rest of the run, which is also what stops the pool from
+  offering it again). `applyCard()`'s new `"ability"` branch is the only
+  code that sets `bossVariant`.
+- **The Lich** (`EnemyKind: "lich"`) — `spawnBoss()` now branches on
+  `bossVariant`. Deliberately different stats and attack shape from the
+  Reaper, not a palette swap: lower HP (300 vs 420), no dash (drifts
+  steadily toward the player instead), a single slow-but-homing "curse
+  bolt" fired periodically (a new `Projectile.homingPlayer` flag — steers
+  toward the player's _live_ position every frame via the same
+  turn-rate-limited math as the Homing Dart weapon, just aimed the other
+  way, versus the Reaper's non-homing 10-projectile ring burst), and
+  periodic weak-minion summons (`spawnMinion()` — reuses the Zombie
+  `EnemyDef` at `LICH_MINION_HP_MULT`/`LICH_MINION_DAMAGE_MULT` — 0.5x/0.6x
+  — so they're pressure, not a real threat alone; the Reaper has no
+  equivalent second attack). Visually: a diamond silhouette (vs the
+  Reaper's circle), green hood/eyes instead of magenta, plus a small
+  three-dot "crown" above the hood (`sprites.ts`'s new `"lich"` case) so it
+  reads as a distinct boss at a glance, not a reskin.
+- **`shop.ts`**: new `UnlockId`/`UnlockDef`/`UNLOCKS`/`isUnlocked()`/
+  `purchaseUnlock()` — structurally parallel to the existing
+  `UpgradeId`/`UpgradeDef`/`UPGRADES` machinery, but a binary owned/not-owned
+  flag (`pStorage` key `game:unlock:<id>`) instead of a 1-N leveled cost
+  curve, since there's nothing to level — it's owned or it isn't.
+- **`icons.ts`**: three new icons — a 3-dots-and-zigzag "chain" icon for the
+  weapon, a tombstone "necromancy" icon for the ability card and shop row,
+  and a padlock icon shown on any shop unlock row not yet purchased.
+- **`index.astro`**: the shop panel gained an "UNLOCKS" section below the
+  existing leveled-upgrade rows — same row layout, but no progress bar (a
+  binary owned/not-owned flag has nothing to bar-fill) and the button reads
+  "Owned" (disabled) once purchased instead of "MAX". The level-up card
+  renderer gained a `kind === "ability"` branch (fuchsia accent, tombstone
+  icon) alongside the existing weaponUpgrade/newWeapon/stat cases. Run-start
+  now reads both unlocks (`isUnlocked("chainLightning")`/
+  `isUnlocked("necromancy")`) and passes them into `startGame()`'s options.
+- **Death-cause coverage extended** (Phase 14's `describeDeathCause()`):
+  added `"contact:lich"` → "Caught by the Lich" and `"lich-curse"` →
+  "Cursed by the Lich" to `DEATH_CAUSE_BY_SOURCE`.
+
+**Validation:** guardrails (`bun run check`) pass (one `prettier --write`
+pass needed after the initial edits — `format:check` caught real style
+issues in `engine.ts`/`shop.ts`/`sprites.ts`, not a false positive).
+In-browser (`claude --chrome` against a fresh `astro preview` build):
+granted 1000 coins + 5 tokens via `localStorage`, opened the shop, and
+confirmed the new "UNLOCKS" section renders both rows correctly (padlock
+icon, "Locked" label, correct costs — screenshotted and visually
+confirmed). Purchased both via the real `purchaseUnlock()` call path
+(clicking the actual Buy buttons) — coin balance dropped 1000 → 800 → 450
+exactly matching the 200/350 costs, `pStorage` flags flipped to `"1"`, and
+both rows immediately re-rendered "Owned" with disabled buttons. Started a
+real run and confirmed live: the "Embrace Necromancy" card appeared in an
+actual level-up draw (not simulated) with the correct fuchsia accent and
+tombstone icon, screenshotted; picking it logged `card:ability` with
+`bossVariant: "lich"`. Reaching the actual Lich encounter (boss spawns ~40s into a 60s run)
+exceeded what scripted synthetic-drag combat could reliably survive to in
+this session, so **the user played a real run themselves** on the same
+prepared profile (unlocks purchased, tokens granted) and confirmed the full
+Lich encounter and loop feel directly — "sí todo funciona bien" — closing
+out the one piece automated testing didn't reach on its own. `bun run
+check`, the purchase flow, and the ability-card offer were all
+independently confirmed by direct observation before that point.
 
 ## Current state
 
@@ -1057,9 +1158,10 @@ Zero console errors across the whole session.
 Phase 10 (level-up card / shop UI redesign), Phase 11 (visible attacks +
 subtle character pass), Phase 12 (game screen visual/UI redesign +
 fullscreen toggle), Phase 13 (time-scaled enemy toughness + threat-tier
-readout), and Phase 14 (damage numbers, low-HP warning, boss telegraph,
-death cause), all added after the fact per user request, are now
-implemented.**
+readout), Phase 14 (damage numbers, low-HP warning, boss telegraph, death
+cause), and Phase 15 (shop-gated content unlocks — a locked weapon, a
+locked ability, an alternate boss), all added after the fact per user
+request, are now implemented.**
 Phases 1-3 are complete and validated end-to-end, including
 Lv6 weapon evolutions. Phases 4 through 8 (real gating/lobby/results,
 coins/shop/enemy tiers, audio, mobile joystick, and visual/perf polish) are
@@ -1087,10 +1189,12 @@ progress). No further phases are currently planned — Phase 11 closed out
 the deferred item from Phase 10 (weapon icons in combat/HUD, the player's
 visual redesign, and visible attack/impact feedback), Phase 13 closed out
 the user's balance-and-feedback report (enemies getting relatively easier
-over time, and no visible signal of rising difficulty), and Phase 14 closed
-out four remaining feedback gaps found via a "what's still missing?" review
+over time, and no visible signal of rising difficulty), Phase 14 closed out
+four remaining feedback gaps found via a "what's still missing?" review
 (damage numbers, a low-HP warning, a boss telegraph, and a death cause on
-the results screen).
+the results screen), and Phase 15 added the site's first shop-gated content
+unlocks — a locked 6th weapon and a locked run-time ability that swaps in
+an alternate boss, both per explicit user request.
 
 ## Deliberate simplifications (intentional — not bugs)
 

@@ -173,9 +173,9 @@ const RAMP_HALF_LIFE_S = 45; // spawn interval halves roughly every 45s
 const MIN_SPAWN_INTERVAL_MS = 150; // perf floor — see file header
 const MAX_ALIVE_ENEMIES = 60; // perf cap — see file header
 
-// --- Phase 2: enemy roster ---
+// --- Phase 2: enemy roster --- (Phase 15 added "lich", the alternate boss)
 export type EnemyKind =
-  "zombie" | "bat" | "skeleton" | "ghost" | "ogre" | "reaper";
+  "zombie" | "bat" | "skeleton" | "ghost" | "ogre" | "reaper" | "lich";
 
 // --- Phase 5: enemy tiers, weighted by shop powerIndex ---
 type EnemyTier = "normal" | "veteran" | "elite";
@@ -208,7 +208,7 @@ const COIN_VALUE_BY_TIER: Record<EnemyTier, number> = {
   veteran: 2,
   elite: 3,
 };
-const BETTER_DROP_KINDS = new Set<EnemyKind>(["ogre", "reaper"]);
+const BETTER_DROP_KINDS = new Set<EnemyKind>(["ogre", "reaper", "lich"]);
 const BETTER_DROP_VALUE_MULT = 2;
 
 // --- Phase 5: boss scaling with powerIndex ---
@@ -256,7 +256,7 @@ function computeThreatTier(elapsedS: number): number {
 }
 
 interface EnemyDef {
-  kind: Exclude<EnemyKind, "reaper">;
+  kind: Exclude<EnemyKind, "reaper" | "lich">;
   unlockAtS: number;
   radius: number;
   speed: number;
@@ -342,13 +342,47 @@ const REAPER_DASH_SPEED = 230;
 const REAPER_DASH_DURATION_MS = 500;
 const REAPER_COLOR = "#c026d3";
 
-const EP_RADIUS = 5; // enemy projectile radius (ghost bolts, reaper ring)
+// --- Phase 15: the Lich, an alternate boss unlocked by picking the
+// run-time "Embrace Necromancy" ability card (itself gated by the shop's
+// Necromancy unlock). Deliberately different stats and attack shape from
+// the Reaper, not just a palette swap: lower HP and no dash (a slower,
+// more stationary threat), a single slow-but-homing curse bolt instead of
+// a non-homing ring burst, and periodic weak-minion summons instead of a
+// second attack pattern of its own — see spawnBoss()/updateEnemyBehavior().
+const LICH_RADIUS = 24;
+const LICH_SPEED = 46;
+const LICH_HP = 300;
+const LICH_CONTACT_DAMAGE = 10;
+const LICH_CURSE_INTERVAL_MS = 3200;
+const LICH_CURSE_DAMAGE = 16;
+const LICH_CURSE_SPEED = 110;
+const LICH_CURSE_TURN_RATE = 2.2; // rad/s — slower turn than a homing dart, dodgeable
+const LICH_SUMMON_INTERVAL_MS = 7000;
+const LICH_SUMMON_COUNT = 2;
+const LICH_MINION_HP_MULT = 0.5; // weak — pressure, not a real threat on their own
+const LICH_MINION_DAMAGE_MULT = 0.6;
+const LICH_COLOR = "#22c55e";
 
-// --- Phase 3: weapon roster ---
+const EP_RADIUS = 5; // enemy projectile radius (ghost bolts, reaper ring, lich curse)
+
+// --- Phase 3: weapon roster --- (Phase 15 added "chainLightning", locked
+// behind the shop's Chain Lightning unlock — see BASE_WEAPON_IDS below)
 export type WeaponId =
-  "bladeArc" | "bolt" | "orbitShield" | "novaPulse" | "homingDart";
+  | "bladeArc"
+  | "bolt"
+  | "orbitShield"
+  | "novaPulse"
+  | "homingDart"
+  | "chainLightning";
 
-const ALL_WEAPON_IDS: WeaponId[] = [
+// The 5 weapons every run starts eligible for, per the original roster.
+// Chain Lightning is deliberately excluded — it only joins a run's
+// available new-weapon pool (startGame()'s `availableWeaponIds`) via
+// GameOptions.unlockedWeaponIds, once bought in the shop (shop.ts's
+// UnlockId "chainLightning"). The Record lookup tables below (name/flavor/
+// icon) still need a "chainLightning" entry regardless — WeaponId includes
+// it, and those are typed as Record<WeaponId, ...>.
+const BASE_WEAPON_IDS: WeaponId[] = [
   "bladeArc",
   "bolt",
   "orbitShield",
@@ -362,6 +396,7 @@ const WEAPON_NAMES: Record<WeaponId, string> = {
   orbitShield: "Orbit Shield",
   novaPulse: "Nova Pulse",
   homingDart: "Homing Dart",
+  chainLightning: "Chain Lightning",
 };
 
 const WEAPON_FLAVOR: Record<WeaponId, string> = {
@@ -370,6 +405,7 @@ const WEAPON_FLAVOR: Record<WeaponId, string> = {
   orbitShield: "Shields orbit you, damaging anything they touch.",
   novaPulse: "Periodic AoE burst centered on you.",
   homingDart: "Seeking projectile that homes in on a random enemy.",
+  chainLightning: "Strikes the nearest enemy, then arcs to nearby enemies.",
 };
 
 const UPGRADE_BLURB: Record<WeaponId, string> = {
@@ -378,6 +414,7 @@ const UPGRADE_BLURB: Record<WeaponId, string> = {
   orbitShield: "+orbiter, +rotation speed, +radius",
   novaPulse: "+radius, +damage, +frequency",
   homingDart: "+dart, +damage, -cooldown",
+  chainLightning: "+damage, +fire rate, +chain jumps",
 };
 
 const EVOLVED_NAMES: Record<WeaponId, string> = {
@@ -386,6 +423,7 @@ const EVOLVED_NAMES: Record<WeaponId, string> = {
   orbitShield: "Barrier Storm",
   novaPulse: "Shockwave",
   homingDart: "Swarm",
+  chainLightning: "Storm Chain",
 };
 
 const EVOLUTION_BLURB: Record<WeaponId, string> = {
@@ -394,6 +432,7 @@ const EVOLUTION_BLURB: Record<WeaponId, string> = {
   orbitShield: "Orbiters leave a damaging trail behind them",
   novaPulse: "2x damage + knockback on burst",
   homingDart: "Fires 5 homing darts in a spread",
+  chainLightning: "Unlimited chain jumps within range",
 };
 
 const WEAPON_MAX_LEVEL = 6; // level 6 is each weapon's evolved form
@@ -421,6 +460,12 @@ const HIT_SPARK_DURATION_MS = 220;
 
 const HOMING_DART_SPEED = 200;
 const HOMING_DART_TURN_RATE = 4; // rad/s
+
+// --- Phase 15: Chain Lightning, the locked 6th weapon (see
+// BASE_WEAPON_IDS above) ---
+const CHAIN_LIGHTNING_JUMP_RANGE = 140; // max distance to the next unhit enemy
+const CHAIN_LIGHTNING_JUMP_DECAY = 0.75; // each successive jump deals less
+const CHAIN_EFFECT_DURATION_MS = 200;
 
 // --- Phase 3: temporary (run-only) stat cards ---
 interface TempStatDef {
@@ -472,8 +517,11 @@ const TEMP_STATS: TempStatDef[] = [
 export interface LevelUpCard {
   id: string;
   // Phase 10: exposed so the page can pick a matching icon/accent without
-  // parsing `id`/`title` strings — see src/lib/game/icons.ts.
-  kind: "weaponUpgrade" | "newWeapon" | "stat";
+  // parsing `id`/`title` strings — see src/lib/game/icons.ts. Phase 15
+  // added "ability" — a one-time, non-stacking, non-leveled pick (currently
+  // just "Embrace Necromancy") that changes run-scoped state rather than a
+  // weapon or a stat, see applyCard()'s "ability" branch.
+  kind: "weaponUpgrade" | "newWeapon" | "stat" | "ability";
   weaponId?: WeaponId;
   statId?: string;
   isEvolution?: boolean;
@@ -533,6 +581,13 @@ export interface GameOptions {
   /** Disables all canvas glow (shadowBlur) effects — see settings.ts's
    * isReducedMotion(). Phase 8. */
   reduceMotion?: boolean;
+  /** Phase 15: weapons beyond the base 5 (BASE_WEAPON_IDS) available in
+   * this run's new-weapon level-up offers — currently just
+   * ["chainLightning"] once shop.ts's Chain Lightning unlock is owned. */
+  unlockedWeaponIds?: WeaponId[];
+  /** Phase 15: whether the "Embrace Necromancy" ability card can appear in
+   * this run's level-up pool — gated by shop.ts's Necromancy unlock. */
+  abilityUnlocked?: boolean;
 }
 
 interface Enemy extends GameObject {
@@ -558,6 +613,8 @@ interface Enemy extends GameObject {
   dashUntil?: number;
   dashDx?: number;
   dashDy?: number;
+  // lich (Phase 15) — lastRangedAt (above) doubles as its curse-bolt timer
+  lastSummonAt?: number;
   // orbit shield hit cooldown (Phase 3)
   lastOrbitHitAt?: number;
   // Phase 11: brief white hit-flash, see HIT_FLASH_MS
@@ -573,6 +630,10 @@ interface Projectile extends GameObject {
   hitSet?: Set<Enemy>;
   homingTarget?: Enemy;
   turnRate?: number;
+  // Phase 15: enemy-side homing (the lich's curse bolt) — steers toward the
+  // player's live position every frame, unlike homingTarget/turnRate above
+  // which lock onto a captured Enemy at fire time (player-side weapons only).
+  homingPlayer?: boolean;
 }
 interface Gem extends GameObject {
   alive: boolean;
@@ -631,9 +692,19 @@ interface DamageNumber {
   createdAt: number;
 }
 
+// Phase 15: a fading line segment between two chain-lightning jump points —
+// same lifecycle pattern as ArcEffect/PulseEffect above.
+interface ChainEffect {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  createdAt: number;
+}
+
 interface InternalCard {
   id: string;
-  kind: "weaponUpgrade" | "newWeapon" | "stat";
+  kind: "weaponUpgrade" | "newWeapon" | "stat" | "ability";
   weaponId?: WeaponId;
   statId?: string;
   isEvolution?: boolean;
@@ -730,9 +801,11 @@ const DEATH_CAUSE_BY_SOURCE: Record<string, string> = {
   "contact:ghost": "Caught by a Ghost",
   "contact:ogre": "Crushed by an Ogre",
   "contact:reaper": "Caught by the Reaper",
+  "contact:lich": "Caught by the Lich",
   "ogre-slam": "Flattened by an Ogre's slam",
   ghost: "Struck by ghost fire",
   "reaper-ring": "Caught in the Reaper's ring",
+  "lich-curse": "Cursed by the Lich",
 };
 
 function describeDeathCause(
@@ -770,6 +843,13 @@ export function startGame(
   };
   const powerIndex = options.powerIndex ?? 0;
   const reduceMotion = options.reduceMotion ?? false;
+  // Phase 15: which weapons this run's new-weapon offers can draw from, and
+  // whether the ability card can appear — both gated by shop.ts unlocks.
+  const availableWeaponIds: WeaponId[] = [
+    ...BASE_WEAPON_IDS,
+    ...(options.unlockedWeaponIds ?? []),
+  ];
+  const abilityUnlocked = options.abilityUnlocked ?? false;
   log.log("startGame() called", {
     width: canvas.width,
     height: canvas.height,
@@ -871,6 +951,7 @@ export function startGame(
   const orbitTrails: OrbitTrailPoint[] = [];
   const hitSparks: HitSpark[] = [];
   const damageNumbers: DamageNumber[] = []; // Phase 14
+  const chainEffects: ChainEffect[] = []; // Phase 15, chain lightning jumps
   let lastOrbitTrailDropAt = -Infinity;
   let orbiterPositions: { x: number; y: number }[] = [];
 
@@ -914,6 +995,9 @@ export function startGame(
   const unlockedPools = new Set<string>();
   let lastThreatTier = 1; // Phase 13
   let lastDamageSource: string | null = null; // Phase 14, see describeDeathCause()
+  // Phase 15: which boss spawnBoss() spawns — flipped to "lich" once the
+  // player picks the "Embrace Necromancy" ability card mid-run.
+  let bossVariant: "reaper" | "lich" = "reaper";
 
   function pushHud() {
     callbacks.onHudUpdate({
@@ -983,34 +1067,76 @@ export function startGame(
     const elapsedS = elapsedMs / 1000;
     const timeHpScale = enemyTimeScale(elapsedS, ENEMY_HP_SCALE_CAP);
     const timeDamageScale = enemyTimeScale(elapsedS, ENEMY_DAMAGE_SCALE_CAP);
+    const isLich = bossVariant === "lich";
+    const radius = isLich ? LICH_RADIUS : REAPER_RADIUS;
+    const baseHp = isLich ? LICH_HP : REAPER_HP;
+    const baseContactDamage = isLich
+      ? LICH_CONTACT_DAMAGE
+      : REAPER_CONTACT_DAMAGE;
     const sprite = Sprite({
       x: canvas.width / 2,
       y: -40,
-      width: REAPER_RADIUS * 2,
-      height: REAPER_RADIUS * 2,
+      width: radius * 2,
+      height: radius * 2,
       anchor: { x: 0.5, y: 0.5 },
-      color: REAPER_COLOR,
+      color: isLich ? LICH_COLOR : REAPER_COLOR,
     }) as unknown as Enemy;
-    sprite.kind = "reaper";
+    sprite.kind = isLich ? "lich" : "reaper";
     sprite.tier = "normal"; // the boss is unique per run, not tiered
-    sprite.hp = REAPER_HP * powerScale * timeHpScale;
+    sprite.hp = baseHp * powerScale * timeHpScale;
     sprite.alive = true;
-    sprite.radius = REAPER_RADIUS;
-    sprite.contactDamage = REAPER_CONTACT_DAMAGE * powerScale * timeDamageScale;
-    sprite.lastRingAt = elapsedMs;
-    sprite.lastDashAt = elapsedMs;
+    sprite.radius = radius;
+    sprite.contactDamage = baseContactDamage * powerScale * timeDamageScale;
+    sprite.lastRingAt = elapsedMs; // reaper ring timer
+    sprite.lastDashAt = elapsedMs; // reaper dash timer
+    sprite.lastRangedAt = elapsedMs; // lich curse-bolt timer (shared field, see Enemy interface)
+    sprite.lastSummonAt = elapsedMs; // lich summon timer
     enemies.push(sprite);
     bossSpawned = true;
-    // Phase 13: ring damage now also reflects the time-based ramp, not just
-    // powerIndex — folded into this one scale so updateEnemyBehavior()'s
-    // existing `REAPER_RING_DAMAGE * bossPowerScale` needs no change.
+    // Phase 13: ring/curse damage now also reflects the time-based ramp, not
+    // just powerIndex — folded into this one scale so
+    // updateEnemyBehavior()'s existing `... * bossPowerScale` reads need no
+    // per-variant change.
     bossPowerScale = powerScale * timeDamageScale;
     log.log("boss:spawned", {
+      variant: bossVariant,
       hp: sprite.hp,
       contactDamage: sprite.contactDamage,
       powerIndex,
       atS: (elapsedMs / 1000).toFixed(1),
     });
+  }
+
+  // Phase 15: the Lich's periodic weak-minion summon — reuses the Zombie
+  // EnemyDef's shape/speed but at reduced HP/damage (LICH_MINION_*_MULT) so
+  // they're pressure, not a real threat on their own; spawned near the
+  // Lich's own position rather than the map edge, since they're meant to
+  // immediately close on the player.
+  function spawnMinion(x: number, y: number, elapsedS: number) {
+    if (enemies.length >= MAX_ALIVE_ENEMIES) return;
+    const def = ENEMY_DEFS.find((d) => d.kind === "zombie")!;
+    const timeHpScale = enemyTimeScale(elapsedS, ENEMY_HP_SCALE_CAP);
+    const timeDamageScale = enemyTimeScale(elapsedS, ENEMY_DAMAGE_SCALE_CAP);
+    const sprite = Sprite({
+      x,
+      y,
+      width: def.radius * 2,
+      height: def.radius * 2,
+      anchor: { x: 0.5, y: 0.5 },
+      color: LICH_COLOR,
+    }) as unknown as Enemy;
+    sprite.kind = "zombie";
+    sprite.tier = "normal";
+    sprite.hp = def.hp * LICH_MINION_HP_MULT * timeHpScale;
+    sprite.alive = true;
+    sprite.radius = def.radius;
+    sprite.contactDamage =
+      def.contactDamage * LICH_MINION_DAMAGE_MULT * timeDamageScale;
+    sprite.wigglePhase = Math.random() * Math.PI * 2;
+    sprite.lastRangedAt = elapsedMs;
+    sprite.slamReadyAt = elapsedMs;
+    enemies.push(sprite);
+    log.log("lich:summon", { x: Math.round(x), y: Math.round(y) });
   }
 
   function findNearestEnemy(): Enemy | null {
@@ -1045,8 +1171,8 @@ export function startGame(
       log.log("kill:enemy", { kind: e.kind, source, totalKills: kills });
       spawnGem(e.x, e.y);
       maybeSpawnCoin(e);
-      if (e.kind === "reaper") {
-        log.log("boss:defeated");
+      if (e.kind === "reaper" || e.kind === "lich") {
+        log.log("boss:defeated", { variant: e.kind });
       }
     }
   }
@@ -1057,6 +1183,50 @@ export function startGame(
     let value = COIN_VALUE_BY_TIER[e.tier];
     if (BETTER_DROP_KINDS.has(e.kind)) value *= BETTER_DROP_VALUE_MULT;
     spawnCoin(e.x, e.y, value);
+  }
+
+  // Phase 15: Chain Lightning's jump logic — strikes `first`, then keeps
+  // jumping to the nearest not-yet-hit enemy within CHAIN_LIGHTNING_JUMP_RANGE
+  // of the last-hit enemy, up to `maxJumps` total hits, each successive jump
+  // dealing CHAIN_LIGHTNING_JUMP_DECAY less damage than the one before it
+  // (balance: hitting N enemies at full damage each would out-damage every
+  // single-target weapon at the same level). Draws a fading ChainEffect line
+  // per jump so the arc is visible, not just its damage numbers.
+  function chainLightningStrike(
+    first: Enemy,
+    baseDamage: number,
+    maxJumps: number,
+  ) {
+    const hit = new Set<Enemy>();
+    let from: { x: number; y: number } = player;
+    let current: Enemy | null = first;
+    let jumpDamage = baseDamage;
+    let jumps = 0;
+    while (current && jumps < maxJumps) {
+      damageEnemy(current, jumpDamage, "chainLightning");
+      chainEffects.push({
+        x1: from.x,
+        y1: from.y,
+        x2: current.x,
+        y2: current.y,
+        createdAt: elapsedMs,
+      });
+      hit.add(current);
+      from = current;
+      jumpDamage *= CHAIN_LIGHTNING_JUMP_DECAY;
+      jumps += 1;
+      let next: Enemy | null = null;
+      let nextDist = CHAIN_LIGHTNING_JUMP_RANGE;
+      for (const e of enemies) {
+        if (!e.alive || hit.has(e)) continue;
+        const d = distance(current, e);
+        if (d <= nextDist) {
+          nextDist = d;
+          next = e;
+        }
+      }
+      current = next;
+    }
   }
 
   function spawnPlayerProjectile(
@@ -1094,23 +1264,26 @@ export function startGame(
     speed: number,
     damage: number,
     source: string,
-  ) {
+    homingPlayer = false,
+  ): Projectile {
     const projectile = Sprite({
       x: from.x,
       y: from.y,
       width: EP_RADIUS * 2,
       height: EP_RADIUS * 2,
       anchor: { x: 0.5, y: 0.5 },
-      color: "#f87171",
+      color: homingPlayer ? LICH_COLOR : "#f87171",
       dx: Math.cos(angle) * speed,
       dy: Math.sin(angle) * speed,
     }) as unknown as Projectile;
-    projectile.ttl = 3;
+    projectile.ttl = homingPlayer ? 6 : 3; // curse bolt is slow, needs longer to reach
     projectile.alive = true;
     projectile.damage = damage;
     projectile.source = source;
+    projectile.homingPlayer = homingPlayer;
     enemyProjectiles.push(projectile);
-    log.log("fire:enemyProjectile", { source, damage });
+    log.log("fire:enemyProjectile", { source, damage, homingPlayer });
+    return projectile;
   }
 
   function spawnGem(x: number, y: number) {
@@ -1226,6 +1399,13 @@ export function startGame(
         hpRegenPerS,
         extraCoinChance,
       });
+    } else if (card.kind === "ability" && card.id === "ability:necromancy") {
+      // Phase 15: one-time, non-stacking pick — swaps which boss
+      // spawnBoss() spawns for the rest of this run. buildCardPool() stops
+      // offering this card once bossVariant is no longer "reaper", so no
+      // separate "already picked" flag is needed.
+      bossVariant = "lich";
+      log.log("card:ability", { id: card.id, bossVariant });
     }
   }
 
@@ -1249,7 +1429,10 @@ export function startGame(
       }
     }
     if (ownedWeapons.length < MAX_EQUIPPED_WEAPONS) {
-      for (const id of ALL_WEAPON_IDS) {
+      // Phase 15: only weapons available *this run* — the base 5 plus
+      // whichever locked ones the shop has unlocked (options.unlockedWeaponIds),
+      // not the full ALL_WEAPON_IDS lookup table.
+      for (const id of availableWeaponIds) {
         if (!ownedWeapons.some((w) => w.id === id)) {
           pool.push({
             id: `newWeapon:${id}`,
@@ -1272,6 +1455,20 @@ export function startGame(
           description: stat.effect,
         });
       }
+    }
+    // Phase 15: the one-time "Embrace Necromancy" ability offer — only
+    // while unlocked, only before the boss has actually spawned (picking it
+    // after the Reaper already dropped in would do nothing visible this
+    // run), and only once (bossVariant flips away from "reaper" the moment
+    // it's chosen, which also removes it from the pool).
+    if (abilityUnlocked && !bossSpawned && bossVariant === "reaper") {
+      pool.push({
+        id: "ability:necromancy",
+        kind: "ability",
+        title: "Embrace Necromancy",
+        description:
+          "This run's boss becomes the Lich instead of the Reaper — lower HP, no dash, but a homing curse bolt and summoned minions.",
+      });
     }
     return pool;
   }
@@ -1506,6 +1703,22 @@ export function startGame(
         }
         break;
       }
+      case "chainLightning": {
+        const isEvolved = w.level >= WEAPON_MAX_LEVEL; // Storm Chain
+        const interval = isEvolved ? 700 : 1000 - (w.level - 1) * 80;
+        if (elapsedMs - w.lastActionAt >= interval) {
+          const start = findNearestEnemy();
+          if (start) {
+            w.lastActionAt = elapsedMs;
+            const damage = (7 + (w.level - 1) * 2) * totalDamageMult();
+            const maxJumps = isEvolved
+              ? enemies.length // effectively unbounded within jump range
+              : 2 + Math.floor((w.level - 1) / 2); // Lv1-2: 2, Lv3-4: 3, Lv5: 4
+            chainLightningStrike(start, damage, maxJumps);
+          }
+        }
+        break;
+      }
     }
   }
 
@@ -1607,6 +1820,49 @@ export function startGame(
       const angle = Math.atan2(player.y - e.y, player.x - e.x);
       e.x += Math.cos(angle) * REAPER_SPEED * dt;
       e.y += Math.sin(angle) * REAPER_SPEED * dt;
+      return;
+    }
+    if (e.kind === "lich") {
+      // Curse bolt: a single slow, homing projectile — dodgeable given
+      // LICH_CURSE_TURN_RATE's gentle turn, unlike the Reaper's non-homing
+      // ring burst. `lastRangedAt` doubles as this timer (see Enemy interface).
+      if (elapsedMs - (e.lastRangedAt ?? 0) >= LICH_CURSE_INTERVAL_MS) {
+        e.lastRangedAt = elapsedMs;
+        const angle = Math.atan2(player.y - e.y, player.x - e.x);
+        const p = fireEnemyProjectile(
+          e,
+          angle,
+          LICH_CURSE_SPEED,
+          LICH_CURSE_DAMAGE * bossPowerScale,
+          "lich-curse",
+          true,
+        );
+        p.turnRate = LICH_CURSE_TURN_RATE;
+        log.log("boss:attack", { pattern: "curse", variant: "lich" });
+      }
+      // Summon: periodic weak minions, pressure instead of a second attack
+      // of the Lich's own — the Reaper has no equivalent, this is the
+      // "different way of attacking" half of the boss swap.
+      if (elapsedMs - (e.lastSummonAt ?? 0) >= LICH_SUMMON_INTERVAL_MS) {
+        e.lastSummonAt = elapsedMs;
+        for (let i = 0; i < LICH_SUMMON_COUNT; i++) {
+          const offsetAngle = (i / LICH_SUMMON_COUNT) * Math.PI * 2;
+          spawnMinion(
+            e.x + Math.cos(offsetAngle) * (e.radius + 20),
+            e.y + Math.sin(offsetAngle) * (e.radius + 20),
+            elapsedMs / 1000,
+          );
+        }
+        log.log("boss:attack", {
+          pattern: "summon",
+          variant: "lich",
+          count: LICH_SUMMON_COUNT,
+        });
+      }
+      // No dash — the Lich drifts steadily toward the player instead.
+      const angle = Math.atan2(player.y - e.y, player.x - e.x);
+      e.x += Math.cos(angle) * LICH_SPEED * dt;
+      e.y += Math.sin(angle) * LICH_SPEED * dt;
       return;
     }
     // zombie, skeleton: straight approach
@@ -1801,9 +2057,24 @@ export function startGame(
         if (!enemies[i].alive) enemies.splice(i, 1);
       }
 
-      // --- enemy projectiles (ghost bolts, reaper ring) ---
+      // --- enemy projectiles (ghost bolts, reaper ring, lich curse) ---
       for (const p of enemyProjectiles) {
         if (!p.alive) continue;
+        if (p.homingPlayer) {
+          // Phase 15: steers toward the player's live position every frame
+          // (unlike player-side homingTarget/turnRate, which lock onto a
+          // captured Enemy at fire time) — same turn-rate-limited steering
+          // math as the Homing Dart weapon, just aimed the other way.
+          const desiredAngle = Math.atan2(player.y - p.y, player.x - p.x);
+          const currentAngle = Math.atan2(p.dy, p.dx);
+          const diff = normalizeAngle(desiredAngle - currentAngle);
+          const maxTurn = (p.turnRate ?? LICH_CURSE_TURN_RATE) * dt;
+          const turn = Math.max(-maxTurn, Math.min(maxTurn, diff));
+          const newAngle = currentAngle + turn;
+          const speed = Math.hypot(p.dx, p.dy);
+          p.dx = Math.cos(newAngle) * speed;
+          p.dy = Math.sin(newAngle) * speed;
+        }
         p.x += p.dx * dt;
         p.y += p.dy * dt;
         p.ttl -= dt;
@@ -1910,6 +2181,11 @@ export function startGame(
           damageNumbers.splice(i, 1);
         }
       }
+      for (let i = chainEffects.length - 1; i >= 0; i--) {
+        if (elapsedMs - chainEffects[i].createdAt >= CHAIN_EFFECT_DURATION_MS) {
+          chainEffects.splice(i, 1);
+        }
+      }
 
       // --- timer ---
       if (elapsedS >= runDurationS) {
@@ -1940,7 +2216,7 @@ export function startGame(
       // see src/lib/game/sprites.ts's drawEnemy().
       for (const e of enemies) {
         const isElite = e.tier === "elite";
-        const isBoss = e.kind === "reaper";
+        const isBoss = e.kind === "reaper" || e.kind === "lich";
         const flashAlpha = e.hitFlashUntil
           ? Math.max(0, (e.hitFlashUntil - elapsedMs) / HIT_FLASH_MS)
           : 0;
@@ -2049,6 +2325,25 @@ export function startGame(
           Math.PI * 2,
         );
         context.stroke();
+      }
+
+      // Phase 15: Chain Lightning jump lines — a bright cyan-white streak
+      // fading over CHAIN_EFFECT_DURATION_MS, cheap (no shadowBlur) like the
+      // other weapon-effect draws above.
+      for (const c of chainEffects) {
+        const progress = Math.min(
+          1,
+          (elapsedMs - c.createdAt) / CHAIN_EFFECT_DURATION_MS,
+        );
+        const alpha = Math.max(0, 1 - progress);
+        context.save();
+        context.strokeStyle = `rgba(125,211,252,${alpha})`;
+        context.lineWidth = 2;
+        context.beginPath();
+        context.moveTo(c.x1, c.y1);
+        context.lineTo(c.x2, c.y2);
+        context.stroke();
+        context.restore();
       }
 
       for (const s of hitSparks) {

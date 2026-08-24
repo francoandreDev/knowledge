@@ -83,6 +83,61 @@ export const UPGRADES: UpgradeDef[] = [
   },
 ];
 
+// Phase 15 — one-time "unlock" purchases, distinct from the leveled
+// UPGRADES above: these aren't a 1-N stat multiplier, they're a binary
+// owned/not-owned gate on content that doesn't exist for a player at all
+// until bought. Chain Lightning is a locked 6th weapon (engine.ts's
+// `WeaponId`) that only appears in a run's level-up "new weapon" offers
+// once purchased; Necromancy is a locked run-time ability that, once
+// purchased, can appear as a one-time level-up card whose pick swaps the
+// run's boss from the Reaper to the Lich (different stats/attack pattern —
+// see engine.ts's `spawnBoss()`/`bossVariant`).
+export type UnlockId = "chainLightning" | "necromancy";
+
+export interface UnlockDef {
+  id: UnlockId;
+  label: string;
+  effectLabel: string;
+  cost: number;
+}
+
+export const UNLOCKS: UnlockDef[] = [
+  {
+    id: "chainLightning",
+    label: "Chain Lightning",
+    effectLabel: "Unlocks a 6th weapon — arcs between nearby enemies",
+    cost: 200,
+  },
+  {
+    id: "necromancy",
+    label: "Necromancy",
+    effectLabel:
+      "Unlocks a run-time ability — summons the Lich instead of the Reaper",
+    cost: 350,
+  },
+];
+
+const UNLOCK_KEY_PREFIX = "game:unlock:";
+
+export function isUnlocked(id: UnlockId): boolean {
+  return pStorage.getItem(UNLOCK_KEY_PREFIX + id) === "1";
+}
+
+/** Spends coins to permanently unlock a one-time item. Returns true on a
+ * successful purchase (false if already owned or unaffordable). */
+export function purchaseUnlock(id: UnlockId): boolean {
+  if (isUnlocked(id)) return false;
+  const def = UNLOCKS.find((u) => u.id === id);
+  if (!def) return false;
+  const balance = getCoinBalance();
+  if (balance < def.cost) return false;
+  pStorage.setItem(COIN_BALANCE_KEY, String(balance - def.cost));
+  pStorage.setItem(UNLOCK_KEY_PREFIX + id, "1");
+  document.dispatchEvent(new CustomEvent("game:coins-changed"));
+  document.dispatchEvent(new CustomEvent("game:upgrades-changed"));
+  return true;
+}
+
 export interface UpgradeEffects {
   maxHpMult: number;
   speedMult: number;
