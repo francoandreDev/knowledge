@@ -20,7 +20,7 @@ import Layout from "../../layouts/Layout.astro";
         >). Runs get longer the more units you've fully completed.
       </p>
 
-      <div class="flex items-center justify-center gap-6">
+      <div class="flex flex-wrap items-center justify-center gap-6">
         <div>
           <div class="text-2xl font-semibold" data-lobby-tokens>0</div>
           <div class="text-xs text-slate-500 dark:text-slate-400">tokens</div>
@@ -37,6 +37,10 @@ import Layout from "../../layouts/Layout.astro";
             best time
           </div>
         </div>
+        <div>
+          <div class="text-2xl font-semibold" data-lobby-coins>0</div>
+          <div class="text-xs text-slate-500 dark:text-slate-400">coins</div>
+        </div>
       </div>
 
       <p
@@ -48,13 +52,30 @@ import Layout from "../../layouts/Layout.astro";
         to earn one.
       </p>
 
-      <button
-        type="button"
-        data-start-button
-        class="rounded-full border border-slate-300 px-4 py-1.5 text-sm font-medium hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:hover:border-slate-500"
-      >
-        Start run (1 token)
-      </button>
+      <div class="flex items-center gap-3">
+        <button
+          type="button"
+          data-start-button
+          class="rounded-full border border-slate-300 px-4 py-1.5 text-sm font-medium hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:hover:border-slate-500"
+        >
+          Start run (1 token)
+        </button>
+        <button
+          type="button"
+          data-shop-toggle
+          class="rounded-full border border-slate-300 px-4 py-1.5 text-sm font-medium hover:border-slate-400 dark:border-slate-700 dark:hover:border-slate-500"
+        >
+          Shop
+        </button>
+      </div>
+
+      <div data-shop-panel class="hidden w-full flex-col gap-2 text-left">
+        <p class="text-xs text-slate-500 dark:text-slate-400">
+          Permanent upgrades, bought with coins earned from runs. Cost rises
+          each level.
+        </p>
+        <div data-shop-rows class="flex w-full flex-col gap-2"></div>
+      </div>
     </div>
 
     <div data-play-area class="hidden w-full flex-col items-center gap-4">
@@ -69,6 +90,7 @@ import Layout from "../../layouts/Layout.astro";
         <div class="flex items-center justify-between">
           <span data-hud-kills>Kills: 0</span>
           <span data-hud-gems>Gems: 0</span>
+          <span data-hud-coins>Coins: 0</span>
         </div>
         <div
           data-hud-weapons
@@ -102,7 +124,7 @@ import Layout from "../../layouts/Layout.astro";
       class="hidden w-full flex-col items-center gap-3 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-6 text-center dark:border-emerald-800 dark:bg-emerald-950"
     >
       <p class="text-lg font-semibold" data-results-headline>Run ended</p>
-      <div class="grid w-full grid-cols-3 gap-2 text-sm" data-results-stats>
+      <div class="grid w-full grid-cols-4 gap-2 text-sm" data-results-stats>
         <div>
           <div class="font-semibold" data-results-time>--</div>
           <div class="text-xs text-slate-600 dark:text-slate-400">survived</div>
@@ -117,15 +139,18 @@ import Layout from "../../layouts/Layout.astro";
             level reached
           </div>
         </div>
+        <div>
+          <div class="font-semibold" data-results-coins>--</div>
+          <div class="text-xs text-slate-600 dark:text-slate-400">
+            coins earned
+          </div>
+        </div>
       </div>
       <p
         data-results-record
         class="hidden text-sm font-medium text-emerald-700 dark:text-emerald-400"
       >
         New best time!
-      </p>
-      <p class="text-xs text-slate-600 dark:text-slate-400">
-        Coins & the permanent shop arrive in a future update.
       </p>
       <button
         type="button"
@@ -147,6 +172,16 @@ import Layout from "../../layouts/Layout.astro";
       consumeToken,
       recordRunResult,
     } from "../../lib/game/tokens";
+    import {
+      UPGRADES,
+      getCoinBalance,
+      addCoins,
+      getUpgradeLevel,
+      upgradeCost,
+      purchaseUpgrade,
+      computePowerIndex,
+      getUpgradeEffects,
+    } from "../../lib/game/shop";
 
     const log = createLogger("page");
 
@@ -177,6 +212,14 @@ import Layout from "../../layouts/Layout.astro";
       const lobbyZeroMessage = document.querySelector<HTMLElement>(
         "[data-lobby-zero-message]",
       );
+      const lobbyCoinsEl =
+        document.querySelector<HTMLElement>("[data-lobby-coins]");
+      const shopToggle =
+        document.querySelector<HTMLButtonElement>("[data-shop-toggle]");
+      const shopPanel =
+        document.querySelector<HTMLElement>("[data-shop-panel]");
+      const shopRowsEl =
+        document.querySelector<HTMLElement>("[data-shop-rows]");
       const resultsHeadline = document.querySelector<HTMLElement>(
         "[data-results-headline]",
       );
@@ -189,6 +232,9 @@ import Layout from "../../layouts/Layout.astro";
       const resultsLevel = document.querySelector<HTMLElement>(
         "[data-results-level]",
       );
+      const resultsCoins = document.querySelector<HTMLElement>(
+        "[data-results-coins]",
+      );
       const resultsRecord = document.querySelector<HTMLElement>(
         "[data-results-record]",
       );
@@ -196,6 +242,7 @@ import Layout from "../../layouts/Layout.astro";
       const timerEl = document.querySelector<HTMLElement>("[data-hud-timer]");
       const killsEl = document.querySelector<HTMLElement>("[data-hud-kills]");
       const gemsEl = document.querySelector<HTMLElement>("[data-hud-gems]");
+      const coinsEl = document.querySelector<HTMLElement>("[data-hud-coins]");
       const levelEl = document.querySelector<HTMLElement>("[data-hud-level]");
       const weaponsEl =
         document.querySelector<HTMLElement>("[data-hud-weapons]");
@@ -216,15 +263,21 @@ import Layout from "../../layouts/Layout.astro";
         !lobbyDurationEl ||
         !lobbyBestEl ||
         !lobbyZeroMessage ||
+        !lobbyCoinsEl ||
+        !shopToggle ||
+        !shopPanel ||
+        !shopRowsEl ||
         !resultsHeadline ||
         !resultsTime ||
         !resultsKills ||
         !resultsLevel ||
+        !resultsCoins ||
         !resultsRecord ||
         !hpEl ||
         !timerEl ||
         !killsEl ||
         !gemsEl ||
+        !coinsEl ||
         !levelEl ||
         !weaponsEl ||
         !levelUpOverlay ||
@@ -250,13 +303,56 @@ import Layout from "../../layouts/Layout.astro";
         lobbyTokensEl!.textContent = String(tokens);
         lobbyDurationEl!.textContent = `${duration}s`;
         lobbyBestEl!.textContent = best > 0 ? formatTime(best) : "--";
+        lobbyCoinsEl!.textContent = String(getCoinBalance());
         lobbyZeroMessage!.classList.toggle("hidden", tokens >= 1);
         startButton!.disabled = tokens < 1;
+        renderShop();
+      }
+
+      function renderShop() {
+        const balance = getCoinBalance();
+        shopRowsEl!.innerHTML = "";
+        for (const def of UPGRADES) {
+          const level = getUpgradeLevel(def.id);
+          const cost = upgradeCost(def.id);
+          const row = document.createElement("div");
+          row.className =
+            "flex items-center justify-between gap-2 rounded border border-slate-200 px-2 py-1.5 text-sm dark:border-slate-800";
+          const info = document.createElement("div");
+          info.innerHTML = `<span class="font-medium">${def.label}</span> <span class="text-xs text-slate-500 dark:text-slate-400">(${level}/${def.maxLevel}) — ${def.effectLabel}</span>`;
+          const buyButton = document.createElement("button");
+          buyButton.type = "button";
+          buyButton.className =
+            "shrink-0 rounded-full border border-slate-300 px-3 py-1 text-xs font-medium hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:hover:border-slate-500";
+          if (cost === null) {
+            buyButton.textContent = "MAX";
+            buyButton.disabled = true;
+          } else {
+            buyButton.textContent = `Buy (${cost})`;
+            buyButton.disabled = balance < cost;
+            buyButton.addEventListener("click", () => {
+              if (purchaseUpgrade(def.id)) {
+                log.log("shop:purchase", { id: def.id });
+                renderLobby();
+              }
+            });
+          }
+          row.append(info, buyButton);
+          shopRowsEl!.appendChild(row);
+        }
       }
 
       if (startButton.dataset.wired === "true") return;
       startButton.dataset.wired = "true";
       backToLobbyButton.dataset.wired = "true";
+      shopToggle.dataset.wired = "true";
+
+      shopToggle.addEventListener("click", () => {
+        const isHidden = shopPanel!.classList.contains("hidden");
+        shopPanel!.classList.toggle("hidden", !isHidden);
+        shopPanel!.classList.toggle("flex", isHidden);
+        if (isHidden) renderShop();
+      });
 
       let activeGame: ReturnType<typeof startGame> | null = null;
 
@@ -276,6 +372,8 @@ import Layout from "../../layouts/Layout.astro";
         results!.classList.remove("flex");
 
         const durationS = computeRunDurationS();
+        const upgradeEffects = getUpgradeEffects();
+        const powerIndex = computePowerIndex();
         activeGame?.stop();
         activeGame = startGame(
           canvas,
@@ -285,6 +383,7 @@ import Layout from "../../layouts/Layout.astro";
               timerEl.textContent = `Time: ${state.timeRemaining.toFixed(1)}s`;
               killsEl.textContent = `Kills: ${state.kills}`;
               gemsEl.textContent = `Gems: ${state.gems}`;
+              coinsEl.textContent = `Coins: ${state.coins}`;
               levelEl.textContent = `Lv ${state.level} (XP ${Math.round(
                 state.xp,
               )}/${state.xpToNext})`;
@@ -295,12 +394,14 @@ import Layout from "../../layouts/Layout.astro";
             onGameOver(summary) {
               log.log("onGameOver callback", summary);
               const isRecord = recordRunResult(summary.survivedS);
+              addCoins(summary.coinsEarned);
               resultsHeadline.textContent = `Run ended — survived ${formatTime(
                 summary.survivedS,
               )} / ${durationS}s`;
               resultsTime.textContent = formatTime(summary.survivedS);
               resultsKills.textContent = String(summary.kills);
               resultsLevel.textContent = String(summary.level);
+              resultsCoins.textContent = String(summary.coinsEarned);
               resultsRecord.classList.toggle("hidden", !isRecord);
               playArea!.classList.add("hidden");
               playArea!.classList.remove("flex");
@@ -331,7 +432,7 @@ import Layout from "../../layouts/Layout.astro";
               levelUpOverlay!.classList.add("flex");
             },
           },
-          { durationS },
+          { durationS, upgradeEffects, powerIndex },
         );
       });
 

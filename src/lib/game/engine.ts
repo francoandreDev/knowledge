@@ -7,9 +7,8 @@
 // Phase 2 scope, layered on top: the full 5-enemy roster (Zombie/Bat/
 // Skeleton/Ghost/Ogre) unlocked on a fixed absolute-time schedule, a boss
 // (Reaper) triggered near the end of the run, and an exponential-ish spawn
-// density ramp. Enemy tiers (Normal/Veteran/Elite) are stubbed at "always
-// Normal" per docs/GAME-PROGRESS.md — they depend on `powerIndex` from the
-// Phase 5 shop, which doesn't exist yet.
+// density ramp. Enemy tiers (Normal/Veteran/Elite) were stubbed at "always
+// Normal" until Phase 5 wired them up to the shop's `powerIndex`.
 // Phase 3 scope, layered on top: gems now feed a real XP/level counter;
 // leveling up pauses the loop and offers 3-4 cards drawn from a pool of
 // owned-weapon upgrades, new-weapon offers (max 4 equipped), and temporary
@@ -21,6 +20,11 @@
 // — startGame() now takes the run's length in seconds from its caller (see
 // GameOptions), computed live by src/lib/game/tokens.ts's
 // computeRunDurationS() from the site's own progress state.
+// Phase 5 scope, layered on top: coin drops/pickup (shared magnetic system
+// with XP gems), enemy tiers (Normal/Veteran/Elite) weighted by the shop's
+// `powerIndex`, boss HP/damage scaling with `powerIndex`, and permanent
+// shop upgrade effects (src/lib/game/shop.ts) applied as run-start
+// multipliers via GameOptions.
 //
 // Spawn/collision math is kept intentionally cheap (linear scans over small
 // arrays, no quadtree) and the density ramp is floored at a minimum interval
@@ -36,6 +40,7 @@ import {
   type GameObject,
 } from "kontra";
 import { createLogger } from "./logger";
+import type { UpgradeEffects } from "./shop";
 
 const log = createLogger("engine");
 
@@ -64,6 +69,43 @@ const MAX_ALIVE_ENEMIES = 60; // perf cap — see file header
 
 // --- Phase 2: enemy roster ---
 type EnemyKind = "zombie" | "bat" | "skeleton" | "ghost" | "ogre" | "reaper";
+
+// --- Phase 5: enemy tiers, weighted by shop powerIndex ---
+type EnemyTier = "normal" | "veteran" | "elite";
+const TIER_HP_MULT: Record<EnemyTier, number> = {
+  normal: 1,
+  veteran: 1.5,
+  elite: 2.2,
+};
+const TIER_DAMAGE_MULT: Record<EnemyTier, number> = {
+  normal: 1,
+  veteran: 1.3,
+  elite: 1.6,
+};
+const TIER_SIZE_MULT: Record<EnemyTier, number> = {
+  normal: 1,
+  veteran: 1,
+  elite: 1.15,
+};
+
+// --- Phase 5: coin drops ---
+const COIN_RADIUS = 5;
+const COIN_COLOR = "#fde047";
+// Base drop chance isn't specified in GAME-DESIGN.md — resolved here at a
+// value that makes coins feel steady without out-earning gems as the run's
+// primary pickup. Ogre/reaper get an extra multiplier per their "better
+// coin drop" flavor text.
+const COIN_DROP_CHANCE_BASE = 0.3;
+const COIN_VALUE_BY_TIER: Record<EnemyTier, number> = {
+  normal: 1,
+  veteran: 2,
+  elite: 3,
+};
+const BETTER_DROP_KINDS = new Set<EnemyKind>(["ogre", "reaper"]);
+const BETTER_DROP_VALUE_MULT = 2;
+
+// --- Phase 5: boss scaling with powerIndex ---
+const BOSS_POWER_SCALING_PER_POINT = 0.02; // +2% HP/damage per powerIndex point
 
 interface EnemyDef {
   kind: Exclude<EnemyKind, "reaper">;
@@ -285,6 +327,7 @@ export interface GameHudState {
   timeRemaining: number;
   kills: number;
   gems: number;
+  coins: number;
   status: "running" | "gameover" | "levelup";
   level: number;
   xp: number;
@@ -298,6 +341,7 @@ export interface GameCallbacks {
     survivedS: number;
     kills: number;
     level: number;
+    coinsEarned: number;
   }) => void;
   onLevelUp: (cards: LevelUpCard[], choose: (cardId: string) => void) => void;
 }
@@ -305,10 +349,16 @@ export interface GameCallbacks {
 export interface GameOptions {
   /** Total run length in seconds — see tokens.ts's computeRunDurationS(). */
   durationS?: number;
+  /** Permanent shop upgrade multipliers — see shop.ts's getUpgradeEffects(). */
+  upgradeEffects?: UpgradeEffects;
+  /** Sum of owned shop upgrade levels — drives enemy-tier weighting and
+   * boss scaling. See shop.ts's computePowerIndex(). */
+  powerIndex?: number;
 }
 
 interface Enemy extends GameObject {
   kind: EnemyKind;
+  tier: EnemyTier;
   hp: number;
   alive: boolean;
   radius: number;
@@ -343,6 +393,10 @@ interface Projectile extends GameObject {
 }
 interface Gem extends GameObject {
   alive: boolean;
+}
+interface CoinPickup extends GameObject {
+  alive: boolean;
+  value: number;
 }
 
 interface WeaponRuntime {
@@ -444,16 +498,54 @@ function pickEnemyDef(elapsedS: number): EnemyDef {
   return unlocked[unlocked.length - 1];
 }
 
+// Every 15 points of powerIndex unlocks the next tier; weights ramp up
+// gradually and plateau near GAME-DESIGN.md's "~70/22/8 at the high end"
+// example (reached close to the max obtainable powerIndex, 33).
+function pickEnemyTier(powerIndex: number): EnemyTier {
+  const veteranWeight =
+    powerIndex >= 15 ? Math.min(0.22, 0.02 * (powerIndex - 15)) : 0;
+  const eliteWeight =
+    powerIndex >= 30 ? Math.min(0.08, 0.01 * (powerIndex - 30)) : 0;
+  const normalWeight = 1 - veteranWeight - eliteWeight;
+  const roll = Math.random();
+  if (roll < eliteWeight) return "elite";
+  if (roll < eliteWeight + veteranWeight) return "veteran";
+  void normalWeight;
+  return "normal";
+}
+
+// Darkens/saturates a "#rrggbb" color for the Veteran tint (per
+// GAME-DESIGN.md's "darker/more saturated tint").
+function darkenHexColor(hex: string, amount: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.max(0, ((n >> 16) & 0xff) * (1 - amount));
+  const g = Math.max(0, ((n >> 8) & 0xff) * (1 - amount));
+  const b = Math.max(0, (n & 0xff) * (1 - amount));
+  return `rgb(${r | 0}, ${g | 0}, ${b | 0})`;
+}
+
 export function startGame(
   canvas: HTMLCanvasElement,
   callbacks: GameCallbacks,
   options: GameOptions = {},
 ) {
   const runDurationS = options.durationS ?? DEFAULT_RUN_DURATION_S;
+  const upgradeEffects: UpgradeEffects = options.upgradeEffects ?? {
+    maxHpMult: 1,
+    speedMult: 1,
+    damageMult: 1,
+    pickupRadiusMult: 1,
+    coinMult: 1,
+    xpMult: 1,
+    regenPerS: 0,
+  };
+  const powerIndex = options.powerIndex ?? 0;
   log.log("startGame() called", {
     width: canvas.width,
     height: canvas.height,
     runDurationS,
+    powerIndex,
+    upgradeEffects,
   });
 
   const { context } = init(canvas);
@@ -474,6 +566,7 @@ export function startGame(
   const projectiles: Projectile[] = [];
   const enemyProjectiles: Projectile[] = [];
   const gems: Gem[] = [];
+  const coinPickups: CoinPickup[] = [];
   const arcEffects: ArcEffect[] = [];
   const pulseEffects: PulseEffect[] = [];
   const orbitTrails: OrbitTrailPoint[] = [];
@@ -494,22 +587,28 @@ export function startGame(
   let maxHpBonus = 0;
   let pickupRadiusMult = 1;
   let hpRegenPerS = 0;
-  let extraCoinChance = 0; // no-op until Phase 5 coins exist
+  let extraCoinChance = 0; // stacked by the Lucky Star temp-stat card
 
   function effectiveMaxHp(): number {
-    return PLAYER_MAX_HP + maxHpBonus;
+    return PLAYER_MAX_HP * upgradeEffects.maxHpMult + maxHpBonus;
+  }
+
+  function totalDamageMult(): number {
+    return damageMult * upgradeEffects.damageMult;
   }
 
   let elapsedMs = 0;
   let lastSpawnAt = 0;
   let kills = 0;
   let gemsCollected = 0;
+  let coinsCollected = 0; // raw total, before shop's Greed multiplier
   let status: GameHudState["status"] = "running";
   let hudAccumulatorMs = 0;
   const HUD_UPDATE_INTERVAL_MS = 100; // throttle DOM writes, not every frame
 
   const bossSpawnAtS = Math.max(20, runDurationS - 20);
   let bossSpawned = false;
+  let bossPowerScale = 1; // set by spawnBoss(), used to scale ring damage too
   const unlockedPools = new Set<string>();
 
   function pushHud() {
@@ -519,6 +618,7 @@ export function startGame(
       timeRemaining: Math.max(0, runDurationS - elapsedMs / 1000),
       kills,
       gems: gemsCollected,
+      coins: coinsCollected,
       status,
       level: playerLevel,
       xp,
@@ -537,20 +637,23 @@ export function startGame(
       unlockedPools.add(def.kind);
       log.log("pool:unlocked", { kind: def.kind, atS: elapsedS.toFixed(1) });
     }
+    const tier = pickEnemyTier(powerIndex);
     const { x, y } = spawnEdgePosition(canvas);
+    const sizeMult = TIER_SIZE_MULT[tier];
     const sprite = Sprite({
       x,
       y,
-      width: def.radius * 2,
-      height: def.radius * 2,
+      width: def.radius * 2 * sizeMult,
+      height: def.radius * 2 * sizeMult,
       anchor: { x: 0.5, y: 0.5 },
-      color: def.color,
+      color: tier === "veteran" ? darkenHexColor(def.color, 0.35) : def.color,
     }) as unknown as Enemy;
     sprite.kind = def.kind;
-    sprite.hp = def.hp;
+    sprite.tier = tier;
+    sprite.hp = def.hp * TIER_HP_MULT[tier];
     sprite.alive = true;
-    sprite.radius = def.radius;
-    sprite.contactDamage = def.contactDamage;
+    sprite.radius = def.radius * sizeMult;
+    sprite.contactDamage = def.contactDamage * TIER_DAMAGE_MULT[tier];
     sprite.wigglePhase = Math.random() * Math.PI * 2;
     sprite.lastRangedAt = elapsedMs;
     sprite.slamReadyAt = elapsedMs;
@@ -559,6 +662,7 @@ export function startGame(
     enemies.push(sprite);
     log.log("spawn:enemy", {
       kind: def.kind,
+      tier,
       x: Math.round(x),
       y: Math.round(y),
       aliveCount: enemies.length,
@@ -566,6 +670,7 @@ export function startGame(
   }
 
   function spawnBoss() {
+    const scale = 1 + BOSS_POWER_SCALING_PER_POINT * powerIndex;
     const sprite = Sprite({
       x: canvas.width / 2,
       y: -40,
@@ -575,16 +680,20 @@ export function startGame(
       color: REAPER_COLOR,
     }) as unknown as Enemy;
     sprite.kind = "reaper";
-    sprite.hp = REAPER_HP;
+    sprite.tier = "normal"; // the boss is unique per run, not tiered
+    sprite.hp = REAPER_HP * scale;
     sprite.alive = true;
     sprite.radius = REAPER_RADIUS;
-    sprite.contactDamage = REAPER_CONTACT_DAMAGE;
+    sprite.contactDamage = REAPER_CONTACT_DAMAGE * scale;
     sprite.lastRingAt = elapsedMs;
     sprite.lastDashAt = elapsedMs;
     enemies.push(sprite);
     bossSpawned = true;
+    bossPowerScale = scale;
     log.log("boss:spawned", {
-      hp: REAPER_HP,
+      hp: sprite.hp,
+      contactDamage: sprite.contactDamage,
+      powerIndex,
       atS: (elapsedMs / 1000).toFixed(1),
     });
   }
@@ -611,10 +720,19 @@ export function startGame(
       kills += 1;
       log.log("kill:enemy", { kind: e.kind, source, totalKills: kills });
       spawnGem(e.x, e.y);
+      maybeSpawnCoin(e);
       if (e.kind === "reaper") {
         log.log("boss:defeated");
       }
     }
+  }
+
+  function maybeSpawnCoin(e: Enemy) {
+    const dropChance = COIN_DROP_CHANCE_BASE + extraCoinChance;
+    if (Math.random() >= dropChance) return;
+    let value = COIN_VALUE_BY_TIER[e.tier];
+    if (BETTER_DROP_KINDS.has(e.kind)) value *= BETTER_DROP_VALUE_MULT;
+    spawnCoin(e.x, e.y, value);
   }
 
   function spawnPlayerProjectile(
@@ -682,6 +800,20 @@ export function startGame(
     }) as unknown as Gem;
     gem.alive = true;
     gems.push(gem);
+  }
+
+  function spawnCoin(x: number, y: number, value: number) {
+    const coin = Sprite({
+      x,
+      y,
+      width: COIN_RADIUS * 2,
+      height: COIN_RADIUS * 2,
+      anchor: { x: 0.5, y: 0.5 },
+      color: COIN_COLOR,
+    }) as unknown as CoinPickup;
+    coin.alive = true;
+    coin.value = value;
+    coinPickups.push(coin);
   }
 
   function damagePlayer(amount: number, source: string) {
@@ -858,7 +990,7 @@ export function startGame(
           const target = findNearestEnemy();
           if (target) {
             w.lastActionAt = elapsedMs;
-            const damage = (6 + (w.level - 1) * 2) * damageMult;
+            const damage = (6 + (w.level - 1) * 2) * totalDamageMult();
             const pierce = isEvolved ? Infinity : w.level >= 4 ? 1 : 0;
             const count = isEvolved
               ? 1
@@ -898,7 +1030,7 @@ export function startGame(
           w.lastActionAt = elapsedMs;
           const arcDeg = isEvolved ? 360 : 70 + (w.level - 1) * 15;
           const halfArc = isEvolved ? Math.PI : (arcDeg * Math.PI) / 180 / 2;
-          const damage = (10 + (w.level - 1) * 3) * damageMult;
+          const damage = (10 + (w.level - 1) * 3) * totalDamageMult();
           for (const e of enemies) {
             if (!e.alive) continue;
             const d = distance(player, e);
@@ -927,7 +1059,7 @@ export function startGame(
         w.orbitAngle = (w.orbitAngle ?? 0) + (1.5 + (w.level - 1) * 0.3) * dt;
         const count = w.level >= 3 ? 2 : 1;
         const radius = 50 + (w.level - 1) * 6;
-        const damage = (5 + (w.level - 1) * 2) * damageMult;
+        const damage = (5 + (w.level - 1) * 2) * totalDamageMult();
         const positions: { x: number; y: number }[] = [];
         const shouldDropTrail =
           isEvolved &&
@@ -983,7 +1115,7 @@ export function startGame(
         if (elapsedMs - w.lastActionAt >= interval) {
           w.lastActionAt = elapsedMs;
           const radius = 70 + (w.level - 1) * 12;
-          let damage = (8 + (w.level - 1) * 3) * damageMult;
+          let damage = (8 + (w.level - 1) * 3) * totalDamageMult();
           if (isEvolved) damage *= 2;
           for (const e of enemies) {
             if (!e.alive) continue;
@@ -1014,7 +1146,7 @@ export function startGame(
           const candidates = enemies.filter((e) => e.alive);
           if (candidates.length > 0) {
             w.lastActionAt = elapsedMs;
-            const damage = (5 + (w.level - 1) * 2) * damageMult;
+            const damage = (5 + (w.level - 1) * 2) * totalDamageMult();
             for (let i = 0; i < count; i++) {
               const target =
                 candidates[Math.floor(Math.random() * candidates.length)];
@@ -1130,7 +1262,7 @@ export function startGame(
             e,
             angle,
             REAPER_RING_PROJECTILE_SPEED,
-            REAPER_RING_DAMAGE,
+            REAPER_RING_DAMAGE * bossPowerScale,
             "reaper-ring",
           );
         }
@@ -1152,14 +1284,17 @@ export function startGame(
     if (status === "gameover") return;
     status = "gameover";
     const survivedS = Math.min(elapsedMs / 1000, runDurationS);
+    const coinsEarned = Math.round(coinsCollected * upgradeEffects.coinMult);
     log.log("game:over", {
       reason,
       survivedS: survivedS.toFixed(1),
       kills,
       gemsCollected,
+      coinsCollected,
+      coinsEarned,
       level: playerLevel,
     });
-    callbacks.onGameOver({ survivedS, kills, level: playerLevel });
+    callbacks.onGameOver({ survivedS, kills, level: playerLevel, coinsEarned });
   }
 
   const loop = GameLoop({
@@ -1168,9 +1303,10 @@ export function startGame(
       elapsedMs += dt * 1000;
       const elapsedS = elapsedMs / 1000;
 
-      // --- passive regen (Quick Recovery stacks) ---
-      if (hpRegenPerS > 0 && player.hp > 0) {
-        player.hp = Math.min(effectiveMaxHp(), player.hp + hpRegenPerS * dt);
+      // --- passive regen (Quick Recovery stacks + shop's Recovery) ---
+      const totalRegenPerS = hpRegenPerS + upgradeEffects.regenPerS;
+      if (totalRegenPerS > 0 && player.hp > 0) {
+        player.hp = Math.min(effectiveMaxHp(), player.hp + totalRegenPerS * dt);
       }
 
       // --- player movement ---
@@ -1182,7 +1318,7 @@ export function startGame(
       if (keyPressed(["arrowdown", "s"])) mvy += 1;
       if (mvx !== 0 || mvy !== 0) {
         const len = Math.hypot(mvx, mvy);
-        const speed = PLAYER_SPEED * speedMult;
+        const speed = PLAYER_SPEED * speedMult * upgradeEffects.speedMult;
         player.x = Math.min(
           Math.max(player.x + (mvx / len) * speed * dt, PLAYER_RADIUS),
           canvas.width - PLAYER_RADIUS,
@@ -1309,14 +1445,15 @@ export function startGame(
       if (status !== "running") return;
 
       // --- gems: magnetic pull + collect (feeds XP) ---
-      const pickupRadius = GEM_PICKUP_RADIUS * pickupRadiusMult;
+      const pickupRadius =
+        GEM_PICKUP_RADIUS * pickupRadiusMult * upgradeEffects.pickupRadiusMult;
       for (const g of gems) {
         if (!g.alive) continue;
         const d = distance(player, g);
         if (d < GEM_COLLECT_DISTANCE) {
           g.alive = false;
           gemsCollected += 1;
-          addXp(GEM_XP_VALUE);
+          addXp(GEM_XP_VALUE * upgradeEffects.xpMult);
           log.log("pickup:gem", { totalGems: gemsCollected });
           continue;
         }
@@ -1328,6 +1465,29 @@ export function startGame(
       }
       for (let i = gems.length - 1; i >= 0; i--) {
         if (!gems[i].alive) gems.splice(i, 1);
+      }
+
+      // --- coins: same magnetic pull + collect system as gems ---
+      for (const c of coinPickups) {
+        if (!c.alive) continue;
+        const d = distance(player, c);
+        if (d < GEM_COLLECT_DISTANCE) {
+          c.alive = false;
+          coinsCollected += c.value;
+          log.log("pickup:coin", {
+            value: c.value,
+            totalCoins: coinsCollected,
+          });
+          continue;
+        }
+        if (d < pickupRadius) {
+          const angle = Math.atan2(player.y - c.y, player.x - c.x);
+          c.x += Math.cos(angle) * GEM_PULL_SPEED * dt;
+          c.y += Math.sin(angle) * GEM_PULL_SPEED * dt;
+        }
+      }
+      for (let i = coinPickups.length - 1; i >= 0; i--) {
+        if (!coinPickups[i].alive) coinPickups.splice(i, 1);
       }
 
       // --- level-up pause: XP thresholds crossed this frame ---
@@ -1364,7 +1524,21 @@ export function startGame(
     render() {
       context.clearRect(0, 0, canvas.width, canvas.height);
       for (const g of gems) g.render();
-      for (const e of enemies) e.render();
+      for (const c of coinPickups) c.render();
+      // Elite glow/aura, drawn behind the sprite — per GAME-DESIGN.md
+      // "Distinct glow/aura" (Veteran instead gets a plain color tint,
+      // applied at spawn time via darkenHexColor()).
+      for (const e of enemies) {
+        if (e.tier === "elite") {
+          context.save();
+          context.shadowColor = "rgba(250, 204, 21, 0.9)";
+          context.shadowBlur = 14;
+          e.render();
+          context.restore();
+        } else {
+          e.render();
+        }
+      }
       for (const p of projectiles) p.render();
       for (const p of enemyProjectiles) p.render();
       player.render();

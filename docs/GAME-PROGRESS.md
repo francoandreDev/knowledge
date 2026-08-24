@@ -30,19 +30,26 @@ of every session that touches game code, before stopping.
   directly, and `options.durationS` sets the run's length (Phase 4).
 - `src/lib/game/tokens.ts` — token/run-duration/best-time bookkeeping
   (Phase 4), backed by `pStorage` (see that file's header for why, not raw
-  `localStorage` or IndexedDB yet).
-- `src/pages/game/index.astro` — the route: a lobby screen, the play area
-  (HUD + canvas + start button), and a results screen, shown/hidden as
-  three sibling containers. Wires `startGame()` to button clicks the same
-  wire-once way `ProgressToggle`/`ExercisePanel` do (`dataset.wired` guard).
+  `localStorage`).
+- `src/lib/game/shop.ts` — coin balance + 7 permanent shop upgrades (Phase
+  5), also backed by `pStorage` — see GAME-DESIGN.md's "Implementation note
+  (Phase 5)" for why the `idb` migration was skipped rather than deferred.
+  Exposes `getUpgradeEffects()`/`computePowerIndex()`, consumed by
+  `engine.ts`'s `GameOptions`.
+- `src/pages/game/index.astro` — the route: a lobby screen (now with a
+  Shop panel, toggled open/closed), the play area (HUD + canvas + start
+  button), and a results screen, shown/hidden as three sibling containers.
+  Wires `startGame()` to button clicks the same wire-once way
+  `ProgressToggle`/`ExercisePanel` do (`dataset.wired` guard).
 
 ## Phases
 
 ### Phase 0 — Scaffolding ✅ done
 
 - Added deps: `kontra` (game loop/sprites/vectors, ~7kb, matches
-  GAME-DESIGN.md's "Technical foundations"), `idb` (for later IndexedDB
-  persistence — not wired up yet, that's Phase 5).
+  GAME-DESIGN.md's "Technical foundations"), `idb` (installed for a possible
+  later IndexedDB migration — Phase 5 ended up deliberately keeping
+  `pStorage` instead, see that phase's notes, so `idb` is currently unused).
 - Route `src/pages/game/index.astro` exists and is reachable at `/game/`.
   Not yet linked from site nav (`Layout.astro`'s header) — that's part of
   Phase 4 (HUD spec calls for a gamepad icon + token badge there).
@@ -345,18 +352,79 @@ clicks) — that's the fastest way to close this out, not further automation
 attempts. A future session (or the user directly) playing one real run
 start-to-finish would fully close Phase 4's validation.
 
-### Phase 5 — Coins, shop, IndexedDB persistence — not started
+### Phase 5 — Coins, shop, enemy tiers ✅ done, partially validated in-browser
 
-From GAME-DESIGN.md "Coins and the shop," "Technical foundations":
+From GAME-DESIGN.md "Coins and the shop," "Enemy tiers," "Technical
+foundations":
 
-- Coin drops/pickup (same shared magnetic system as XP gems).
-- Permanent shop: 7 upgrades, `cost = base × (level+1)^1.5`.
-- `idb` wrapper for tokens/coins/upgrade levels/best time — the _only_
-  game-owned persistence; the game only ever **reads** `progress:`/
-  `exercise:` keys, never writes them (guardrail from GAME-DESIGN.md, worth
-  re-checking against actual code at the end of this phase).
-- `powerIndex` (sum of shop levels) driving enemy-tier weighting from
-  Phase 2.
+- **Coin drops/pickup** (`engine.ts`): shares the gems' magnetic-pull
+  system via a new `coinPickups` array. `damageEnemy()` rolls a drop on
+  every kill (`COIN_DROP_CHANCE_BASE = 0.3` + the Lucky Star temp-stat's
+  `extraCoinChance`, neither specified numerically in GAME-DESIGN.md —
+  resolved here). Value scales with enemy tier (`COIN_VALUE_BY_TIER`) and
+  doubles for Ogre/Reaper per their "better coin drop" flavor text. Raw
+  `coinsCollected` this run is multiplied by the shop's Greed upgrade
+  (`upgradeEffects.coinMult`) once, at `endGame()`, into `coinsEarned` —
+  not per-pickup, so the HUD's live "Coins: N" during a run shows the raw
+  count, and the results screen's "coins earned" shows the Greed-adjusted
+  total credited to the permanent balance.
+- **Enemy tiers** (`engine.ts`'s `pickEnemyTier()`): Normal/Veteran/Elite,
+  weighted by `powerIndex` — every 15 points unlocks the next tier, weights
+  ramp linearly and cap near GAME-DESIGN.md's "~70/22/8 at the high end"
+  example. Veteran = darker/saturated tint (`darkenHexColor()`); Elite =
+  +15% size and a canvas `shadowBlur` glow, per the design doc. The boss
+  doesn't use tiers (unique per run) but scales HP/contact-damage/ring
+  damage directly with `powerIndex` (+2%/point, `BOSS_POWER_SCALING_PER_POINT`).
+- **Permanent shop** (`src/lib/game/shop.ts`): all 7 upgrades from
+  GAME-DESIGN.md's table, `cost = base × (level+1)^1.5` exactly as specced.
+  `baseCost` (20, or 30 for the 3-level-max Recovery) and Recovery's
+  per-level regen amount (0.3 HP/s) aren't specified in the design doc —
+  both are open items resolved here, documented in `shop.ts`'s header.
+  `getUpgradeEffects()` aggregates owned levels into run-start multipliers,
+  applied in `engine.ts` alongside the existing run-only stat-card
+  multipliers (shop and stat-card bonuses stack multiplicatively, e.g.
+  `totalDamageMult() = damageMult * upgradeEffects.damageMult`).
+- **Shop UI** (`index.astro`): a toggleable panel in the lobby, one row per
+  upgrade with current level, effect blurb, and a Buy button (cost or
+  "MAX", disabled when unaffordable/maxed). Re-renders after every
+  purchase and every lobby re-entry.
+- **`idb` migration**: deliberately **not done** — see GAME-DESIGN.md's
+  "Implementation note (Phase 5)" under "Technical foundations" for the
+  reasoning (the site-wide, synchronously-read nav badge in `Layout.astro`
+  made an async storage layer a real cost, not a formality, and `pStorage`
+  already gives per-profile isolation + `deleteProfile()` cleanup for
+  free). Coins and upgrade levels followed tokens/best-time into `pStorage`
+  instead.
+
+**Validation:** guardrails (`typecheck`/`lint`/`format`/`validate:content`/
+`test`/`build`) all pass. In `claude --chrome`: the shop panel renders all
+7 upgrades with correct costs/MAX states; a simulated coin grant
+(`localStorage`, since dynamic-importing a `.ts` module doesn't work
+against the built preview server) correctly enabled Buy buttons; buying
+Vigor correctly deducted 20 coins, bumped its level to 1/5, and
+recalculated its next cost to 57 (`ceil(20 × 2^1.5)`, matching the
+formula) — verified against the same formula run standalone via `bun run`
+on `shop.ts` directly (see the cost-sequence check below) rather than
+trusting the UI alone. A real "Start run" click (after granting a token via
+`localStorage`) transitioned to the play area with the new Coins HUD row
+present and no console errors; a stray real click (aimed at a
+since-hidden "Back to lobby" button) landed on the page and granted real
+OS focus for exactly one frame — HP read 100/110 (confirming
+`maxHpMult` from 1 owned Vigor level applied correctly: 100 × 1.1 = 110)
+before `document.visibilityState` reverted to `"hidden"` and the loop
+froze again. **Same rAF-suspension limitation Phase 2 and Phase 4 both
+hit** — not a new bug, not re-investigated further (Phase 4 already
+confirmed spoofing `visibilityState` doesn't help). Enemy-tier
+spawn/color/glow logic, coin-drop-on-kill, and boss `powerIndex` scaling
+were reviewed but **not observed live** for the same reason — they only
+execute inside the suspended rAF loop. A real human playing one full run
+would be the fastest way to observe these directly, same recommendation
+as Phase 4's close-out note.
+
+Cost-sequence check (`bun run` against `shop.ts` with `localStorage` /
+`document` stubbed, 1000 coins granted, upgrades bought to exhaustion in
+declared order): `vigor: 20, 57, 104, 160, 224, MAX` — matches
+`ceil(20 × (level+1)^1.5)` at every step.
 
 ### Phase 6 — Audio + weapon evolutions polish — not started
 
@@ -382,16 +450,20 @@ From GAME-DESIGN.md "Coins and the shop," "Technical foundations":
 ## Current state
 
 **Phases 1-3 complete and validated**, including Lv6 weapon evolutions.
-**Phase 4 implemented; lobby gating, nav badge, and the results-screen
-DOM/CSS wiring are all confirmed working**, but a real rAF-driven run
-(engine callbacks firing live, not simulated) hasn't been observed in this
-environment — automation hit the same OS-focus/backgrounding limitation
-Phase 2 documented, and spoofing `document.visibilityState` doesn't work
-around it. The fastest close-out is a real human clicking "Start run" once
-(see Phase 4's validation note), not more automation attempts. Phases 5-8
-not started. Next session (or the user directly) should play one real run
-to fully close Phase 4, then confirm scope for Phase 5 (coins, shop,
-IndexedDB persistence).
+**Phase 4 and Phase 5 implemented**; lobby gating, nav badge,
+results-screen wiring, the coin/shop system, and enemy tiers are all
+believed correct from code review + guardrails + the non-rAF-dependent UI
+checks described in each phase's validation notes, but **a real rAF-driven
+run (engine callbacks firing live, not simulated) still hasn't been fully
+observed in this environment** — automation keeps hitting the same
+OS-focus/backgrounding limitation Phase 2 first documented (confirmed
+again in Phase 5: a single real click produced exactly one live frame
+before `visibilityState` reverted to `"hidden"`), and spoofing it doesn't
+work around it. The fastest close-out for both phases is a real human
+playing one full run (see Phase 4 and Phase 5's validation notes), not
+more automation attempts. Phases 6-8 not started. Next session (or the
+user directly) should play one real run to fully close Phases 4-5, then
+confirm scope for Phase 6 (audio + weapon-evolution polish).
 
 ## Deliberate simplifications (intentional — not bugs)
 
@@ -405,11 +477,9 @@ Phase 2:
   spawns and **capped at 60 alive enemies**, not literally uncapped as the
   design doc specifies — a deliberate perf tradeoff, see the Phase 2 section
   above.
-- Enemy tiers (Normal/Veteran/Elite) stubbed at "always Normal" — no
-  `powerIndex` exists until Phase 5.
-- No coin drops yet (Phase 5) — enemies still only drop XP gems on kill.
 - No `dt` clamp on a real tab-backgrounding gap — see the Phase 2 "gotcha"
-  note above.
+  note above. (Enemy tiers and coin drops, also originally deferred here,
+  shipped in Phase 5 — see that section.)
 
 Phase 3:
 
@@ -418,8 +488,6 @@ Phase 3:
   as GAME-DESIGN.md's "3-4 random cards" phrasing allows — a harmless
   simplification since the pool is large enough in practice that this
   rarely under-fills anyway.
-- `luckyStar`'s "+10% extra coin drop" stat card accumulates into
-  `extraCoinChance` but is a no-op — coins don't exist until Phase 5.
 - Orbiter/arc/pulse weapon visuals are simple raw-canvas draws, not
   sprite-based — consistent with the project's "keep the math cheap"
   instruction, revisit only if Phase 8's visual polish pass wants richer
