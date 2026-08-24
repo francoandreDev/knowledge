@@ -47,6 +47,12 @@
 // etc.) — still pure Canvas drawing, no external image assets, per
 // GAME-DESIGN.md's "Visual style" note that this swap was always expected.
 // engine.ts's simulation code is untouched; only render() changed.
+// Phase 10 scope, layered on top: `LevelUpCard` now carries `kind`/
+// `weaponId`/`statId`/`isEvolution` (all already computed internally on
+// `InternalCard`, just not previously exposed) so index.astro can pick a
+// matching icon/accent color for each card without parsing `id`/`title`
+// strings. `WeaponId` is now exported for the same reason. No simulation
+// change — purely additive rendering metadata.
 //
 // Spawn/collision math is kept intentionally cheap (linear scans over small
 // arrays, no quadtree) and the density ramp is floored at a minimum interval
@@ -244,7 +250,7 @@ const REAPER_COLOR = "#c026d3";
 const EP_RADIUS = 5; // enemy projectile radius (ghost bolts, reaper ring)
 
 // --- Phase 3: weapon roster ---
-type WeaponId =
+export type WeaponId =
   "bladeArc" | "bolt" | "orbitShield" | "novaPulse" | "homingDart";
 
 const ALL_WEAPON_IDS: WeaponId[] = [
@@ -364,6 +370,12 @@ const TEMP_STATS: TempStatDef[] = [
 
 export interface LevelUpCard {
   id: string;
+  // Phase 10: exposed so the page can pick a matching icon/accent without
+  // parsing `id`/`title` strings — see src/lib/game/icons.ts.
+  kind: "weaponUpgrade" | "newWeapon" | "stat";
+  weaponId?: WeaponId;
+  statId?: string;
+  isEvolution?: boolean;
   title: string;
   description: string;
 }
@@ -487,6 +499,7 @@ interface InternalCard {
   kind: "weaponUpgrade" | "newWeapon" | "stat";
   weaponId?: WeaponId;
   statId?: string;
+  isEvolution?: boolean;
   title: string;
   description: string;
 }
@@ -1034,6 +1047,7 @@ export function startGame(
           id: `weaponUpgrade:${w.id}`,
           kind: "weaponUpgrade",
           weaponId: w.id,
+          isEvolution,
           title: isEvolution
             ? `Evolve ${WEAPON_NAMES[w.id]} → ${EVOLVED_NAMES[w.id]}`
             : `Upgrade ${WEAPON_NAMES[w.id]} — Lv ${w.level + 1}`,
@@ -1081,6 +1095,10 @@ export function startGame(
     lastDrawnCards = new Map(cards.map((c) => [c.id, c]));
     const external: LevelUpCard[] = cards.map((c) => ({
       id: c.id,
+      kind: c.kind,
+      weaponId: c.weaponId,
+      statId: c.statId,
+      isEvolution: c.isEvolution,
       title: c.title,
       description: c.description,
     }));

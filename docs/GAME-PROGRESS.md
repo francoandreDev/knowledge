@@ -680,11 +680,83 @@ suspended. A real human playing one run remains the way to see the full
 composite roster (all 5 enemy kinds + boss + gems + coins + projectiles)
 at once.
 
+### Phase 10 — Level-up card and shop UI redesign ✅ done, partially validated in-browser
+
+Not part of the original 8-phase plan or Phase 9 — the user clarified after
+Phase 9 that "better assets" meant real designs for weapons, the level-up
+cards, the shop, and the character, plus more visible attack feedback, not
+just richer enemy sprites. Scoped down (user's explicit choice when asked)
+to **UI first: level-up cards + shop rows**, deferring weapon icons wired
+into combat, the player's own visual redesign, and attack animation/impact
+feedback to a later session.
+
+- **New `src/lib/game/icons.ts`**: hand-authored inline SVG icons (24x24
+  viewBox, stroke-based, `currentColor`, matching the outline style
+  `lucide-astro` uses for site chrome — see CLAUDE.md's "Visual design
+  balance") for the 5 weapons, an evolution "sparkle" marker, and 6 shared
+  _concept_ icons reused across the run-only temp stats (`engine.ts`'s
+  `TEMP_STATS`) and the permanent shop upgrades (`shop.ts`'s `UPGRADES`)
+  wherever they represent the same idea — Vigor/Thick Skin (heart),
+  Fleetness/Adrenaline (double-chevron), Magnetism/Wide Reach (inward
+  arrows), Greed/Lucky Star (coin stack), Might/Power Surge (flame),
+  Recovery/Quick Recovery (plus-in-circle) — plus a standalone book icon
+  for Amanuensis (XP, no temp-stat counterpart). `lucide-astro` itself
+  isn't used here because these are built in vanilla client-side JS in
+  `index.astro`'s `<script>`, not `.astro` files where that component
+  works. A `sizedIcon()` helper injects a size class onto an icon string's
+  `<svg>` tag so one icon constant works at different sizes (h-5 in cards,
+  h-4 in the denser shop rows).
+- **`engine.ts`**: `LevelUpCard` (the public shape `index.astro` receives)
+  now carries `kind`/`weaponId`/`statId`/`isEvolution` — all of this was
+  already computed internally on `InternalCard`, just not previously
+  exposed, so the page had to parse `id`/`title` strings to guess which
+  icon to show. Now it doesn't have to. `WeaponId` is exported for the
+  same reason. Purely additive metadata — no simulation change.
+- **Level-up cards** (`index.astro`'s `onLevelUp`): each card now has an
+  icon badge (weapon icon for weapon cards, concept icon for stat cards)
+  and an accent color by kind — sky for weapon upgrades, emerald + a "NEW"
+  pill for new-weapon offers, violet for stat cards, and gold/amber
+  (overriding the other three) plus the sparkle icon for evolution (Lv6)
+  cards specifically, since reaching one is the rarer moment of the three
+  kinds. Cards animate in with the shared `animate-fade-slide-in` class
+  (per CLAUDE.md's micro-interaction convention), matching how
+  `ExercisePanel`/`LevelTabs` reveal content elsewhere on the site.
+- **Shop rows** (`index.astro`'s `renderShop`): each row gained an icon
+  badge and a real visual level-progress bar (`animate-fill-bar` +
+  `--target-width`, the same pattern `business-communication/
+audience-awareness` established) replacing the old plain "(3/5)" text,
+  plus the same fade-in-on-render treatment as the level-up cards.
+
+**Validated 2026-08-24**: guardrails (`bun run check`) pass. In-browser:
+the shop panel doesn't depend on the rAF loop, so it was fully verified
+live — granted coins and partial levels on Vigor (2/5) and Magnetism (1/5)
+via `localStorage`, opened the shop, and confirmed all 7 rows render their
+icon (heart/double-chevron/flame/inward-arrows/coin-stack/book/plus-circle)
+and that the progress bars fill to the exact level fraction (Vigor's bar
+at 40%, Magnetism's at 20%, the other five at 0%) — screenshotted and
+visually confirmed. Zero console errors. The level-up cards **do** depend
+on the rAF loop for a real trigger (same limitation as every phase since
+Phase 2), so instead of a live level-up, the exact `onLevelUp` render
+logic (accent color, icon selection, NEW pill, evolution sparkle) was
+replicated via `javascript_tool` against the real DOM with one sample card
+of each kind (weapon upgrade, weapon evolution, new weapon, stat) —
+screenshotted after force-finishing the `animate-fade-slide-in` animations
+(`el.getAnimations().forEach(a => a.finish())`, the project's established
+technique for this exact automation limitation). All four rendered
+correctly and distinctly: sky accent + bolt icon for the plain upgrade,
+gold accent + sword icon + sparkle for the evolution, emerald accent +
+shield icon + "NEW" pill for the new-weapon offer, violet accent + coin
+icon for the stat card. **Not confirmed**: the real `onLevelUp` call site
+firing from inside a live run (only its rendering logic was replicated,
+not the actual invocation path) — closing that gap needs the same real
+human playthrough already recommended for Phases 4-9.
+
 ## Current state
 
-**All 8 originally-planned phases, plus Phase 9 (composite sprite detail,
-added after the fact per user request), are now implemented.** Phases 1-3
-are complete and validated
+**All 8 originally-planned phases, plus Phase 9 (composite sprite detail)
+and Phase 10 (level-up card / shop UI redesign), both added after the fact
+per user request, are now implemented.** Phases 1-3 are complete and
+validated
 end-to-end, including Lv6 weapon evolutions. Phases 4 through 8 (real
 gating/lobby/results, coins/shop/enemy tiers, audio, mobile joystick, and
 visual/perf polish) are all believed correct from code review + guardrails
@@ -699,12 +771,16 @@ doesn't work around it. The fastest, and really the only remaining,
 close-out step is **a real human playing one full run** — ideally long
 enough to see an Elite spawn, a weapon evolve, a boss with its hood
 rendered, and (deliberately) a mid-run tab-switch to exercise Phase 8's
-`dt` clamp — not more automation attempts. No further phases are planned;
-GAME-DESIGN.md is fully implemented as specced (with the small, explicitly-
-documented deviations noted throughout this file, e.g. the Phase 4
-per-unit-not-per-level token grant, Phase 2's spawn-density floor/cap,
-Phase 8's selective-glow decision, and Phase 9's composite-Canvas-detail
-scope instead of external art assets).
+`dt` clamp — not more automation attempts. GAME-DESIGN.md is fully
+implemented as specced (with the small, explicitly-documented deviations
+noted throughout this file, e.g. the Phase 4 per-unit-not-per-level token
+grant, Phase 2's spawn-density floor/cap, Phase 8's selective-glow
+decision, and Phase 9's composite-Canvas-detail scope instead of external
+art assets). **One deferred item remains, per the user's explicit choice
+when scoping Phase 10**: weapon icons wired into actual combat/HUD, the
+player character's own visual redesign, and more visible attack
+animation/impact feedback — Phase 10 only covered the level-up cards and
+shop. A future session should pick this up as Phase 11 once named.
 
 ## Deliberate simplifications (intentional — not bugs)
 
