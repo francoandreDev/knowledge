@@ -31,7 +31,9 @@ of every session that touches game code, before stopping.
   added `enemyTimeScale()`/`computeThreatTier()` — enemy HP/contact-damage
   now scale up (bounded, asymptotic) with elapsed run time, and
   `GameHudState.threatTier` / `GameCallbacks.onThreatTierUp` expose a
-  cosmetic 1-5 readout of that same ramp.
+  cosmetic 1-5 readout of that same ramp. Phase 14 added floating
+  `DamageNumber`s, `GameHudState.lowHp`, `GameCallbacks.onBossIncoming`, and
+  a `cause` string on `onGameOver`'s summary (via `describeDeathCause()`).
 - `src/lib/game/tokens.ts` — token/run-duration/best-time bookkeeping
   (Phase 4), backed by `pStorage` (see that file's header for why, not raw
   `localStorage`).
@@ -64,7 +66,9 @@ of every session that touches game code, before stopping.
   HUD's live weapon-icon row. Phase 12 added a `UI_ICON` export (clock,
   skull, gem, star, ticket, trophy, sound/motion/shop/fullscreen/back/play)
   for the lobby/HUD/results chrome. Phase 13 added a trending-up-line icon
-  (`UI_ICON.threat`) for the new threat-tier HUD chip/toast.
+  (`UI_ICON.threat`) for the new threat-tier HUD chip/toast. Phase 14 added
+  a triangle-exclamation icon (`UI_ICON.warning`) for the boss-incoming
+  banner.
 - `src/lib/game/settings.ts` — Phase 8's reduce-motion setting
   (`isReducedMotion()`/`setReducedMotion()`/`toggleReducedMotion()`),
   persisted via `pStorage` (`game:reduce-motion`) — mirrors `audio.ts`'s
@@ -974,13 +978,88 @@ further checked via `el.getAnimations()[0].finish()` per this file's
 established animation-verification technique, resolving to `opacity: 1` /
 no residual transform as intended.
 
+### Phase 14 — Four post-launch gaps: damage numbers, low-HP warning, boss telegraph, death cause ✅ done, validated in-browser
+
+Not part of the original design doc — the user asked "what else is the game
+missing?" after Phase 13's balance/feedback pass. Reviewed `GAME-DESIGN.md`
+in full against the current implementation (everything specced was already
+built) and identified four genre-standard feedback gaps worth closing:
+
+- **Floating damage numbers** (`engine.ts`): `damageEnemy()` now pushes a
+  `DamageNumber` (`x`, `y`, `amount`, `createdAt`) on every hit; `render()`
+  draws it as white canvas text rising `DAMAGE_NUMBER_RISE_PX` and fading out
+  over `DAMAGE_NUMBER_DURATION_MS` (700ms), pruned the same way `hitSparks`
+  already are. Layered on top of (not a replacement for) Phase 11's
+  hit-flash/spark — a hit's magnitude is now visible, not just its
+  occurrence.
+- **Low-HP screen warning**: `GameHudState.lowHp` flips true once HP drops to
+  `LOW_HP_THRESHOLD` (25%) of effective max HP, computed in `pushHud()`.
+  `index.astro` toggles a `data-lowhp-vignette` overlay (an inset red
+  `box-shadow` div, absolutely positioned over the canvas wrapper only, not
+  the whole page) and a new looping `animate-pulse-warn` CSS keyframe
+  (`global.css`) — the game's first *looping* animation, unlike every prior
+  one-shot (`fade-slide-in`/`shake`/`pop`), since it needs to keep signaling
+  "still low," not mark a single moment. Gated off (no `animate-pulse-warn`
+  class) when `reduceMotion` is on, matching the canvas glow/idle-bob
+  convention elsewhere.
+- **Boss telegraph**: a new `GameCallbacks.onBossIncoming?()` fires once,
+  `BOSS_WARNING_LEAD_S` (4s) before `spawnBoss()` actually runs — mirrors
+  Phase 13's `onThreatTierUp` toast pattern exactly (same re-triggerable
+  `animate-fade-slide-in` remove/reflow/re-add mechanism), rendered as a red
+  "⚠ Boss incoming" banner over the canvas.
+- **Death cause on the results screen**: `damagePlayer()` now records
+  `lastDamageSource`; `endGame()` resolves it through a new
+  `describeDeathCause(reason, source)` (a lookup table keyed by the same
+  `source` strings already used for logging — `"contact:<kind>"`,
+  `"ogre-slam"`, `"ghost"`, `"reaper-ring"`) into a human-readable string
+  (`"Caught by a Zombie"`, `"Survived the full run"`, etc.), now carried on
+  `GameCallbacks.onGameOver`'s summary as `cause` and shown as a new line
+  under the results headline.
+  - **Real bug found and fixed along the way**: the enemy-projectile
+    collision handler in the main loop always called
+    `damagePlayer(p.damage, "ranged")` with a hardcoded source string,
+    discarding the projectile's own `source` (already set correctly at each
+    `fireEnemyProjectile()` call site) — this made ghost-bolt and
+    reaper-ring deaths indistinguishable before the cause string needed to
+    tell them apart. Fixed by passing `p.source` through instead.
+- **`icons.ts`**: one new icon, a triangle-exclamation (`UI_ICON.warning`)
+  for the boss banner — distinct from `ICON_SKULL` (the kills stat) since
+  this is a warning about what's about to happen, not a tally of what
+  already did.
+
+**Validation:** guardrails (`bun run check`) pass. In-browser (`claude
+--chrome` against a fresh `astro preview` build), and this time a **real,
+sustained rAF-driven session** — synthetic `PointerEvent` drag sequences
+spaced with real `setTimeout` delays (not instantaneous) kept the tab
+genuinely focused across several full runs, avoiding the
+`visibilityState: "hidden"` wall documented in every earlier phase. Directly
+confirmed, live:
+- **Damage numbers**: patched `CanvasRenderingContext2D.prototype.fillText`
+  to log calls matching `/^\d+$/` before triggering combat — 318 real calls
+  observed with the correct per-hit damage value ("6", Bolt's base damage)
+  during one drag session, proving the render path executes for real, not
+  just that it type-checks. Also directly caught a floating "7" in a
+  screenshot mid-run.
+- **Low-HP vignette**: drove HP down to 18/120 (15%) via real combat and
+  screenshotted — the red pulsing glow renders correctly, confined to the
+  canvas (not bleeding into the page chrome), while HP was genuinely low.
+- **Boss telegraph**: the same screenshot that caught the low-HP vignette
+  also caught the "⚠ Boss incoming" banner, both firing correctly in the
+  same live frame.
+- **Death cause**: three separate real deaths across the session all showed
+  "Caught by a Zombie" on the results screen (matching the actual killer in
+  each case), alongside the existing "New best time!" callout.
+Zero console errors across the whole session.
+
 ## Current state
 
 **All 8 originally-planned phases, plus Phase 9 (composite sprite detail),
 Phase 10 (level-up card / shop UI redesign), Phase 11 (visible attacks +
 subtle character pass), Phase 12 (game screen visual/UI redesign +
-fullscreen toggle), and Phase 13 (time-scaled enemy toughness + threat-tier
-readout), all added after the fact per user request, are now implemented.**
+fullscreen toggle), Phase 13 (time-scaled enemy toughness + threat-tier
+readout), and Phase 14 (damage numbers, low-HP warning, boss telegraph,
+death cause), all added after the fact per user request, are now
+implemented.**
 Phases 1-3 are complete and validated end-to-end, including
 Lv6 weapon evolutions. Phases 4 through 8 (real gating/lobby/results,
 coins/shop/enemy tiers, audio, mobile joystick, and visual/perf polish) are
@@ -1006,9 +1085,12 @@ composite-Canvas-detail scope instead of external art assets, and Phase 13's
 bounded (not open-ended) time-scaling cap since run length varies with site
 progress). No further phases are currently planned — Phase 11 closed out
 the deferred item from Phase 10 (weapon icons in combat/HUD, the player's
-visual redesign, and visible attack/impact feedback), and Phase 13 closed
-out the user's balance-and-feedback report (enemies getting relatively
-easier over time, and no visible signal of rising difficulty).
+visual redesign, and visible attack/impact feedback), Phase 13 closed out
+the user's balance-and-feedback report (enemies getting relatively easier
+over time, and no visible signal of rising difficulty), and Phase 14 closed
+out four remaining feedback gaps found via a "what's still missing?" review
+(damage numbers, a low-HP warning, a boss telegraph, and a death cause on
+the results screen).
 
 ## Deliberate simplifications (intentional — not bugs)
 

@@ -187,6 +187,21 @@ import Layout from "../../layouts/Layout.astro";
         </div>
 
         <div
+          data-boss-toast
+          class="animate-fade-slide-in pointer-events-none absolute top-2 left-1/2 z-10 hidden -translate-x-1/2 items-center gap-1.5 rounded-full border border-red-400/50 bg-red-950/90 px-3 py-1 text-xs font-medium text-red-200"
+        >
+          <span data-icon-boss-toast></span>
+          <span>Boss incoming</span>
+        </div>
+
+        <div
+          data-lowhp-vignette
+          class="pointer-events-none absolute inset-0 hidden rounded-lg"
+          style="box-shadow: inset 0 0 40px 10px rgba(244, 63, 94, 0.9);"
+        >
+        </div>
+
+        <div
           data-levelup-overlay
           class="absolute inset-0 hidden flex-col items-center justify-center gap-3 rounded-lg bg-slate-950/90 p-4"
         >
@@ -201,6 +216,11 @@ import Layout from "../../layouts/Layout.astro";
       class="hidden w-full flex-col items-center gap-3 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-6 text-center dark:border-emerald-800 dark:bg-emerald-950"
     >
       <p class="text-lg font-semibold" data-results-headline>Run ended</p>
+      <p
+        class="text-xs text-emerald-700 dark:text-emerald-400"
+        data-results-cause
+      >
+      </p>
       <div class="grid w-full grid-cols-4 gap-2 text-sm" data-results-stats>
         <div class="flex flex-col items-center gap-1">
           <span class="text-sky-500" data-icon-results-time></span>
@@ -335,6 +355,9 @@ import Layout from "../../layouts/Layout.astro";
       const resultsRecord = document.querySelector<HTMLElement>(
         "[data-results-record]",
       );
+      const resultsCause = document.querySelector<HTMLElement>(
+        "[data-results-cause]",
+      );
       const hpEl = document.querySelector<HTMLElement>("[data-hud-hp]");
       const hpBarEl = document.querySelector<HTMLElement>("[data-hud-hp-bar]");
       const timerEl = document.querySelector<HTMLElement>("[data-hud-timer]");
@@ -351,6 +374,11 @@ import Layout from "../../layouts/Layout.astro";
       );
       const threatToastTextEl = document.querySelector<HTMLElement>(
         "[data-threat-toast-text]",
+      );
+      const bossToastEl =
+        document.querySelector<HTMLElement>("[data-boss-toast]");
+      const lowHpVignetteEl = document.querySelector<HTMLElement>(
+        "[data-lowhp-vignette]",
       );
       const levelUpOverlay = document.querySelector<HTMLElement>(
         "[data-levelup-overlay]",
@@ -383,6 +411,7 @@ import Layout from "../../layouts/Layout.astro";
         !resultsLevel ||
         !resultsCoins ||
         !resultsRecord ||
+        !resultsCause ||
         !hpEl ||
         !hpBarEl ||
         !timerEl ||
@@ -395,6 +424,8 @@ import Layout from "../../layouts/Layout.astro";
         !threatEl ||
         !threatToastEl ||
         !threatToastTextEl ||
+        !bossToastEl ||
+        !lowHpVignetteEl ||
         !levelUpOverlay ||
         !levelUpCardsEl
       ) {
@@ -422,6 +453,7 @@ import Layout from "../../layouts/Layout.astro";
       setIcon("[data-icon-coins]", UI_ICON.coins, "h-3.5 w-3.5");
       setIcon("[data-icon-threat]", UI_ICON.threat, "h-3.5 w-3.5");
       setIcon("[data-icon-threat-toast]", UI_ICON.threat, "h-3.5 w-3.5");
+      setIcon("[data-icon-boss-toast]", UI_ICON.warning, "h-3.5 w-3.5");
       setIcon("[data-icon-results-time]", UI_ICON.timer, "h-4 w-4");
       setIcon("[data-icon-results-kills]", UI_ICON.kills, "h-4 w-4");
       setIcon("[data-icon-results-level]", UI_ICON.level, "h-4 w-4");
@@ -557,6 +589,33 @@ import Layout from "../../layouts/Layout.astro";
         }, 2200);
       }
 
+      // Phase 14: boss telegraph banner, fired once via engine.ts's
+      // onBossIncoming — same re-triggerable animation pattern as the
+      // threat toast above.
+      let bossToastTimeout: number | undefined;
+      function showBossToast() {
+        bossToastEl!.classList.remove("hidden");
+        bossToastEl!.classList.add("flex");
+        bossToastEl!.classList.remove("animate-fade-slide-in");
+        void bossToastEl!.offsetWidth;
+        bossToastEl!.classList.add("animate-fade-slide-in");
+        if (bossToastTimeout) window.clearTimeout(bossToastTimeout);
+        bossToastTimeout = window.setTimeout(() => {
+          bossToastEl!.classList.add("hidden");
+          bossToastEl!.classList.remove("flex");
+        }, 3200);
+      }
+
+      // Phase 14: low-HP pulsing vignette — only animates when reduceMotion
+      // is off, matching the canvas glow/idle-bob gating elsewhere.
+      function setLowHp(active: boolean) {
+        lowHpVignetteEl!.classList.toggle("hidden", !active);
+        lowHpVignetteEl!.classList.toggle(
+          "animate-pulse-warn",
+          active && !isReducedMotion(),
+        );
+      }
+
       if (startButton.dataset.wired === "true") return;
       startButton.dataset.wired = "true";
       backToLobbyButton.dataset.wired = "true";
@@ -608,6 +667,9 @@ import Layout from "../../layouts/Layout.astro";
         levelUpOverlay!.classList.remove("flex");
         threatToastEl!.classList.add("hidden");
         threatToastEl!.classList.remove("flex");
+        bossToastEl!.classList.add("hidden");
+        bossToastEl!.classList.remove("flex");
+        setLowHp(false);
         lobby!.classList.add("hidden");
         playArea!.classList.remove("hidden");
         playArea!.classList.add("flex");
@@ -630,6 +692,7 @@ import Layout from "../../layouts/Layout.astro";
               coinsEl.textContent = String(state.coins);
               levelEl.textContent = String(state.level);
               threatEl.textContent = String(state.threatTier);
+              setLowHp(state.lowHp);
               xpBarEl.style.width = `${Math.max(0, Math.min(100, (state.xp / state.xpToNext) * 100))}%`;
               weaponsEl.innerHTML = state.weapons
                 .map(
@@ -648,11 +711,17 @@ import Layout from "../../layouts/Layout.astro";
               log.log("onThreatTierUp callback", { tier });
               showThreatToast(tier);
             },
+            onBossIncoming() {
+              log.log("onBossIncoming callback");
+              showBossToast();
+            },
             onGameOver(summary) {
               log.log("onGameOver callback", summary);
               const isRecord = recordRunResult(summary.survivedS);
               addCoins(summary.coinsEarned);
+              setLowHp(false);
               resultsHeadline.textContent = `Survived ${formatTime(summary.survivedS)}`;
+              resultsCause.textContent = summary.cause;
               resultsTime.textContent = formatTime(summary.survivedS);
               resultsKills.textContent = String(summary.kills);
               resultsLevel.textContent = String(summary.level);

@@ -85,6 +85,27 @@
 // once per tier crossed — answers the other half of the ask ("nothing tells
 // the player they're facing more difficulty"): index.astro renders it as a
 // HUD chip plus a brief toast on every tier-up.
+// Phase 14 scope, layered on top: four gaps identified after a "what's still
+// missing" review against docs/GAME-DESIGN.md and general genre conventions.
+// (1) Floating damage numbers — damageEnemy() now stamps a DamageNumber at
+// the hit point, rendered as rising/fading canvas text, so a hit's actual
+// magnitude is visible, not just its existence (the Phase 11 flash/spark).
+// (2) A low-HP warning — GameHudState.lowHp flips true at <=25% effective
+// max HP; index.astro pulses a red screen vignette off it, since previously
+// the only signal was reading the numeric HP bar. (3) A boss telegraph —
+// GameCallbacks.onBossIncoming fires BOSS_WARNING_LEAD_S before spawnBoss()
+// actually runs (the boss itself still drops in unannounced-looking without
+// this), mirroring Phase 13's threat-tier toast pattern. (4) A death cause —
+// damagePlayer() now records the source of the last hit that reduced the
+// player to 0 HP, and endGame()/onGameOver's summary carries a human-
+// readable `cause` string (describeDeathCause()) so the results screen says
+// what killed the player, not just how long they lasted. Along the way,
+// fixed a latent bug: the enemy-projectile collision handler always called
+// damagePlayer(..., "ranged") regardless of which enemy fired it, discarding
+// the projectile's own `source` (which was already being set correctly at
+// fireEnemyProjectile() call sites) — this made ghost-bolt and reaper-ring
+// deaths indistinguishable from each other before Phase 14 needed to tell
+// them apart for the cause string.
 //
 // Spawn/collision math is kept intentionally cheap (linear scans over small
 // arrays, no quadtree) and the density ramp is floored at a minimum interval
@@ -203,6 +224,16 @@ const ENEMY_STAT_RAMP_HALF_LIFE_S = 90;
 const ENEMY_HP_SCALE_CAP = 3; // up to +200% HP by the late game
 const ENEMY_DAMAGE_SCALE_CAP = 2; // up to +100% contact damage by the late game
 const THREAT_TIER_COUNT = 5; // cosmetic readout, see computeThreatTier()
+
+// --- Phase 14: floating damage numbers ---
+const DAMAGE_NUMBER_DURATION_MS = 700;
+const DAMAGE_NUMBER_RISE_PX = 34;
+
+// --- Phase 14: low-HP screen warning ---
+const LOW_HP_THRESHOLD = 0.25; // fraction of effective max HP
+
+// --- Phase 14: boss telegraph, mirrors the Phase 13 threat-toast pattern ---
+const BOSS_WARNING_LEAD_S = 4;
 
 // 0..1, asymptotically approaching 1 — the shared curve shape driving both
 // enemy stat scaling and the threat-tier readout below.
@@ -465,6 +496,9 @@ export interface GameHudState {
   /** Phase 13: 1-based, capped at 5 — cosmetic readout of enemyTimeScale()'s
    * underlying ramp, so the player sees difficulty rising, not just feels it. */
   threatTier: number;
+  /** Phase 14: true once HP drops to LOW_HP_THRESHOLD of effective max HP —
+   * drives index.astro's pulsing screen vignette. */
+  lowHp: boolean;
 }
 
 export interface GameCallbacks {
@@ -474,11 +508,18 @@ export interface GameCallbacks {
     kills: number;
     level: number;
     coinsEarned: number;
+    /** Phase 14: human-readable — "Survived the full run" for a timer
+     * ending, or "Caught by a Zombie"/etc. for a death. See
+     * describeDeathCause(). */
+    cause: string;
   }) => void;
   onLevelUp: (cards: LevelUpCard[], choose: (cardId: string) => void) => void;
   /** Phase 13: fired once per threat tier crossed (1→2, 2→3, ...) — lets the
    * page show a brief "getting harder" toast at the moment it happens. */
   onThreatTierUp?: (tier: number) => void;
+  /** Phase 14: fired once, BOSS_WARNING_LEAD_S before the boss actually
+   * spawns — lets the page show a telegraph banner ahead of the drop-in. */
+  onBossIncoming?: () => void;
 }
 
 export interface GameOptions {
@@ -580,6 +621,16 @@ interface HitSpark {
   createdAt: number;
 }
 
+// Phase 14: a rising/fading damage amount at the hit point, layered on top
+// of Phase 11's hit-flash + spark so a hit's magnitude is visible, not just
+// its occurrence.
+interface DamageNumber {
+  x: number;
+  y: number;
+  amount: number;
+  createdAt: number;
+}
+
 interface InternalCard {
   id: string;
   kind: "weaponUpgrade" | "newWeapon" | "stat";
@@ -665,6 +716,31 @@ function pickEnemyTier(powerIndex: number): EnemyTier {
   if (roll < eliteWeight + veteranWeight) return "veteran";
   void normalWeight;
   return "normal";
+}
+
+// Phase 14: turns the raw damageEnemy/damagePlayer `source` string used
+// throughout for logging into a human-readable death cause for the results
+// screen. `source` values come from contact hits ("contact:<kind>"), ranged
+// enemy attacks (fireEnemyProjectile's own `source` param — "ghost",
+// "reaper-ring"), and the ogre's telegraphed slam ("ogre-slam").
+const DEATH_CAUSE_BY_SOURCE: Record<string, string> = {
+  "contact:zombie": "Caught by a Zombie",
+  "contact:bat": "Caught by a Bat",
+  "contact:skeleton": "Caught by a Skeleton",
+  "contact:ghost": "Caught by a Ghost",
+  "contact:ogre": "Crushed by an Ogre",
+  "contact:reaper": "Caught by the Reaper",
+  "ogre-slam": "Flattened by an Ogre's slam",
+  ghost: "Struck by ghost fire",
+  "reaper-ring": "Caught in the Reaper's ring",
+};
+
+function describeDeathCause(
+  reason: "death" | "timer",
+  source: string | null,
+): string {
+  if (reason === "timer") return "Survived the full run";
+  return (source && DEATH_CAUSE_BY_SOURCE[source]) || "Defeated";
 }
 
 // Darkens/saturates a "#rrggbb" color for the Veteran tint (per
@@ -794,6 +870,7 @@ export function startGame(
   const pulseEffects: PulseEffect[] = [];
   const orbitTrails: OrbitTrailPoint[] = [];
   const hitSparks: HitSpark[] = [];
+  const damageNumbers: DamageNumber[] = []; // Phase 14
   let lastOrbitTrailDropAt = -Infinity;
   let orbiterPositions: { x: number; y: number }[] = [];
 
@@ -832,9 +909,11 @@ export function startGame(
 
   const bossSpawnAtS = Math.max(20, runDurationS - 20);
   let bossSpawned = false;
+  let bossWarned = false; // Phase 14
   let bossPowerScale = 1; // set by spawnBoss(), used to scale ring damage too
   const unlockedPools = new Set<string>();
   let lastThreatTier = 1; // Phase 13
+  let lastDamageSource: string | null = null; // Phase 14, see describeDeathCause()
 
   function pushHud() {
     callbacks.onHudUpdate({
@@ -850,6 +929,7 @@ export function startGame(
       xpToNext: xpForNextLevel(playerLevel),
       weapons: ownedWeapons.map((w) => ({ id: w.id, level: w.level })),
       threatTier: computeThreatTier(elapsedMs / 1000),
+      lowHp: player.hp > 0 && player.hp / effectiveMaxHp() <= LOW_HP_THRESHOLD,
     });
   }
 
@@ -951,6 +1031,12 @@ export function startGame(
     e.hp -= amount;
     e.hitFlashUntil = elapsedMs + HIT_FLASH_MS;
     hitSparks.push({ x: e.x, y: e.y, createdAt: elapsedMs });
+    damageNumbers.push({
+      x: e.x,
+      y: e.y - e.radius,
+      amount,
+      createdAt: elapsedMs,
+    });
     playHit();
     log.log("hit:enemy", { kind: e.kind, source, remainingHp: e.hp });
     if (e.hp <= 0 && e.alive) {
@@ -1057,6 +1143,7 @@ export function startGame(
   function damagePlayer(amount: number, source: string) {
     player.hp = Math.max(0, player.hp - amount);
     playerHitFlashUntil = elapsedMs + HIT_FLASH_MS;
+    lastDamageSource = source;
     log.log("player:damaged", { amount, source, hpRemaining: player.hp });
     if (player.hp <= 0) {
       playDeath();
@@ -1534,8 +1621,10 @@ export function startGame(
     status = "gameover";
     const survivedS = Math.min(elapsedMs / 1000, runDurationS);
     const coinsEarned = Math.round(coinsCollected * upgradeEffects.coinMult);
+    const cause = describeDeathCause(reason, lastDamageSource);
     log.log("game:over", {
       reason,
+      cause,
       survivedS: survivedS.toFixed(1),
       kills,
       gemsCollected,
@@ -1543,7 +1632,13 @@ export function startGame(
       coinsEarned,
       level: playerLevel,
     });
-    callbacks.onGameOver({ survivedS, kills, level: playerLevel, coinsEarned });
+    callbacks.onGameOver({
+      survivedS,
+      kills,
+      level: playerLevel,
+      coinsEarned,
+      cause,
+    });
   }
 
   const loop = GameLoop({
@@ -1613,7 +1708,12 @@ export function startGame(
         );
       }
 
-      // --- boss trigger (relative, near run end) ---
+      // --- boss telegraph, then trigger (relative, near run end) ---
+      if (!bossWarned && elapsedS >= bossSpawnAtS - BOSS_WARNING_LEAD_S) {
+        bossWarned = true;
+        callbacks.onBossIncoming?.();
+        log.log("boss:incoming");
+      }
       if (!bossSpawned && elapsedS >= bossSpawnAtS) {
         spawnBoss();
       }
@@ -1719,7 +1819,11 @@ export function startGame(
         }
         if (distance(p, player) < EP_RADIUS + PLAYER_RADIUS) {
           p.alive = false;
-          damagePlayer(p.damage, "ranged");
+          // Phase 14: use the projectile's own source (set correctly at
+          // fireEnemyProjectile() call sites) instead of a hardcoded
+          // "ranged" — needed so describeDeathCause() can tell a ghost
+          // bolt apart from a reaper-ring hit.
+          damagePlayer(p.damage, p.source);
           if (status !== "running") break;
         }
       }
@@ -1796,6 +1900,14 @@ export function startGame(
       for (let i = hitSparks.length - 1; i >= 0; i--) {
         if (elapsedMs - hitSparks[i].createdAt >= HIT_SPARK_DURATION_MS) {
           hitSparks.splice(i, 1);
+        }
+      }
+      for (let i = damageNumbers.length - 1; i >= 0; i--) {
+        if (
+          elapsedMs - damageNumbers[i].createdAt >=
+          DAMAGE_NUMBER_DURATION_MS
+        ) {
+          damageNumbers.splice(i, 1);
         }
       }
 
@@ -1946,6 +2058,24 @@ export function startGame(
         );
         drawImpactBurst(context, s.x, s.y, progress);
       }
+
+      // Phase 14: floating damage numbers — rise and fade over
+      // DAMAGE_NUMBER_DURATION_MS, drawn last so they sit above everything
+      // else at the hit point.
+      context.save();
+      context.font = "bold 12px sans-serif";
+      context.textAlign = "center";
+      for (const n of damageNumbers) {
+        const progress = Math.min(
+          1,
+          (elapsedMs - n.createdAt) / DAMAGE_NUMBER_DURATION_MS,
+        );
+        const alpha = Math.max(0, 1 - progress);
+        const y = n.y - progress * DAMAGE_NUMBER_RISE_PX;
+        context.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+        context.fillText(String(Math.round(n.amount)), n.x, y);
+      }
+      context.restore();
     },
   });
 

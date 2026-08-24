@@ -77,6 +77,12 @@ const ICON_PLAY = `<svg ${ICON_ATTRS} stroke-linejoin="round"><polygon points="6
 // toughness over time, not the player's damage stat.
 const ICON_TRENDING_UP = `<svg ${ICON_ATTRS}><polyline points="3 17 9 11 13 15 21 6"/><polyline points="15 6 21 6 21 12"/></svg>`;
 
+// Phase 14 — triangle exclamation, "boss incoming" telegraph banner
+// (engine.ts's onBossIncoming callback). Distinct from ICON_SKULL (used for
+// the kills stat) since this is a warning about what's about to happen, not
+// a tally of what already did.
+const ICON_WARNING = `<svg ${ICON_ATTRS}><path d="M12 3 L22 20 L2 20 Z"/><line x1="12" y1="9" x2="12" y2="14"/><circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="currentColor"/></svg>`;
+
 export const WEAPON_ICON: Record<
   "bladeArc" | "bolt" | "orbitShield" | "novaPulse" | "homingDart",
   string
@@ -132,6 +138,7 @@ export const UI_ICON = {
   back: ICON_ARROW_LEFT,
   play: ICON_PLAY,
   threat: ICON_TRENDING_UP,
+  warning: ICON_WARNING,
 } as const;
 
 // Injects a size/utility class onto an icon string's root <svg> tag —
