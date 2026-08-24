@@ -37,15 +37,31 @@ after compiling, and every idea here (topics, consumer groups,
 acknowledgment, redelivery, dead-lettering) has a direct analog in every
 production broker's actual API.
 
+Read the TypeScript as precise pseudocode if you are not fluent in it
+yet. The exercises below assume arrays, objects, `Set`, loops,
+`async`/`await`, and `reduce`; the architecture idea to track first is
+the path of one event from "published" to "stored," "projected," and
+"possibly redelivered."
+
 ## Part 1 — the domain events
 
 ```typescript
 // events.ts
 type OrderEvent =
   | { type: "OrderPlaced"; orderId: string; items: string[]; at: number }
-  | { type: "PaymentReceived"; orderId: string; amountCents: number; at: number }
+  | {
+      type: "PaymentReceived";
+      orderId: string;
+      amountCents: number;
+      at: number;
+    }
   | { type: "OrderPacked"; orderId: string; at: number }
-  | { type: "DeliveryAttempted"; orderId: string; succeeded: boolean; at: number }
+  | {
+      type: "DeliveryAttempted";
+      orderId: string;
+      succeeded: boolean;
+      at: number;
+    }
   | { type: "OrderShipped"; orderId: string; carrier: string; at: number };
 
 // Every event names a fact that already happened — past tense, no
@@ -66,23 +82,38 @@ interface OrderState {
 
 // Pure function: given the current state and one new event, return the
 // next state. This is the entire "business logic" of what an event means.
-function applyEvent(state: OrderState | undefined, event: OrderEvent): OrderState {
+function applyEvent(
+  state: OrderState | undefined,
+  event: OrderEvent,
+): OrderState {
   switch (event.type) {
     case "OrderPlaced":
-      return { orderId: event.orderId, status: "placed", failedDeliveryAttempts: 0, amountCents: 0 };
+      return {
+        orderId: event.orderId,
+        status: "placed",
+        failedDeliveryAttempts: 0,
+        amountCents: 0,
+      };
     case "PaymentReceived":
-      if (!state) throw new Error(`PaymentReceived for unknown order ${event.orderId}`);
+      if (!state)
+        throw new Error(`PaymentReceived for unknown order ${event.orderId}`);
       return { ...state, status: "paid", amountCents: event.amountCents };
     case "OrderPacked":
-      if (!state) throw new Error(`OrderPacked for unknown order ${event.orderId}`);
+      if (!state)
+        throw new Error(`OrderPacked for unknown order ${event.orderId}`);
       return { ...state, status: "packed" };
     case "DeliveryAttempted":
-      if (!state) throw new Error(`DeliveryAttempted for unknown order ${event.orderId}`);
+      if (!state)
+        throw new Error(`DeliveryAttempted for unknown order ${event.orderId}`);
       return event.succeeded
         ? state
-        : { ...state, failedDeliveryAttempts: state.failedDeliveryAttempts + 1 };
+        : {
+            ...state,
+            failedDeliveryAttempts: state.failedDeliveryAttempts + 1,
+          };
     case "OrderShipped":
-      if (!state) throw new Error(`OrderShipped for unknown order ${event.orderId}`);
+      if (!state)
+        throw new Error(`OrderShipped for unknown order ${event.orderId}`);
       return { ...state, status: "shipped" };
   }
 }
@@ -102,9 +133,17 @@ interface Snapshot {
   state: OrderState;
 }
 
-function rebuildFromSnapshot(events: OrderEvent[], snapshot?: Snapshot): OrderState {
+function rebuildFromSnapshot(
+  events: OrderEvent[],
+  snapshot?: Snapshot,
+): OrderState {
   const start = snapshot?.atEventIndex ?? 0;
-  return events.slice(start).reduce<OrderState | undefined>(applyEvent, snapshot?.state) ?? rebuild(events);
+  return (
+    events
+      .slice(start)
+      .reduce<OrderState | undefined>(applyEvent, snapshot?.state) ??
+    rebuild(events)
+  );
 }
 ```
 
@@ -141,11 +180,20 @@ class InMemoryBroker {
     // Fire independently per subscriber — one slow/failing consumer
     // never blocks another, and never blocks the publisher.
     await Promise.all(
-      handlers.map((handler) => this.deliverWithRetry(handler, { event, partitionKey, deliveryCount: 0 })),
+      handlers.map((handler) =>
+        this.deliverWithRetry(handler, {
+          event,
+          partitionKey,
+          deliveryCount: 0,
+        }),
+      ),
     );
   }
 
-  private async deliverWithRetry(handler: Handler, envelope: Envelope): Promise<void> {
+  private async deliverWithRetry(
+    handler: Handler,
+    envelope: Envelope,
+  ): Promise<void> {
     try {
       await handler(envelope.event);
     } catch (err) {
@@ -154,7 +202,10 @@ class InMemoryBroker {
         // Poison message: stop retrying forever, quarantine it instead
         // of blocking every event behind it on this partition key.
         this.deadLetters.push(envelope);
-        console.error(`Dead-lettered ${envelope.event.type} after ${envelope.deliveryCount} attempts`, err);
+        console.error(
+          `Dead-lettered ${envelope.event.type} after ${envelope.deliveryCount} attempts`,
+          err,
+        );
         return;
       }
       return this.deliverWithRetry(handler, envelope);
@@ -167,11 +218,17 @@ class InMemoryBroker {
 }
 ```
 
+This in-memory broker is deliberately small, so `publish()` still awaits
+the demo handlers to make examples deterministic. A production broker
+usually returns once it has accepted the message durably; consumers then
+process later from their own queues. The pattern is the same, but the
+timing is different.
+
 **Why a partition key at all?** A single topic delivered by multiple
 parallel workers gives you throughput but no ordering — `OrderShipped`
 could be processed before `PaymentReceived` for the same order if they
 land on different workers. Keying by `orderId` guarantees every event for
-*that* order goes to the same worker in publish order, while different
+_that_ order goes to the same worker in publish order, while different
 orders still parallelize freely. This is exactly what Kafka partitions
 and SQS FIFO message groups do under different names.
 
@@ -197,7 +254,10 @@ class ShippingDashboardProjector {
     if (this.processedEventIds.has(eventId)) return; // idempotent no-op
     this.processedEventIds.add(eventId);
 
-    const row = this.readModel.get(event.carrier) ?? { carrier: event.carrier, shipmentsToday: 0 };
+    const row = this.readModel.get(event.carrier) ?? {
+      carrier: event.carrier,
+      shipmentsToday: 0,
+    };
     row.shipmentsToday += 1;
     this.readModel.set(event.carrier, row);
   }
@@ -232,14 +292,28 @@ async function main() {
   broker.subscribe("order.events", (event) => projector.handle(event));
   broker.subscribe("order.events", async (event) => {
     if (event.type === "OrderShipped") {
-      console.log(`[Notifications] emailing customer: order ${event.orderId} shipped via ${event.carrier}`);
+      console.log(
+        `[Notifications] emailing customer: order ${event.orderId} shipped via ${event.carrier}`,
+      );
     }
   });
 
   const orderId = "ord_4471";
-  await broker.publish("order.events", { type: "OrderPlaced", orderId, items: ["mug"], at: 1 }, orderId);
-  await broker.publish("order.events", { type: "PaymentReceived", orderId, amountCents: 1499, at: 2 }, orderId);
-  await broker.publish("order.events", { type: "OrderPacked", orderId, at: 3 }, orderId);
+  await broker.publish(
+    "order.events",
+    { type: "OrderPlaced", orderId, items: ["mug"], at: 1 },
+    orderId,
+  );
+  await broker.publish(
+    "order.events",
+    { type: "PaymentReceived", orderId, amountCents: 1499, at: 2 },
+    orderId,
+  );
+  await broker.publish(
+    "order.events",
+    { type: "OrderPacked", orderId, at: 3 },
+    orderId,
+  );
   await broker.publish(
     "order.events",
     { type: "OrderShipped", orderId, carrier: "parcelco", at: 4 },
@@ -261,27 +335,27 @@ fully recoverable from nothing but the log.
 
 ## Trade-offs and when polling is actually fine
 
-| Situation                                                        | Better fit          |
-| ------------------------------------------------------------------ | ---------------------- |
-| Many independent consumers, producer shouldn't know about any of them | Event-driven / pub/sub |
-| Need full history, audit trail, or "state at time T"                | Event sourcing          |
-| Read and write load/shape are very different (few writes, many complex reads) | CQRS                    |
-| One consumer, one producer, both owned by the same team, low volume | A direct call — a broker is pure overhead |
-| Consumer only needs the *current* value, never the history, and can tolerate checking on its own schedule (e.g. "is this batch job done yet," checked every 30s by a human-facing UI) | Polling is genuinely fine — it's simple, debuggable, and the 1-request-per-poll cost is nowhere near a hot path |
-| A step must complete before the function returns (e.g. "confirm the charge succeeded before showing the receipt") | A direct, synchronous call — eventual consistency is the wrong trade when the caller cannot proceed without the answer |
+| Situation                                                                                                                                                                             | Better fit                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Many independent consumers, producer shouldn't know about any of them                                                                                                                 | Event-driven / pub/sub                                                                                                 |
+| Need full history, audit trail, or "state at time T"                                                                                                                                  | Event sourcing                                                                                                         |
+| Read and write load/shape are very different (few writes, many complex reads)                                                                                                         | CQRS                                                                                                                   |
+| One consumer, one producer, both owned by the same team, low volume                                                                                                                   | A direct call — a broker is pure overhead                                                                              |
+| Consumer only needs the _current_ value, never the history, and can tolerate checking on its own schedule (e.g. "is this batch job done yet," checked every 30s by a human-facing UI) | Polling is genuinely fine — it's simple, debuggable, and the 1-request-per-poll cost is nowhere near a hot path        |
+| A step must complete before the function returns (e.g. "confirm the charge succeeded before showing the receipt")                                                                     | A direct, synchronous call — eventual consistency is the wrong trade when the caller cannot proceed without the answer |
 
 Polling isn't a mistake by default — it's a mistake when the polling
 interval is fighting against a latency requirement it can't meet cheaply,
 or when N consumers are each independently hammering the same producer
 for the same fact. A single low-frequency poll from one caller is often
-the simplest correct answer; add a broker when the *number of parties who
-need to react*, not the urgency of any single one, is what's driving load.
+the simplest correct answer; add a broker when the _number of parties who
+need to react_, not the urgency of any single one, is what's driving load.
 
 ## Edge cases and failure modes
 
 - **Out-of-order delivery across partitions.** Two different orders
   processed on two different workers can be observed in either order —
-  the partition key only orders events *within* the same key. A projector
+  the partition key only orders events _within_ the same key. A projector
   that assumes global order across all orders will be wrong; one that
   only assumes order within a single `orderId` (as `applyEvent` above
   does) is safe.
@@ -312,7 +386,7 @@ to use the same partition key or the same consumer-group parallelism —
 `Notifications` can subscribe keyed by `orderId`, `Analytics` can
 subscribe unkeyed across many parallel workers, off the exact same
 topic.) And separately: what would you have to add to this broker to
-support a *new* consumer that needs everything that's ever happened,
+support a _new_ consumer that needs everything that's ever happened,
 not just events from the moment it starts listening — i.e., how does
 "replay history to a new subscriber" differ from "deliver new events to
 an existing one"?

@@ -5,6 +5,8 @@ detectar dudas que tendria una persona con base escolar, extender sin borrar
 contenido existente y validar que cada unidad responda la pregunta del
 roadmap.
 
+Avance actual: 100 de 133 unidades revisadas. Faltan 33.
+
 ## Criterio de revision
 
 - Confirmar si L1, L2 y L3 responden la pregunta de la unidad.
@@ -44,9 +46,10 @@ roadmap.
 | 22    | `learning-craft/systematic-exploration`, `learning-craft/weighing-credibility`, `applied-math/asymptotic-analysis`, `applied-math/combinatorics`                                                         | Extendida; formato OK; `typecheck` OK; `build` OK; `validate:content` bloqueado por frontmatter faltante global |
 | 23    | `applied-math/math-tool-prediction`, `applied-math/measurement-theory`, `applied-math/orders-magnitude`, `applied-math/probability-distributions-uniform`                                                | Extendida; formato OK; `typecheck` OK; `build` OK; `validate:content` bloqueado por frontmatter faltante global |
 | 24    | `applied-math/queueing-theory-basics`, `applied-math/statistics`, `applied-math/time-series-basics`, `architecture/architecture-styles`                                                                  | Extendida; formato OK; `typecheck` OK; `build` OK; `validate:content` bloqueado por frontmatter faltante global |
+| 25    | `architecture/domain-driven-design`, `architecture/event-driven-architecture`, `architecture/hexagonal-clean-architecture`, `design/design-thinking-process`                                             | Extendida; formato OK; `typecheck` OK; `build` OK; `validate:content` bloqueado por frontmatter faltante global |
 
 ## Siguiente tanda sugerida
 
-| Tanda | Unidades                                                                                                                                                     | Estado    |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- |
-| 25    | `architecture/domain-driven-design`, `architecture/event-driven-architecture`, `architecture/hexagonal-clean-architecture`, `design/design-thinking-process` | Pendiente |
+| Tanda | Unidades                                                                                                                       | Estado    |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------ | --------- |
+| 26    | `design/information-architecture`, `design/usability-heuristics`, `design/visual-design-fundamentals`, `infra-delivery/docker` | Pendiente |
