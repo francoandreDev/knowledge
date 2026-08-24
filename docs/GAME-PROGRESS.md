@@ -309,12 +309,41 @@ and `<code>docs/GAME-DESIGN.md</code>` starting the next — Astro's
 whitespace handling collapsed the newline between them to nothing rather
 than a space, rendering as "(seedocs/GAME-DESIGN.md)"; fixed by moving the
 `<code>` tag onto the same logical line with explicit `<code\n  >...</code\n>`
-whitespace-suppression syntax. **Not yet confirmed in this pass:** actually
-clicking "Start run," playing a run to completion, and checking the results
-screen (time/kills/level/new-record callout) render correctly and that
-"Back to lobby" correctly stops the loop and re-renders live stats — the
-session was interrupted before that step. A future session should do this
-before considering Phase 4 fully validated, the same rigor Phases 1-3 got.
+whitespace-suppression syntax.
+
+**Follow-up pass, same day:** clicking "Start run" for real worked (token
+consumed, lobby → play-area transition, `startGame()`/`loop starting` logged
+with no errors), but the automation tab hit the same OS-level backgrounding
+issue documented under Phase 2 — `document.visibilityState` stuck at
+`"hidden"` (and initially `hasFocus()` `false` too) regardless of real
+clicks on the Start button or the canvas, which suspends Kontra's
+`requestAnimationFrame` loop entirely, so the HUD/timer never ticked and a
+natural run-to-completion couldn't be driven this way. Spoofing
+`document.hidden`/`visibilityState` via `Object.defineProperty` did **not**
+unstick it — Chromium's real rAF throttling is driven by actual page/window
+visibility, not the JS-readable property, so that's a dead end for future
+sessions too, not worth retrying.
+Given that, validated the two pieces that don't depend on rAF actually
+running: (1) **"Back to lobby" from a live (frozen) play-area state** —
+confirmed it stops the run and cleanly returns to the lobby. (2) **The
+results-screen DOM/CSS wiring itself** — replicated the exact statements
+`onGameOver`'s callback body executes (same `formatTime`, same element
+writes, same `hidden`/`flex` class toggles) via `javascript_tool` with a
+synthetic summary (`survivedS: 42.7, kills: 17, level: 4`): headline, time,
+kills, and level all rendered correctly, the "New best time!" callout
+correctly stayed hidden when `survivedS` was below the stored best and
+correctly appeared when raised above it, and "Back to lobby" from the
+results screen correctly hid it and re-enabled the lobby/start button. Zero
+console errors from `[game:...]` namespaces across the whole session.
+**Still not confirmed by an actual live rAF-driven run in this environment:**
+the `onGameOver`/`onHudUpdate`/`onLevelUp` callbacks firing for real from
+inside the engine's loop — only their call sites' effects were verified by
+direct simulation, not the real invocation path. This is the same class of
+gap Phase 2 hit and resolved by a **real human clicking Start** (which
+reliably keeps OS focus, unlike the automation's synthetic/CDP-mediated
+clicks) — that's the fastest way to close this out, not further automation
+attempts. A future session (or the user directly) playing one real run
+start-to-finish would fully close Phase 4's validation.
 
 ### Phase 5 — Coins, shop, IndexedDB persistence — not started
 
@@ -353,11 +382,15 @@ From GAME-DESIGN.md "Coins and the shop," "Technical foundations":
 ## Current state
 
 **Phases 1-3 complete and validated**, including Lv6 weapon evolutions.
-**Phase 4 implemented and partially validated** — lobby gating/nav badge
-confirmed live in-browser, but the actual play → results → back-to-lobby
-flow still needs a real in-browser pass (see Phase 4's validation note).
-Phases 5-8 not started. Next session should first finish validating Phase 4
-in-browser, then confirm scope with the user for Phase 5 (coins, shop,
+**Phase 4 implemented; lobby gating, nav badge, and the results-screen
+DOM/CSS wiring are all confirmed working**, but a real rAF-driven run
+(engine callbacks firing live, not simulated) hasn't been observed in this
+environment — automation hit the same OS-focus/backgrounding limitation
+Phase 2 documented, and spoofing `document.visibilityState` doesn't work
+around it. The fastest close-out is a real human clicking "Start run" once
+(see Phase 4's validation note), not more automation attempts. Phases 5-8
+not started. Next session (or the user directly) should play one real run
+to fully close Phase 4, then confirm scope for Phase 5 (coins, shop,
 IndexedDB persistence).
 
 ## Deliberate simplifications (intentional — not bugs)
