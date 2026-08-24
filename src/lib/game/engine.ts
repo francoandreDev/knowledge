@@ -27,6 +27,20 @@
 // multipliers via GameOptions.
 // Phase 6 scope, layered on top: synthesized SFX (src/lib/game/audio.ts) for
 // pickup, enemy hit, level-up, weapon evolution, and player death.
+// Phase 7 scope, layered on top: a dynamic virtual joystick (pointer events
+// on the canvas — base spawns at the exact pointer-down point, not a fixed
+// zone, per GAME-DESIGN.md "Mobile controls") that drives player movement
+// alongside (not instead of) WASD/arrow keys.
+// Phase 8 scope, layered on top: sprites switched from Kontra's default
+// flat-color rectangle render to hand-drawn geometric shapes (circle/
+// triangle/square/diamond) with an outline and, on select entities only
+// (player, boss, elite-tier enemies), a canvas glow — see drawShape() and
+// GAME-DESIGN.md "Visual style." Glow is deliberately NOT applied to every
+// entity (up to 60 enemies + projectiles can be alive at once) to keep
+// shadowBlur's per-draw cost bounded — a `reduceMotion` GameOption (see
+// src/lib/game/settings.ts) disables all glow entirely. Also added a dt
+// clamp (MAX_DT) so a real tab-backgrounding gap can't produce one huge
+// catch-up frame — a gap flagged but deferred back in Phase 2.
 //
 // Spawn/collision math is kept intentionally cheap (linear scans over small
 // arrays, no quadtree) and the density ramp is floored at a minimum interval
@@ -58,6 +72,16 @@ const PLAYER_RADIUS = 14;
 const PLAYER_MAX_HP = 100;
 const PLAYER_HIT_COOLDOWN_MS = 600; // i-frames, melee contact only
 const CONTACT_DAMAGE = 8; // fallback if an enemy def is somehow missing one
+
+// --- Phase 7: dynamic virtual joystick ---
+const JOYSTICK_MAX_RADIUS = 42; // px, in canvas-internal coordinates
+const JOYSTICK_DEADZONE = 4;
+const JOYSTICK_BASE_VISUAL_RADIUS = 42;
+const JOYSTICK_KNOB_VISUAL_RADIUS = 18;
+
+// --- Phase 8: perf — clamp a single frame's dt so a real tab-backgrounding
+// gap (rAF suspended, then resumed) can't produce one huge catch-up step.
+const MAX_DT = 1 / 15;
 
 const PROJECTILE_SPEED = 320; // bolt's base projectile speed
 const PROJECTILE_RADIUS = 4;
@@ -363,6 +387,9 @@ export interface GameOptions {
   /** Sum of owned shop upgrade levels — drives enemy-tier weighting and
    * boss scaling. See shop.ts's computePowerIndex(). */
   powerIndex?: number;
+  /** Disables all canvas glow (shadowBlur) effects — see settings.ts's
+   * isReducedMotion(). Phase 8. */
+  reduceMotion?: boolean;
 }
 
 interface Enemy extends GameObject {
@@ -372,6 +399,7 @@ interface Enemy extends GameObject {
   alive: boolean;
   radius: number;
   contactDamage: number;
+  color: string;
   // bat
   wigglePhase?: number;
   // ghost
@@ -395,6 +423,7 @@ interface Projectile extends GameObject {
   alive: boolean;
   damage: number;
   source: string;
+  color: string;
   pierceRemaining?: number;
   hitSet?: Set<Enemy>;
   homingTarget?: Enemy;
@@ -402,10 +431,12 @@ interface Projectile extends GameObject {
 }
 interface Gem extends GameObject {
   alive: boolean;
+  color: string;
 }
 interface CoinPickup extends GameObject {
   alive: boolean;
   value: number;
+  color: string;
 }
 
 interface WeaponRuntime {
@@ -533,6 +564,64 @@ function darkenHexColor(hex: string, amount: number): string {
   return `rgb(${r | 0}, ${g | 0}, ${b | 0})`;
 }
 
+// --- Phase 8: geometric-shape rendering (GAME-DESIGN.md "Visual style") ---
+type Shape = "circle" | "triangle" | "square" | "diamond";
+
+const ENEMY_SHAPE: Record<EnemyKind, Shape> = {
+  zombie: "circle",
+  bat: "triangle",
+  skeleton: "square",
+  ghost: "circle",
+  ogre: "square",
+  reaper: "circle",
+};
+
+// Draws a filled, outlined shape, with an optional glow (shadowBlur).
+// Glow is intentionally opt-in per call site, not automatic — see the
+// Phase 8 header note on why it's reserved for the player/boss/elites only.
+function drawShape(
+  ctx: CanvasRenderingContext2D,
+  shape: Shape,
+  x: number,
+  y: number,
+  radius: number,
+  color: string,
+  opts: { glow?: boolean; glowColor?: string } = {},
+) {
+  ctx.save();
+  if (opts.glow) {
+    ctx.shadowColor = opts.glowColor ?? color;
+    ctx.shadowBlur = radius * 1.1;
+  }
+  ctx.fillStyle = color;
+  ctx.strokeStyle = "rgba(255,255,255,0.4)";
+  ctx.lineWidth = Math.max(1, radius * 0.14);
+  ctx.beginPath();
+  if (shape === "circle") {
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+  } else if (shape === "square") {
+    ctx.rect(x - radius, y - radius, radius * 2, radius * 2);
+  } else if (shape === "diamond") {
+    ctx.moveTo(x, y - radius);
+    ctx.lineTo(x + radius, y);
+    ctx.lineTo(x, y + radius);
+    ctx.lineTo(x - radius, y);
+    ctx.closePath();
+  } else {
+    for (let i = 0; i < 3; i++) {
+      const a = -Math.PI / 2 + (i * Math.PI * 2) / 3;
+      const px = x + Math.cos(a) * radius;
+      const py = y + Math.sin(a) * radius;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+  }
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
 export function startGame(
   canvas: HTMLCanvasElement,
   callbacks: GameCallbacks,
@@ -549,12 +638,14 @@ export function startGame(
     regenPerS: 0,
   };
   const powerIndex = options.powerIndex ?? 0;
+  const reduceMotion = options.reduceMotion ?? false;
   log.log("startGame() called", {
     width: canvas.width,
     height: canvas.height,
     runDurationS,
     powerIndex,
     upgradeEffects,
+    reduceMotion,
   });
 
   const { context } = init(canvas);
@@ -570,6 +661,70 @@ export function startGame(
   }) as unknown as GameObject & { hp: number; lastHitAt: number };
   player.hp = PLAYER_MAX_HP;
   player.lastHitAt = -Infinity;
+
+  // --- Phase 7: dynamic virtual joystick (pointer events on the canvas) ---
+  interface JoystickState {
+    pointerId: number;
+    originX: number;
+    originY: number;
+    curX: number;
+    curY: number;
+  }
+  let joystick: JoystickState | null = null;
+
+  function clientToCanvasPoint(clientX: number, clientY: number) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+    };
+  }
+
+  function handlePointerDown(ev: PointerEvent) {
+    if (joystick) return; // one active touch at a time
+    const { x, y } = clientToCanvasPoint(ev.clientX, ev.clientY);
+    joystick = {
+      pointerId: ev.pointerId,
+      originX: x,
+      originY: y,
+      curX: x,
+      curY: y,
+    };
+    canvas.setPointerCapture(ev.pointerId);
+    log.log("joystick:start", { x: Math.round(x), y: Math.round(y) });
+  }
+
+  function handlePointerMove(ev: PointerEvent) {
+    if (!joystick || ev.pointerId !== joystick.pointerId) return;
+    const { x, y } = clientToCanvasPoint(ev.clientX, ev.clientY);
+    const dx = x - joystick.originX;
+    const dy = y - joystick.originY;
+    const dist = Math.hypot(dx, dy);
+    if (dist > JOYSTICK_MAX_RADIUS) {
+      const scale = JOYSTICK_MAX_RADIUS / dist;
+      joystick.curX = joystick.originX + dx * scale;
+      joystick.curY = joystick.originY + dy * scale;
+    } else {
+      joystick.curX = x;
+      joystick.curY = y;
+    }
+  }
+
+  function endJoystick(ev: PointerEvent) {
+    if (joystick && ev.pointerId === joystick.pointerId) {
+      joystick = null;
+      log.log("joystick:end");
+    }
+  }
+
+  canvas.style.touchAction = "none";
+  canvas.addEventListener("pointerdown", handlePointerDown);
+  canvas.addEventListener("pointermove", handlePointerMove);
+  canvas.addEventListener("pointerup", endJoystick);
+  canvas.addEventListener("pointercancel", endJoystick);
+  canvas.addEventListener("pointerleave", endJoystick);
 
   const enemies: Enemy[] = [];
   const projectiles: Projectile[] = [];
@@ -1314,6 +1469,7 @@ export function startGame(
 
   const loop = GameLoop({
     update(dt = 1 / 60) {
+      dt = Math.min(dt, MAX_DT); // Phase 8: cap a single frame's catch-up
       if (status !== "running") return;
       elapsedMs += dt * 1000;
       const elapsedS = elapsedMs / 1000;
@@ -1324,22 +1480,42 @@ export function startGame(
         player.hp = Math.min(effectiveMaxHp(), player.hp + totalRegenPerS * dt);
       }
 
-      // --- player movement ---
-      let mvx = 0;
-      let mvy = 0;
-      if (keyPressed(["arrowleft", "a"])) mvx -= 1;
-      if (keyPressed(["arrowright", "d"])) mvx += 1;
-      if (keyPressed(["arrowup", "w"])) mvy -= 1;
-      if (keyPressed(["arrowdown", "s"])) mvy += 1;
-      if (mvx !== 0 || mvy !== 0) {
-        const len = Math.hypot(mvx, mvy);
-        const speed = PLAYER_SPEED * speedMult * upgradeEffects.speedMult;
+      // --- player movement (keyboard, or Phase 7's virtual joystick) ---
+      let moveX = 0;
+      let moveY = 0;
+      let moveMagnitude = 0;
+      if (joystick) {
+        const dx = joystick.curX - joystick.originX;
+        const dy = joystick.curY - joystick.originY;
+        const dist = Math.hypot(dx, dy);
+        if (dist > JOYSTICK_DEADZONE) {
+          moveX = dx / dist;
+          moveY = dy / dist;
+          moveMagnitude = Math.min(1, dist / JOYSTICK_MAX_RADIUS);
+        }
+      } else {
+        let mvx = 0;
+        let mvy = 0;
+        if (keyPressed(["arrowleft", "a"])) mvx -= 1;
+        if (keyPressed(["arrowright", "d"])) mvx += 1;
+        if (keyPressed(["arrowup", "w"])) mvy -= 1;
+        if (keyPressed(["arrowdown", "s"])) mvy += 1;
+        if (mvx !== 0 || mvy !== 0) {
+          const len = Math.hypot(mvx, mvy);
+          moveX = mvx / len;
+          moveY = mvy / len;
+          moveMagnitude = 1;
+        }
+      }
+      if (moveMagnitude > 0) {
+        const speed =
+          PLAYER_SPEED * speedMult * upgradeEffects.speedMult * moveMagnitude;
         player.x = Math.min(
-          Math.max(player.x + (mvx / len) * speed * dt, PLAYER_RADIUS),
+          Math.max(player.x + moveX * speed * dt, PLAYER_RADIUS),
           canvas.width - PLAYER_RADIUS,
         );
         player.y = Math.min(
-          Math.max(player.y + (mvy / len) * speed * dt, PLAYER_RADIUS),
+          Math.max(player.y + moveY * speed * dt, PLAYER_RADIUS),
           canvas.height - PLAYER_RADIUS,
         );
       }
@@ -1540,25 +1716,69 @@ export function startGame(
     },
     render() {
       context.clearRect(0, 0, canvas.width, canvas.height);
-      for (const g of gems) g.render();
-      for (const c of coinPickups) c.render();
-      // Elite glow/aura, drawn behind the sprite — per GAME-DESIGN.md
-      // "Distinct glow/aura" (Veteran instead gets a plain color tint,
-      // applied at spawn time via darkenHexColor()).
-      for (const e of enemies) {
-        if (e.tier === "elite") {
-          context.save();
-          context.shadowColor = "rgba(250, 204, 21, 0.9)";
-          context.shadowBlur = 14;
-          e.render();
-          context.restore();
-        } else {
-          e.render();
-        }
+      for (const g of gems) {
+        drawShape(context, "diamond", g.x, g.y, GEM_RADIUS, g.color);
       }
-      for (const p of projectiles) p.render();
-      for (const p of enemyProjectiles) p.render();
-      player.render();
+      for (const c of coinPickups) {
+        drawShape(context, "circle", c.x, c.y, COIN_RADIUS, c.color);
+      }
+      // Elite/boss get a glow (GAME-DESIGN.md "Distinct glow/aura"); Veteran
+      // instead gets a plain color tint, applied at spawn time via
+      // darkenHexColor(). Glow is skipped for ordinary enemies to keep
+      // shadowBlur's per-draw cost bounded at up to 60 alive (Phase 8).
+      for (const e of enemies) {
+        const isElite = e.tier === "elite";
+        const isBoss = e.kind === "reaper";
+        drawShape(context, ENEMY_SHAPE[e.kind], e.x, e.y, e.radius, e.color, {
+          glow: !reduceMotion && (isElite || isBoss),
+          glowColor: isElite ? "rgba(250, 204, 21, 0.9)" : e.color,
+        });
+      }
+      for (const p of projectiles) {
+        drawShape(context, "circle", p.x, p.y, p.width / 2, p.color);
+      }
+      for (const p of enemyProjectiles) {
+        drawShape(context, "circle", p.x, p.y, p.width / 2, p.color);
+      }
+      drawShape(
+        context,
+        "circle",
+        player.x,
+        player.y,
+        PLAYER_RADIUS,
+        "#38bdf8",
+        {
+          glow: !reduceMotion,
+          glowColor: "#38bdf8",
+        },
+      );
+
+      // --- Phase 7: joystick visual (base at touch-down point, knob follows) ---
+      if (joystick) {
+        context.save();
+        context.strokeStyle = "rgba(226,232,240,0.5)";
+        context.lineWidth = 2;
+        context.beginPath();
+        context.arc(
+          joystick.originX,
+          joystick.originY,
+          JOYSTICK_BASE_VISUAL_RADIUS,
+          0,
+          Math.PI * 2,
+        );
+        context.stroke();
+        context.fillStyle = "rgba(226,232,240,0.35)";
+        context.beginPath();
+        context.arc(
+          joystick.curX,
+          joystick.curY,
+          JOYSTICK_KNOB_VISUAL_RADIUS,
+          0,
+          Math.PI * 2,
+        );
+        context.fill();
+        context.restore();
+      }
 
       for (const t of orbitTrails) {
         const age = elapsedMs - t.createdAt;
@@ -1626,6 +1846,11 @@ export function startGame(
     stop() {
       log.log("loop stopped manually");
       loop.stop();
+      canvas.removeEventListener("pointerdown", handlePointerDown);
+      canvas.removeEventListener("pointermove", handlePointerMove);
+      canvas.removeEventListener("pointerup", endJoystick);
+      canvas.removeEventListener("pointercancel", endJoystick);
+      canvas.removeEventListener("pointerleave", endJoystick);
     },
   };
 }

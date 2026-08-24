@@ -43,13 +43,19 @@ of every session that touches game code, before stopping.
   `game:audio-muted`), and `playPickup()`/`playHit()`/`playLevelUp()`/
   `playEvolution()`/`playDeath()`, called directly from `engine.ts` at the
   relevant event sites (not routed through `GameCallbacks`).
+- `src/lib/game/settings.ts` — Phase 8's reduce-motion setting
+  (`isReducedMotion()`/`setReducedMotion()`/`toggleReducedMotion()`),
+  persisted via `pStorage` (`game:reduce-motion`) — mirrors `audio.ts`'s
+  mute pattern exactly. Passed into `engine.ts` as `GameOptions.reduceMotion`,
+  which disables all canvas glow when set.
 - `src/pages/game/index.astro` — the route: a lobby screen (now with a
-  Shop panel and a Sound on/off toggle), the play area (HUD + canvas + start
-  button), and a results screen, shown/hidden as three sibling containers.
-  Wires `startGame()` to button clicks the same wire-once way
-  `ProgressToggle`/`ExercisePanel` do (`dataset.wired` guard). The Start
-  button click also calls `unlockAudio()` — it's the first real user
-  gesture in a run, needed to resume the `AudioContext`.
+  Shop panel, a Sound on/off toggle, and a Motion on/off toggle), the play
+  area (HUD + canvas + start button, canvas also hosts Phase 7's pointer-
+  driven virtual joystick), and a results screen, shown/hidden as three
+  sibling containers. Wires `startGame()` to button clicks the same
+  wire-once way `ProgressToggle`/`ExercisePanel` do (`dataset.wired` guard).
+  The Start button click also calls `unlockAudio()` — it's the first real
+  user gesture in a run, needed to resume the `AudioContext`.
 
 ## Phases
 
@@ -486,39 +492,154 @@ backgrounding limitation noted in Phases 2/4/5 — same recommendation: a
 real human playing one run is the fastest way to confirm the SFX sound
 right and aren't too spammy in a real fight.
 
-### Phase 7 — Mobile controls — not started
+### Phase 7 — Mobile controls ✅ done, partially validated in-browser
 
-- Dynamic virtual joystick (spawns at touch point, not a fixed zone).
+From GAME-DESIGN.md "Mobile controls":
 
-### Phase 8 — Visual/UX + performance polish pass — not started
+- **Dynamic virtual joystick** (`engine.ts`): `pointerdown`/`pointermove`/
+  `pointerup`/`pointercancel`/`pointerleave` listeners on the canvas
+  (Pointer Events, not raw touch events — works for touch and mouse alike).
+  The base spawns at the exact `pointerdown` point (`joystick.originX/Y`,
+  in canvas-internal coordinates via `clientToCanvasPoint()`, which accounts
+  for the canvas's CSS scaling), **not a fixed screen zone**, per the design
+  doc. Dragging beyond `JOYSTICK_MAX_RADIUS` (42px) clamps the knob to the
+  edge of the base rather than following the finger past it. Only one
+  active pointer is tracked at a time (a second `pointerdown` while one is
+  already active is ignored).
+- **Movement integration**: the joystick, when active, fully drives
+  movement for that frame (analog — magnitude scales with drag distance via
+  `moveMagnitude`, not just direction); when inactive, WASD/arrow keys work
+  exactly as before. The two never fight each other since only one branch
+  runs per frame.
+- **Visual feedback**: a translucent ring at the base position + a filled
+  knob circle at the current drag position, drawn in `render()` only while
+  a joystick is active — see the "Phase 7: joystick visual" block.
+- `canvas.style.touchAction = "none"` prevents the browser's default
+  scroll/zoom touch gestures from fighting the joystick drag.
+- Listeners are added once in `startGame()` and explicitly removed in the
+  returned `stop()` — same cleanup discipline the rest of the engine
+  already follows for the game loop itself.
+- `src/pages/game/index.astro`'s lobby copy updated to mention touch
+  ("drag anywhere on the play area").
 
-- Replace prototype flat-color squares with the real geometric-shape +
-  glow + outline sprite style from GAME-DESIGN.md "Visual style."
-- Revisit `game:debug` default (see Phase 4 note).
-- A real performance pass at max realistic enemy/projectile/gem counts
-  (long accumulated-study runs are uncapped-duration by design) — check
-  frame time doesn't degrade, add a spatial partition for collision only if
-  profiling actually shows it's needed.
-- Settings toggle (mute audio / reduce motion) — deferred item from
-  GAME-DESIGN.md, decide here.
+**Validated 2026-08-24**: guardrails (`bun run check`) pass. In-browser
+(`claude --chrome` against a fresh `astro preview` build): granted a token
+via `localStorage`, clicked "Start run" for real, confirmed the play area
+and canvas render. Dispatched synthetic `PointerEvent`s
+(`pointerdown` → `pointermove` → `pointerup`) directly at the canvas via
+`javascript_tool` — no exceptions, `canvas.style.touchAction` correctly
+reads `"none"`, zero new console errors. **Not confirmed**: the joystick
+actually moving the player during a live, rAF-driven frame — same
+automation-environment backgrounding limitation as every prior phase (the
+loop is suspended, so `update()` never runs to consume the joystick state).
+A real human dragging on a touch device (or a mouse-down-drag on desktop)
+remains the fastest way to confirm the analog feel and clamped-radius
+behavior in practice.
+
+### Phase 8 — Visual/UX + performance polish pass ✅ done, partially validated in-browser
+
+From GAME-DESIGN.md "Visual style" and the deferred "settings toggle" item:
+
+- **Geometric-shape rendering** (`engine.ts`'s `drawShape()`): every sprite
+  (player, all 5 enemy kinds + boss, gems, coins, player/enemy projectiles)
+  switched from Kontra's default flat-color rectangle render to a hand-drawn
+  shape — circle, triangle, square, or diamond, picked per entity kind
+  (`ENEMY_SHAPE`), each filled with an outline (`rgba(255,255,255,0.4)`
+  stroke). This replaces the old `sprite.render()` calls entirely; the
+  Kontra `Sprite` objects are still used for position/physics bookkeeping,
+  just not for drawing.
+- **Glow is deliberately selective, not universal**: only the player, the
+  boss (Reaper), and Elite-tier enemies get a `shadowBlur` glow. Up to 60
+  enemies plus projectiles can be alive at once (Phase 2's perf cap), and
+  `shadowBlur` is one of the more expensive canvas operations per draw call
+  — applying it to every Zombie/Bat/etc. would be the first thing to show up
+  in a profile at max enemy counts. This is a documented scope decision, not
+  an oversight: GAME-DESIGN.md's "Visual style" describes glow as part of
+  the overall look, not a mandate that literally everything glows, and
+  Elite already had its own glow/aura requirement independently.
+  Veteran-tier's existing darker/saturated tint (`darkenHexColor()`, from
+  Phase 5) is unchanged.
+- **`reduceMotion` GameOption** (new): when set, disables glow entirely
+  (player, boss, and Elite all render without `shadowBlur`), regardless of
+  tier. Backed by **`src/lib/game/settings.ts`** (new file) —
+  `isReducedMotion()`/`setReducedMotion()`/`toggleReducedMotion()`, mirroring
+  `audio.ts`'s mute pattern exactly (persisted via `pStorage`,
+  `game:reduce-motion`). A new lobby "Motion: On/Off" button in
+  `index.astro` toggles it; the current value is read and passed into
+  `startGame()`'s options at run start, same as `upgradeEffects`/
+  `powerIndex`. This resolves GAME-DESIGN.md's "Open items deferred to
+  implementation time" question about a reduce-motion toggle — mute audio
+  already shipped in Phase 6, this is the other half.
+- **`game:debug` default revisited, not changed**: re-read `logger.ts` —
+  still defaults to `false` (set in Phase 4, since tokens gate real play
+  now). No reason found to change it; documenting the revisit here rather
+  than silently skipping it, per the phase's own checklist item.
+- **`dt` clamp** (`MAX_DT = 1/15`, applied as the very first line of
+  `GameLoop`'s `update()`): closes a gap flagged but deliberately deferred
+  back in **Phase 2**'s "Known issues" — a real player who backgrounds the
+  tab mid-run and returns would otherwise see one huge catch-up frame
+  (`elapsedMs` jumping by however long the tab was hidden). Now any single
+  frame's simulated time is capped at ~67ms regardless of how long the real
+  gap was, so spawning/movement/regen all stay bounded. This is a cheap,
+  correctness-only change — it does not affect normal 60fps play at all
+  (real frame dt is almost always well under the cap).
+- **Performance pass at max realistic entity counts — reasoned, not
+  profiled**: this environment cannot drive a live rAF loop long enough to
+  actually profile a busy frame (same limitation blocking every other
+  phase's live validation). Did the math instead: `MAX_ALIVE_ENEMIES = 60`
+  (Phase 2's cap) × a realistic simultaneous projectile count (bolt
+  multi-shot + homing darts + enemy ranged attacks, rarely more than ~20
+  alive) is at most ~1,200 pairwise distance checks per frame for
+  collision — trivial for JS at 60fps, and no different in shape from what
+  Phase 2-5 already shipped (this phase didn't change any collision logic,
+  only rendering). Per GAME-DESIGN.md's own instruction, **no spatial
+  partition was added** — the doc explicitly says to add one "only if
+  profiling actually shows it's needed," and there's neither a profile nor
+  a reasoned case that it's needed yet. A future session with a real
+  playtest (or a session outside this automation environment that can hold
+  focus for a full run) should actually profile a late-run frame before
+  reconsidering this.
+
+**Validated 2026-08-24**: guardrails (`bun run check`) pass — `typecheck`
+in particular confirms the new `color` fields added to the `Enemy`/
+`Projectile`/`Gem`/`CoinPickup` interfaces line up with what Kontra's
+`Sprite()` actually carries at runtime. In-browser: took a screenshot of a
+started run's canvas and confirmed the player renders as a glowing cyan
+circle (not the old flat square) — visual proof `drawShape()` runs
+correctly in this environment, not just that it type-checks. Toggling
+"Motion: On/Off" correctly flips `pStorage`'s `game:reduce-motion` key
+(`0→1` on a real click) and the new value survives a full page reload.
+**Not confirmed live**: enemy-shape variety (triangle Bats, square
+Skeletons/Ogres, etc.), the dt clamp actually engaging after a real
+backgrounding gap, and glow correctly disabling on Elite/boss when
+`reduceMotion` is on — all of these only execute inside the suspended rAF
+loop, same class of gap as every prior phase's close-out note. A real human
+playing one run (ideally one long enough to see an Elite or two, and
+ideally with a deliberate tab-switch mid-run to exercise the dt clamp)
+would fully close this out.
 
 ## Current state
 
-**Phases 1-3 complete and validated**, including Lv6 weapon evolutions.
-**Phases 4, 5, and 6 implemented**; lobby gating, nav badge, results-screen
-wiring, the coin/shop system, enemy tiers, and synthesized SFX are all
-believed correct from code review + guardrails + the non-rAF-dependent UI
-checks described in each phase's validation notes, but **a real rAF-driven
-run (engine callbacks firing live, not simulated) still hasn't been fully
-observed in this environment** — automation keeps hitting the same
-OS-focus/backgrounding limitation Phase 2 first documented (confirmed
-again in Phase 5: a single real click produced exactly one live frame
-before `visibilityState` reverted to `"hidden"`), and spoofing it doesn't
-work around it. The fastest close-out for Phases 4-6 is a real human
-playing one full run (see each phase's validation notes), not more
-automation attempts. Phases 7-8 not started. Next session (or the user
-directly) should play one real run to fully close Phases 4-6, then confirm
-scope for Phase 7 (mobile controls).
+**All 8 phases are now implemented.** Phases 1-3 are complete and validated
+end-to-end, including Lv6 weapon evolutions. Phases 4 through 8 (real
+gating/lobby/results, coins/shop/enemy tiers, audio, mobile joystick, and
+visual/perf polish) are all believed correct from code review + guardrails
+(`bun run check` passing at every phase) + the non-rAF-dependent UI checks
+described in each phase's own validation notes, but **a real rAF-driven run
+(engine callbacks firing live over a full run, not simulated or verified
+frame-by-frame) still hasn't been fully observed in this environment** —
+automation keeps hitting the same OS-focus/backgrounding limitation Phase 2
+first documented (a single real click reliably produces at most one live
+frame before `visibilityState` reverts to `"hidden"`), and spoofing it
+doesn't work around it. The fastest, and really the only remaining,
+close-out step is **a real human playing one full run** — ideally long
+enough to see an Elite spawn, a weapon evolve, and (deliberately) a
+mid-run tab-switch to exercise Phase 8's new `dt` clamp — not more
+automation attempts. No further phases are planned; GAME-DESIGN.md is
+fully implemented as specced (with the small, explicitly-documented
+deviations noted throughout this file, e.g. the Phase 4 per-unit-not-per-
+level token grant, Phase 2's spawn-density floor/cap, and Phase 8's
+selective-glow decision).
 
 ## Deliberate simplifications (intentional — not bugs)
 
