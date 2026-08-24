@@ -91,10 +91,10 @@ one_, while the keyed diff cost stays fixed at 1 no matter how large
 the list is:
 
 ```js
-diffUnkeyed(
-  makeContacts(50).filter((c) => c.id !== 25),
-  makeContacts(50),
-).length; // scales with list size
+const old50 = makeContacts(50);
+const new50 = old50.filter((c) => c.id !== 25);
+diffUnkeyed(old50, new50).length; // scales with list size
+
 diffKeyed(
   makeContacts(50000),
   makeContacts(50000).filter((c) => c.id !== 25000),
@@ -107,6 +107,26 @@ thousands to tens of thousands of operations — each one potentially
 triggering its own share of reflow work — which is exactly why this
 unit's Scenario feels fine in a small dev list and visibly stutters
 in production.
+
+## How to diagnose before choosing a fix
+
+Keys solve one class of render waste: the framework cannot recognize
+which list item is the same item after a change. A real slow page may
+have a different bottleneck, so the first move is to classify the
+symptom:
+
+| Symptom you see                         | Possible category                 | What to measure first                                    |
+| --------------------------------------- | --------------------------------- | -------------------------------------------------------- |
+| First page load is slow                 | Network or bundle size            | Request timing, JS bundle size, parse/execute time       |
+| Clicking feels slow after data arrives  | Too much JavaScript during update | Long tasks and function time around the interaction      |
+| Scroll stutters in a huge list          | Too many DOM nodes or layout work | Number of rendered rows, FPS, layout/recalculate time    |
+| One small change redraws many list rows | Missing or unstable item identity | DOM operations, component rerenders, stable `key` values |
+| Data appears late but UI stays smooth   | Server/data synchronization       | API timing and cache behavior, not paint/layout first    |
+
+This keeps performance work honest: measure which layer is slow, then
+choose the smallest fix for that layer. Sometimes the fix is stable
+keys; sometimes it is list virtualization, smaller bundles, less shared
+state, or a caching change from another unit.
 
 ## What generalizes and what doesn't
 

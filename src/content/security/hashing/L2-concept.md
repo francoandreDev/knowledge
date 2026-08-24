@@ -12,6 +12,11 @@ produces a chosen checksum. A cryptographic hash function needs to hold
 up under adversarial pressure, which means satisfying several properties
 at once, not just "compresses the input":
 
+A toy checksum shows the weakness. If `A = 65` and `B = 66`, then
+`AB` and `BA` both add to `131`. The output is the same even though the
+input order changed, so this is useful for catching accidents at best,
+not for resisting someone trying to fool it.
+
 | Property             | What it requires                                                                  |
 | -------------------- | --------------------------------------------------------------------------------- |
 | Deterministic        | Same input → same output, always, on any machine                                  |
@@ -19,6 +24,10 @@ at once, not just "compresses the input":
 | Avalanche effect     | Flipping one input bit should flip roughly half the output bits, unpredictably    |
 | Preimage resistance  | Given a hash, it should be infeasible to find _any_ input that produces it        |
 | Collision resistance | It should be infeasible to find _two different_ inputs that produce the same hash |
+
+Preimage means "the thing before the hash." Preimage resistance is the
+property that stops someone from seeing a fingerprint and reconstructing
+some matching original on purpose.
 
 **Why does the avalanche effect matter for something like file
 integrity checking, specifically?** If a hash changed only a little for
@@ -36,6 +45,12 @@ flowchart TD
     Hash --> Outputs["Fixed, finite set of possible outputs\n(e.g. 2^256 for SHA-256)"]
     Outputs -->|pigeonhole principle| Collision["Collisions MUST exist somewhere —\nmore inputs than outputs"]
 ```
+
+Start with a small version: if 100 objects must fit into 10 boxes, at
+least some objects share a box. Hashes have the same shape: many
+possible inputs, fewer possible outputs. Real cryptographic hashes make
+the number of boxes astronomically large, so finding a shared box on
+purpose is still practically out of reach.
 
 **If collisions are mathematically guaranteed to exist, doesn't that mean
 hash functions are broken?** No — collision _resistance_ doesn't claim
@@ -60,10 +75,14 @@ model: the faster the hash, the cheaper each guess is. A key derivation
 function deliberately sacrifices speed and adds a second lever an
 everyday hash doesn't have:
 
-| Lever               | What it does                                                      | Why an everyday hash doesn't need it                                                                               |
-| ------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Iteration/time cost | Repeats internal work thousands of times                          | File-integrity checks need speed, not slowness                                                                     |
-| Memory hardness     | Requires a large block of memory per attempt, not just CPU cycles | Forces attackers into expensive hardware (can't cheaply parallelize on cheap ASICs the way a pure-CPU hash can be) |
+| Lever               | What it does                                                      | Why an everyday hash doesn't need it                                                                                                                                             |
+| ------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Iteration/time cost | Repeats internal work thousands of times                          | File-integrity checks need speed, not slowness                                                                                                                                   |
+| Memory hardness     | Requires a large block of memory per attempt, not just CPU cycles | Forces attackers into expensive hardware (can't cheaply parallelize on cheap ASICs — specialized chips built to repeat one operation very fast — the way a pure-CPU hash can be) |
+
+For the password side of this threat model, connect back to
+`/security/authentication-fundamentals/`: that unit explains why a
+stolen database turns fast guessing into the real danger.
 
 **Does turning up a KDF's cost parameter forever make it more secure
 with no downside?** No — every legitimate login pays that same cost too.

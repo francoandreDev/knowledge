@@ -36,6 +36,12 @@ actually takes. This directly addresses the Scenario's mechanism:
 instead of a stuck request holding a connection indefinitely, it's
 released back to the pool after a bounded, known maximum time.
 
+One subtlety: this wrapper returns control to the caller, but it does
+not automatically cancel the underlying dependency work. Real HTTP
+clients often need an abort/cancellation mechanism as well. Even then,
+the timeout is still valuable because the caller stops lending its own
+resource to an unbounded wait.
+
 **Does this timeout alone stop the order service's connection pool
 from ever filling up?** Only partially — if the inventory service
 stays slow indefinitely, new requests keep arriving, each one still
@@ -139,6 +145,54 @@ of tying up a connection for up to 100ms each. The order service's
 own connection pool stops draining, and it stays available for
 requests that don't depend on inventory at all — directly preventing
 the Scenario's cascading outage.
+
+## Adding retries without multiplying the outage
+
+A retry should be a small, bounded second chance, not an infinite loop.
+The usual shape is: try once, wait a little after a transient failure,
+try again, and stop after a known maximum number of attempts.
+
+```js
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function retryWithBackoff(operation, { attempts, baseDelayMs }) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await operation();
+    } catch (err) {
+      lastError = err;
+      if (attempt === attempts) break;
+      await sleep(baseDelayMs * attempt);
+    }
+  }
+  throw lastError;
+}
+
+async function callInventoryWithRetries(breaker, requestFn) {
+  return retryWithBackoff(() => callInventory(breaker, requestFn), {
+    attempts: 3,
+    baseDelayMs: 50,
+  });
+}
+```
+
+For circuit-breaker counting, a practical rule is to count the whole
+retried sequence as one logical operation at the product level, while
+still recording the final failed dependency call that proves the
+dependency is unhealthy. Otherwise one user request with three attempts
+can trip the breaker as if three unrelated users failed. The exact
+policy varies, but the design question is always the same: retries
+should recover from brief blips without hiding or amplifying a real
+outage.
+
+Backpressure is the next protective layer around this. If the order
+service is already near its limit, it should stop accepting unlimited
+new work: return a clear overload response, cap the queue, or degrade
+optional behavior. That signal is what prevents "we will process it
+eventually" from becoming "we queued more work than we can survive."
 
 ## What generalizes and what doesn't
 

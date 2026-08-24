@@ -198,7 +198,7 @@ export const UNIT_TEASERS: Record<string, UnitTeaser> = {
   "git-teamwork/working-tree": {
     myth: "An uncommitted change just stays wherever you left it.",
     reality:
-      "It lives in the working tree, tied to whatever branch is checked out — switch branches without committing or stashing and that change looks like it vanished.",
+      "It lives in the working tree, visible under whatever branch is checked out, but not owned by that branch — switch without committing or stashing and that change can look like it vanished.",
   },
   "git-teamwork/merge": {
     myth: "Two people editing the same file always means a conflict.",

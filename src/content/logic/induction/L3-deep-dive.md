@@ -7,6 +7,16 @@ title: "L3 — Proving the Scenario's folder-size function correct, and diagnosi
 **Here's the Scenario's actual function. What are its base case and
 inductive step, concretely?**
 
+The data model is intentionally small:
+
+```js
+// A file is a leaf: it has a size and no children.
+{ type: "file", size: 10 }
+
+// A folder contains zero or more child files/folders.
+{ type: "folder", children: [...] }
+```
+
 ```js
 function folderSize(node) {
   if (node.type === "file") {
@@ -18,7 +28,8 @@ function folderSize(node) {
 
 **Base case:** a file node has no children — `folderSize` returns its
 `size` directly, with no recursion. This is trivially correct, since
-"total size" for a single file is just that file's size.
+"total size" for a single file is just that file's size; there are no
+smaller parts left to add.
 
 **Inductive step:** for a folder node, the function calls
 `folderSize` on each child and sums the results. By the inductive
@@ -28,6 +39,21 @@ total size. Summing correct sub-totals gives the correct total for
 the parent folder — this is a straightforward, one-level argument
 that never had to think about how deep any particular child actually
 is.
+
+If `reduce` is new, here is the same inductive step written with a
+plain loop. The proof is the same; only the JavaScript helper changed:
+
+```js
+function folderSizeWithLoop(node) {
+  if (node.type === "file") return node.size;
+
+  let total = 0;
+  for (const child of node.children) {
+    total += folderSizeWithLoop(child);
+  }
+  return total;
+}
+```
 
 ```js
 const tree = {
@@ -48,7 +74,9 @@ const tree = {
 folderSize(tree); // 35
 ```
 
-Notice the proof above never traced this specific tree — it argued
+One trace of this specific tree says: `10 + (20 + 5 + 0) = 35`.
+Notice the proof above never depended on tracing this specific tree —
+it argued
 correctness for _any_ tree shape, and this particular result (35)
 falls out as one instance of that general guarantee, not something
 that had to be separately verified by hand.
@@ -69,6 +97,8 @@ function folderSizeBuggy(node) {
 folderSizeBuggy(tree); // throws: Reduce of empty array with no initial value
 ```
 
+The example `tree` contains `{ type: "folder", children: [] }`, so
+`folderSizeBuggy(tree)` eventually reaches an empty folder and throws.
 The bug is a missing initial value on `reduce`. Tracing wouldn't
 necessarily catch this — plenty of trees have no empty folders
 anywhere, and would trace through fine. Framing it through induction
@@ -105,6 +135,22 @@ should be. The inductive step's logic (sum the children's correct
 sub-totals) was never wrong — it just needed a correct answer for the
 special case of _zero_ children, which is really a base case hiding
 inside what looked like the inductive step.
+
+## When induction does not apply yet
+
+Sometimes the right conclusion is not "the proof failed," but "the
+input model is not ready for this proof."
+
+| Input problem                               | What must happen first                                 |
+| ------------------------------------------- | ------------------------------------------------------ |
+| A folder can reference one of its ancestors | Detect/reject cycles or change the algorithm           |
+| A node has no `type`                        | Validate the data before calling `folderSize`          |
+| A file is missing `size`                    | Define how invalid files are handled                   |
+| Children can be generated forever           | Add a finite stopping rule before claiming correctness |
+
+This connects to `logic/state-machines`: good models make invalid
+shapes impossible or explicit instead of letting the algorithm discover
+them accidentally.
 
 ## What generalizes and what doesn't
 

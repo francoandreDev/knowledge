@@ -16,6 +16,18 @@ mechanical one — a bundler can read every file's `import` statements,
 build the full graph of what depends on what, and calculate a valid
 order automatically.
 
+Before the graph, separate three ideas that often get blurred:
+
+| Shape              | What the developer writes                   | What the browser has to manage                                                                  |
+| ------------------ | ------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Plain script tags  | Several files attached manually in HTML     | Load order and globals are manual bookkeeping                                                   |
+| Browser ES modules | Files use `import`/`export` directly        | The browser can follow imports, but still downloads many files and only runs syntax it supports |
+| Bundled output     | Source modules are analyzed before shipping | The browser receives fewer browser-ready files in a computed order                              |
+
+A module system answers "who needs whom?" A bundler uses that answer before
+the page loads to produce output that is easier and safer for the browser to
+execute.
+
 ```mermaid
 flowchart TD
     Entry["Entry point: main.js"] -->|imports| A["a.js"]
@@ -51,6 +63,15 @@ together as one pipeline.
 | Same file duplicated by multiple script tags | Bundling (module deduplication)        | Wasted bytes, or worse, duplicate global state            |
 | Newer syntax an old browser can't parse      | Transpilation                          | A syntax error before any code even runs                  |
 | Too many small files, too many HTTP requests | Bundling (fewer output files)          | Slower page loads, especially on high-latency connections |
+
+## So why a build step at all?
+
+The build step exists because the source code shape that helps humans work is
+not always the shape browsers should receive. It can compute a safe module
+order, include shared dependencies once, rewrite syntax for target browsers,
+split or combine output files, and remove code the graph proves is unused.
+Those are all pre-browser decisions: by the time the user opens the page, the
+browser gets files that are already organized for execution.
 
 ## Tree-shaking: removing what nothing actually uses
 

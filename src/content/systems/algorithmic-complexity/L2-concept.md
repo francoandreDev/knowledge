@@ -43,8 +43,10 @@ xychart-beta
     line [1, 10, 40, 90]
 ```
 
-The bottom, flatter line is `O(n log n)` — the growth rate of a hash-based or sort-based
-approach. The steep line is `O(n²)` — the incident's actual growth rate. Both lines start
+The bottom, flatter line is `O(n log n)` — a common "good sort, then scan" shape, shown as
+a conservative contrast against the incident's quadratic curve. The Set-based fix below is
+even flatter for this exact duplicate-removal problem: average-case `O(n)`. The steep line
+is `O(n²)` — the incident's actual growth rate. Both lines start
 close together because at small `n`, the _difference_ in growth rate hasn't had room to
 compound yet. The gap isn't a fixed amount that shows up early — it's a **multiplicative**
 gap that only becomes visible once `n` is large enough for the multiplication to matter,
@@ -70,6 +72,13 @@ it computes a hash and jumps almost directly to the right bucket instead of scan
 everything already stored. Swapping the data structure — not adding cleverness to the loop
 — is what collapses `n` iterations of `O(n)` work into `n` iterations of `O(1)` work: `O(n²)`
 becomes `O(n)`.
+
+`Set` is not magic; it changes the question the computer has to answer.
+A plain list is like checking a row of names from the beginning until
+you find the person or run out of names. A hash-based `Set` is more
+like using an index: compute a bucket from the id, jump near where that
+id should live, then check there. That extra structure costs memory,
+but it removes the repeated full scan that caused the incident.
 
 ## The rules for reading Big-O off real code
 

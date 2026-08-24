@@ -15,6 +15,11 @@ flowchart LR
 
 Correctness gets a proposal to the gate — it doesn't get it through. What's on the other side is a separate question entirely: does someone with actual capacity to act (budget, headcount, priority-setting authority, or enough trust that others will follow their lead) find this proposal worth spending that capacity on? A proposal can be perfectly correct and simply never reach anyone positioned to move it — that's not a contradiction, it's the whole reason power is a distinct variable from correctness.
 
+Capacity means available ability to do something: money, people,
+calendar space, attention, or authority. Roadmap means the list of
+work the team has already committed to. Headcount means people
+assigned to the work, not just agreement that the work is a good idea.
+
 ## Four sources of power, and how each one actually moves a decision
 
 Before the table: name one person whose opinion reliably moves decisions in a group you're part of, and ask yourself _why_ — is it their title, their track record, the fact that people trust them personally, or that they seem to know things others don't? Most people can answer instantly, which is itself evidence these four sources are already something you reason about intuitively, just not always on purpose.
@@ -27,6 +32,12 @@ Before the table: name one person whose opinion reliably moves decisions in a gr
 | Information      | Frame a proposal in terms of what decision-makers already care about, avoid fights already lost before | Built by paying attention to context outside your own team — what's been tried, what leadership is actually optimizing for |
 
 None of these require being disliked, dishonest, or manipulative to acquire — that association is a common reason people avoid thinking about power deliberately, but the sources themselves (track record, trust, context, formal role) are the same things that make someone a good colleague, applied with intent instead of accumulated by accident.
+
+Incentives are the things a person is rewarded, measured, or pressured
+to improve. A sponsor is someone with enough power over the problem to
+spend resources or credibility on the proposal. Framing is how you
+explain the proposal so the sponsor can see why it matters to their
+own responsibilities.
 
 A rough sense of how much these sources typically compound over time versus how fast they can be spent — formal authority can be granted overnight by a promotion, but the other three only accumulate through repeated, real interactions:
 
@@ -43,6 +54,10 @@ Formal authority can arrive in a single conversation (a promotion, a reorg); exp
 ## The adoption pipeline
 
 Given a correct proposal and someone who does have power over the problem, is that automatically enough? What's the one more thing that has to be true before that person actually spends their capacity on it?
+
+Pipeline here just means "path of steps." It is not a special
+software system; it is the route a proposal must travel from "good
+idea" to "people are actually working on it."
 
 Technical merit is evaluated first — necessary, but per the diagram above, not sufficient on its own. The next step is finding someone in the org who actually has power over the problem the proposal addresses; with no such sponsor, the proposal is shelved regardless of how correct it is. If a sponsor exists, the proposal still has to be translated into terms of what _that sponsor_ is accountable for — a sponsor with formal authority needs the framing connected to what they can directly allocate; a sponsor whose power comes from relationships needs the framing strong enough that vouching for it is worth spending their own trust on.
 
@@ -62,3 +77,8 @@ This makes explicit what "politics" often gets blamed for when it's really just 
 If the underlying mechanism here isn't optional — every group of people with different incentives has to align somehow — what actually happens when someone refuses to engage with it on principle?
 
 The word "politics" carries a negative connotation mostly because its most visible instances are its abuses (credit-stealing, undermining, hoarding information as leverage). But the underlying mechanism — aligning people with different incentives toward a shared decision — is present in every functioning group and isn't optional to opt out of; declining to engage with it deliberately doesn't remove power from the equation, it just means decisions get made by whoever _did_ engage with it, correct or not.
+
+This does not excuse dishonest politics. It separates the neutral
+skill from the abuse: understanding who can act, what they care about,
+and how to connect a true proposal to those cares is not the same as
+stealing credit or manipulating people.

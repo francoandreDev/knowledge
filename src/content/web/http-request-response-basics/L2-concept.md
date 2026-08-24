@@ -6,15 +6,42 @@ title: "L2 — HTTP request/response basics"
 
 ```mermaid
 sequenceDiagram
-    participant C as Client (browser, curl, fetch)
+    participant U as User
+    participant C as Browser
+    participant D as DNS
     participant S as Server
+    participant R as Resources
 
+    U->>C: Click a link or enter https://example.com/articles/42
+    C->>D: Resolve example.com to an IP address
+    D-->>C: IP address
     C->>S: Open TCP connection
-    C->>S: HTTP request (request line, headers, body?)
+    C->>S: Start TLS for HTTPS
+    C->>S: HTTP GET /articles/42
     Note over S: Parse request, route to a handler, build a response
-    S->>C: HTTP response (status line, headers, body?)
-    Note over C,S: Connection may be reused (keep-alive) or closed
+    S-->>C: HTTP response with HTML
+    C->>R: Request CSS, JS, images, fonts mentioned by HTML
+    R-->>C: Resource responses
+    Note over C: Parse HTML -> DOM, parse CSS -> CSSOM
+    Note over C: Combine trees -> layout -> paint visible pixels
+    Note over C,S: Connections may be reused (keep-alive) or closed
 ```
+
+From a learner's point of view, there are two halves that often get blurred
+together. The **network half** gets bytes to the browser: URL, DNS, TCP, TLS
+when the URL starts with `https`, then an HTTP request and response. The
+**browser half** turns those bytes into a screen: HTML becomes the DOM, CSS
+becomes the CSSOM, the browser combines them, calculates layout, and paints
+pixels. HTTP gets the ingredients across the network; rendering cooks them
+into the visible page.
+
+That first HTML response is usually only the starting sheet of instructions.
+If it contains `<link rel="stylesheet" href="/styles.css">`, `<script
+src="/app.js">`, `<img src="/hero.png">`, or a font reference, the browser
+sends more HTTP requests for those resources. Each one is still the same
+request/response contract from L1; the difference is that the browser is now
+asking for supporting files needed to finish the page, not the initial HTML
+document itself.
 
 A request and a response are both just structured text. A request literally looks like this on the wire:
 

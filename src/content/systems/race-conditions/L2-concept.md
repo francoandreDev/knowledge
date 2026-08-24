@@ -29,6 +29,19 @@ and write are each individually correct. So is Request B's. The bug
 only exists in the interleaving — B's read landing in the gap after
 A's read but before A's write.
 
+The same timeline as a plain table:
+
+| Step | Request A sees/does | Request B sees/does | Shared stock after step |
+| ---- | ------------------- | ------------------- | ----------------------- |
+| 1    | Reads `1`           | -                   | `1`                     |
+| 2    | -                   | Reads `1`           | `1`                     |
+| 3    | Writes `0`          | -                   | `0`                     |
+| 4    | -                   | Writes `0`          | `0`                     |
+
+Both requests made a decision from the same old fact. The final stock
+number alone hides the damage: it says `0`, but two success promises
+were already made.
+
 ## Closing the gap: two different strategies
 
 **Once you see the gap, there are two structurally different ways to
@@ -44,6 +57,10 @@ make anyone wait, it just makes the operation itself uninterruptible.
 Locks are more general (they work no matter how complicated the
 critical section gets) but they cost throughput: every request that
 arrives while the lock is held has to sit and wait.
+
+Another way to say it: atomicity removes the window where another
+operation can slip in; a lock puts a door in front of that window so
+only one operation can enter at a time.
 
 ## Why "just add an if-check" doesn't fix it
 

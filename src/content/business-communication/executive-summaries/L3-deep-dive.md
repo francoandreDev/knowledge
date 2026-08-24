@@ -71,6 +71,10 @@ reordered so the parts most necessary for a decision come first:
 > history and context from the original draft, now clearly labeled
 > "Background" rather than serving as the doc's opening.**
 
+Here, Q3 and Q4 mean business quarters: three-month planning periods.
+A sprint is a short work cycle, often one or two weeks. Replace
+`[date]` with the actual decision date in a real doc.
+
 **If the VP again only has ninety seconds, what happens now?** The
 ask, the timeline, the stakes, the recommendation, and the trade-off
 are all present in the paragraph the VP actually has time to read —
@@ -106,6 +110,10 @@ now two weeks behind schedule — not asking for a new decision, just
 informing the VP — would the same four-question structure still
 apply, or does an FYI status update need a different opening than a
 decision-requesting proposal?
+
+A status update needs a different BLUF: current status, impact, what
+changed, next estimate or next check-in, and ask if there is one. The
+`status-updates-build-trust` unit handles that pattern directly.
 
 ## Failure modes
 

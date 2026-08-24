@@ -7,6 +7,13 @@ title: "L3 — Implementing a real chain-of-trust verifier, and proving what it 
 Using Node's built-in `crypto` module for genuine RSA key pairs and
 signatures — not a toy stand-in:
 
+You do not need to master RSA, SHA-256, or X.509 to read this example.
+Treat the code as a small paper-signing machine: one key signs a
+certificate, another public key checks whether the paper is still
+unchanged, and the chain says which witness signed which paper. The
+real web certificate format is called X.509; this example uses plain
+JSON so the responsibility of each field is visible.
+
 ```js
 const crypto = require("crypto");
 
@@ -161,8 +168,9 @@ since the signature covers the exact certificate contents). What it
 was never built to detect, and structurally cannot detect, is whether
 the _domain string itself_ is a legitimate brand's domain or a
 convincing lookalike — that comparison isn't cryptographic, it's
-lexical, and it has to happen in the human (or a separate anti-phishing
-system) reading the address bar.
+lexical, meaning text compared character by character, and it has to
+happen in the human (or a separate anti-phishing system) reading the
+address bar.
 
 ## What this proves and doesn't prove
 
@@ -175,7 +183,8 @@ necessary check, not a sufficient one**, for deciding whether a site
 is safe to trust with a password.
 
 **Try extending it yourself:** suppose a company later adds a check
-that flags any domain within a small edit-distance of a list of
+that flags any domain within a small edit-distance — the number of
+letter changes needed to turn one domain into another — of a list of
 known, high-value target domains (like `paypal.com`) as suspicious
 before showing a login form. Would that check belong inside
 `verifyChain` itself, or does it need to live somewhere else in the

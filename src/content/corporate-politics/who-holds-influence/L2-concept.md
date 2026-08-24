@@ -23,6 +23,12 @@ every infrastructure-adjacent conversation without chairing a single one of them
 signals point at the same person — that convergence is what makes the informal network
 legible, once you know to look for it.
 
+Plain terms: being looped in or cc'd means someone is included in the
+conversation even when they do not own it. A thread is a written
+conversation. Chairing a meeting means officially leading it. If a
+person keeps appearing, being cited, or slowing a decision by
+disagreeing, that is a signal of real influence.
+
 ## A concrete exercise: trace the last three decisions
 
 **Rather than guessing at who holds influence, what's an actual, doable way to find out?**
@@ -39,6 +45,11 @@ who signed off, but **who was actually consulted before the decision was made**:
 unrelated decisions, is the single strongest signal of real influence this exercise can
 produce** — it's not a one-off relationship, it's a consistent pattern of being the person
 whose judgment gets checked before a call is made.
+
+You can run the same exercise outside a company: list the last three
+decisions in a class project, family business, club, or community
+group. Do not only write who had the official right to decide; write
+whose opinion people checked before the decision felt safe.
 
 ## Why this differs from just "networking"
 
@@ -77,3 +88,9 @@ information?** Two very different responses to the same map:
 The map is the same either way — what separates the two is whether the underlying case is
 actually sound, and whether the formal process still gets respected once the informal
 evaluation is done.
+
+"Currying favor" means trying to win someone over through flattery or
+useful favors instead of through the strength of the case. Mapping
+influence is legitimate when it helps you get better feedback and
+respect the formal decision; it turns unhealthy when it becomes a way
+to dodge the people or standards that should still evaluate the work.

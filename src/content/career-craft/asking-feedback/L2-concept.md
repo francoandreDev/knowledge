@@ -31,6 +31,13 @@ Jordan's "looks great!" and Priya's "looks great!" could mean very
 different things even if both said the exact same three words — what's the
 one follow-up question that would tell Maya which is which?
 
+Reading feedback is not just reading the words. You also ask: how much did
+this person review, what concrete thing did they mention, and does this
+person usually catch real issues in this kind of work? These are clues, not
+proofs — a fast answer can still be careful, and a specific answer can
+still be wrong. Calibration is how you decide what to do next with the
+answer you received.
+
 | Signal to watch for                                                | What it suggests about how to weight this feedback                                                                   |
 | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
 | Specific references to actual content ("the pricing slide's math") | High engagement — likely reviewed carefully, weight accordingly                                                      |
@@ -54,6 +61,11 @@ that work together: asking a better-shaped question, _and_ visibly,
 consistently rewarding candid answers (not reacting defensively, thanking
 people for specific critical feedback) so the safety exists for the
 better-shaped question to actually work.
+
+Two everyday versions: if someone once corrected your draft and you argued
+with them for ten minutes, next time they may choose the safe "looks fine."
+If you thanked them, used the useful part, and explained what you changed,
+next time the honest answer feels less risky to give.
 
 ## Scope: specific and finished beats broad and ongoing
 

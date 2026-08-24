@@ -29,6 +29,19 @@ free capacity (rather than packing the fullest node first) is what
 keeps one node's failure from taking out a disproportionate share of
 the fleet:
 
+Before the code, do one scheduling pass by hand. The function below is
+just automating this table over and over:
+
+| Pod to place        | Nodes with enough room    | Spread choice | Remaining capacity after choice |
+| ------------------- | ------------------------- | ------------- | ------------------------------- |
+| `p2` (2 CPU, 2 mem) | `nodeA`, `nodeB`, `nodeC` | `nodeA`       | `nodeA` has 2 CPU, 6 mem left   |
+| `p5` (2 CPU, 1 mem) | `nodeB`, `nodeC`, `nodeA` | `nodeB`       | `nodeB` has 2 CPU, 7 mem left   |
+| `p1` (1 CPU, 2 mem) | `nodeC`, `nodeA`, `nodeB` | `nodeC`       | `nodeC` has 3 CPU, 6 mem left   |
+
+`remaining` in the code means "what each node still has free after the
+placements so far." `pending` means "pods the scheduler could not place
+anywhere."
+
 ```js
 function scheduleSpread(nodes, pods) {
   const remaining = nodes.map((n) => ({
@@ -90,7 +103,9 @@ nodes rather than packing any single one, leaving real spare capacity
 on each.
 
 ```js
-// nodeC fails — its 2 pods (p1, p4) are lost
+// nodeC fails — its 2 pods (p1, p4) are lost.
+// We list them by hand here to keep the example small; a real
+// orchestrator records which pod is on which node.
 const lostPods = [pods6[0], pods6[3]]; // p1, p4
 const survivors = initial.remaining.filter((n) => n.name !== "nodeC");
 const reconciled = scheduleSpread(survivors, lostPods);
@@ -156,7 +171,12 @@ capacity that would let _any single node's_ failure be fully absorbed
 by the survivors — and does adding a 3rd identical node fix it, the
 way it did in Scenario A?** Try extending `nodes2` to 3 nodes with the
 same `podsTight` list and re-running the scheduler and reconciliation
-above to check.
+above to check. Hint: because the four pods need 8 CPU / 16 memory in
+total, two 4-CPU / 8-memory nodes leave no spare room at all. A third
+identical node raises total capacity to 12 CPU / 24 memory, so the
+surviving two nodes after any one-node failure still have 8 CPU / 16
+memory available in total — enough to absorb the same four pods, if
+their placement leaves that capacity usable.
 
 ## Failure modes
 

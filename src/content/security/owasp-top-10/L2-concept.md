@@ -9,18 +9,18 @@ it secure?** Not necessarily — those cover exactly three of the ten
 categories below. A system can max out all three and still be
 breached through any of the other seven:
 
-| #   | Category                                   | What it actually means                                                                            | Covered elsewhere in this track                                     |
-| --- | ------------------------------------------ | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| 1   | Broken access control                      | Right identity, wrong permission check (or none)                                                  | Related to `authorization-models`, but IDOR is this unit's L3 focus |
-| 2   | Cryptographic failures                     | Sensitive data exposed because it wasn't encrypted, or was encrypted badly                        | `hashing`, `symmetric-asymmetric-encryption-basics`                 |
-| 3   | Injection                                  | Untrusted input executed as code by a downstream interpreter                                      | New in this unit — L3 focus                                         |
-| 4   | Insecure design                            | The flaw is in the requirements/architecture, not a single line of code                           | Touched by `secure-by-design` (later unit)                          |
-| 5   | Security misconfiguration                  | Insecure by default setup, not by broken logic                                                    | New in this unit                                                    |
-| 6   | Vulnerable and outdated components         | A dependency has a known, unpatched CVE                                                           | Related to `supply-chain-security` (later unit)                     |
-| 7   | Identification and authentication failures | Login, session, or credential-recovery logic has a gap                                            | `authentication-fundamentals`                                       |
-| 8   | Software and data integrity failures       | Code or data trusted without verifying where it came from                                         | Related to `supply-chain-security` (later unit)                     |
-| 9   | Security logging and monitoring failures   | A breach happens and nobody notices for months, because nothing was logged or watched             | Related to `incident-response` (later unit)                         |
-| 10  | Server-side request forgery (SSRF)         | The server itself is tricked into making a request to somewhere the attacker can't reach directly | New in this unit — L3 focus                                         |
+| #   | Category                                   | What it actually means                                                                            | Covered elsewhere in this track                                                |
+| --- | ------------------------------------------ | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| 1   | Broken access control                      | Right identity, wrong permission check (or none)                                                  | Related to `/security/authorization-models/`, but IDOR is this unit's L3 focus |
+| 2   | Cryptographic failures                     | Sensitive data exposed because it wasn't encrypted, or was encrypted badly                        | `/security/hashing/`, `/security/symmetric-asymmetric-encryption-basics/`      |
+| 3   | Injection                                  | Untrusted input executed as code by a downstream interpreter                                      | New in this unit — L3 focus                                                    |
+| 4   | Insecure design                            | The flaw is in the requirements/architecture, not a single line of code                           | Touched by `secure-by-design` (later unit)                                     |
+| 5   | Security misconfiguration                  | Insecure by default setup, not by broken logic                                                    | New in this unit                                                               |
+| 6   | Vulnerable and outdated components         | A dependency has a known, unpatched CVE                                                           | Related to `supply-chain-security` (later unit)                                |
+| 7   | Identification and authentication failures | Login, session, or credential-recovery logic has a gap                                            | `/security/authentication-fundamentals/`                                       |
+| 8   | Software and data integrity failures       | Code or data trusted without verifying where it came from                                         | Related to `supply-chain-security` (later unit)                                |
+| 9   | Security logging and monitoring failures   | A breach happens and nobody notices for months, because nothing was logged or watched             | Related to `incident-response` (later unit)                                    |
+| 10  | Server-side request forgery (SSRF)         | The server itself is tricked into making a request to somewhere the attacker can't reach directly | New in this unit — L3 focus                                                    |
 
 **Is this list saying the other units in this track don't matter?**
 No — getting authentication, hashing, and TLS right closes off three
@@ -47,6 +47,13 @@ flowchart LR
     E --> G
     F --> G
 ```
+
+Read that as a concrete walk, not as a vague "hack the app" cloud:
+first the attacker lists places the app accepts input, then tries cheap
+assumptions one by one. Can I change an invoice id? Can I put strange
+text in a search box? Is there an old staging route still online? Is a
+dependency version tied to a known public flaw, a CVE? A **zero-day**
+is a previously unknown flaw; most incidents do not need one.
 
 **Why does this matter for how a team prioritizes security work?**
 If the real attack process is "find the cheapest gap across ten

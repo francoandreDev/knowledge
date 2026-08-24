@@ -9,6 +9,13 @@ to produce a correct create/update/delete list?** Two lists of
 resources — the desired (declared) state and the current (state
 file) — matched up by id, then diffed by config:
 
+Code vocabulary before the function: a `Map` is a lookup table where
+you can ask "give me the resource with id `web-1`"; `id` is the stable
+name used to match the same resource across lists; `config` is the part
+that can change, like server size; and `JSON.stringify` is used here as
+a simple way to compare two small config objects. Real IaC tools use
+more careful comparisons, but the idea is the same.
+
 ```js
 function diffResources(desired, current) {
   const desiredById = new Map(desired.map((r) => [r.id, r]));
@@ -149,6 +156,33 @@ deploy: their `plan` was computed against `stateFile1` (which still
 said `small`), not against the drifted actual state — so their
 deploy's plan correctly matched what the _tool_ believed was true,
 which by then had silently diverged from reality.
+
+One more step shows the "it got resized back to `small`" part of the
+opening scenario. If the tool refreshes from actual cloud before
+applying the declared config, it sees that reality is `xlarge` while
+the declared file still says `small`, so the computed plan is an update
+back to `small`:
+
+```js
+const planAgainstActual = diffResources(desired1, [
+  ...actualCloudWithDrift.values(),
+]);
+
+// planAgainstActual.toUpdate.length === 1
+// planAgainstActual.toUpdate[0].id === "web-1"
+// planAgainstActual.toUpdate[0].config.size === "small"
+
+const cloudAfterRoutineDeploy = applyPlan(
+  actualCloudWithDrift,
+  planAgainstActual,
+);
+cloudAfterRoutineDeploy.get("web-1").config.size; // "small"
+```
+
+That update is not malicious and not random. It is the tool obeying the
+only declared source of truth it has. The incident fix lived only in
+the console, so the next routine deploy treated that console-only
+change as something to overwrite.
 
 ## What generalizes and what doesn't
 

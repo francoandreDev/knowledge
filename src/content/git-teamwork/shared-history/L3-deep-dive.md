@@ -8,6 +8,21 @@ title: "L3 — Simulating the Scenario's force-push, and how --force-with-lease 
 happened. Here's a minimal commit-history model — enough to measure
 exactly which commits the Scenario's force-push destroys.**
 
+Here is the story before code:
+
+| Commit | Parent | Who made it                    | In old remote line? | In developer's new local line? |
+| ------ | ------ | ------------------------------ | ------------------- | ------------------------------ |
+| `A`    | none   | shared starting point          | Yes                 | Yes                            |
+| `B`    | `A`    | earlier shared work            | Yes                 | Yes                            |
+| `C`    | `B`    | last commit developer had seen | Yes                 | Yes                            |
+| `D`    | `C`    | teammate's newer push          | Yes                 | No                             |
+| `E`    | `C`    | developer's rebased work       | No                  | Yes                            |
+
+In the JavaScript below, `null` means "no parent." A `Set` is used to
+remember hashes without duplicates. `find` searches the array for the
+commit with a matching hash. "Reachable" means the loop starts at a
+tip like `D` or `E` and walks backward through `parent` links.
+
 ```js
 function findCommit(history, hash) {
   return history.find((c) => c.hash === hash);
@@ -111,6 +126,13 @@ rejected — the developer is forced to fetch, see the teammate's
 commit, and reconcile before any history gets overwritten. A plain
 `--force` never asks this question at all.
 
+Fetching is only the start of the safe behavior. If fetching shows the
+remote now has commits you did not include, you still have to
+incorporate them or make an explicit team decision about replacing
+them. `--force-with-lease` protects against surprising remote changes;
+it does not decide for you whether your rewritten history contains
+everything that should remain on the shared branch.
+
 ## What generalizes and what doesn't
 
 The core lesson — force-pushing replaces a ref unconditionally, while
@@ -132,9 +154,9 @@ all — and does that change what makes a force-push actually risky?
 
 ## Failure modes
 
-| Failure mode                                                                 | What it gets wrong                                                                                                                                |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Reaching for `--force` reflexively when a normal push is rejected            | A rejection means the remote has commits the local branch doesn't — the fix is to fetch and reconcile, not to bypass the check that caught it     |
-| Treating `--force-with-lease` as equivalent to `--force`                     | `--force-with-lease` still checks the remote's actual current state before overwriting — it's meaningfully safer, not just a longer command name  |
-| Assuming a personal-branch force-push habit is safe on any branch            | The same command is safe on a branch nobody else touches and dangerous on a shared one — the branch's status, not the command, is what changed    |
-| Not fetching immediately before a force-push, even with `--force-with-lease` | `--force-with-lease` only protects against changes since the _last fetch_ — a stale local fetch from hours ago still leaves a real window of risk |
+| Failure mode                                                      | What it gets wrong                                                                                                                               |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Reaching for `--force` reflexively when a normal push is rejected | A rejection means the remote has commits the local branch doesn't — the fix is to fetch and reconcile, not to bypass the check that caught it    |
+| Treating `--force-with-lease` as equivalent to `--force`          | `--force-with-lease` still checks the remote's actual current state before overwriting — it's meaningfully safer, not just a longer command name |
+| Assuming a personal-branch force-push habit is safe on any branch | The same command is safe on a branch nobody else touches and dangerous on a shared one — the branch's status, not the command, is what changed   |
+| Fetching, then force-pushing without reading what changed         | A fresh fetch updates your view, but it doesn't mean your local rewritten branch includes the new remote commits — inspect and reconcile first   |

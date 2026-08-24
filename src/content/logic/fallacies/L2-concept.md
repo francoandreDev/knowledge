@@ -6,6 +6,11 @@ title: "L2 — Five recurring patterns, and why they persuade independent of val
 
 Take the "either we commit every week, or admit it's over" message from L1. Before reading on: if a friend of yours said that to you directly, would your gut reaction be "yeah, fair point" or "wait, is that actually true"? Most people's gut says the first — so what is it about that sentence that makes a false claim feel true on first read?
 
+In this unit, **valid** does not mean "I like it" or "it sounds true."
+It means the conclusion is actually supported by the reasons given.
+**Persuasive** means it feels convincing. A fallacy is dangerous because
+it can be persuasive while still not being valid.
+
 ```mermaid
 flowchart LR
     Claim["An argument\ncontaining a fallacy"] --> Feel{"Does it FEEL\nconvincing?"}
@@ -14,7 +19,7 @@ flowchart LR
     Valid -- "Often no" --> Invalid["Fails on inspection"]
 ```
 
-Validity (covered in `logic/formal-informal-logic`) and persuasiveness are separate axes — that's precisely why fallacies are worth memorizing by name: they're the specific, recurring shapes that land in the top-left of this diagram (invalid, but persuasive) often enough that recognizing the pattern on sight is more reliable than re-deriving from scratch each time why a given argument feels off.
+Validity (covered in `logic/formal-informal-logic`) and persuasiveness are separate axes — that's precisely why fallacies are worth memorizing by name: they're recurring shapes that feel persuasive while failing on inspection often enough that recognizing the pattern on sight is more reliable than re-deriving from scratch each time why a given argument feels off.
 
 ## Five patterns, with everyday examples
 
@@ -32,7 +37,20 @@ Every example is a real, common shape of an everyday disagreement — not an abs
 
 ## False dichotomy, made checkable
 
-The false-dichotomy pattern is directly related to the truth-table validity checker from `logic/formal-informal-logic` — it's about whether a _claimed_ set of possibilities is actually the _complete_ set. Instead of arguing in the abstract about whether "commit or quit" leaves something out, can you write down a rule that checks it directly?
+You can think of a false dichotomy as a possibility-list problem: did
+the speaker present the real options, or hide some?
+
+| Claimed options  | Actual options            | Result               |
+| ---------------- | ------------------------- | -------------------- |
+| Commit weekly    | Commit weekly             | Covered              |
+| Admit it is over | Admit it is over          | Covered              |
+|                  | Send a reminder text      | Excluded real option |
+|                  | Rotate who hosts          | Excluded real option |
+|                  | Accept an occasional miss | Excluded real option |
+
+If `C`, `D`, or `E` are real options, then "A or B are the only options"
+was incomplete. The code below is just the same check written for people
+who program.
 
 ```js
 // possibility-space.mjs — models "is this dichotomy actually exhaustive?"

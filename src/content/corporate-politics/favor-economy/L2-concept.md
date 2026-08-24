@@ -32,6 +32,13 @@ visible follow-up ask. A large, unsolicited favor delivered right before
 a known request, on the other hand, tends to read as exactly what it
 is — a setup.
 
+If the office examples are unfamiliar: Slack is just a workplace chat;
+a PR is a proposed code change someone reviews; sharing context means
+explaining useful background so another person does not waste time.
+The non-technical equivalent is lending clear notes, explaining a task,
+warning someone about an avoidable mistake, or helping tidy up before
+anyone asks you for a favor.
+
 | Genuine deposit                                      | Reads-as-a-ploy version                                        |
 | ---------------------------------------------------- | -------------------------------------------------------------- |
 | Answering a quick Slack question, unprompted         | Volunteering unsolicited large help right before a known ask   |
@@ -48,6 +55,10 @@ accumulates precisely because it isn't attached to a specific, nearby
 ask; the gap in time (and the absence of any explicit tally) is part of
 what keeps it reading as goodwill rather than a trade.
 
+Quid pro quo means "this for that." The problem is not that exchange is
+always bad; the problem is that pretending to give free help while
+quietly treating it as "this for that" makes people feel tracked.
+
 ## The cold-ask problem
 
 **What happens when there's no prior relationship at all, and the need is
@@ -58,6 +69,11 @@ on my end") and, ideally, routing through someone who _does_ have
 relationship capital with the person being asked, rather than pretending
 a relationship exists that doesn't. Cold asks succeed on the strength of
 the ask itself, not on borrowed trust that hasn't actually been earned.
+
+A simple cold-ask shape is: "I know this is short notice. The smallest
+thing that would help is X. It would take about Y minutes and it
+unblocks Z. No worries if today is not possible." Specific and bounded
+means the other person can see exactly what saying yes would cost.
 
 ## The generalizable lesson
 

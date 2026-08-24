@@ -18,6 +18,12 @@ sounds like an accusation:
 > the first month, that's on me — even though the current setup is
 > genuinely worse."
 
+"Migration" here means moving from one tool to another. "Rollout"
+means the period when the new tool is introduced into real work. The
+client is worried about the messy middle: the old system is imperfect,
+but everyone knows how to survive it; the new system might be better,
+but the switch itself could create blame.
+
 **What did this question actually surface that the original pitch
 never touched?** The real objection was never about the product —
 it was about the client's personal exposure if a switch they
@@ -40,6 +46,11 @@ to address that specifically:
 > existing alerts, and only cut over once you've personally seen it
 > catch everything the old one does. That way there's no month where
 > you're exposed if something's missed."
+
+A parallel pilot means trying the new thing beside the old thing,
+without turning the old thing off. "Cut over" means making the new
+tool the real one people depend on. In this offer, the client gets to
+compare both systems before any risky switch happens.
 
 **Why does this specific offer directly answer the real objection,
 where a discount or a features list wouldn't have?** The client's
@@ -80,6 +91,12 @@ don't have the authority to approve this — my boss does, and she
 hasn't seen this yet," would the parallel-pilot offer from this
 scenario still be the right response, or does a different kind of
 real objection need a structurally different kind of fix?
+
+A better response in that authority case would sound different:
+"Would it help if we prepared a short internal summary for your boss,
+joined a decision call, or mapped the approval steps together?" The
+fix is no longer mainly reducing rollout risk; it is helping the
+buyer involve the person who can actually approve the purchase.
 
 ## Failure modes
 

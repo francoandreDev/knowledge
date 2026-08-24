@@ -9,6 +9,10 @@ why didn't that settle it?** Because the manager isn't the only
 decision-maker in the room, and their spoken confidence in the 1:1
 never actually enters calibration — only the written packet does.
 
+**Read cold** means the other managers are reading the written case
+without already knowing the person's day-to-day work. That is why
+specific evidence matters more than the manager's private confidence.
+
 | Determines the outcome                                                          | Doesn't determine the outcome                                        |
 | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | The packet's written evidence, read cold by managers with no personal context   | How enthusiastically the manager spoke about the person in a 1:1     |
@@ -20,7 +24,9 @@ necessarily — the manager's statement described their own intent
 accurately. The mistake, if there is one, is in what the engineer (or
 the manager) inferred from it: intent to advocate is not the same
 thing as a guaranteed outcome, because advocacy still has to survive
-a room the manager doesn't fully control.
+a room the manager doesn't fully control. **Advocacy** means the
+manager actively argues for the promotion; it does not mean the manager
+controls the final decision.
 
 ## What happens to the packet inside the room
 
@@ -36,6 +42,11 @@ flowchart LR
     D --> E
     E --> F["Outcome depends on whether\nthe WRITTEN evidence holds up —\nnot the manager's verbal case"]
 ```
+
+In simpler terms: the manager brings a written argument, other managers
+compare it to the level expectations and to other cases, then they ask
+whether the written proof is strong enough without relying on personal
+trust.
 
 The managers in the room weren't in the engineer's 1:1s, don't know
 their day-to-day work, and have no reason to simply trust another
@@ -64,6 +75,11 @@ many individual cases clear the bar — which means a packet can be
 genuinely strong and still not result in a promotion that specific
 cycle, for a reason that has nothing to do with the quality of the
 case itself.
+
+That can feel unfair because the person may have met the standard but
+still lost to timing or capacity. The practical next step is different:
+preserve the packet, ask what would make it stronger, and ask whether
+it can be resubmitted next cycle.
 
 ## Failure modes at this level
 

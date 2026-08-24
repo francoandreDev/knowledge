@@ -25,6 +25,10 @@ best available solution to it.
 
 ## How do you get from a stated request to the actual need underneath it?
 
+To **validate** the problem here does not mean running a technical test.
+It means checking with the user that you understood the real difficulty
+behind the request, before you commit to one solution.
+
 The five whys keeps asking "why do you need that?" — roughly five times,
 in practice — checking after each answer whether it's landed on an actual
 **need** or just another layer of solution. Once an answer stops naming a
@@ -70,12 +74,22 @@ sweet spot: specific enough to evaluate candidate solutions against, general
 enough not to have foreclosed any of them. Depth 5+ risks over-abstracting
 into something no longer actionable at all.
 
+Read the chart as examples, not as math to memorize: depth 0 is
+"build CSV," so you can only judge CSV. Around depth 3, "notice a trend
+getting worse in time to act" lets you compare CSV, a chart, an alert, or
+an email. Around depth 5+, "feel in control" may be true, but it is too
+broad to decide what to build next.
+
 ## Why does the same underlying need call for different solutions in different contexts?
 
 **Jobs to be done**: users don't want a product, they "hire" it to make
 progress on a specific job in a specific context. If "see this number over
 time" is the need in both of the rows below, why would the best solution
 still be different for each one?
+
+Again, "job" means the progress someone is trying to make, not their job
+title. The context matters because a five-second weekly check and a
+twenty-minute investigation ask the software to play different roles.
 
 | Component                  | Weekly glance (Mara's actual job)                                            | One-off deep investigation (a different job)                             |
 | -------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
@@ -108,3 +122,7 @@ The second version can be evaluated against _multiple_ candidate solutions
 (a live chart, an automated alert threshold, a weekly digest email) — the
 first version has already foreclosed that comparison by baking the
 requester's first-imagined solution into the problem statement itself.
+
+If you want to see this transfer beyond Mara's CSV example, L3 works
+through two other requests — bulk delete and dark mode — where the same
+requested feature changes meaning once the underlying problem is named.

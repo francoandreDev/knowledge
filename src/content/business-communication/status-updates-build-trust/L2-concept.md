@@ -29,12 +29,28 @@ Two updates can both be true. What's the actual, checkable difference between th
 
 The vague-estimate row is the most common failure specifically because it _feels_ honest in the moment (nobody's lying — "soon" really is the best guess) — but a string of "soon"s that don't hold up is indistinguishable, from the reader's side, from someone who has no real handle on the situation, whether or not that's true.
 
+In simpler words: a trust-building update gives the reader something
+they can check later, explains why the new guess is not just the old
+guess repeated, and says whether they need to do anything. A
+trust-eroding update may be true today, but it leaves the reader with
+no way to judge what changed.
+
 ## Known vs. estimated: the distinction that keeps updates honest under uncertainty
 
 If every sentence in an update was a good-faith guess at the time, how does a track record still end up reading as unreliable in hindsight? The answer is almost always that "confirmed" and "projected" got blended into one undifferentiated stream of claims:
 
 - **Known**: "The backend fix is merged and deployed." (verified, not a projection)
 - **Estimated**: "Frontend integration should take about two more days, assuming no further API changes." (a projection, with its own assumption named)
+
+Same idea without software:
+
+| Claim type | School-event example                                                           |
+| ---------- | ------------------------------------------------------------------------------ |
+| Known      | "The room is booked and the teacher approved the new date."                    |
+| Estimated  | "We should finish posters by Thursday, assuming the printer has ink tomorrow." |
+
+The first claim is already checked. The second is a reasonable guess,
+but it depends on a named condition.
 
 Marking the second sentence as an estimate — and naming the assumption it depends on — does two things a flat "should be done in two days" doesn't: it tells the reader how much weight to put on the number, and it gives them (and the future you writing the next update) a specific, checkable reason if the assumption turns out wrong, rather than a vague sense that the estimate was "wrong somehow."
 
@@ -55,6 +71,10 @@ The same eventual delay, surfaced in three small updates as the picture became c
 
 The cost compounds specifically when vagueness repeats. A single "should be done soon" is a normal hedge; the same phrase reused across several consecutive misses is what actually erodes trust — approximately how fast, if each miss chips away at what's left rather than a fixed amount:
 
+The numbers below are illustrative, not a scientific measurement of
+trust. They show the shape of the problem: repeated vague misses hurt
+more than one vague miss.
+
 ```mermaid
 xychart-beta
     title "Reader trust remaining, by consecutive vague/missed estimates"
@@ -74,5 +94,11 @@ Given everything above, one question actually decides most of an update's struct
 3. **What changed since the last estimate that makes this one more reliable?** A repeat guess with the same confidence as a missed one earns no more trust than the miss did.
 4. **What, if anything, do I need from the reader?** State it explicitly, even if the answer is "nothing yet" — an implicit ask leaves the reader guessing whether they're supposed to act.
 5. **Is this update triggered by genuinely new information, or just a schedule?** An update with nothing new in it trains readers to skim, which costs you the one time there's something they actually need to notice.
+
+If there is real uncertainty, send a short update even if the update
+is "still investigating, next specific estimate by Tuesday." If
+nothing has changed and there is no risk to the reader, avoid noise.
+The rule is not "always update"; it is "do not let the reader assume
+good news while you know the situation is uncertain."
 
 This is the checklist behind both paths in L3 — Path A skips questions 1, 3, and 5; Path B answers all five, every time.

@@ -31,6 +31,16 @@ though nothing about server processing itself changed. This is a false
 decomposition: it looks like measured, independent progress while
 actually double-counting a single real cause.
 
+| Property            | Plain version       | Question to ask                                                        |
+| ------------------- | ------------------- | ---------------------------------------------------------------------- |
+| **Exhaustive**      | Complete            | Did we leave any important part of the original problem outside?       |
+| **Non-overlapping** | Not counting twice  | Do two pieces describe the same cause under different names?           |
+| **Independent**     | Workable separately | Can someone make progress on this piece without solving another first? |
+
+For timing, money, distance, and quantities, "complete" can often be
+checked by addition. For messier human problems, the check is causal:
+do these pieces cover the main reasons the problem happens?
+
 ## Independence: can this piece be worked on without the others?
 
 **Beyond exhaustive and non-overlapping, is there a third property worth
@@ -43,6 +53,11 @@ actually be worked on without first understanding the first, because
 end-to-end time is partly _made of_ server-side time. A decomposition
 whose pieces secretly depend on each other isn't really four separate
 problems — it's one problem wearing four labels.
+
+Independent does not mean "these pieces can never affect each other."
+It means the current piece is specific enough that a person can work on
+it, measure it, or test a hypothesis about it without first solving all
+the others.
 
 ## Decomposition reveals priority, not just structure
 
@@ -72,3 +87,16 @@ kind of user, causes confusion). The generalizable skill isn't
 "measure everything" — it's the discipline of checking any proposed
 split against the same two questions: does it cover the whole problem,
 and do the pieces avoid describing the same cause twice.
+
+For "our onboarding is confusing," a useful first decomposition might
+look like this instead of a timing table:
+
+| Step               | User affected       | Suspected cause        | How to check it              |
+| ------------------ | ------------------- | ---------------------- | ---------------------------- |
+| Account creation   | First-time users    | Password rules unclear | Watch failed signup attempts |
+| First dashboard    | Non-technical users | Labels use team jargon | Ask users to explain choices |
+| First saved change | All users           | Success message hidden | Check support tickets        |
+
+If the original request is vague because requirements are vague, link
+this skill to `product-domain/requirements-gathering`: turn the ask
+into observable behavior before choosing the implementation work.

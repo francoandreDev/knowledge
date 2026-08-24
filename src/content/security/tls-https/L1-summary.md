@@ -35,13 +35,15 @@ belongs to the company the user thinks it does.
   a browser and a server, so anyone intercepting the traffic in
   transit (a coffee-shop Wi-Fi eavesdropper, an ISP) sees scrambled
   bytes instead of readable data. This is a real, valuable guarantee
-  — but it's a guarantee about the _pipe_, not about who's on the
-  other end of it.
+  — but it's a guarantee about the road the message travels, not a
+  character reference for the person or company at the destination.
 - A **TLS certificate** binds a public key to a specific domain name
-  and is signed by a **certificate authority (CA)** — an organization
-  browsers already trust. The padlock appears when the browser can
-  verify that signature chains back to a CA it trusts, _for the exact
-  domain currently in the address bar_.
+  (the public half of the key-pair idea from
+  `/security/symmetric-asymmetric-encryption-basics/`) and is signed by
+  a **certificate authority (CA)** — an organization browsers already
+  trust as a witness for domain control. The padlock appears when the
+  browser can verify that signature chains back to a CA it trusts, _for
+  the exact domain currently in the address bar_.
 - **Domain validation is not identity validation.** A CA issuing a
   certificate for `paypa1-secure-login.com` isn't vouching that the
   site is operated by PayPal — it's only certifying that whoever
@@ -53,7 +55,8 @@ belongs to the company the user thinks it does.
 
 - **TLS (Transport Layer Security)** — the protocol that encrypts and
   authenticates a connection between a client and server; HTTPS is
-  HTTP running over TLS.
+  HTTP running over TLS, so `/web/http-request-response-basics/` is the
+  layer underneath and TLS is the protective wrapper around it.
 - **Certificate** — a signed document binding a public key to a
   domain name, issued by a certificate authority.
 - **Certificate authority (CA)** — an organization whose signing key

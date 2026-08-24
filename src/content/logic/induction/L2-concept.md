@@ -13,6 +13,19 @@ filesystem is far deeper and more varied than any hand-picked
 example. Tracing only ever tells you about the specific cases you
 traced.
 
+Even a regular-looking tree grows quickly:
+
+| Shape assumption               | Leaves to inspect by tracing |
+| ------------------------------ | ---------------------------- |
+| 2 children per folder, depth 3 | 8 leaves                     |
+| 3 children per folder, depth 5 | 243 leaves                   |
+| 4 children per folder, depth 6 | 4,096 leaves                 |
+
+Real folders are not perfectly regular, but the lesson survives: each
+extra level and each extra branch multiplies the number of concrete
+paths a trace would have to cover. For the counting intuition, connect
+this to `applied-math/combinatorics`.
+
 ```mermaid
 flowchart TD
     A["Trace-based confidence"] --> B["Check example 1: OK"]
@@ -42,6 +55,18 @@ because the argument shows correctness is preserved at every step
 from the base case upward, however many steps that turns out to be
 for any particular input.
 
+That guarantee has hidden conditions:
+
+| Condition                            | Why it matters                                          |
+| ------------------------------------ | ------------------------------------------------------- |
+| Inputs match the expected shape      | The proof is about folders/files, not corrupted objects |
+| The structure is finite              | Every path must eventually end                          |
+| There are no cycles                  | A folder cannot contain itself through a chain of links |
+| Recursive calls are strictly smaller | Each call must move closer to a base case               |
+
+Without those conditions, "base case + inductive step" is not ready to
+guarantee every input yet; first you have to fix or reject the inputs.
+
 ## Why the inductive step is allowed to just assume the recursive call works
 
 **Isn't "assume the recursive call already works" circular reasoning
@@ -62,6 +87,16 @@ smaller inputs — you only have to reason about how the _current_
 level combines those results. This is what makes induction scale to
 arbitrary depth: the reasoning at each level is the same, fixed-size
 argument, regardless of how deep the actual tree turns out to be.
+
+| Method    | What it checks                     | What it cannot guarantee by itself              |
+| --------- | ---------------------------------- | ----------------------------------------------- |
+| Tracing   | One concrete input path            | All untraced shapes and edge cases              |
+| Testing   | Many selected examples             | Every possible valid input                      |
+| Induction | The base case and the general step | Inputs that break the proof's hidden conditions |
+
+This is a cousin of `logic/problem-decomposition`: the large recursive
+problem becomes "prove the smallest piece" plus "prove the way pieces
+combine."
 
 ## Failure modes at this level
 

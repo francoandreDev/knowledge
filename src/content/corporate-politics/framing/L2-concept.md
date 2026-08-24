@@ -32,6 +32,14 @@ team used; it can't reasonably skip a production outage the project
 caused. The first detail doesn't change how anyone should read the
 outcome. The second one does.
 
+A reasonable reader means a normal person trying to understand the
+result fairly, not someone looking for excuses. Everyday examples:
+"we finished late because the bus broke down" is material if timing is
+being judged; "I used a blue pen" usually is not. "The event raised
+$500" is material; "the poster font was Arial" usually is not. "No one
+was hurt" is material after an accident; "the chairs were green" is
+not.
+
 ## A self-check before sending a narrative out
 
 ```mermaid
@@ -48,6 +56,10 @@ single vague "does this feel honest" judgment call — which is what
 makes the self-check actually usable in the moment, rather than
 something that only becomes obvious in hindsight.
 
+In simpler checklist form: did I say anything false? Did I leave out
+anything that would change the reader's judgment? Did I give serious
+facts enough space for their seriousness?
+
 ## Why framing is worth doing deliberately, not avoiding
 
 **If spin and lying are both risks nearby, is the safest move to avoid
@@ -60,3 +72,8 @@ it just means the reader's own assumptions (often "no news is good
 news," or the opposite) fill the gap left by an undeliberate telling.
 Owning the narrative honestly is the alternative to that default, not
 a departure from honesty.
+
+Chronological order is just one frame: "first we failed, then we
+fixed it" feels different from "we delivered the result, after a
+failure we fixed." Both can be honest if both include the same
+material facts.

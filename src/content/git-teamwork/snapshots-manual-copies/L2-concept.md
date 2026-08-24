@@ -40,9 +40,20 @@ flowchart LR
 
 The staging area is the part manual-copy workflows have no equivalent for: it lets you build a commit out of _some_ of your current changes, not all-or-nothing. Edit five files, but only three of them belong to the fix you're about to describe? Stage those three, commit, then stage and commit the other two separately — each commit stays a coherent, describable unit instead of "various changes."
 
+Think of it as three places: the working directory is your desk, messy
+and current; the staging area is the tray of pages you are about to
+file; the repository is the archive where filed pages become part of
+the permanent record. `git status` tells you what is still on the desk
+and what is already in the tray.
+
 ## Why is creating a branch nearly instant, no matter how large the project is?
 
 Compare this to the manual-copies equivalent of "try an experimental change without risking the working version" — copying the entire project directory, which takes longer the bigger the project gets. A Git branch doesn't do that:
+
+In plain language, creating a branch is like putting a sticky label on
+one page of the archive. It does not photocopy the whole archive. The
+small pseudocode below shows that same idea mechanically: Git writes a
+new name that points at the current commit.
 
 ```python
 function create_branch(name):
@@ -56,7 +67,7 @@ Git's branch creation is O(1) regardless of project size because it never touche
 
 ## What actually stops "two files, byte-for-byte identical" from being stored twice?
 
-Every object Git stores (a file's content, a directory listing, a commit) is identified by the SHA-1 hash of its own content, not by a filename or path. Two files with identical content — even in different commits, different branches, or different parts of the tree — hash to the same value and are stored exactly once. This is also what makes a commit hash a trustworthy fingerprint of an entire project state: if even one byte anywhere in the tree changed, the commit's hash is different, guaranteed.
+Every object Git stores (a file's content, a directory listing, a commit) is identified by the SHA-1 hash of its own content, not by a filename or path. Two files with identical content — even in different commits, different branches, or different parts of the tree — hash to the same value and are stored exactly once. For learning Git, treat the hash as a practical fingerprint of the bytes: same bytes, same fingerprint; changed bytes, different fingerprint for all practical work in this course.
 
 | Storage model              | Identical content across N snapshots | Growth as project size increases          |
 | -------------------------- | ------------------------------------ | ----------------------------------------- |

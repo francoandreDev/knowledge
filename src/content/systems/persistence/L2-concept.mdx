@@ -42,6 +42,12 @@ flowchart LR
 
 A normal `write()` call only guarantees the data reached the **OS page cache** — a fast, in-RAM buffer the kernel maintains specifically so writes don't block on slow physical disk I/O. That's a real, useful optimization, and it's also exactly the gap: page cache is RAM, so it's just as volatile as any other RAM. A crash after `write()` returns but before the OS actually flushes that page to the disk loses the data, even though the program's `write()` call succeeded and returned no error. This is precisely the gap the ATM fell into above.
 
+This unit mostly means a machine crash, reboot, or power loss: the kind
+of failure that removes RAM. If only one program process dies while the
+machine stays on, the OS may still have dirty pages in its page cache
+and flush them later. That is a different failure shape from "the whole
+machine lost power before durable storage was reached."
+
 ## Where does fsync fit, and why is it slow?
 
 ```python
@@ -79,6 +85,12 @@ function commit_transaction(db, transaction):
 ```
 
 The trick: instead of making every committed transaction fsync a potentially large, scattered data-file write (slow), the database fsyncs a small, sequential log entry (fast) and treats _that_ as the actual durability boundary — the promise made to the client ("your transaction is committed") is backed by the log surviving a crash, not by the full data file being fully updated yet. Applied to the ATM: if the withdrawal had gone through a WAL, "committed" would mean the log entry was fsynced — which is exactly the step that was skipped.
+
+A bookkeeping analogy helps: first write the withdrawal into a small
+receipt book that is locked in a safe; then update the big ledger later.
+If the lights go out between those two steps, the safe receipt is enough
+to replay the change and repair the big ledger. WAL is that safe receipt
+book for a database.
 
 ## What if fsyncing every single commit is too slow?
 

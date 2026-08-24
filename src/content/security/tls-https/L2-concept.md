@@ -21,11 +21,13 @@ flowchart TD
     E -->|"no"| G
 ```
 
-Two checks, and only two: does the certificate's domain match what's
-in the address bar, and does every signature in the chain verify
-correctly up to a trusted root. **Neither check asks "is this
-organization who it claims to be" in any deeper sense than "do they
-control this specific domain name."**
+For the point this unit is isolating, focus on two checks: does the
+certificate's domain match what's in the address bar, and does every
+signature in the chain verify correctly up to a trusted root. **Neither
+check asks "is this organization who it claims to be" in any deeper
+sense than "do they control this specific domain name."** Real browsers
+also check dates, revocation signals, policy rules, and more, but those
+extra checks still do not turn a lookalike domain into the real brand.
 
 ## What the padlock proves versus what people assume it proves
 
@@ -51,14 +53,15 @@ suspicious, wouldn't that close the gap?** Domain validation (DV) —
 the most common certificate type — was deliberately designed to be
 fast, automated, and cheap: prove you control the domain (respond to
 a challenge sent to an email address at that domain, or publish a
-specific DNS record) and a certificate is issued within minutes, no
-human review involved. This scale is what made HTTPS practical for
-the entire web to adopt — but it also means DV certificates say
-nothing about who's actually behind the domain. Extended Validation
-(EV) certificates exist specifically to add real organizational
-identity checks, but they're far less common and browsers no longer
-visually distinguish them from DV certificates the way they used to,
-so most users never see the difference even when it exists.
+specific DNS record, a public configuration entry for that domain) and
+a certificate is issued within minutes, no human review involved. This
+scale is what made HTTPS practical for the entire web to adopt — but it
+also means DV certificates say nothing about who's actually behind the
+domain. Extended Validation (EV) certificates exist specifically to add
+real organizational identity checks, but they're far less common and
+browsers no longer visually distinguish them from DV certificates the
+way they used to, so most users never see the difference even when it
+exists.
 
 ## Failure modes at this level
 

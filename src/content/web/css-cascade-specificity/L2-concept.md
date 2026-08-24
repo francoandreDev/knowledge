@@ -48,9 +48,9 @@ xychart-beta
 **If `!important` escalates the fight instead of ending it, what actually lets you override something safely?**
 
 ```css
-/* :where() — the selector still matches, but contributes ZERO specificity */
+/* :where() — only the part inside :where(...) contributes zero specificity */
 :where(.legacy-toolbar) .btn {
-  background: gray; /* specificity: (0, 0, 0) — trivially overridable later */
+  background: gray; /* specificity: (0, 1, 0) — only .btn outside counts */
 }
 
 /* @layer — controls PRIORITY BY LAYER ORDER, before specificity is even compared */
@@ -69,7 +69,21 @@ xychart-beta
 }
 ```
 
-`:where()` lets a selector match normally while contributing nothing to the specificity tuple — useful for wrapping legacy selectors you don't want to keep out-competing new ones. `@layer` inserts a brand-new step _before_ specificity comparison in the cascade: declarations in a later-declared layer beat declarations in an earlier layer, **regardless of specificity**, as long as neither uses `!important`. This is why a legacy stylesheet's `#page .toolbar .btn` can be made to lose to a new `.btn-primary` without touching the legacy selector at all — put the legacy CSS in an earlier layer.
+`:where()` lets the selector _inside the parentheses_ match normally while contributing nothing to the specificity tuple — useful for wrapping the legacy part you don't want to keep out-competing new rules. Anything outside `:where(...)` still counts, so `:where(.legacy-toolbar) .btn` is `(0, 1, 0)` because `.btn` remains outside. `@layer` inserts a brand-new step _before_ specificity comparison in the cascade: declarations in a later-declared layer beat declarations in an earlier layer, **regardless of specificity**, as long as neither uses `!important`. This is why a legacy stylesheet's `#page .toolbar .btn` can be made to lose to a new `.btn-primary` without touching the legacy selector at all — put the legacy CSS in an earlier layer.
+
+## The reusable-style pattern to aim for
+
+| Goal                             | Stable pattern                                           | Fragile pattern                                      |
+| -------------------------------- | -------------------------------------------------------- | ---------------------------------------------------- |
+| Base button shared everywhere    | `.btn { ... }` on every button-like element              | `#page .toolbar button { ... }` tied to one location |
+| Variant of that button           | `.btn-primary { ... }` or `.btn[data-variant="primary"]` | `#checkout .sidebar .toolbar .btn.primary`           |
+| Card title reused in many cards  | `.card-title { ... }`                                    | `.dashboard main section div h2`                     |
+| Priority between families of CSS | `@layer reset, base, components, utilities`              | More ids, deeper nesting, then `!important`          |
+
+The positive recipe is: give repeated UI ideas a reusable class, keep that
+class's specificity low, and use layer/order deliberately. If a new class has
+to become more and more specific just to work, the old CSS is setting the
+terms of the fight.
 
 ## The decision rule, restated precisely
 

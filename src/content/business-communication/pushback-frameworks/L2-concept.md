@@ -31,6 +31,15 @@ flowchart TD
     Options --> Decision["Requester picks\nwhich trade-off\nto accept"]
 ```
 
+Use this as a practical four-step check before you speak:
+
+1. Verify the real load: what is already promised, and by when?
+2. Name the constraint with facts, not mood: "two tasks are already due
+   Friday," not just "I'm busy."
+3. Offer real options the requester can choose between.
+4. Ask for a priority call when the requester owns it, or flag the
+   trade-off and state your default plan when the power gap is larger.
+
 **What does "naming the constraint" actually mean, concretely?** Not "I'm
 too busy" (a feeling), but something checkable: "the sprint is fully
 allocated across three commitments already." **What makes the offered
@@ -38,6 +47,13 @@ options genuinely useful?** Each one names a real trade — "I can take this
 if X ships Tuesday instead of Friday" or "I can take this if someone else
 picks up the deploy pipeline task" — not vague flexibility, but specific
 substitutions the requester can actually evaluate and choose between.
+
+| Trade-off type | Example phrase                                                        |
+| -------------- | --------------------------------------------------------------------- |
+| Time           | "I can do it, but it ships Tuesday instead of Friday."                |
+| Scope          | "I can make the demo version by Friday, without the advanced export." |
+| Priority       | "I can do it if we move the migration to next week."                  |
+| Person         | "I can do it if someone else takes the deploy task."                  |
 
 ## Why handing back the decision is the actual mechanism
 
@@ -50,6 +66,10 @@ Handing back the decision, with the real trade-off visible, keeps the
 requester in control of a call that's genuinely theirs to make, instead of
 the responder guessing (and either guessing wrong, or defaulting to
 absorbing the cost themselves).
+
+If the same words would land differently with another audience, connect
+this with `business-communication/audience-awareness`: the trade-off can
+stay the same while the framing changes.
 
 ## Comparing all three responses to the same request
 

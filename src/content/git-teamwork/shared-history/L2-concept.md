@@ -12,6 +12,13 @@ danger only appears once someone else has already based work on the
 commits being rewritten. A normal push has a built-in safety check for
 exactly this:
 
+Read a branch as a movable label, not as a folder. In a simple line
+like `A <- B <- C <- D`, the branch label might be attached to `D`,
+the latest commit. If you move that label from `D` to `E`, anyone
+looking at the branch starts from `E` instead. Commits not reachable
+from `E` can disappear from normal branch history even if their raw
+objects still exist for a while.
+
 ```mermaid
 flowchart TD
     A["git push (no force)"] --> B{"Is the remote's\ncurrent tip an ancestor\nof what I'm pushing?"}
@@ -41,6 +48,13 @@ technically in the repository's object database for a while, but
 nothing points to them anymore, and nobody browsing the branch will
 ever see them.
 
+Think of the remote branch's ref as a bookmark in a long chain of
+snapshots. A normal push says, "move the bookmark forward only if the
+old page is still behind the new page." A force-push says, "put the
+bookmark here now." The snapshots may still be in the book for a
+while, but if the bookmark no longer leads to one of them, ordinary
+readers will not find it by following the branch.
+
 **Does this mean the teammate's lost commit is unrecoverable?** Not
 immediately — it likely still exists as an object in the repository,
 and the _original author's own local copy_ still has it. But from the
@@ -48,6 +62,13 @@ remote branch's perspective, and for anyone who doesn't have a local
 copy of that specific commit, it's gone — which is exactly why this
 unit's Scenario describes it as the commit "disappearing," even
 though nothing was technically deleted.
+
+If this already happened, the safest order is practical, not heroic:
+tell the team immediately, stop force-pushing, ask the original author
+or another local clone for the missing commit hash, and restore it by
+merging or cherry-picking once everyone agrees on the correct branch
+state. The `snapshots-manual-copies` unit is a useful refresher for
+why a commit hash can identify the exact saved snapshot you need.
 
 ## Failure modes at this level
 

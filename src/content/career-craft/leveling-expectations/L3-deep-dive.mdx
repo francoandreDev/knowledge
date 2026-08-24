@@ -4,6 +4,19 @@ title: "L3 — The same bug, handled at four different scopes"
 
 import Scenario from "../../../components/Scenario.astro";
 
+Before the scenario, you do not need to master the technical words. Read
+them like this:
+
+| Term                       | Simple reading                                                        |
+| -------------------------- | --------------------------------------------------------------------- |
+| Event listener             | Code that waits for a signal, like "a request arrived"                |
+| Memory leak                | The program keeps holding memory it should have released              |
+| OOM                        | "Out of memory": the program runs out of memory and dies              |
+| Orchestrator               | A system that restarts services when they crash                       |
+| Profiler / load test       | Tools for checking what the program uses while it runs under pressure |
+| Lint rule                  | An automatic rule that warns when code matches a risky pattern        |
+| Platform default / rollout | A shared setting adopted by many teams, then introduced gradually     |
+
 <Scenario label="The scenario">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
@@ -46,24 +59,34 @@ flowchart TD
 Find the leak, patch it, verify memory is stable, ship the fix. Done in two days: a profiler run shows an event listener being added on every request without being removed; the fix removes it in the corresponding cleanup path. Verified with a load test showing flat memory over an hour where it previously climbed steadily.
 
 **What's in scope:** exactly the reported symptom. **What's out of scope, by design:** why nobody noticed for months, whether the same pattern exists elsewhere, whether this class of bug is preventable going forward. This is complete, correct work for the ambiguity level of "fix this leak" — nothing here is wrong, it's scoped to a well-defined task.
+The dimension mostly exercised here is **task execution**: the problem was
+already defined, and the engineer solved exactly that problem well.
 
 ## Response 2: project scope
 
 Same fix, plus: while investigating, notices the leaked listener pattern (subscribing without a matching cleanup) appears in three other files in the same service, not yet leaking only because those code paths are triggered less often. Fixes all three, and adds a lint rule that flags an event-listener subscription with no corresponding removal in the same function scope, so this specific pattern can't silently reappear in this service.
 
 **What's in scope now:** not just the reported instance, but the _pattern_ behind it, bounded to this project. The person filled in an edge the ticket didn't specify ("just fix the one leak") because the evidence in front of them implied a wider, still-bounded problem.
+The dimension that grew is **blast radius inside the project**: the fix now
+prevents the same pattern from hurting nearby files in the same service.
 
 ## Response 3: unowned-problem scope
 
 Same fix and lint rule, plus: notices this service has no memory-usage alerting at all — the only reason this leak was caught is a human happened to look, and the auto-restart was silently masking the underlying growth curve for months. Proposes and implements a memory-trend alert (not just a hard OOM crash-loop alert) for this service, then checks two adjacent services owned by the same team and finds neither has one either — adds it there too, and writes up why crash-loop auto-restart is a dangerous signal to treat as "handled."
 
 **What's in scope now:** a problem nobody had assigned to anyone — "we have no visibility into slow resource leaks until they crash-loop" — identified, scoped, and closed without waiting to be asked, because the evidence made the gap visible to someone looking for it.
+The dimensions that grew are **ambiguity tolerance** and **time horizon**:
+the engineer named an unowned monitoring problem and prevented a future
+repeat, not just today's leak.
 
 ## Response 4: cross-team direction scope
 
 Same investigation, plus: recognizes that "auto-restart on crash masks the underlying problem" isn't unique to this team — it's a property of how the whole organization's orchestration platform is configured by default. Writes a short document proposing a platform-level default (alert on the trend, not just the crash) that would apply to every team, works with the platform team to get it adopted as the new default rather than a fix each team has to remember to add, and mentors two engineers on other teams through applying the same pattern to their own services during the rollout.
 
 **What's in scope now:** an org-wide default nobody was individually responsible for, requiring influence across teams that never asked for input, with a time horizon (platform defaults, mentoring others through adoption) well beyond "this leak" or even "this team."
+The dimension that grew most is **influence radius**: other teams change how
+they operate because the engineer turned one team's lesson into a shared
+default.
 
 ## What grows, response by response
 

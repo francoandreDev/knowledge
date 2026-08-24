@@ -43,6 +43,13 @@ just a slightly cheaper commitment. A true MVP might not export
 anything at all; it might just be a button that, when clicked, reveals
 "coming soon" and asks what the customer actually needed it for.
 
+The everyday version: if someone says "I need an app to print my
+recipes," the riskiest assumption might be that printing is the real
+need. A cheap test could ask whether they actually want paper copies,
+or whether they need to send recipes to a family WhatsApp group. The
+MVP is the smallest test that answers that question, not automatically
+the smallest printing app.
+
 ## Why stated opinions aren't the same as evidence
 
 **If sales already told the team customers want to export data, isn't
@@ -52,6 +59,10 @@ actually do when given a real chance to act can diverge sharply. A
 cheap prototype that measures real clicks, real follow-up questions,
 or real willingness to wait for a feature produces a much stronger
 signal than a stated preference relayed through another team.
+
+That doesn't mean sales did anything wrong. It means "customers said
+this to sales" is a useful clue, while "customers clicked, answered,
+waited, paid, or changed behavior" is stronger evidence.
 
 ## The generalizable lesson
 

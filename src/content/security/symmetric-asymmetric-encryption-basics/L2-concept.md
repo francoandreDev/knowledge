@@ -42,7 +42,9 @@ sequenceDiagram
 In the second diagram, the only thing that travels besides ciphertext
 is Bob's _public_ key — which is safe to expose by design. Bob's
 private key, the only thing that can decrypt the message, never
-touches the network at all.
+touches the network at all. A useful image: the public key is like a
+lock Bob gives everyone so they can close a box for him; the private
+key is the one key that opens boxes closed with that lock.
 
 ## What asymmetric encryption costs to get that benefit
 
@@ -67,8 +69,8 @@ with a fast, randomly generated symmetric key, then encrypt that small
 key with the recipient's public key. The recipient uses their private
 key to unwrap the small symmetric key, then uses that key to decrypt
 the actual data quickly. This is exactly the pattern behind HTTPS,
-covered in the next unit — a brief asymmetric handshake, followed by
-fast symmetric encryption for the rest of the connection.
+covered in `/security/tls-https/` — a brief asymmetric handshake,
+followed by fast symmetric encryption for the rest of the connection.
 
 ## The generalizable lesson
 
@@ -76,6 +78,9 @@ fast symmetric encryption for the rest of the connection.
 anywhere two parties who haven't already shared a secret need to
 communicate confidentially: signing software updates, securing a web
 connection, verifying a message really came from who it claims to.
+Those last two examples add a second question, identity, on top of the
+confidentiality question in this unit; `/security/authentication-fundamentals/`
+and `/security/tls-https/` pick up that boundary from different angles.
 The underlying question is always the same: does a secret need to
 travel to make this work, and if so, is there a way to avoid that
 using a key pair instead?

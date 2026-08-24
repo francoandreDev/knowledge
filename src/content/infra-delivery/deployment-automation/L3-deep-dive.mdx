@@ -34,6 +34,13 @@ function buildDeploySteps(currentRelease, newRelease) {
 }
 ```
 
+This first function is intentionally modeling the repeatability problem
+from Deploy 9: can a required step like `install-deps` disappear because
+someone typed the list from memory? It is not yet modeling the full
+"prove healthy before switching traffic" gate from L2. We'll add that
+gate below so the simplified code and the production pipeline idea do
+not get mixed together.
+
 The steps aren't typed out by whoever happens to be running the
 deploy that day — they're the return value of a function, which means
 every call to `buildDeploySteps` produces the exact same five steps in
@@ -91,6 +98,39 @@ console.log(runDeploy(["a", "b"], () => false));
 `"rollback"` to what actually ran, automatically, as part of the same
 function call that ran the deploy. There's no separate "someone
 notices and re-runs the old steps" phase.
+
+## Modeling the pre-switch gate explicitly
+
+To match the L2 pipeline more closely, split the deploy into
+"preparation steps" and the one step that changes user traffic. The
+health check runs after preparation but before `switch-symlink`; if the
+candidate is unhealthy, users remain on the old release:
+
+```js
+function runGatedDeploy(currentRelease, newRelease, healthCheckFn) {
+  const executed = [
+    `extract:${newRelease}`,
+    `install-deps:${newRelease}`,
+    `run-migrations:${newRelease}`,
+    `health-check:${newRelease}`,
+  ];
+
+  if (!healthCheckFn()) {
+    executed.push(`keep-live:${currentRelease}`);
+    return { success: false, executed };
+  }
+
+  executed.push(`switch-symlink:${currentRelease}->${newRelease}`);
+  executed.push("restart-service");
+  return { success: true, executed };
+}
+```
+
+Now the rollback idea is not "users saw the broken version and then we
+recover." It is "the new version failed the candidate check, so the
+pipeline never points user traffic at it." A real system may implement
+that candidate check with a temporary port, preview route, or separate
+process, but the rule is the same: test before traffic depends on it.
 
 ## Extend it: what if the health check is flaky, not just pass/fail?
 

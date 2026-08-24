@@ -175,3 +175,28 @@ socket.on("data", (chunk) => {
 This is the detail that trips up most from-scratch HTTP parsers: keep-alive turns "one request per connection" into "an unbounded stream of requests per connection," and the parser has to re-synchronize on request boundaries itself instead of relying on the connection closing to mark the end.
 
 The raw server above is one worked example — a GET-only, JSON-only toy — not the whole territory. **What would you need to add to `parseRequestHead` and the dispatch logic if a route needed to accept a request body** (say, a `POST /articles` that creates a resource from a JSON payload)? At minimum: check for `Content-Length` on the parsed headers, keep buffering past `headerEnd + 4` until that many body bytes have arrived, and only then parse and dispatch — the same "don't assume one `data` event is the whole message" discipline this unit already applied to headers, extended to the body.
+
+## Where HTTP stops and rendering begins
+
+This unit's boundary is deliberately narrow: HTTP explains how a browser and a
+server exchange messages. It covers the request line, headers, body, status
+line, connection reuse, and the failure modes that appear when bytes are parsed
+incorrectly. It does not, by itself, explain why a `<button>` is accessible,
+why one CSS rule wins over another, why a click bubbles, why JavaScript gets
+bundled, or why changing the DOM can still be slow.
+
+The bridge is this: HTTP can deliver `index.html`, `styles.css`, `app.js`,
+images, and fonts. After those responses arrive, the browser takes over:
+semantic HTML shapes the DOM and accessibility tree, CSS cascade rules decide
+computed styles, JavaScript listens to DOM events, bundled assets determine how
+many files and bytes must be requested, and render performance depends on what
+DOM/CSS changes force the browser to recalculate before it can paint.
+
+For the next internal steps, connect this unit to
+[TLS/HTTPS](/security/tls-https/) for the encrypted layer under HTTPS,
+[HTML semantics](/web/need-html-semantics-just-divs/) for what the delivered
+markup means, [CSS cascade](/web/css-cascade-specificity/) for how styles are
+chosen, [DOM events](/web/dom-event-model/) for browser-side interaction,
+[bundling](/web/bundling/) for how many resource requests modern apps produce,
+and [render performance](/web/render-performance/) for the layout/repaint work
+that turns parsed resources into visible pixels.

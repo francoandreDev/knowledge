@@ -23,6 +23,20 @@ that particular mistake in a state machine?**
 
 ## Reproducing the bug: the legacy boolean-flag version
 
+Before the code, the intended state-machine idea can be read as a table:
+
+| Current state | Event     | Next state  |
+| ------------- | --------- | ----------- |
+| `idle`        | `START`   | `uploading` |
+| `uploading`   | `PAUSE`   | `paused`    |
+| `paused`      | `RESUME`  | `uploading` |
+| `uploading`   | `SUCCESS` | `success`   |
+| `uploading`   | `FAIL`    | `error`     |
+
+The boolean version below does not have that table as its source of
+truth. Each branch edits separate checkboxes and must remember to clean
+up all the others.
+
 ```js
 function createLegacyUploadState() {
   return {
@@ -61,6 +75,10 @@ console.log(legacyState);
 
 Verified: after `START` then `SUCCESS`, `isUploading` and `isSuccess`
 are **both `true`** — the exact impossible state from L1's bug report.
+There is a second suspicious detail too: `PAUSE` sets `isPaused = true`
+but leaves `isUploading` alone. If the intended paused row is "uploading
+false, paused true," then this branch has the same style of bug: a
+handler changed one flag and trusted the others to stay meaningful.
 Nothing in `legacyHandleEvent` prevented this; the `SUCCESS` branch
 simply didn't happen to reset a flag it should have. This is a single
 missing line, in a function that otherwise looks completely
@@ -103,6 +121,16 @@ single state value, `"success"` — there is no `isUploading` variable
 left dangling `true`, because there's no `isUploading` variable at
 all. The bug isn't fixed by writing more careful code; it's fixed by
 removing the category of mistake the transition table can't represent.
+
+Read the table object aloud:
+
+- If I am in `idle` and `START` happens, go to `uploading`.
+- If I am in `uploading` and `SUCCESS` happens, go to `success`.
+- If I am in `success`, there are no allowed next events.
+
+The expression `transitions[state] && transitions[state][event]` is a
+JavaScript way to ask, "does this row exist, and does this event have a
+next state from that row?"
 
 ## The transition table also rejects genuinely invalid sequences
 
@@ -156,6 +184,19 @@ without going back to independent boolean flags (like adding a
 additional states and transitions this would need — what has to change
 about `transition`'s signature if the _next_ state depends on more
 than just the current state and the event?
+
+A guided sketch could model retry count as explicit states:
+
+| Current state | Event   | Next state           |
+| ------------- | ------- | -------------------- |
+| `error-0`     | `START` | `uploading-1`        |
+| `uploading-1` | `FAIL`  | `error-1`            |
+| `error-1`     | `START` | `uploading-2`        |
+| `uploading-2` | `FAIL`  | `permanently-failed` |
+
+In a real implementation you might keep extra context such as
+`retryCount` next to the state, but the warning is the same: do not let
+that context silently create states the table never modeled.
 
 ## Failure modes
 

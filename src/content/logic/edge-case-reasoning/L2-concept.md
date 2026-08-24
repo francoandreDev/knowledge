@@ -10,6 +10,15 @@ more tests"?** No — writing ten more interior values (2.1kg, 3.7kg,
 kind of test doesn't cover a different kind of input. The fix is a
 different process, not more repetitions of the same one:
 
+You can do the process by hand for any rule:
+
+1. What data enters the rule?
+2. Which values are valid, invalid, empty, or missing?
+3. Where does the answer change?
+4. Does the exact boundary belong to the lower group or the higher group?
+5. Which value will you test just before, exactly on, and just after the
+   boundary?
+
 ```mermaid
 flowchart TD
     A["Identify the input space\n(what can this function receive?)"] --> B["Partition into\nequivalence classes\n(under 5, 5-10, over 10)"]
@@ -24,6 +33,11 @@ direction — the exact value might be handled correctly while the
 step just below or above it isn't (or vice versa) — testing all
 three (`4.99`, `5.0`, `5.01`) is what actually distinguishes a `<`
 bug from a `<=` bug from correct code.
+
+"One step" depends on the kind of value. If the system measures weight
+to two decimals, `4.99`, `5.00`, and `5.01` are useful. If the rule uses
+whole years of age, the useful values around age 12 are `11`, `12`, and
+`13`.
 
 ## Reading the shipping tiers as a number line
 
@@ -48,6 +62,10 @@ proportionally more interior testing never will** — the bug's entire
 "surface area" is a single point, and no number of interior samples
 gets closer to hitting it.
 
+Inclusive means the boundary is included: "5kg and under" includes
+exactly `5`. Exclusive means the boundary is not included: "under 5kg"
+stops before `5`.
+
 ## What common edge-case categories actually are
 
 **Beyond boundaries, what other categories of input does "typical
@@ -63,6 +81,10 @@ exhaustive, but covering the inputs bugs disproportionately hide in:
 | Maximum / extreme  | `weight = 10000`                  | "Realistic" test data rarely includes it                   |
 | Empty / missing    | no weight provided at all         | Often assumed to be validated somewhere else               |
 
+For a form, empty/missing means the box was left blank. Non-numeric
+means the box contains text like `"five"` where the rule expects a
+number like `5`.
+
 ## What an invariant catches — and what it doesn't
 
 **If "shipping cost should never decrease as weight increases" is
@@ -76,6 +98,10 @@ the next tier still produces a higher (not lower) price, so the
 "never decreases" property holds throughout, even though the price
 charged at exactly `5.0` is still wrong relative to the business
 rule.
+
+That "never decreases" property is often called **monotonicity**. The
+plain-language version is enough here: as weight goes up, price should
+stay the same or go up, never down.
 
 **This is the core lesson of this level:** invariants are powerful
 because they hold across an entire input space rather than a handful

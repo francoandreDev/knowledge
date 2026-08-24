@@ -26,6 +26,13 @@ flowchart LR
     end
 ```
 
+The same diagram as a story:
+
+| Moment  | Local branch sees | Remote branch sees | Fast-forward possible?                         |
+| ------- | ----------------- | ------------------ | ---------------------------------------------- |
+| Monday  | `A -> B`          | `A -> B -> C`      | Yes. Local `B` is already inside remote's line |
+| Tuesday | `A -> B -> D`     | `A -> B -> C`      | No. `C` and `D` are different children of `B`  |
+
 **Why does the right-hand case above make a fast-forward impossible?**
 Because `B` — the last point local and remote agreed on — now has two
 separate children, `D` (local's own commit) and `C` (remote's commit).
@@ -58,7 +65,8 @@ from `B`.
 
 |                                   | Merge                                               | Rebase                                                                |
 | --------------------------------- | --------------------------------------------------- | --------------------------------------------------------------------- |
-| New commit created?               | Yes — one merge commit with two parents             | No new merge commit — local commits get new hashes instead            |
+| Merge commit created?             | Yes — one merge commit with two parents             | No — rebase avoids a merge commit                                     |
+| New copied commits created?       | No — the original local commits stay where they are | Yes — local commits are replayed as new commits with new hashes       |
 | Resulting history shape           | Shows the actual branching and reconciliation point | Straight line, as if local work started from the new base             |
 | Original commit hashes preserved? | Yes, all original commits keep their hashes         | No — replayed commits get new hashes, even though content is the same |
 
@@ -74,6 +82,11 @@ never rewrites existing commits, which is exactly why it's the safer
 default for history that's already been pushed and pulled by other
 people — the trade-off is a cleaner-looking history (rebase) against a
 smaller risk of breaking someone else's copy of that history (merge).
+
+The `shared-history` unit focuses on that risk directly: once another
+person may already have your old commit hash, rebasing it is no longer
+just "cleaning up your own copy." It changes the coordinates other
+people might already be using.
 
 ## The generalizable lesson
 

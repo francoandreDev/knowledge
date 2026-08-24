@@ -22,6 +22,9 @@ no personal context has nothing to independently evaluate, so the
 packet effectively asks the room to trust the writer's judgment alone
 — exactly what calibration exists to not do.
 
+Here, **impressions** means opinions or general feelings that are not
+yet backed by proof.
+
 ## The same packet, rewritten with checkable evidence
 
 **What would make the same underlying case survive that question?**
@@ -35,16 +38,21 @@ packet effectively asks the room to trust the writer's judgment alone
 > engineers, both of whom shipped their first cross-team projects
 > independently this cycle."
 
+You do not need to know every technical system named here. The pattern
+is what matters: named project, concrete responsibility, measurable
+before/after result, coordination with other teams, and evidence that
+other people became more effective because of this person.
+
 Every claim here is a specific, checkable fact: a named project, a
 concrete before/after number, a named responsibility taken on
 unprompted, and an outcome (two engineers shipping independently)
 that another manager could ask about directly if they wanted to
 verify it. **Why does the specific 2.1% → 0.3% error-rate number
 matter more than just saying "greatly improved reliability"?**
-Because a specific number is falsifiable — a skeptical manager could
-in principle check it — while "greatly improved" asks to be taken on
-faith. Calibration rewards exactly the kind of evidence that doesn't
-require faith in the writer.
+Because a specific number is **falsifiable** — someone could check
+whether it is true or false — while "greatly improved" asks to be
+taken on faith. Calibration rewards exactly the kind of evidence that
+doesn't require faith in the writer.
 
 ## What "senior-level" scope actually looks like on paper
 
@@ -58,6 +66,12 @@ other engineers' independent output (multiplying impact beyond the
 engineer's own work) — both are the kind of evidence a leveling
 rubric for a more senior role typically asks for specifically,
 separate from "did good individual work."
+
+Plain map: **impact** asks what changed because of the work. **Scope**
+asks how large or complex the responsibility was. **Ownership** asks
+whether the person carried responsibility without needing someone else
+to drive every step. **Multiplying impact** means helping other people
+or teams produce better work, not only producing your own work.
 
 ## A strong packet that still doesn't result in a promotion
 
@@ -78,6 +92,9 @@ actually do next (a slot-constrained strong case mostly needs
 patience and re-submission; a case that didn't clear the bar needs
 different, better evidence next cycle).
 
+A simpler version of the question: "Was the feedback that my case was
+not ready yet, or that it was ready but there was no room this cycle?"
+
 ## What generalizes and what doesn't
 
 The core lesson — a case has to be built from specific, checkable
@@ -94,6 +111,11 @@ strongest quarter of work happened eight months before the
 calibration cycle and their most recent quarter was comparatively
 quiet, would the rewritten packet above still make as strong a case,
 or does _when_ the evidence happened matter as much as _what_ it was?
+
+The same pattern appears anywhere a group judges written evidence:
+school applications, grant requests, project approvals, or performance
+reviews. The labels change, but the question stays similar: can
+strangers understand and verify the case?
 
 ## Failure modes
 

@@ -7,6 +7,12 @@ title: "L3 — Reproducing both directions: a bug review catches, and a bug only
 **Before anything changes — what does `applyDiscount` do, and what
 does its existing test suite actually verify?**
 
+In arithmetic first: a price of `100` with a `10%` discount becomes
+`90`, because the customer pays `100 - 10`. But if one discount is
+`60%` and another is `50%`, adding them gives `110%`. A `110%`
+discount on a price of `100` means `100 - 110 = -10`, which is not a
+valid price.
+
 ```js
 function round2(n) {
   return Math.round(n * 100) / 100;
@@ -124,6 +130,11 @@ not defined` fails immediately.** This is precisely the territory
 where CI's advantage over review is real: exhaustively re-checking
 everything, every time, including files the diff never shows.
 
+A very strong reviewer might search for call sites and notice
+`invoicing.js` manually. The point is that review depends on human
+attention and habits, while CI can make that broader check systematic
+for every PR.
+
 ## What generalizes and what doesn't
 
 The core division — automated checks are exhaustive but blind to
@@ -140,6 +151,13 @@ category of bug would neither CI _nor_ a normal diff-focused review
 catch — something that only shows up once the change is actually
 running in production, under real traffic or real data? What would a
 team need beyond PRs and CI to catch that category too?
+
+Common answers include timing races, slow database queries that only
+appear with production-sized data, flaky third-party dependencies,
+rollout mistakes, and behavior that depends on real user traffic. PRs
+and CI help before merge; those categories also need observability,
+alerts, progressive rollout, feature flags, and incident learning after
+the change is running.
 
 ## Failure modes
 

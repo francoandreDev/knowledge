@@ -23,7 +23,8 @@ passed" are different claims. A pipeline that always reaches the final
 stage regardless of intermediate results isn't a safety mechanism — it's
 a sequence of steps that happen to run one after another. The gates
 between stages, not the stages themselves, are what make a pipeline
-protective.
+protective. A **gate** is a door with a condition: if the condition
+fails, the next room should not open.
 
 ## Continue-on-error: a scalpel, not a permanent setting
 
@@ -59,7 +60,9 @@ per-environment reopens the exact risk environment-parity practices exist
 to close: a dependency resolving to a slightly different version between
 builds, a compiler flag differing by environment, anything that could make
 "tested in staging" and "running in production" refer to two subtly
-different artifacts instead of the same one.
+different artifacts instead of the same one. The everyday version is:
+inspect the same sealed box in each room, not a freshly-packed box that
+only looks similar.
 
 ## Rollback has to be a decision made in advance, not during an incident
 
@@ -69,7 +72,10 @@ before the incident — keeping the previous artifact readily deployable,
 and having a fast, well-rehearsed path back to it. Deciding how rollback
 will work _during_ an active incident, under pressure, with a team that's
 never actually exercised the rollback path before, is far slower and
-riskier than a path that was designed and tested in advance.
+riskier than a path that was designed and tested in advance. The next
+unit, `/infra-delivery/deployment-automation/`, continues the same idea:
+deployment steps should be repeatable enough that recovery is not a
+guessing exercise.
 
 ## The generalizable lesson
 

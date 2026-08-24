@@ -9,11 +9,16 @@ techniques, why does it matter which one is used for the Scenario's
 problem?** Because each one optimizes for a different failure mode,
 and picking the wrong one leaves the actual risk unaddressed:
 
-| Technique             | What it actually controls                                                | What it doesn't solve                                                                            |
-| --------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| Canary deployment     | How many users are exposed to a new version before it's fully rolled out | Doesn't make rollback instant — reverting still means redeploying the old version                |
-| Blue-green deployment | How fast a full rollback can happen (an instant traffic switch)          | Doesn't limit how many users hit a bug before someone notices and switches back                  |
-| Feature flag          | Whether a specific piece of code runs at all, independent of deploys     | Doesn't control infrastructure-level or non-code-gated risks (like the underlying deploy itself) |
+Plain version before the table: canary decides **how many people try
+the new version**, blue-green decides **how fast traffic can switch
+back to a known-good environment**, and a feature flag decides **whether
+one behavior inside the app is turned on**.
+
+| Technique             | What it actually controls                                                | What it doesn't solve                                                                                                                                |
+| --------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Canary deployment     | How many users are exposed to a new version before it's fully rolled out | Doesn't by itself define the rollback mechanism — reverting may mean lowering canary to 0%, switching environments, disabling a flag, or redeploying |
+| Blue-green deployment | How fast a full rollback can happen (an instant traffic switch)          | Doesn't limit how many users hit a bug before someone notices and switches back                                                                      |
+| Feature flag          | Whether a specific piece of code runs at all, independent of deploys     | Doesn't control infrastructure-level or non-code-gated risks (like the underlying deploy itself)                                                     |
 
 **Would blue-green deployment alone have prevented the Scenario's
 20-minute incident?** Not on its own — blue-green makes the _rollback_
@@ -42,6 +47,12 @@ Each stage is a real checkpoint, not just a delay — if the error rate
 or another health signal crosses a threshold at any stage, the
 rollout halts and rolls back to the previous known-good state,
 automatically or via a human decision, before advancing further.
+An **error rate** is "bad requests divided by total requests"; a
+**threshold** is the agreed limit; a **monitoring window** is the period
+you watch before deciding whether the stage is healthy. For the
+recommendation Scenario, "healthy" cannot only mean "the server did not
+crash" — it might also include recommendation-click rate, empty-result
+rate, support reports, or a product-quality metric tied to that feature.
 
 **Why not just start at 50% instead of 5%, to reach full rollout
 faster?** Because the whole point is limiting exposure while the

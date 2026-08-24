@@ -21,6 +21,13 @@ search term like `' UNION SELECT username, password, 1 FROM users --`
 closes the original quote early and appends an entirely different
 query, and the database dutifully runs all of it.
 
+If that attack string looks unreadable, break it into three pieces:
+the first `'` closes the search text early, `UNION SELECT` asks the
+database to join in rows from another table, and `--` turns the rest of
+the original query into a comment. The important idea is not memorizing
+SQL punctuation; it is noticing that the user's text changed the
+database command itself.
+
 **How does parameterizing the query fix this, specifically?**
 
 ```js
@@ -96,6 +103,12 @@ a real link, and the _server_ — which can reach that internal
 address even though the attacker's browser can't — fetches it and
 (if the response is shown back) leaks those credentials.
 
+Think of the server as standing inside the company's building while
+the attacker is outside on the street. A normal browser cannot walk
+through internal hallways, but a server-side preview feature can, so
+the bug is giving an outsider a way to tell the inside server which
+internal door to knock on.
+
 ```js
 function isPrivateOrLinkLocalIP(hostname) {
   const parts = hostname.split(".").map(Number);
@@ -143,8 +156,9 @@ Injection is missing a data/code boundary; broken access control is
 missing an ownership boundary; SSRF is missing a
 reachable-destination boundary. What's specific to each: the exact
 fix (parameterized queries vs. an ownership comparison vs. an IP
-allowlist) doesn't transfer between them — a parameterized query does
-nothing for an IDOR. **Try extending it yourself:** the invoice
+allowlist) doesn't transfer between them — an **allowlist** means "only
+these known-good destinations are allowed," and a parameterized query
+does nothing for an IDOR. **Try extending it yourself:** the invoice
 example fixes reads (`GET /api/invoices/:id`). If the same API also
 had `DELETE /api/invoices/:id`, would the identical ownership check
 be sufficient, or does a destructive action need something extra on

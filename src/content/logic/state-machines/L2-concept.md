@@ -10,6 +10,22 @@ title: "L2 — Counting the combinations a flag set allows, versus what a state 
 count of possible combinations — 4 independent booleans give
 `2⁴ = 16` combinations total, whether or not each one makes sense:
 
+| Number of independent booleans | Combinations |
+| ------------------------------ | ------------ |
+| 1                              | 2            |
+| 2                              | 4            |
+| 3                              | 8            |
+| 4                              | 16           |
+
+With only two booleans, you can see every combination:
+
+| isUploading | isSuccess | Meaning                                |
+| ----------- | --------- | -------------------------------------- |
+| false       | false     | idle-ish                               |
+| true        | false     | uploading                              |
+| false       | true      | success                                |
+| true        | true      | already suspicious: uploading and done |
+
 | isUploading | isPaused | isSuccess | isError | Meaningful state?                                   |
 | ----------- | -------- | --------- | ------- | --------------------------------------------------- |
 | false       | false    | false     | false   | ✅ idle                                             |
@@ -25,6 +41,12 @@ Only **5 of the 16** combinations correspond to a state the widget was
 ever meant to be in. The other 11 aren't prevented by anything in the
 code — they're just combinations nobody happened to write an event
 handler that produces, until one did.
+
+Those 5 are the states expressible with the four original flags:
+`idle`, `uploading`, `paused`, `success`, and `error`. The diagram below
+adds `cancelled` as a sixth intentional state, which is a feature: it is
+named directly instead of being smuggled in through another independent
+flag.
 
 ## The state machine: the same widget, one variable instead of four
 
@@ -51,6 +73,11 @@ and the exact next state. There's no arrow for "PAUSE while in
 doesn't exist. Not "is disallowed by a check somewhere" — doesn't
 exist, the same way "green" isn't a valid answer to "heads or tails."
 
+Read the diagram like this: each word node is a state the upload can be
+in; each arrow is a permitted change; each label on an arrow is the
+event that causes that change. No arrow means "this event is not allowed
+from here."
+
 ## What a state machine actually buys you
 
 | Property                                  | 4 independent booleans                                     | State machine (1 named state)                             |
@@ -74,3 +101,18 @@ lifecycle (placed, paid, shipped, delivered, cancelled), a TCP
 connection's handshake states, a CI pipeline's run status. Independent
 boolean flags scale the same way in all of these — badly, and quietly,
 until a genuinely impossible combination shows up in production.
+
+Everyday examples work too: a traffic light is not red and green at the
+same time; a food order moves from placed to preparing to delivered or
+cancelled; a school application might be draft, submitted, reviewed,
+accepted, or rejected.
+
+To design one from scratch:
+
+1. List the real states the system can be in.
+2. List the events that can happen.
+3. Draw only the arrows that should be legal.
+4. Ask which events must be rejected from each state.
+
+If `true`, `false`, and truth tables still feel slippery, revisit
+`logic/boolean-logic` before the code-heavy L3.

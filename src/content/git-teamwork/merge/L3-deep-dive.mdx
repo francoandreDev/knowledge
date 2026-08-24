@@ -23,6 +23,20 @@ to the exact same new value?
 
 ## Step 1 — diffing two versions against a shared base
 
+First, the idea without the algorithm:
+
+| Base line                | Ours               | Theirs                | Decision                              |
+| ------------------------ | ------------------ | --------------------- | ------------------------------------- |
+| `tax = 0.08`             | `tax = 0.0825`     | `tax = 0.08`          | take ours; only we changed it         |
+| `total = subtotal + tax` | same as base       | same as base          | keep base; nobody changed it          |
+| `return total`           | `return total`     | `return round(total)` | take theirs; only they changed it     |
+| `currency = "USD"`       | `currency = "EUR"` | `currency = "GBP"`    | conflict; both changed it differently |
+
+The code below is just the mechanical way to discover those rows for
+real files. LCS means "find the lines that still match, in order," so
+everything around those matching lines can be treated as added or
+deleted.
+
 Real diff algorithms (including git's) use a longest-common-subsequence
 (LCS) approach: find the longest run of lines that appear, in order, in
 both versions, and treat everything else as an insertion or deletion
@@ -140,6 +154,9 @@ function threeWayMerge(base, ours, theirs) {
     // if only one side changed/deleted the line, its replacement already
     // arrived via mergeAdds above (or nothing, if it was a pure deletion) —
     // the base line itself is correctly omitted either way.
+    // In this simplified model, replacing a line is represented as
+    // "delete the old base line, then add the new line before the next
+    // surviving base line."
   }
   mergeAdds(oursMap.trailingAdds, theirsMap.trailingAdds);
   return { merged: result, conflict };
@@ -207,6 +224,20 @@ console.log(result2.merged.join("\n"));
 Now both sides changed `TAX_RATE` to _different_ values — the algorithm
 correctly refuses to guess, and produces exactly the marker format git
 itself uses.
+
+Resolving this conflict means turning the marked section into one final,
+valid line. Git cannot know whether finance wanted `0.0825`, `0.075`, or
+a third value. A human has to decide, remove the markers, and then check
+the result:
+
+```js
+const TAX_RATE = 0.0825; // chosen after confirming the correct rate
+```
+
+After editing the file, the workflow is `git add cart.js`, run the
+relevant tests or manual check, and finish the merge. A file with no
+markers can still be logically wrong; marker removal is not the same as
+correct resolution.
 
 ## The case that surprises people: identical edits don't conflict
 

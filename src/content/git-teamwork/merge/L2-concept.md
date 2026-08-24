@@ -32,6 +32,17 @@ same lines?
 **Walking through the base file line by line, what does git actually
 decide at each line?**
 
+Before the pseudocode, anchor the three names:
+
+| Name   | Plain picture                                     | In the scenario                                    |
+| ------ | ------------------------------------------------- | -------------------------------------------------- |
+| Base   | The original photo before either person edited it | The morning commit both branches started from      |
+| Ours   | The photo from the branch you are currently on    | Sam's branch while running `git merge alex-branch` |
+| Theirs | The photo from the branch being brought in        | Alex's branch being merged into Sam's              |
+
+Git compares both edited photos against the same original. That is what
+lets it tell "only Alex touched this" from "both people disagreed here."
+
 ```text
 for each line in the merge base:
     ours_changed  = did Alex's branch change or delete this line?
@@ -76,7 +87,9 @@ hasn't moved since the two branches split, git doesn't need to combine
 anything. It just moves that branch's pointer forward to match the other
 branch's latest commit. This is why `git merge` sometimes produces a merge
 commit and sometimes doesn't — it depends entirely on whether real,
-independent history exists to reconcile.
+independent history exists to reconcile. The `merge-rebase` unit goes
+deeper on fast-forward and why it is about ancestry, not about the
+absence of possible conflicts in general.
 
 ## The generalizable lesson
 

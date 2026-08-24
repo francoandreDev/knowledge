@@ -52,6 +52,20 @@ how ready it is — still has to wait for its turn.
 | A `for` loop doing heavy computation    | Yes — every instruction runs on this thread   | Yes, for its entire duration |
 | `JSON.parse` on a huge payload          | Yes                                           | Yes                          |
 
+## Choosing the right concurrency tool
+
+| Situation                                         | First tool to consider              | Why                                                               |
+| ------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------- |
+| Waiting on DB, file, HTTP, or network I/O         | Async/non-blocking I/O              | The thread can serve other callbacks while the outside work waits |
+| CPU work that can be split into independent steps | Chunking with explicit yielding     | Other callbacks get turns between chunks                          |
+| CPU work that cannot be split safely              | Worker thread or separate process   | The main event loop stays free while another execution unit works |
+| Multiple execution units touching shared state    | Atomic operation or lock discipline | Parallel progress introduces race-condition risk                  |
+
+More concurrency is not automatically more capacity. Each tool moves
+pressure somewhere: async I/O reduces wasted waiting, chunking improves
+fairness, workers/processes consume extra CPU and memory, and shared
+state requires coordination.
+
 ## Threads and processes as an alternative model
 
 **Is a single event loop the only way to get concurrency?** No — an
