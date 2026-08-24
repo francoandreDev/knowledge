@@ -36,11 +36,20 @@ of every session that touches game code, before stopping.
   (Phase 5)" for why the `idb` migration was skipped rather than deferred.
   Exposes `getUpgradeEffects()`/`computePowerIndex()`, consumed by
   `engine.ts`'s `GameOptions`.
+- `src/lib/game/audio.ts` — Phase 6 synthesized SFX (Web Audio API
+  oscillators/envelopes, no audio files). Exposes `unlockAudio()` (call from
+  a user-gesture handler — browsers block autoplay otherwise),
+  `isMuted()`/`setMuted()`/`toggleMuted()` (persisted via `pStorage`,
+  `game:audio-muted`), and `playPickup()`/`playHit()`/`playLevelUp()`/
+  `playEvolution()`/`playDeath()`, called directly from `engine.ts` at the
+  relevant event sites (not routed through `GameCallbacks`).
 - `src/pages/game/index.astro` — the route: a lobby screen (now with a
-  Shop panel, toggled open/closed), the play area (HUD + canvas + start
+  Shop panel and a Sound on/off toggle), the play area (HUD + canvas + start
   button), and a results screen, shown/hidden as three sibling containers.
   Wires `startGame()` to button clicks the same wire-once way
-  `ProgressToggle`/`ExercisePanel` do (`dataset.wired` guard).
+  `ProgressToggle`/`ExercisePanel` do (`dataset.wired` guard). The Start
+  button click also calls `unlockAudio()` — it's the first real user
+  gesture in a run, needed to resume the `AudioContext`.
 
 ## Phases
 
@@ -426,10 +435,56 @@ Cost-sequence check (`bun run` against `shop.ts` with `localStorage` /
 declared order): `vigor: 20, 57, 104, 160, 224, MAX` — matches
 `ceil(20 × (level+1)^1.5)` at every step.
 
-### Phase 6 — Audio + weapon evolutions polish — not started
+### Phase 6 — Audio + weapon evolutions polish ✅ done, partially validated in-browser
 
-- Web Audio API synthesized cues (pickup, hit, level-up, death, evolution).
-- Confirm all 5 weapons' Lv6 evolutions are implemented and feel distinct.
+- **`src/lib/game/audio.ts`**: Web Audio API, oscillators + gain envelopes,
+  no audio files — matches GAME-DESIGN.md's "Audio" section exactly. Five
+  distinct cues:
+  - `playPickup()` — short 1040Hz sine blip (gem and coin pickup share this
+    cue, per the design doc — they're the same mechanic).
+  - `playHit()` — short 160Hz square thud, throttled to at most one play
+    per 30ms so overlapping-hit weapons (Nova Pulse's burst, stacked Orbit
+    Shield) can't stack into a wall of noise.
+  - `playLevelUp()` — two-note ascending triangle arpeggio (C5 → G5).
+  - `playEvolution()` — longer, more elaborate four-note ascending run
+    (G4 → C5 → E5 → C6, the last note sine instead of triangle) than a
+    normal level-up, per the design doc's explicit "longer/more elaborate"
+    spec.
+  - `playDeath()` — descending two-note sawtooth (A3 → A2).
+  - `unlockAudio()` resumes the `AudioContext` from the Start button's click
+    handler (the run's first real user gesture) — browsers refuse to start
+    audio contexts outside a user gesture. Mute state
+    (`isMuted()`/`setMuted()`/`toggleMuted()`) persists via `pStorage`
+    (`game:audio-muted`); a new lobby "Sound: On/Off" button toggles it.
+- Wired directly into `engine.ts` at each event site (not routed through
+  `GameCallbacks`, matching how `logger.ts` is used): `damageEnemy()` →
+  `playHit()`, gem/coin collect → `playPickup()`, `addXp()`'s level-up
+  branch → `playLevelUp()`, `applyCard()`'s weapon-upgrade branch (when the
+  new level hits `WEAPON_MAX_LEVEL`) → `playEvolution()`,
+  `damagePlayer()`'s death branch → `playDeath()`.
+- **Weapon evolutions confirmed already implemented** (shipped in Phase 3,
+  re-verified this phase by re-reading the code, not re-implemented): all 5
+  read distinctly different at Lv6 — Whirlwind (Blade Arc) goes to a full
+  360° constant arc, Piercing Lance (Bolt) gets infinite pierce and bigger/
+  faster bolts, Barrier Storm (Orbit Shield) drops a damaging trail as it
+  orbits, Shockwave (Nova Pulse) doubles burst damage and adds knockback,
+  Swarm (Homing Dart) fires 5 spread darts instead of 1. No changes needed.
+
+Validation: guardrails (`bun run check`) pass. In-browser (real clicks
+against `astro preview`, not simulated): the "Sound: On/Off" button
+correctly toggles `pStorage`'s `game:audio-muted` key (confirmed `0→1` on a
+real click, and `1` still read back after a full page reload — persistence
+works). Replicated `playPickup()`'s exact oscillator+gain envelope pattern
+directly via the console against a real `AudioContext` — it resumes to
+`"running"` and schedules/starts/stops the node graph with no exceptions,
+confirming the Web Audio API surface `audio.ts` depends on behaves as
+expected in this environment. A full run with real rAF-driven combat (to
+hear cues actually fire together during live play — e.g. confirming the
+hit-sound throttle sounds right during a Nova Pulse burst, not just that
+the API doesn't throw) still hits the same automation-environment
+backgrounding limitation noted in Phases 2/4/5 — same recommendation: a
+real human playing one run is the fastest way to confirm the SFX sound
+right and aren't too spammy in a real fight.
 
 ### Phase 7 — Mobile controls — not started
 
@@ -450,8 +505,8 @@ declared order): `vigor: 20, 57, 104, 160, 224, MAX` — matches
 ## Current state
 
 **Phases 1-3 complete and validated**, including Lv6 weapon evolutions.
-**Phase 4 and Phase 5 implemented**; lobby gating, nav badge,
-results-screen wiring, the coin/shop system, and enemy tiers are all
+**Phases 4, 5, and 6 implemented**; lobby gating, nav badge, results-screen
+wiring, the coin/shop system, enemy tiers, and synthesized SFX are all
 believed correct from code review + guardrails + the non-rAF-dependent UI
 checks described in each phase's validation notes, but **a real rAF-driven
 run (engine callbacks firing live, not simulated) still hasn't been fully
@@ -459,11 +514,11 @@ observed in this environment** — automation keeps hitting the same
 OS-focus/backgrounding limitation Phase 2 first documented (confirmed
 again in Phase 5: a single real click produced exactly one live frame
 before `visibilityState` reverted to `"hidden"`), and spoofing it doesn't
-work around it. The fastest close-out for both phases is a real human
-playing one full run (see Phase 4 and Phase 5's validation notes), not
-more automation attempts. Phases 6-8 not started. Next session (or the
-user directly) should play one real run to fully close Phases 4-5, then
-confirm scope for Phase 6 (audio + weapon-evolution polish).
+work around it. The fastest close-out for Phases 4-6 is a real human
+playing one full run (see each phase's validation notes), not more
+automation attempts. Phases 7-8 not started. Next session (or the user
+directly) should play one real run to fully close Phases 4-6, then confirm
+scope for Phase 7 (mobile controls).
 
 ## Deliberate simplifications (intentional — not bugs)
 

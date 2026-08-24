@@ -25,6 +25,8 @@
 // `powerIndex`, boss HP/damage scaling with `powerIndex`, and permanent
 // shop upgrade effects (src/lib/game/shop.ts) applied as run-start
 // multipliers via GameOptions.
+// Phase 6 scope, layered on top: synthesized SFX (src/lib/game/audio.ts) for
+// pickup, enemy hit, level-up, weapon evolution, and player death.
 //
 // Spawn/collision math is kept intentionally cheap (linear scans over small
 // arrays, no quadtree) and the density ramp is floored at a minimum interval
@@ -41,6 +43,13 @@ import {
 } from "kontra";
 import { createLogger } from "./logger";
 import type { UpgradeEffects } from "./shop";
+import {
+  playPickup,
+  playHit,
+  playLevelUp,
+  playEvolution,
+  playDeath,
+} from "./audio";
 
 const log = createLogger("engine");
 
@@ -714,6 +723,7 @@ export function startGame(
 
   function damageEnemy(e: Enemy, amount: number, source: string) {
     e.hp -= amount;
+    playHit();
     log.log("hit:enemy", { kind: e.kind, source, remainingHp: e.hp });
     if (e.hp <= 0 && e.alive) {
       e.alive = false;
@@ -820,6 +830,7 @@ export function startGame(
     player.hp = Math.max(0, player.hp - amount);
     log.log("player:damaged", { amount, source, hpRemaining: player.hp });
     if (player.hp <= 0) {
+      playDeath();
       endGame("death");
     }
   }
@@ -834,6 +845,7 @@ export function startGame(
       leveledUp = true;
     }
     if (leveledUp) {
+      playLevelUp();
       log.log("player:levelup", { newLevel: playerLevel, pendingLevelUps });
     }
   }
@@ -869,6 +881,9 @@ export function startGame(
       const w = ownedWeapons.find((w) => w.id === card.weaponId);
       if (w) {
         w.level += 1;
+        if (w.level === WEAPON_MAX_LEVEL) {
+          playEvolution();
+        }
         log.log("card:weaponUpgrade", { id: w.id, newLevel: w.level });
       }
     } else if (card.kind === "newWeapon" && card.weaponId) {
@@ -1454,6 +1469,7 @@ export function startGame(
           g.alive = false;
           gemsCollected += 1;
           addXp(GEM_XP_VALUE * upgradeEffects.xpMult);
+          playPickup();
           log.log("pickup:gem", { totalGems: gemsCollected });
           continue;
         }
@@ -1474,6 +1490,7 @@ export function startGame(
         if (d < GEM_COLLECT_DISTANCE) {
           c.alive = false;
           coinsCollected += c.value;
+          playPickup();
           log.log("pickup:coin", {
             value: c.value,
             totalCoins: coinsCollected,
