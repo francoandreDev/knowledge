@@ -9,13 +9,13 @@ separate tactics within it?** Because each one damages trust through
 a different mechanism, and recognizing which one is happening
 changes what evidence to look for and how to respond:
 
-| Tactic               | What it actually does                                                                           |
-| -------------------- | ----------------------------------------------------------------------------------------------- |
-| Credit-stealing      | Presents someone else's work or idea as your own, or lets others believe it's yours             |
-| Scapegoating         | Directs blame for a failure onto someone who wasn't actually responsible for it                 |
-| Sabotage             | Deliberately undermines someone else's work or standing, often while appearing supportive       |
-| Weaponized rumors    | Spreads unverified or false information to damage someone's reputation, with the source hidden  |
-| Manufactured urgency | Falsely frames a decision as time-critical to bypass normal scrutiny or push it through quickly |
+| Tactic               | What it actually does                                                                           | In simpler words                                     |
+| -------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Credit-stealing      | Presents someone else's work or idea as your own, or lets others believe it's yours             | "I did this," when someone else did                  |
+| Scapegoating         | Directs blame for a failure onto someone who wasn't actually responsible for it                 | "It was their fault," when it was not                |
+| Sabotage             | Deliberately undermines someone else's work or standing, often while appearing supportive       | Quietly making someone else's work fail              |
+| Weaponized rumors    | Spreads unverified or false information to damage someone's reputation, with the source hidden  | Using gossip as a weapon while hiding who started it |
+| Manufactured urgency | Falsely frames a decision as time-critical to bypass normal scrutiny or push it through quickly | Inventing hurry so people do not review carefully    |
 
 **Do all five require the same kind of evidence to recognize?** No —
 credit-stealing is often visible in a single moment (a specific
@@ -44,6 +44,12 @@ concealment or deception to work ("I let people believe this was my
 idea"). Credit-stealing specifically fails this test: it only works
 if the original contributor's role stays hidden or unclear.
 
+This is the same transparency test from
+[white politics](/corporate-politics/white/): if explaining the move
+openly would make it look worse, the move probably depends on the
+concealment. [Framing](/corporate-politics/framing/) is different: it
+can present true work clearly without erasing who did it.
+
 ## Why deniability is what makes black politics hard to call out
 
 **If credit-stealing is so common, why don't more people confront it
@@ -55,6 +61,11 @@ makes a direct, public accusation risky: if the pattern isn't
 established yet, the accuser can come across as petty or paranoid,
 even when the underlying instinct is correct.
 
+Deniability is the built-in escape hatch: the act benefits the person
+now, and if challenged later they can claim innocent intent. That does
+not prove they meant harm, but it does mean your response should create
+a clearer record without jumping straight to a public accusation.
+
 **Does this mean a single ambiguous incident should just be ignored?**
 Not necessarily — but it does mean the response to a single incident
 should usually be different (privately raising it, starting to
@@ -62,6 +73,12 @@ document) from the response to an established pattern (a more direct
 conversation, escalation). Conflating the two — treating every
 ambiguous moment as proof of a deliberate pattern — is itself a
 common mistake, covered further in L3.
+
+Example: "Here is the analysis" with no names may be an ambiguous
+omission. "Here is the approach I came up with" over work you built is
+much clearer because it claims authorship. Repetition after a private
+conversation is clearer still, because the person can no longer claim
+they did not know the credit was missing.
 
 ## Failure modes at this level
 

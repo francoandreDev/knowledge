@@ -39,9 +39,10 @@ roadmap.
 | 17    | `product-domain/understanding-user-s-problem-solution`, `product-domain/requirements-gathering`, `product-domain/domain-driven-design-basics`, `product-domain/bounded-contexts`                         | Extendida; formato OK; `typecheck` OK; `build` OK; `validate:content` bloqueado por frontmatter faltante global |
 | 18    | `product-domain/validation`, `product-domain/value-framing-over-feature-framing`, `product-domain/buyer-psychology`, `corporate-politics/power-real-resource`                                            | Extendida; formato OK; `typecheck` OK; `build` OK; `validate:content` bloqueado por frontmatter faltante global |
 | 19    | `corporate-politics/white`, `corporate-politics/who-holds-influence`, `corporate-politics/favor-economy`, `corporate-politics/framing`                                                                   | Extendida; formato OK; `typecheck` OK; `build` OK; `validate:content` bloqueado por frontmatter faltante global |
+| 20    | `corporate-politics/strategic-ambiguity`, `corporate-politics/subtext`, `corporate-politics/credit-stealing`, `learning-craft/exposure-understanding`                                                    | Extendida; formato OK; `typecheck` OK; `build` OK; `validate:content` bloqueado por frontmatter faltante global |
 
 ## Siguiente tanda sugerida
 
-| Tanda | Unidades                                                                                                                                              | Estado    |
-| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| 20    | `corporate-politics/strategic-ambiguity`, `corporate-politics/subtext`, `corporate-politics/credit-stealing`, `learning-craft/exposure-understanding` | Pendiente |
+| Tanda | Unidades                                                                                                                                     | Estado    |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| 21    | `learning-craft/feynman-technique`, `learning-craft/search-literacy`, `learning-craft/source-evaluation`, `learning-craft/spaced-repetition` | Pendiente |
