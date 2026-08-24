@@ -21,28 +21,21 @@ export const ENEMY_SHAPE: Record<EnemyKind, Shape> = {
 interface ShapeOptions {
   glow?: boolean;
   glowColor?: string;
+  // Phase 11: 0-1 fade — a white overlay of the same silhouette, used for a
+  // brief "just got hit" flash. 0/undefined draws nothing extra.
+  flashAlpha?: number;
 }
 
-// Draws a filled, outlined base shape, with an optional glow (shadowBlur).
-// Glow is opt-in per call site — see engine.ts's Phase 8 header note on why
-// it's reserved for the player/boss/elites only (perf at up to 60 alive).
-export function drawShape(
+// Traces the given shape's outline into ctx's current path (caller controls
+// fill/stroke/save/restore) — shared by drawShape() and the flash overlay so
+// both draw the exact same silhouette.
+function traceShapePath(
   ctx: CanvasRenderingContext2D,
   shape: Shape,
   x: number,
   y: number,
   radius: number,
-  color: string,
-  opts: ShapeOptions = {},
 ) {
-  ctx.save();
-  if (opts.glow) {
-    ctx.shadowColor = opts.glowColor ?? color;
-    ctx.shadowBlur = radius * 1.1;
-  }
-  ctx.fillStyle = color;
-  ctx.strokeStyle = "rgba(255,255,255,0.4)";
-  ctx.lineWidth = Math.max(1, radius * 0.14);
   ctx.beginPath();
   if (shape === "circle") {
     ctx.arc(x, y, radius, 0, Math.PI * 2);
@@ -64,9 +57,42 @@ export function drawShape(
     }
     ctx.closePath();
   }
+}
+
+// Draws a filled, outlined base shape, with an optional glow (shadowBlur)
+// and an optional white hit-flash overlay of the same silhouette.
+// Glow is opt-in per call site — see engine.ts's Phase 8 header note on why
+// it's reserved for the player/boss/elites only (perf at up to 60 alive).
+export function drawShape(
+  ctx: CanvasRenderingContext2D,
+  shape: Shape,
+  x: number,
+  y: number,
+  radius: number,
+  color: string,
+  opts: ShapeOptions = {},
+) {
+  ctx.save();
+  if (opts.glow) {
+    ctx.shadowColor = opts.glowColor ?? color;
+    ctx.shadowBlur = radius * 1.1;
+  }
+  ctx.fillStyle = color;
+  ctx.strokeStyle = "rgba(255,255,255,0.4)";
+  ctx.lineWidth = Math.max(1, radius * 0.14);
+  traceShapePath(ctx, shape, x, y, radius);
   ctx.fill();
   ctx.stroke();
   ctx.restore();
+
+  if (opts.flashAlpha && opts.flashAlpha > 0) {
+    ctx.save();
+    ctx.globalAlpha = opts.flashAlpha;
+    ctx.fillStyle = "#ffffff";
+    traceShapePath(ctx, shape, x, y, radius);
+    ctx.fill();
+    ctx.restore();
+  }
 }
 
 // Small filled dot, no outline/glow — cheap detail primitive (eyes, etc.).
@@ -102,6 +128,39 @@ function drawLine(
 
 const DARK = "rgba(15,23,42,0.85)";
 
+// Phase 11: a subtle cloak silhouette, trailing opposite the facing angle —
+// gives the player body a "character" identity beyond a plain circle
+// without an articulated/animated sprite (per the confirmed "subtle
+// animation" scope: idle bob + hit-flash, no limbs to rig).
+function drawCloak(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  facingAngle: number,
+  color: string,
+) {
+  const backAngle = facingAngle + Math.PI;
+  const spread = 0.62; // radians either side of directly-behind
+  const tip = radius * 1.55;
+  const a1x = x + Math.cos(backAngle - spread) * radius * 0.75;
+  const a1y = y + Math.sin(backAngle - spread) * radius * 0.75;
+  const a2x = x + Math.cos(backAngle + spread) * radius * 0.75;
+  const a2y = y + Math.sin(backAngle + spread) * radius * 0.75;
+  const tipx = x + Math.cos(backAngle) * tip;
+  const tipy = y + Math.sin(backAngle) * tip;
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(a1x, a1y);
+  ctx.lineTo(tipx, tipy);
+  ctx.lineTo(a2x, a2y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
 export function drawPlayer(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -110,8 +169,14 @@ export function drawPlayer(
   color: string,
   facingAngle: number,
   glow: boolean,
+  hitFlashAlpha = 0,
 ) {
-  drawShape(ctx, "circle", x, y, radius, color, { glow, glowColor: color });
+  drawCloak(ctx, x, y, radius, facingAngle, "#0ea5e9");
+  drawShape(ctx, "circle", x, y, radius, color, {
+    glow,
+    glowColor: color,
+    flashAlpha: hitFlashAlpha,
+  });
   // Facing nub — a small bright dot toward the last movement direction, so
   // the player reads as oriented even though the body itself is symmetric.
   const nx = x + Math.cos(facingAngle) * radius * 0.85;
@@ -132,6 +197,7 @@ export function drawEnemy(
   opts: ShapeOptions = {},
 ) {
   drawShape(ctx, ENEMY_SHAPE[kind], x, y, radius, color, opts);
+  if (opts.flashAlpha && opts.flashAlpha > 0.5) return; // fully whited-out — skip accents
   const eyeR = Math.max(1, radius * 0.14);
   switch (kind) {
     case "zombie":
@@ -277,4 +343,34 @@ export function drawProjectile(
     ctx.restore();
   }
   drawShape(ctx, "circle", x, y, radius, color);
+}
+
+// Phase 11: a small radiating-line burst at a weapon-hit point — the
+// "visible attacks" feedback layered on top of each weapon's existing
+// swing/burst/ring effect (arcEffects/pulseEffects/orbitTrails in
+// engine.ts), giving individual hits an impact even outside those. progress
+// runs 0 (just spawned) to 1 (fully faded) — engine.ts owns the timing.
+export function drawImpactBurst(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  progress: number,
+) {
+  const alpha = Math.max(0, 1 - progress);
+  if (alpha <= 0) return;
+  const inner = 3 + progress * 2;
+  const outer = 6 + progress * 8;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 1.5;
+  ctx.lineCap = "round";
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    ctx.beginPath();
+    ctx.moveTo(x + Math.cos(a) * inner, y + Math.sin(a) * inner);
+    ctx.lineTo(x + Math.cos(a) * outer, y + Math.sin(a) * outer);
+    ctx.stroke();
+  }
+  ctx.restore();
 }

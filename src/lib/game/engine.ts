@@ -53,6 +53,24 @@
 // matching icon/accent color for each card without parsing `id`/`title`
 // strings. `WeaponId` is now exported for the same reason. No simulation
 // change — purely additive rendering metadata.
+// Phase 11 scope, layered on top: "visible attacks" + a subtle character
+// pass, per the user's explicit "subtle animation" scope choice (idle bob +
+// hit-flash, no articulated/limb-rigged sprite). damageEnemy()/damagePlayer()
+// now stamp a brief hitFlashUntil / playerHitFlashUntil (HIT_FLASH_MS), drawn
+// as a white silhouette overlay in render() (see sprites.ts's flashAlpha
+// param on drawShape()); damageEnemy() also drops a short-lived HitSpark at
+// the hit point (drawImpactBurst() in sprites.ts) — a small radiating-line
+// burst layered on top of each weapon's existing swing/burst/ring effect, so
+// individual hits read as impacts even outside those. The player also gets a
+// gentle idle-only sinusoidal bob (playerBobPhase, gated off while moving or
+// reduceMotion is on) and a translucent trailing "cloak" silhouette
+// (sprites.ts's drawCloak()) for a bit of character identity beyond a plain
+// circle. index.astro's HUD weapon list was swapped from plain text to icon
+// badges (reusing icons.ts's WEAPON_ICON, already built for Phase 10's
+// level-up cards) so weapons are recognizable at a glance during a run, not
+// just after leveling up. No collision/damage-number changes — flashes and
+// sparks are purely visual, timed off the same elapsedMs the rest of the
+// engine already uses.
 //
 // Spawn/collision math is kept intentionally cheap (linear scans over small
 // arrays, no quadtree) and the density ramp is floored at a minimum interval
@@ -82,6 +100,7 @@ import {
   drawGem,
   drawCoin,
   drawProjectile,
+  drawImpactBurst,
 } from "./sprites";
 
 const log = createLogger("engine");
@@ -318,6 +337,12 @@ const SHOCKWAVE_KNOCKBACK = 40; // Nova Pulse evolution (Lv6)
 
 const PULSE_EFFECT_DURATION_MS = 300;
 
+// Phase 11: shared "just got hit" feedback — a brief white flash on the hit
+// entity itself, plus a small radiating spark burst at the hit point. Same
+// duration for both so they read as one moment, not two staggered effects.
+const HIT_FLASH_MS = 120;
+const HIT_SPARK_DURATION_MS = 220;
+
 const HOMING_DART_SPEED = 200;
 const HOMING_DART_TURN_RATE = 4; // rad/s
 
@@ -443,6 +468,8 @@ interface Enemy extends GameObject {
   dashDy?: number;
   // orbit shield hit cooldown (Phase 3)
   lastOrbitHitAt?: number;
+  // Phase 11: brief white hit-flash, see HIT_FLASH_MS
+  hitFlashUntil?: number;
 }
 interface Projectile extends GameObject {
   ttl: number;
@@ -489,6 +516,14 @@ interface PulseEffect {
 }
 
 interface OrbitTrailPoint {
+  x: number;
+  y: number;
+  createdAt: number;
+}
+
+// Phase 11: a small impact-spark burst at a weapon-hit point, see
+// HIT_SPARK_DURATION_MS and sprites.ts's drawImpactBurst().
+interface HitSpark {
   x: number;
   y: number;
   createdAt: number;
@@ -631,6 +666,9 @@ export function startGame(
   player.hp = PLAYER_MAX_HP;
   player.lastHitAt = -Infinity;
   let playerFacingAngle = -Math.PI / 2; // Phase 9: sprite orientation, faces up by default
+  let playerHitFlashUntil = -Infinity; // Phase 11
+  let playerBobPhase = 0; // Phase 11: idle-only bob, see the render()-side gating on playerIsIdle
+  let playerIsIdle = true;
 
   // --- Phase 7: dynamic virtual joystick (pointer events on the canvas) ---
   interface JoystickState {
@@ -704,6 +742,7 @@ export function startGame(
   const arcEffects: ArcEffect[] = [];
   const pulseEffects: PulseEffect[] = [];
   const orbitTrails: OrbitTrailPoint[] = [];
+  const hitSparks: HitSpark[] = [];
   let lastOrbitTrailDropAt = -Infinity;
   let orbiterPositions: { x: number; y: number }[] = [];
 
@@ -848,6 +887,8 @@ export function startGame(
 
   function damageEnemy(e: Enemy, amount: number, source: string) {
     e.hp -= amount;
+    e.hitFlashUntil = elapsedMs + HIT_FLASH_MS;
+    hitSparks.push({ x: e.x, y: e.y, createdAt: elapsedMs });
     playHit();
     log.log("hit:enemy", { kind: e.kind, source, remainingHp: e.hp });
     if (e.hp <= 0 && e.alive) {
@@ -953,6 +994,7 @@ export function startGame(
 
   function damagePlayer(amount: number, source: string) {
     player.hp = Math.max(0, player.hp - amount);
+    playerHitFlashUntil = elapsedMs + HIT_FLASH_MS;
     log.log("player:damaged", { amount, source, hpRemaining: player.hp });
     if (player.hp <= 0) {
       playDeath();
@@ -1482,6 +1524,10 @@ export function startGame(
           moveMagnitude = 1;
         }
       }
+      playerIsIdle = moveMagnitude === 0;
+      if (playerIsIdle) {
+        playerBobPhase += dt * 3.2; // Phase 11: gentle idle-only bob, see render()
+      }
       if (moveMagnitude > 0) {
         playerFacingAngle = Math.atan2(moveY, moveX); // Phase 9: sprite orientation
         const speed =
@@ -1676,6 +1722,11 @@ export function startGame(
           pulseEffects.splice(i, 1);
         }
       }
+      for (let i = hitSparks.length - 1; i >= 0; i--) {
+        if (elapsedMs - hitSparks[i].createdAt >= HIT_SPARK_DURATION_MS) {
+          hitSparks.splice(i, 1);
+        }
+      }
 
       // --- timer ---
       if (elapsedS >= runDurationS) {
@@ -1707,9 +1758,13 @@ export function startGame(
       for (const e of enemies) {
         const isElite = e.tier === "elite";
         const isBoss = e.kind === "reaper";
+        const flashAlpha = e.hitFlashUntil
+          ? Math.max(0, (e.hitFlashUntil - elapsedMs) / HIT_FLASH_MS)
+          : 0;
         drawEnemy(context, e.kind, e.x, e.y, e.radius, e.color, {
           glow: !reduceMotion && (isElite || isBoss),
           glowColor: isElite ? "rgba(250, 204, 21, 0.9)" : e.color,
+          flashAlpha,
         });
       }
       for (const p of projectiles) {
@@ -1718,14 +1773,21 @@ export function startGame(
       for (const p of enemyProjectiles) {
         drawProjectile(context, p.x, p.y, p.width / 2, p.color, p.dx, p.dy);
       }
+      const idleBobOffset =
+        playerIsIdle && !reduceMotion ? Math.sin(playerBobPhase) * 1.6 : 0;
+      const playerFlashAlpha = Math.max(
+        0,
+        (playerHitFlashUntil - elapsedMs) / HIT_FLASH_MS,
+      );
       drawPlayer(
         context,
         player.x,
-        player.y,
+        player.y + idleBobOffset,
         PLAYER_RADIUS,
         "#38bdf8",
         playerFacingAngle,
         !reduceMotion,
+        playerFlashAlpha,
       );
 
       // --- Phase 7: joystick visual (base at touch-down point, knob follows) ---
@@ -1804,6 +1866,14 @@ export function startGame(
           Math.PI * 2,
         );
         context.stroke();
+      }
+
+      for (const s of hitSparks) {
+        const progress = Math.min(
+          1,
+          (elapsedMs - s.createdAt) / HIT_SPARK_DURATION_MS,
+        );
+        drawImpactBurst(context, s.x, s.y, progress);
       }
     },
   });

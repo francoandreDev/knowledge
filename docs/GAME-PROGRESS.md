@@ -48,7 +48,16 @@ of every session that touches game code, before stopping.
   functions (`drawPlayer`/`drawEnemy`/`drawGem`/`drawCoin`/`drawProjectile`)
   that layer extra detail (eyes, wings, a hood, a coin ring, a motion
   trail) on top. Pure rendering — no simulation/collision code lives here,
-  and `engine.ts`'s game logic is untouched by this file.
+  and `engine.ts`'s game logic is untouched by this file. Phase 11 added a
+  `flashAlpha` option on `drawShape()` (a white hit-flash overlay, traced via
+  a shared `traceShapePath()` helper), a `drawCloak()` used by `drawPlayer()`
+  for a subtle trailing character silhouette, and `drawImpactBurst()` for a
+  short radiating-line spark at a weapon-hit point.
+- `src/lib/game/icons.ts` — Phase 10's hand-authored inline SVG icon set
+  (weapons, an evolution sparkle, and 6 shared concept icons reused across
+  run-only temp stats and permanent shop upgrades), plus `sizedIcon()` for
+  rendering one icon constant at different sizes. Reused by Phase 11 for the
+  HUD's live weapon-icon row.
 - `src/lib/game/settings.ts` — Phase 8's reduce-motion setting
   (`isReducedMotion()`/`setReducedMotion()`/`toggleReducedMotion()`),
   persisted via `pStorage` (`game:reduce-motion`) — mirrors `audio.ts`'s
@@ -751,36 +760,121 @@ firing from inside a live run (only its rendering logic was replicated,
 not the actual invocation path) — closing that gap needs the same real
 human playthrough already recommended for Phases 4-9.
 
+### Phase 11 — Visible attacks + subtle character pass ✅ done, validated in-browser (rare live-run confirmation)
+
+The deferred item from Phase 10: weapon icons wired into actual combat/HUD,
+the player character's own visual redesign, and more visible attack
+animation/impact feedback. Scoped to **subtle animation** per the user's
+explicit choice when asked about depth (idle bob + hit-flash, no
+articulated/limb-rigged sprite).
+
+- **HUD weapon icons** (`index.astro`'s `onHudUpdate`): the plain-text
+  `Weapons: bolt L1, bladeArc L3` line is now a row of icon badges (reusing
+  `icons.ts`'s `WEAPON_ICON`, already built for Phase 10's cards) each
+  showing the weapon icon + level, so equipped weapons are recognizable at a
+  glance mid-run, not just at the moment they're picked.
+- **Hit-flash** (`engine.ts` + `sprites.ts`): `damageEnemy()` now stamps
+  `e.hitFlashUntil = elapsedMs + HIT_FLASH_MS` (120ms) on every hit;
+  `damagePlayer()` does the same for a module-level `playerHitFlashUntil`.
+  `render()` converts the remaining time into a 0-1 alpha and passes it as a
+  new `flashAlpha` option through to `sprites.ts`'s `drawShape()`, which
+  draws a second white-filled pass of the exact same silhouette (via a new
+  shared `traceShapePath()` helper, factored out of `drawShape()` so the
+  flash overlay traces the identical outline) at that alpha on top of the
+  normal fill. `drawEnemy()` skips per-kind accent details (eyes, wings,
+  etc.) while more than half-flashed, so a hit reads as a clean white pop
+  rather than eyes floating over white.
+- **Impact sparks** (`engine.ts`'s new `HitSpark[]` + `sprites.ts`'s
+  `drawImpactBurst()`): every `damageEnemy()` call also drops a `HitSpark` at
+  the hit point — a small 4-line radiating burst that fades over
+  `HIT_SPARK_DURATION_MS` (220ms), pruned the same way `arcEffects`/
+  `pulseEffects` already are. This is deliberately layered on top of (not a
+  replacement for) each weapon's existing swing/burst/ring effect
+  (`arcEffects`/`pulseEffects`/`orbitTrails`) — those show the weapon's
+  shape, this shows the moment of contact, so individual hits (e.g. a single
+  Bolt connecting) read as an impact even when no larger effect is active.
+- **Player subtle redesign** (`sprites.ts`'s `drawPlayer()`): a new
+  `drawCloak()` draws a translucent triangular cloak silhouette trailing
+  opposite the facing angle, underneath the existing circle+facing-nub — a
+  bit of "character" shape beyond a plain circle without any limb rigging.
+  A new idle-only bob (`playerBobPhase`, incremented in `update()` only while
+  `moveMagnitude === 0`, applied in `render()` as a small sinusoidal
+  `player.y` offset, gated off entirely when `reduceMotion` is on) gives the
+  character a breathing/idle feel when not moving, per the confirmed
+  "subtle animation" scope — no walk cycle, since there's no limb rig to
+  animate one with.
+- All of this is rendering-only, timed off the existing `elapsedMs` clock —
+  no collision, damage-number, or balance changes. `GameHudState.weapons[].id`
+  was already typed `WeaponId` (Phase 10), so the HUD icon lookup needed no
+  new type plumbing.
+
+**Validation:** guardrails (`bun run check`) pass. In-browser (`claude
+--chrome` against a fresh `astro preview` build): granted 3 tokens via
+`localStorage`, clicked "Start run" for real — and this time the tab
+genuinely kept OS focus and a **full live run played out**, unlike every
+prior phase since Phase 2 (all of which hit the documented
+`visibilityState: "hidden"` rAF-suspension wall). Confirmed live, by
+screenshot, across several points in the run: the player rendering as a
+glowing circle with a visible bright facing-nub dot **and** a darker
+trailing cloak silhouette behind it (zoomed screenshot at both an early
+low-kill moment and again mid-run next to an active Orbit Shield ring and a
+Nova Pulse burst); the HUD weapon-icon row updating live as weapons were
+picked (bolt → bolt+shield → bolt+shield+pulse, each with its correct icon);
+HP dropping across screenshots (100/120 → 52/120 → 50/135) confirming
+`damagePlayer()` — and therefore `playerHitFlashUntil` — fired for real
+multiple times; and the run ending naturally at 54.6s (death, not the 60s
+timer) with a correct results screen (47 kills, level 5, 17 coins earned).
+Zero console errors/exceptions across the whole run
+(`read_console_messages` with `onlyErrors: true` came back clean). **Not
+caught on camera, specifically**: the white hit-flash overlay and the
+impact-spark burst are both only ~120-220ms — one zoomed screenshot mid-run
+did catch a small white radiating mark consistent with `drawImpactBurst()`
+next to an enemy, but a screenshot's ~1-2s round-trip isn't fast enough to
+reliably land inside either window, so this is not claimed as a confirmed
+sighting of either effect specifically (only inferred from the HP-drop
+evidence that the code path executed). The `flashAlpha`/`drawImpactBurst`
+rendering logic itself was separately confirmed correct by replicating it
+verbatim against the real canvas 2D context (a manual draw call with
+`flashAlpha` at 0, 0.25, 0.6, and 0.9, and `drawImpactBurst` at progress 0,
+0.4, 0.8) — screenshotted and visually confirmed: partial alpha blends the
+white overlay with the base color as expected, full alpha whites the shape
+out completely, and the impact burst's four lines correctly shrink toward
+the center and fade as progress advances. Idle bob was not isolated on
+camera either (the player was in near-continuous combat motion throughout
+the observed run) — its code path is genuinely simple enough (a gated
+`Math.sin()` y-offset) that this is a low-risk gap, but a future session
+watching a player stand still for a couple of seconds would close it fully.
+
 ## Current state
 
-**All 8 originally-planned phases, plus Phase 9 (composite sprite detail)
-and Phase 10 (level-up card / shop UI redesign), both added after the fact
-per user request, are now implemented.** Phases 1-3 are complete and
-validated
-end-to-end, including Lv6 weapon evolutions. Phases 4 through 8 (real
-gating/lobby/results, coins/shop/enemy tiers, audio, mobile joystick, and
-visual/perf polish) are all believed correct from code review + guardrails
-(`bun run check` passing at every phase) + the non-rAF-dependent UI checks
-described in each phase's own validation notes, but **a real rAF-driven run
-(engine callbacks firing live over a full run, not simulated or verified
-frame-by-frame) still hasn't been fully observed in this environment** —
-automation keeps hitting the same OS-focus/backgrounding limitation Phase 2
-first documented (a single real click reliably produces at most one live
-frame before `visibilityState` reverts to `"hidden"`), and spoofing it
-doesn't work around it. The fastest, and really the only remaining,
-close-out step is **a real human playing one full run** — ideally long
-enough to see an Elite spawn, a weapon evolve, a boss with its hood
-rendered, and (deliberately) a mid-run tab-switch to exercise Phase 8's
-`dt` clamp — not more automation attempts. GAME-DESIGN.md is fully
-implemented as specced (with the small, explicitly-documented deviations
-noted throughout this file, e.g. the Phase 4 per-unit-not-per-level token
-grant, Phase 2's spawn-density floor/cap, Phase 8's selective-glow
-decision, and Phase 9's composite-Canvas-detail scope instead of external
-art assets). **One deferred item remains, per the user's explicit choice
-when scoping Phase 10**: weapon icons wired into actual combat/HUD, the
-player character's own visual redesign, and more visible attack
-animation/impact feedback — Phase 10 only covered the level-up cards and
-shop. A future session should pick this up as Phase 11 once named.
+**All 8 originally-planned phases, plus Phase 9 (composite sprite detail),
+Phase 10 (level-up card / shop UI redesign), and Phase 11 (visible attacks +
+subtle character pass), all added after the fact per user request, are now
+implemented.** Phases 1-3 are complete and validated end-to-end, including
+Lv6 weapon evolutions. Phases 4 through 8 (real gating/lobby/results,
+coins/shop/enemy tiers, audio, mobile joystick, and visual/perf polish) are
+all believed correct from code review + guardrails (`bun run check` passing
+at every phase) + the non-rAF-dependent UI checks described in each phase's
+own validation notes — **a real rAF-driven full run was finally observed
+directly in this environment during Phase 11's validation pass** (54.6s
+survived, Lv5, 47 kills, zero console errors), the first time any phase
+since Phase 2 has gotten past the automation tab-focus/backgrounding wall
+for more than a single frame; it confirmed Phase 11's player cloak/facing-nub
+rendering, live HUD weapon icons, and repeated real damage events, but
+didn't happen to land a screenshot inside the ~120-220ms hit-flash/
+impact-spark windows specifically (see Phase 11's own validation note), and
+doesn't retroactively re-verify Phases 4-8's own callback paths (Elite
+tiers, weapon evolution visuals, boss hood, the `dt` clamp) — those still
+rest on code review + non-rAF checks. A future session's real human
+playthrough, or another lucky focus-retaining automation run, would be the
+way to close out that remaining set. GAME-DESIGN.md is fully implemented as
+specced (with the small, explicitly-documented deviations noted throughout
+this file, e.g. the Phase 4 per-unit-not-per-level token grant, Phase 2's
+spawn-density floor/cap, Phase 8's selective-glow decision, and Phase 9's
+composite-Canvas-detail scope instead of external art assets). No further
+phases are currently planned — Phase 11 closed out the deferred item from
+Phase 10 (weapon icons in combat/HUD, the player's visual redesign, and
+visible attack/impact feedback).
 
 ## Deliberate simplifications (intentional — not bugs)
 
