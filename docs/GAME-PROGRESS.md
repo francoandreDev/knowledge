@@ -57,7 +57,9 @@ of every session that touches game code, before stopping.
   (weapons, an evolution sparkle, and 6 shared concept icons reused across
   run-only temp stats and permanent shop upgrades), plus `sizedIcon()` for
   rendering one icon constant at different sizes. Reused by Phase 11 for the
-  HUD's live weapon-icon row.
+  HUD's live weapon-icon row. Phase 12 added a `UI_ICON` export (clock,
+  skull, gem, star, ticket, trophy, sound/motion/shop/fullscreen/back/play)
+  for the lobby/HUD/results chrome.
 - `src/lib/game/settings.ts` — Phase 8's reduce-motion setting
   (`isReducedMotion()`/`setReducedMotion()`/`toggleReducedMotion()`),
   persisted via `pStorage` (`game:reduce-motion`) — mirrors `audio.ts`'s
@@ -845,11 +847,79 @@ the observed run) — its code path is genuinely simple enough (a gated
 `Math.sin()` y-offset) that this is a low-risk gap, but a future session
 watching a player stand still for a couple of seconds would close it fully.
 
+### Phase 12 — Game screen visual/UI redesign ✅ done, validated in-browser
+
+The user asked to improve the game screen itself (not the game canvas):
+less text, more visual elements, and a fullscreen toggle. Scoped to the
+lobby/HUD/results chrome around the canvas — no engine/gameplay changes.
+
+- **New `UI_ICON` set** (`icons.ts`): 17 additional hand-authored icons
+  (clock, skull, gem, star, ticket, trophy, sound on/off, eye/eye-off for
+  motion, shop bag, maximize/minimize, back arrow, play triangle), reusing
+  the existing heart/coin icons from Phase 10 where the concept already had
+  one. Same style/sizing convention as the existing set.
+- **Lobby**: the multi-sentence intro paragraph shrank to one line. The four
+  stat blocks (tokens/run length/best time/coins) became icon+number pill
+  chips instead of "number over a text label" columns. The Shop/Sound/Motion
+  buttons became icon-only circular buttons (`title`/`aria-label` for
+  tooltip + accessibility) instead of text buttons reading "Sound: On" —
+  Start Run kept its text (the primary CTA) but gained a play icon.
+- **HUD** (in-run): HP is now an icon + a real horizontal bar (`--target`
+  style width set directly per `onHudUpdate` tick, with a CSS `transition`
+  for smooth movement) with the numeric `42/120` alongside it, replacing the
+  plain "HP: 42/120" text. Kills/gems/coins/level are icon+number pairs with
+  no text labels. A new thin XP bar sits under the stat row. The "Weapons:"
+  text label was dropped — the icon chips already carry the meaning.
+- **Results screen**: each stat (time/kills/level/coins) got an icon above
+  the number instead of a text caption below it; the headline shortened from
+  "Run ended — survived Xs / Ys" to just "Survived Xs" (the lobby's own "run
+  length" stat already covers the duration side); "Back to lobby" shortened
+  to "Lobby" with a back-arrow icon.
+- **Fullscreen toggle** (new): a single icon button top-right of the page
+  header (visible in all three screens — lobby/play/results), wired to the
+  Fullscreen API on a new `data-game-root` wrapper div around the whole
+  widget (not just the canvas), so HUD and lobby/results also benefit from
+  the larger viewport. A `fullscreenchange` listener (`renderFullscreen()`)
+  swaps the icon between maximize/minimize and toggles a small set of
+  layout classes (`max-w-none h-screen justify-center bg-white
+dark:bg-slate-950 p-4`) so the widget actually fills the screen instead of
+  sitting at its normal `max-w-lg` width inside a black fullscreen frame.
+  The canvas's existing `h-[min(58vh,500px)]` sizing already scales up
+  correctly once the viewport (now the whole screen) is taller.
+
+**Validation:** guardrails (`bun run check`) pass. In-browser (`claude
+--chrome` against a fresh `astro preview` build): the redesigned lobby
+rendered correctly (all 4 icon chips, icon-only toolbar, play-icon start
+button); the shop panel opened correctly showing all 7 rows with icons and
+bars (unchanged from Phase 10, confirmed still working with the new toggle
+button); Sound/Motion toggles correctly flipped their icon and `title`
+between on/off states on real clicks. **Fullscreen was confirmed working
+both directions**: `requestFullscreen()` on `data-game-root` genuinely
+entered fullscreen (screenshot showed the site's nav header gone, full-bleed
+game content, confirmed via `document.fullscreenElement`), and exiting
+(triggered by the automation environment itself, the same kind of
+focus-related interruption documented elsewhere in this file) correctly
+fired `fullscreenchange` and reverted the icon and layout classes back to
+normal — the toggle logic is sound in both directions, independent of what
+caused the exit. The in-run HUD's static layout was confirmed live (heart,
+clock, star, skull, gem, coin icons all render correctly; HP bar starts
+full; XP bar starts empty), but — same rAF-suspension limitation as every
+phase since Phase 2 — `onHudUpdate` didn't fire live in this session, so the
+HP/XP bar width math and text formatting were separately confirmed correct
+by replicating the exact `onHudUpdate` body against the real DOM with a
+synthetic state (`hp: 42/120` → bar width `35%`, `xp: 18/44` → bar width
+`40.9091%`), screenshotted and visually confirmed. The results screen and
+"Lobby" back button were both confirmed correctly with a synthetic
+`onGameOver`-equivalent state, including the "New best time!" trophy
+callout and the real token-count decrement on return to the lobby. Zero
+console errors across the whole session.
+
 ## Current state
 
 **All 8 originally-planned phases, plus Phase 9 (composite sprite detail),
-Phase 10 (level-up card / shop UI redesign), and Phase 11 (visible attacks +
-subtle character pass), all added after the fact per user request, are now
+Phase 10 (level-up card / shop UI redesign), Phase 11 (visible attacks +
+subtle character pass), and Phase 12 (game screen visual/UI redesign +
+fullscreen toggle), all added after the fact per user request, are now
 implemented.** Phases 1-3 are complete and validated end-to-end, including
 Lv6 weapon evolutions. Phases 4 through 8 (real gating/lobby/results,
 coins/shop/enemy tiers, audio, mobile joystick, and visual/perf polish) are
