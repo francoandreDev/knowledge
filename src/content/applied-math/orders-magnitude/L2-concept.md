@@ -21,6 +21,11 @@ fact; it's _derived_ from the units that were multiplied. The incident's mistake
 skipping a step of arithmetic — it was mentally discarding this derivation and writing
 "MB" out of habit or haste instead of what the algebra actually produced.
 
+If the algebra notation feels abstract, read it as labels on objects: "records" appears
+once as the thing being counted and once as "per record," so those labels cancel. "KB" has
+no matching opposite label, so it remains. That is why the result is `10,000,000 KB`
+before any storage-unit conversion happens.
+
 ## Converting units is multiplying by a disguised 1
 
 **How does `10,000,000 KB` actually become GB, correctly?** A unit conversion factor —
@@ -35,24 +40,27 @@ quantity:
 ```
 
 **Skipping this conversion — using the `10,000,000` figure directly as if it were already
-in MB — is precisely the incident's error.** The number itself never changes through a
-correct conversion (multiplying by 1 can't change a quantity); only the unit label changes,
-which is exactly why forgetting the conversion factor leaves the right _number_ attached to
-the wrong _unit_, inflating the apparent value by whatever factor was skipped (1,000x here).
+in MB — is precisely the incident's error.** A correct conversion preserves the real
+quantity, but the written number changes because the unit changed: `10,000,000 KB` is the
+same amount of data as `10 GB`. Forgetting the conversion factor leaves the right raw
+number attached to the wrong _unit_, inflating the apparent value by whatever factor was
+skipped (1,000x here).
 
 ```mermaid
 flowchart LR
     A["10,000,000 KB"] -- "÷ 1,000" --> B["10,000 MB"]
     B -- "÷ 1,000" --> C["10 GB"]
-    A -. "mistake: skip both steps,\nrelabel KB as MB" .-> D["10,000,000 MB\n(1,000x too large)"]
+    A -. "mistake: skip the KB→MB conversion,\nrelabel KB as MB" .-> D["10,000,000 MB\n(1,000x too large)"]
 ```
 
 ## Fermi estimation: getting the right order of magnitude fast, without exact arithmetic
 
 **If exact arithmetic can still produce a wrong-by-1,000x answer through a units slip, what
 catches it?** A **Fermi estimate** — named after physicist Enrico Fermi, known for
-quick, rough physical estimates — rounds every factor to its nearest power of 10, then
-multiplies the powers, trading precision for speed:
+quick, rough physical estimates — rewrites each factor as a small front number times a
+power of 10, then multiplies the small front numbers and adds the exponents. A more
+aggressive version rounds the front numbers away too; here we keep them because `2 × 5`
+is still easy arithmetic:
 
 ```text
 2,000,000 records  ≈ 2 × 10⁶
@@ -76,7 +84,7 @@ xychart-beta
     bar [3, 1000]
 ```
 
-A Fermi estimate's rounding (each factor to the nearest power of 10) typically introduces
+A Fermi estimate's rounding and simplification typically introduce
 at most a few-fold error — nowhere near enough to hide a 1,000x mistake. This is exactly
 why a rough, fast, independent estimate is a strong sanity check: its own error margin is
 far smaller than the class of error (a skipped or doubled conversion factor) it's meant to

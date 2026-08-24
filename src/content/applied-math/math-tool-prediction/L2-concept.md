@@ -20,6 +20,16 @@ Guessing from "200 requests per second sounds like a lot" gives no usable number
 
 **L = λW** — the average number of items in a system (L) equals the average arrival rate (λ) times the average time each item spends in the system (W). It holds for _any_ stable queueing system — a web server's request queue, a support ticket backlog, items on a factory line — regardless of the arrival pattern's specific shape, which is what makes it so reusable.
 
+Read the symbols as ordinary school arithmetic first:
+
+| Symbol | Plain-language meaning                       | In the example below                |
+| ------ | -------------------------------------------- | ----------------------------------- |
+| `L`    | how many things are inside, on average       | concurrent requests                 |
+| `λ`    | how many things arrive per unit of time      | `200` requests each second          |
+| `W`    | how long each thing stays inside, on average | `150ms = 0.150` seconds per request |
+
+So the sentence is simply: **things inside = things arriving each second × seconds each thing stays**. The units do the checking for you: `requests/second × seconds = requests`.
+
 ```python
 function estimate_concurrent_requests(requests_per_second, avg_time_in_system_seconds):
     # Little's Law: L = λW
@@ -34,6 +44,14 @@ This single line answers a question that's easy to get badly wrong by intuition 
 ## If utilization goes from 60% to 90%, does wait time go up by about the same 1.5x?
 
 The dangerous part of L = λW is what happens as a system approaches saturation: **W (average time in system) isn't constant** — it grows as the system gets busier, often sharply, not linearly. A system near its capacity limit doesn't degrade gracefully in proportion to extra load; queueing delay tends to blow up non-linearly as utilization approaches 100%, because a busy server queues _new_ arrivals behind an already-growing backlog, not just behind the average case.
+
+The arithmetic reason is small but brutal: the wait curve divides by the room left before 100% busy. At 50% busy, the remaining room is `1 - 0.50 = 0.50`; at 90% busy, it is only `1 - 0.90 = 0.10`. Dividing by a shrinking leftover makes the result grow faster than the original percentage change.
+
+| Utilization `ρ` | Leftover room `1 - ρ` | `ρ / (1 - ρ)` |
+| --------------- | --------------------- | ------------- |
+| 0.50            | 0.50                  | 1             |
+| 0.90            | 0.10                  | 9             |
+| 0.95            | 0.05                  | 19            |
 
 ```mermaid
 xychart-beta
