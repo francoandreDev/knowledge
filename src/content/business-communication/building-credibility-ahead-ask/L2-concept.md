@@ -12,6 +12,10 @@ one exists: a request lands differently depending on the balance built
 up before it arrived, whether or not either person could name a
 number.
 
+A **ledger** is just a record of what was added and subtracted. Nobody
+is literally writing one down here; the point is that people remember
+patterns.
+
 ```mermaid
 flowchart LR
     A["Helped study\n+deposit"] --> D["Trust balance\nrising"]
@@ -27,6 +31,8 @@ withdrawal — it draws down the balance rather than adding to it. If
 the balance is at or near zero when the withdrawal happens, there's
 nothing to draw from, and the request lands as presumptuous rather
 than reasonable, regardless of how politely it's phrased.
+Presumptuous means it feels like you are asking for more trust than
+you have earned.
 
 ## Why the size of the ask matters
 
@@ -55,6 +61,12 @@ being caught faking a deposit doesn't just fail to add to the
 balance — it can subtract from it, since it reveals the asker was
 thinking about the future withdrawal the whole time.
 
+| Looks like a real deposit                        | Looks performative                                      |
+| ------------------------------------------------ | ------------------------------------------------------- |
+| Helping because you noticed a real need          | Helping loudly only when the future ask is already near |
+| Warning early when a promise might slip          | Staying quiet, then apologizing when you need support   |
+| Sharing useful context before anyone asks for it | Sharing just enough to make yourself look cooperative   |
+
 ## The generalizable lesson
 
 **Is this really about bikes, or does it generalize?** It generalizes
@@ -65,3 +77,17 @@ been deposited before this moment, and does the size of what's being
 asked roughly match what's been built up? Skipping straight to the
 ask without ever making a deposit is the single most common way this
 goes wrong.
+
+| Personal situation      | Work situation                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------ |
+| Asking to borrow a bike | Asking someone to support a proposal or priority change                              |
+| Deposits                | Keeping promises, warning early, sharing context, helping without collecting a favor |
+| Withdrawal              | Asking for approval, time, risk, reputation, or political support                    |
+
+Zero is not the same as debt. A person with no history may simply ask
+too early; a person with broken promises has active damage to repair.
+Repairing trust is a different job from building it from zero.
+
+Before a serious ask, add a third question: has the person who needs
+to say yes already seen enough evidence to trust me before I need
+their support?

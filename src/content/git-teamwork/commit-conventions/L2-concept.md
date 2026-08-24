@@ -46,6 +46,18 @@ exactly what to expect from the diff before they open it — a
 `chore: update eslint config` commit sitting next to it is
 unmistakably a different kind of change, at a glance.
 
+## The team convention, not just the syntax
+
+Conventional commit syntax helps, but the real convention is a shared
+promise about shape:
+
+| Team habit                               | Why it matters later                                                        |
+| ---------------------------------------- | --------------------------------------------------------------------------- |
+| One idea per commit                      | Bisect, review, and revert can point to one coherent change                 |
+| Specific description, not vague activity | `fix: reject expired invite token` is searchable; `updates` is not          |
+| Type matches intent                      | A behavior fix should be `fix`, not hidden in `chore` or `refactor`         |
+| Split unrelated work                     | Formatting, dependency bumps, feature logic, and bug fixes age better apart |
+
 ## Why atomic commits are what makes bisect's answer actionable
 
 **If bisect correctly points at the right commit, why isn't that
@@ -72,3 +84,13 @@ instead of an undifferentiated pile), reverting a bad deploy, or just
 reading `git log` to understand what happened and why. Atomicity and
 clear messages aren't really about the moment of committing at all —
 they're about making every later reader's job possible.
+
+| Later task          | What good commits make easier                                                     |
+| ------------------- | --------------------------------------------------------------------------------- |
+| Code review         | The reviewer can ask "is this one change correct?" instead of untangling a pile   |
+| Bad deploy rollback | `git revert` can undo one bad change without dragging good changes with it        |
+| Release notes       | `feat`, `fix`, and `docs` messages can be summarized without rereading every diff |
+
+When this unit says "revert," it means making a new commit that undoes
+an earlier commit. The `checkout` unit covers how to inspect or move
+around history without confusing that with rewriting history.

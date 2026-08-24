@@ -24,6 +24,19 @@ This deep dive uses **TypeScript** — its structural interfaces map directly on
 
 It shouldn't — and the port is what makes that true in code, not just in principle.
 
+Read the code in four layers:
+
+| Layer        | Plain meaning                                              |
+| ------------ | ---------------------------------------------------------- |
+| Core rule    | "Can this order be placed?"                                |
+| Port         | "I need something that can save/load orders"               |
+| Real adapter | "Here is how Postgres satisfies that need"                 |
+| Fake adapter | "Here is a tiny test replacement satisfying the same need" |
+
+The TypeScript uses `Promise`, `async`, interfaces, and imports. Those are
+language details; the architecture test is whether the core imports only
+ports and never imports Postgres, Express, or a driver.
+
 ### The port: an interface the core defines
 
 ```typescript
@@ -140,7 +153,11 @@ export class InMemoryOrderRepository implements OrderRepository {
 
 ```typescript
 // core/use-cases/place-order.test.ts
-import { PlaceOrderUseCase, EmptyCartError, OutOfStockError } from "./place-order";
+import {
+  PlaceOrderUseCase,
+  EmptyCartError,
+  OutOfStockError,
+} from "./place-order";
 import { InMemoryOrderRepository } from "../../adapters/in-memory-order-repository";
 
 class AlwaysInStock {
@@ -150,15 +167,23 @@ class AlwaysInStock {
 }
 
 test("rejects an empty cart", async () => {
-  const useCase = new PlaceOrderUseCase(new InMemoryOrderRepository(), new AlwaysInStock());
-  await expect(useCase.execute({ id: "o1", lines: [] })).rejects.toBeInstanceOf(EmptyCartError);
+  const useCase = new PlaceOrderUseCase(
+    new InMemoryOrderRepository(),
+    new AlwaysInStock(),
+  );
+  await expect(useCase.execute({ id: "o1", lines: [] })).rejects.toBeInstanceOf(
+    EmptyCartError,
+  );
 });
 
 test("saves a valid order", async () => {
   const orders = new InMemoryOrderRepository();
   const useCase = new PlaceOrderUseCase(orders, new AlwaysInStock());
   await useCase.execute({ id: "o1", lines: [{ sku: "SKU-1", qty: 2 }] });
-  expect(await orders.findById("o1")).toEqual({ id: "o1", lines: [{ sku: "SKU-1", qty: 2 }] });
+  expect(await orders.findById("o1")).toEqual({
+    id: "o1",
+    lines: [{ sku: "SKU-1", qty: 2 }],
+  });
 });
 ```
 
@@ -201,16 +226,23 @@ sequenceDiagram
 
 ## Trade-offs: this pattern is not free
 
-| Situation                                                          | Worth it?                                                                     |
-| -------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Real business rules (pricing, eligibility, workflow state)          | Usually yes — the rules are exactly what you want to test without infra        |
-| A five-endpoint CRUD app with no logic beyond validation             | Usually not — the port/adapter split adds files and indirection for rules that don't exist yet |
-| A prototype that will likely be thrown away                          | Not yet — add the seam when the logic (or the pain of testing it) actually shows up |
-| A team of one, on a script run twice a year                          | Almost never — the coordination cost this pattern buys you has nothing to coordinate |
+| Situation                                                  | Worth it?                                                                                      |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Real business rules (pricing, eligibility, workflow state) | Usually yes — the rules are exactly what you want to test without infra                        |
+| A five-endpoint CRUD app with no logic beyond validation   | Usually not — the port/adapter split adds files and indirection for rules that don't exist yet |
+| A prototype that will likely be thrown away                | Not yet — add the seam when the logic (or the pain of testing it) actually shows up            |
+| A team of one, on a script run twice a year                | Almost never — the coordination cost this pattern buys you has nothing to coordinate           |
 
 **The over-abstraction risk in one sentence:** a port with exactly one adapter, forever, is an interface that costs a file and a level of indirection while returning nothing — it's only paying for itself once a second real implementation (a test double counts) actually exists or is genuinely coming.
 
 ## Edge cases and failure modes
+
+For transaction-heavy cases, connect this unit to
+`systems/transactions` and `systems/race-conditions`: a port can hide
+Postgres from the core, but it does not magically make multi-step writes
+atomic. If one use case must save an order and charge a payment together,
+the boundary needs an explicit transaction strategy such as a unit of
+work, outbox, retry, or compensating action.
 
 - **A port that leaks its adapter's shape.** If `OrderRepository.save()` took a raw SQL fragment as an argument, an honest in-memory adapter couldn't implement it without embedding a SQL interpreter — that's the tell the port was designed around Postgres instead of around what the core actually needs.
 - **Adapters throwing adapter-specific exceptions into the core.** If `PostgresOrderRepository.save()` lets a raw `pg` `UniqueViolationError` propagate up through the port, the core (and its tests) now have to know about Postgres error types to handle it — the adapter should translate infrastructure errors into errors the port's contract actually promises (or a core-level `DuplicateOrderError`), not let them leak through unchanged.

@@ -66,12 +66,24 @@ enough to actually evaluate the ask, not just notice one exists:
 | What do you recommend?     | The proposed path, briefly — not the full justification yet | "Migrate to the payments team's existing platform over 6 weeks."                                       |
 | What's the cost/risk?      | What the reader is actually trading off by saying yes       | "Delays the analytics dashboard project by one sprint."                                                |
 
+A reusable first block can be:
+
+| Slot           | Fill it with                              |
+| -------------- | ----------------------------------------- |
+| Request        | What decision/action you need and by when |
+| Why now        | Risk/cost of waiting                      |
+| Recommendation | Path you want, in one sentence            |
+| Trade-off      | Cost/risk of saying yes                   |
+
 **Why include the cost, when it might make the ask harder to
 approve?** Because omitting it doesn't make the trade-off disappear
 — it just means the reader discovers it later, at a worse moment,
 and now also has to wonder what else wasn't mentioned up front. A
 summary that only lists benefits reads as advocacy, not analysis,
 and loses exactly the credibility BLUF is supposed to build.
+
+Advocacy means selling only the upside. Analysis means showing upside
+and trade-off so the reader can decide with eyes open.
 
 ## Failure modes at this level
 

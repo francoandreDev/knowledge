@@ -4,7 +4,7 @@
       "id": "headroom-vs-recovery",
       "level": 3,
       "title": "How many nodes does it take before a single node's failure fully recovers?",
-      "description": "Using the exact scheduleSpread and reconciliation logic from L3, drag the number of nodes in the cluster (each with 4 CPU / 8 memory) while scheduling the same 8 pods (2 CPU / 4 memory each) used in Scenario B. The worst-loaded node is then killed and reconciliation is attempted on the survivors.",
+      "description": "Using the exact scheduleSpread and reconciliation logic from L3, drag the number of nodes in the cluster (each with 4 CPU / 8 memory) while scheduling an extended stress-test version of Scenario B: 8 pods, each asking for 2 CPU / 4 memory. First notice whether any pods were already pending before the failure; then the worst-loaded node is killed and reconciliation is attempted on the survivors.",
       "params": [
         {
           "name": "nodeCount",
@@ -16,8 +16,14 @@
           "unit": ""
         }
       ],
-      "compute": "function scheduleSpread(nodes, pods) { const remaining = nodes.map((n) => ({ name: n.name, cpu: n.cpu, mem: n.mem })); const sorted = [...pods].sort((a, b) => b.cpu - a.cpu || b.mem - a.mem); const placements = []; const pending = []; for (const pod of sorted) { const candidates = remaining.filter((n) => n.cpu >= pod.cpu && n.mem >= pod.mem); if (candidates.length === 0) { pending.push(pod.name); continue; } candidates.sort((a, b) => b.cpu - a.cpu || b.mem - a.mem); const node = candidates[0]; node.cpu -= pod.cpu; node.mem -= pod.mem; placements.push({ pod: pod.name, node: node.name }); } return { placements, pending, remaining }; } const nodes = Array.from({ length: params.nodeCount }, (_, i) => ({ name: 'node' + i, cpu: 4, mem: 8 })); const pods = Array.from({ length: 8 }, (_, i) => ({ name: 'p' + i, cpu: 2, mem: 4 })); const initial = scheduleSpread(nodes, pods); const countByNode = {}; for (const pl of initial.placements) countByNode[pl.node] = (countByNode[pl.node] || 0) + 1; let worstNode = null, worstCount = -1; for (const [name, count] of Object.entries(countByNode)) { if (count > worstCount) { worstCount = count; worstNode = name; } } if (!worstNode) return { pendingAfterFailure: 0 }; const lostPods = initial.placements.filter((p) => p.node === worstNode).map((pl) => pods.find((p) => p.name === pl.pod)); const survivors = initial.remaining.filter((n) => n.name !== worstNode); const reconciled = scheduleSpread(survivors, lostPods); return { pendingAfterFailure: reconciled.pending.length };",
+      "compute": "function scheduleSpread(nodes, pods) { const remaining = nodes.map((n) => ({ name: n.name, cpu: n.cpu, mem: n.mem })); const sorted = [...pods].sort((a, b) => b.cpu - a.cpu || b.mem - a.mem); const placements = []; const pending = []; for (const pod of sorted) { const candidates = remaining.filter((n) => n.cpu >= pod.cpu && n.mem >= pod.mem); if (candidates.length === 0) { pending.push(pod.name); continue; } candidates.sort((a, b) => b.cpu - a.cpu || b.mem - a.mem); const node = candidates[0]; node.cpu -= pod.cpu; node.mem -= pod.mem; placements.push({ pod: pod.name, node: node.name }); } return { placements, pending, remaining }; } const nodes = Array.from({ length: params.nodeCount }, (_, i) => ({ name: 'node' + i, cpu: 4, mem: 8 })); const pods = Array.from({ length: 8 }, (_, i) => ({ name: 'p' + i, cpu: 2, mem: 4 })); const initial = scheduleSpread(nodes, pods); const initialPending = initial.pending.length; const countByNode = {}; for (const pl of initial.placements) countByNode[pl.node] = (countByNode[pl.node] || 0) + 1; let worstNode = null, worstCount = -1; for (const [name, count] of Object.entries(countByNode)) { if (count > worstCount) { worstCount = count; worstNode = name; } } if (!worstNode) return { initialPending, pendingAfterFailure: initialPending }; const lostPods = initial.placements.filter((p) => p.node === worstNode).map((pl) => pods.find((p) => p.name === pl.pod)); const survivors = initial.remaining.filter((n) => n.name !== worstNode); const reconciled = scheduleSpread(survivors, lostPods); return { initialPending, pendingAfterFailure: initialPending + reconciled.pending.length };",
       "outputs": [
+        {
+          "key": "initialPending",
+          "label": "Pods already pending before any node fails",
+          "unit": "",
+          "color": "#fbbf24"
+        },
         {
           "key": "pendingAfterFailure",
           "label": "Pods still pending after the worst-loaded node fails",

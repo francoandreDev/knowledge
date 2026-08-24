@@ -75,6 +75,11 @@ store.getStock()` before it writes anything, so the event loop can run
 the _other_ call's `getStock()` in that gap — both see `stock = 1`
 before either one calls `setStock`.
 
+If `await` is new, read it here as "pause this function until the
+database-like operation returns, and let other ready work run meanwhile."
+That pause is useful for concurrency, but it also creates the exact gap
+where a race can enter.
+
 ## Fix 1: make the critical section synchronous (atomic)
 
 If the check and the update never hit an `await` between them, there's
@@ -117,6 +122,12 @@ Sometimes the critical section genuinely needs an `await` in the
 middle — calling a payment API before committing the stock change, for
 example. A lock (mutex) forces every other call to wait outside the
 critical section instead of interleaving into it.
+
+In production, be careful about what the lock protects. Lock the small
+span that decides or changes the shared value. Avoid holding a lock
+around slow, unrelated work like calling a payment provider if that work
+doesn't actually need exclusive access to the shared value; otherwise
+the lock becomes a throughput bottleneck.
 
 ```js
 class Mutex {

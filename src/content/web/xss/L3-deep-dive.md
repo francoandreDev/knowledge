@@ -31,11 +31,19 @@ from user input; it just runs it, with access to that page's cookies
 (`document.cookie`), which is exactly the mechanism the Scenario
 describes.
 
+Real sites should mark session cookies as `HttpOnly`, which prevents
+JavaScript from reading them through `document.cookie`. That reduces
+one common data-theft path, but it does not make XSS harmless: the
+injected script is still running inside the victim's logged-in page and
+can often perform actions as that user.
+
 This isn't theoretical — it's what a real browser does with exactly
 these two functions' output, served as the initial page HTML (not
 inserted later via `innerHTML`, which browsers deliberately don't
 execute `<script>` tags from — only markup present when the page is
-first parsed runs):
+first parsed runs). That `innerHTML` detail is not a safety rule:
+other injected markup, such as event-handler attributes, can still be
+dangerous when user input is inserted as HTML instead of text.
 
 ![Top: the vulnerable renderer's output loaded as a page — the injected script ran immediately and appended a visible "script executed" banner. Bottom: the fixed renderer's output — the same malicious text rendered as inert, visible text instead of running.](./images/vulnerable-vs-escaped.png)
 

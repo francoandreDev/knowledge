@@ -24,6 +24,13 @@ request actually came from the site's own page (commonly via a CSRF
 token), which is a completely different mechanism from sanitizing
 displayed content.
 
+A concrete CSRF shape: you are logged in to a bank, then visit another
+site. That other site quietly submits a hidden transfer form to the
+bank. Your browser may attach your bank cookies automatically, so the
+bank needs another proof that the request came from the bank's own UI:
+a CSRF token or an equivalent same-site defense the attacker page cannot
+guess or read.
+
 ## How XSS actually gets injected: reflected vs. stored
 
 **Does XSS always require an attacker to permanently store something

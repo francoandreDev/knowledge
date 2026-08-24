@@ -4,6 +4,12 @@ title: "L3 — Writing the review: what turns a correct fix into a senior-level 
 
 ## The raw facts, before anyone writes anything
 
+Technical words in the example: a **batch job** is a scheduled task a
+system runs automatically; a **billing cycle** is the period when
+customers are charged; **QA** means quality assurance, the people or
+process used to check that a change behaves correctly; and **production**
+is the real system customers use.
+
 Before either manager wrote a word, here's what actually happened —
 identical in structure, wildly different in scope:
 
@@ -60,6 +66,11 @@ version that reads as senior — not because the code changed, but
 because the write-up now shows the reader what would have happened
 without Sam's intervention.
 
+Notice the senior signal does not say, "Sam is excellent." It shows
+the facts — customer count, dollar amount, timing, and verification —
+so the reader can reach that conclusion without being asked to trust a
+self-assessment.
+
 ## Priya's write-up, for contrast — and why it's _correctly_ modest
 
 > "Priya identified and fixed an off-by-one error in the debug
@@ -88,12 +99,20 @@ later; as the person writing about someone else's work, the habit is
 translating "what did they do" into "what would have happened without
 them," which is what actually carries the scope information.
 
+This connects directly to `career-craft/documentation-career-tool`: a
+prevented problem often needs to be documented on purpose, because no
+outage or customer complaint exists to remind everyone later.
+
 **Try extending it yourself:** suppose Priya's debug-log fix had
 actually been reused six months later by a different team debugging a
 production incident, cutting their diagnosis time from two days to
 two hours. Does that change how her original write-up should have
 been framed at the time it happened, or only how a _later_ write-up
 should credit her, once that consequence became visible?
+
+Hint: do not rewrite the past as if Priya knew the future. Record the
+new impact when it becomes visible, and connect it back to the original
+work with the evidence that now exists.
 
 ## Failure modes
 

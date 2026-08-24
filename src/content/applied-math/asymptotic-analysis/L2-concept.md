@@ -19,6 +19,12 @@ a fixed per-operation cost; `n₀` is exactly what lets Big-O ignore
 small-`n` behavior — which is also exactly why a benchmark run only at
 small `n` can't validate or refute a Big-O claim on its own.
 
+With simple numbers, if `f(n)` is `n²` and `c = 4`, the bound says:
+"after some point, the work is never more than four times `n²`." It does
+not say the work equals `n²` exactly, and it does not care if the first
+few small values behave strangely. The phrase "for all n ≥ n₀" means
+"from that starting size onward, with no later exceptions."
+
 ## Ω and Θ: bounding from below, and from both sides
 
 **If O(f(n)) is an upper bound, is there a way to state a lower bound —
@@ -38,7 +44,16 @@ technically `O(n³)` (a looser, still-true upper bound) — but calling it
 ## Why the dominant term wins, and exactly when it starts winning
 
 **`3n² + 100n` — at what point does the `n²` term actually take over from
-the `100n` term?** They're equal when `3n² = 100n`, i.e. `n = 100/3 ≈ 33`.
+the `100n` term?** They're equal when `3n² = 100n`. Since input size is
+positive, divide both sides by `n`:
+
+```text
+3n² = 100n
+3n² / n = 100n / n
+3n = 100
+n = 100/3 ≈ 33
+```
+
 Below that, `100n` is larger; above it, `3n²` grows away from `100n`
 increasingly fast:
 
@@ -70,9 +85,21 @@ tracking the crossover in the chart above.
 
 | Where you measure     | `T(2n)/T(n)` for `3n² + 100n` | What it looks like         |
 | --------------------- | ----------------------------- | -------------------------- |
-| n = 5 → 10            | ≈ 2.3                         | Looks close to linear      |
+| n = 5 → 10            | ≈ 2.26                        | Looks close to linear      |
 | n = 50 → 100          | ≈ 3.2                         | Ambiguous, trending upward |
 | n = 100,000 → 200,000 | ≈ 4.0                         | Unambiguously quadratic    |
+
+For the first row, the actual arithmetic is:
+
+```text
+T(5) = 3·25 + 100·5 = 575
+T(10) = 3·100 + 100·10 = 1300
+T(10) / T(5) = 1300 / 575 ≈ 2.26
+```
+
+That ratio is genuinely near 2 at this small size. The mistake is
+treating that local ratio as proof that the ratio will stay near 2 when
+`n` becomes much larger.
 
 ## The generalizable lesson
 

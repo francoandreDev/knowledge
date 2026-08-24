@@ -37,6 +37,13 @@ flowchart TB
 
 **Read the arrow direction, not just the boxes: which side names the interface, and which side is forced to conform to it?** The port arrows (`UC --> P1`) point from the core outward to an interface _the core owns_. The implementation arrows (dotted) point from each adapter _back_ toward that same port. The core never draws an arrow toward `PGa` or `Mema` by name — it only knows about `P1`. That's the entire trick: swapping `PGa` for `Mema` changes which dotted line exists, and touches nothing solid.
 
+Another way to say it: the **port lives inside the core's vocabulary**.
+The core says, "I need something that can save an order." Postgres,
+DynamoDB, and the in-memory fake each bring an adapter that fits that
+socket. The diagram may draw a line outward to the port so you can see
+the need, but the code dependency still points inward because the core
+owns the interface name and shape.
+
 ## Two families of adapters, two different questions
 
 <Scenario label="A team's actual confusion">
@@ -54,10 +61,17 @@ A team adds a background worker that consumes messages from a queue and calls `p
 
 It's primary — the direction of the _call_, not the "infrastructure-ness" of the technology, is what decides the category. The queue consumer calls into the core the same way an HTTP controller does; it just gets triggered by a message instead of a request. It matters because primary and secondary adapters are tested differently: a primary adapter's test asks "does this correctly translate an external trigger into a call on the core," while a secondary adapter's test asks "does this correctly implement the port's contract" — mixing the two up produces tests that check the wrong thing.
 
-| Question a primary adapter answers                          | Question a secondary adapter answers                        |
-| ------------------------------------------------------------ | -------------------------------------------------------------- |
+A tiny primary-adapter test might send a fake HTTP body like
+`{ items: [...] }` and assert that the adapter called `placeOrder()` with
+plain domain data. A secondary-adapter contract test might save an order
+through `PostgresOrderRepository`, load it again through the same
+`OrderRepository` port, and assert that the loaded order matches the
+contract. Same app, different question.
+
+| Question a primary adapter answers                                                                               | Question a secondary adapter answers                                     |
+| ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | Did I correctly translate an external trigger (HTTP request, CLI args, a queue message) into a call on the core? | Did I correctly implement the port's contract against a real technology? |
-| Owned by: whoever's driving the app (web team, CLI, scheduler) | Owned by: whoever the core depends on (DB team, infra)          |
+| Owned by: whoever's driving the app (web team, CLI, scheduler)                                                   | Owned by: whoever the core depends on (DB team, infra)                   |
 
 ## Who defines the port's shape?
 

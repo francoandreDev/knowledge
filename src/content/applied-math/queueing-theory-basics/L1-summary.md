@@ -30,6 +30,20 @@ the cliff coming.
 
 ## The shape of the problem
 
+Before the symbols, use a line at a store. If 6 people arrive every minute
+and one cashier can serve 10 people every minute, the cashier is using `6 / 10
+= 60%` of capacity. If 9 people arrive every minute, the cashier is using
+`9 / 10 = 90%`. The second case still has "some room left," but only 1 person
+per minute of slack; any small burst now turns into a visible line.
+
+| Everyday queue piece           | Systems word     | Example at 60% capacity    |
+| ------------------------------ | ---------------- | -------------------------- |
+| people entering line           | arrival rate `λ` | 6 requests/second          |
+| cashier speed                  | service rate `μ` | 10 requests/second         |
+| fraction busy                  | utilization `ρ`  | `6 / 10 = 0.60`            |
+| people waiting or being served | in system `L`    | average requests in flight |
+| time from joining to leaving   | latency `W`      | average time per request   |
+
 - **Queueing theory** studies what happens when requests (or
   customers, or packets, or anything else) arrive at a system faster
   than, or comparably close to, the rate the system can process them.
@@ -47,6 +61,11 @@ the cliff coming.
   time doesn't grow proportionally — it grows toward infinity. A
   system doesn't fail gracefully as it nears capacity; it fails
   sharply, often well before "100% busy" is actually reached.
+- "Stable in the long run" means the line eventually drains instead
+  of growing forever. If the average arrival rate is lower than the
+  average service rate, bursts can clear. If arrivals equal or exceed
+  service for long enough, the queue has no mathematical reason to
+  shrink.
 
 ## Key terms
 
@@ -63,6 +82,11 @@ the cliff coming.
   completes per unit time; latency is how long any individual request
   takes. They're related but not interchangeable — a system can have
   high throughput and terrible latency at the same time.
+- **Capacity before build** — when the real system does not exist yet,
+  the service rate is an estimate from a prototype, benchmark, vendor
+  limit, previous system, or explicit assumption. `applied-math/orders-magnitude`
+  and `applied-math/math-tool-prediction` cover that "rough first number"
+  discipline.
 
 ## What this unit covers
 

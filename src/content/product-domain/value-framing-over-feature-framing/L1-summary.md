@@ -8,7 +8,7 @@ import Scenario from "../../../components/Scenario.astro";
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
       <div class="flex items-center gap-1.5"><span>🧪</span> <strong>Pitch A</strong> — "activated carbon filter, 10-cup capacity, BPA-free plastic"</div>
-      <div class="flex items-center gap-1.5"><span>💰</span> <strong>Pitch B</strong> — "tap water that tastes like bottled water, for $1,028.50 less per year"</div>
+      <div class="flex items-center gap-1.5"><span>💰</span> <strong>Pitch B</strong> — "tap water that tastes like bottled water, for $1,028.50 less in year one"</div>
       <div class="flex items-center gap-1.5"><span>🙋</span> <strong>Listener's reaction</strong> — glazed eyes for A, "wait, how much?" for B</div>
     </div>
   </Fragment>
@@ -24,6 +24,11 @@ The first pitch describes what the product _is_. The second describes
 what the product _does for the listener_ — a concrete, felt
 difference in their own life, expressed in terms they didn't need any
 special knowledge to understand.
+
+In plain language, a pitch is a short explanation meant to make
+someone care. "Activated carbon" is a filter material, "BPA-free" is a
+plastic-safety claim, and "10-cup" is capacity. Those facts may be
+true, but the listener still needs to know why any of them matters.
 
 </Scenario>
 
@@ -42,6 +47,11 @@ special knowledge to understand.
   they don't already have the background to make the connection. Value
   framing does the translation _for_ them.
 
+Short rule: a product fact says what it has; value says why that
+should matter to the person listening. "This backpack has padded
+straps" is a feature. "Your shoulders hurt less on the walk home" is
+value.
+
 ## Key terms
 
 - **Feature** — a factual property of a product: what it has, how it
@@ -51,7 +61,11 @@ special knowledge to understand.
   background knowledge.
 - **Translation gap** — the mental work a listener has to do to get
   from a feature to why it matters to them. A wide translation gap
-  means most listeners give up before crossing it.
+  means most listeners give up before crossing it. Here, "translation"
+  does not mean changing languages; it means changing a technical fact
+  into a reason the listener can care about.
+- **Pitch** — a short explanation meant to persuade someone that an
+  idea, product, or offer is worth their attention.
 - **Audience-relevant terms** — units of meaning a listener already
   understands and cares about: money, time, comfort, risk, effort —
   as opposed to units specific to the product's own internal

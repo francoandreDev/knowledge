@@ -21,6 +21,15 @@ the server. A `GET` with an `Authorization` header is _not_ simple,
 even though `GET` itself is a simple method, because the header alone
 is enough to require a preflight.
 
+## Same symptom, different causes
+
+| Evidence                                                   | What likely happened                | Did the real request reach the server? | What JavaScript sees                       |
+| ---------------------------------------------------------- | ----------------------------------- | -------------------------------------- | ------------------------------------------ |
+| Server logs show no `GET`, console says CORS/preflight     | Preflight failed                    | No                                     | `fetch()` rejects like a network failure   |
+| Server logs show successful `GET`, console says CORS       | Simple request response was blocked | Yes                                    | `fetch()` rejects like a network failure   |
+| Server logs show `404` or `500`, no CORS console error     | HTTP error response                 | Yes                                    | `fetch()` resolves; `response.ok` is false |
+| No server logs, no CORS details, network offline/DNS fails | Network failure                     | No                                     | `fetch()` rejects                          |
+
 ## The preflight round-trip, step by step
 
 **For a non-simple request, what does the browser actually send before

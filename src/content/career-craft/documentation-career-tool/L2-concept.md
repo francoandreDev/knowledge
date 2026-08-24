@@ -10,6 +10,10 @@ own?** Because "the work speaks for itself" requires someone to be
 listening at the exact moment the work happened, and remembering it
 clearly months later — a standard almost nothing meets:
 
+Here, **reports** means the people a manager is responsible for, not
+written reports. **Advocate** means the manager tries to make a strong
+case for them.
+
 ```mermaid
 flowchart LR
     A["Work happens\n(week 3)"] --> B["Manager notices,\nmaybe"]
@@ -32,12 +36,20 @@ facts themselves, or about how they're usually stated?** Almost
 always the latter — the discomfort tracks subjective self-assessment
 ("I did a great job"), not objective description of what happened:
 
+Simple version: subjective means "believe me, I was good." Objective
+means "this happened, and this changed." The second version gives the
+reader something to evaluate.
+
 |                                     | Subjective self-assessment                    | Objective framing                                                                      |
 | ----------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------- |
 | Example                             | "I did a great job leading the migration."    | "Led the database migration; cut query latency from 400ms to 60ms with zero downtime." |
 | What it claims                      | A judgment about the writer's own quality     | A fact about what happened and what changed                                            |
 | How it reads                        | Advocacy — asking the reader to agree         | Analysis — giving the reader something to evaluate                                     |
 | Why it feels uncomfortable to write | Because it's asking for a verdict on yourself | It shouldn't feel uncomfortable — it's a factual report                                |
+
+In the technical example, **latency** means how long a system takes to
+respond, and **zero downtime** means the service did not have to be
+turned off while the change happened.
 
 **Why does objective framing resolve the discomfort rather than just
 disguising the same claim?** Because it genuinely is a different
@@ -54,6 +66,9 @@ conclusion.
 months later, when the writer has forgotten the details themselves?**
 Three things, consistently, not just a title:
 
+A usable entry can follow this simple shape: "I did X; before, Y was
+happening; afterward, Z changed; the hard part was W."
+
 - **What changed** — the concrete before/after, with a number where
   one genuinely exists (latency, incident count, review turnaround
   time) — not vague ("improved reliability") but not padded with a
@@ -64,6 +79,9 @@ Three things, consistently, not just a title:
   documenting at all; routine work usually isn't brag-doc material,
   but the judgment calls, the ambiguity navigated, or the cross-team
   coordination usually are.
+
+A **judgment call** is a decision where there was no obvious answer and
+the person had to choose with care.
 
 ## Failure modes at this level
 

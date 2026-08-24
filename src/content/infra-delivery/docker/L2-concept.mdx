@@ -55,6 +55,15 @@ COPY . .                            <- layer 5 (cache key: entire source tree's 
 CMD ["node", "server.js"]
 ```
 
+Read the cascade like a row of stacked boxes:
+
+| If this changes             | Docker must rebuild                                          |
+| --------------------------- | ------------------------------------------------------------ |
+| Only `server.js`            | The source-copy layer and anything after it                  |
+| `package.json` or lockfile  | The manifest-copy layer, `npm ci`, and the source-copy layer |
+| Base image tag/digest       | Everything after `FROM`, because the foundation changed      |
+| Nothing in a layer's inputs | That layer can be reused from cache                          |
+
 Each instruction produces a layer, cached by a hash of its inputs (the previous layer plus the instruction itself, plus any files it copies in). Editing `server.js` changes layer 5's cache key — layers 1 through 4 are untouched and reused instantly, so `npm ci` doesn't rerun. Editing `package.json` changes layer 3's cache key, which cascades: layers 3, 4, and 5 all rebuild, because each depends on the one before it. This is exactly why dependency-manifest files are copied and installed _before_ the rest of the source in a well-ordered Dockerfile — it maximizes how often the expensive `npm ci` layer gets reused. **The teammate's slow rebuild above is what happens when `COPY . .` comes before the dependency install instead** — every source edit then invalidates the install layer too, because the install now depends on the whole source tree, not just the two manifest files.
 
 ## What happens to the build tools once the app is actually shipped?

@@ -11,6 +11,17 @@ wrong release. A scripted pipeline turns the same steps into a fixed
 sequence a machine executes exactly the same way every time, with no
 step optional and no step reachable out of order.
 
+Before the diagram, translate the infrastructure words into ordinary
+objects:
+
+| Term                  | Read it as                                                                              |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| Release directory     | A separate folder containing one complete version of the app                            |
+| Traffic               | The real user requests arriving at the service                                          |
+| Health check          | An automatic question: "does this candidate version answer correctly?"                  |
+| Migration             | A database shape change the new code needs before it can run safely                     |
+| Atomic symlink switch | Changing one pointer so users go from the old folder to the new folder in a single step |
+
 ```mermaid
 flowchart TD
     A["extract new release"] --> B["install dependencies"]
@@ -25,10 +36,12 @@ flowchart TD
 Because the whole point of checking health at all is to decide whether
 traffic should ever reach the new release — checking after the switch
 would mean users already hit the broken version before anyone found
-out. The switch itself is deliberately the very last thing that can go
-wrong: extracting, installing, and migrating all happen against the
-_new_ release directory while the _old_ one is still live and serving
-every request.
+out. In a real pipeline, that pre-switch health check normally probes a
+candidate process, temporary port, or preview route for the new release
+while the old release is still serving users. The switch itself is
+deliberately the very last thing that can affect user traffic:
+extracting, installing, migrating, and proving the candidate healthy all
+happen while the _old_ release is still live and serving every request.
 
 ## What "atomic" actually buys you
 

@@ -24,6 +24,28 @@ doesn't stop at the icon just because the icon is what was technically
 clicked. This bubbling is what makes delegation possible at all: a
 listener doesn't have to live on the exact element clicked.
 
+The smallest possible listener looks like this:
+
+```js
+const button = document.querySelector(".delete-btn");
+
+button.addEventListener("click", (event) => {
+  console.log("The browser sent this click event:", event);
+});
+```
+
+`addEventListener("click", ...)` is the moment JavaScript asks the browser:
+"when this kind of event happens on this element, run this function." The
+function receives an event object, and that object is where `target`,
+`currentTarget`, bubbling information, and default behavior become visible.
+
+Some elements also have built-in default actions. A link with `href` navigates
+to another URL. A form submit can send data and reload/navigate the page. If
+JavaScript wants to handle that interaction in place, the listener must call
+`event.preventDefault()` and then update the DOM or state itself. That is the
+difference between "the browser navigated away" and "this page reacted without
+reloading."
+
 ## target vs. currentTarget: two different, easily confused values
 
 **If a listener is attached to `ul.todo-list` but the click happened on

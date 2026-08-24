@@ -12,7 +12,7 @@ stands for:
 | Property        | What it guarantees                                                                 | What breaks without it (stock/order example)                                         |
 | --------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | **A**tomicity   | Every operation in the transaction happens, or none of them do                     | Stock decrements, order insert fails — exactly L1's bug                              |
-| **C**onsistency | Data-level rules (invariants) always hold before and after                         | Stock could go negative if two orders are allowed to over-sell it                    |
+| **C**onsistency | Data-level rules (invariants) always hold before and after                         | One order tries to buy 15 items when only 10 are allowed to leave stock              |
 | **I**solation   | A transaction in progress never sees another transaction's unfinished changes      | Two concurrent orders could both read "10 in stock" and both proceed to sell it      |
 | **D**urability  | Once a transaction reports success, that result survives a crash immediately after | A crash right after "Order placed!" wipes out an order that was never actually saved |
 
@@ -20,6 +20,13 @@ Each property answers a different way the naive two-step version can
 go wrong — atomicity alone wouldn't have caught a stock-goes-negative
 bug, and consistency alone wouldn't have caught a mid-transaction crash
 losing an already-reported success.
+
+Read Consistency and Isolation as different questions. Consistency is
+about rules that must be true even for one request by itself: stock
+cannot become negative, an order must point to a real customer, a bank
+balance cannot break its allowed limits. Isolation is about overlap:
+what happens when two requests touch the same data at the same time.
+Both matter, but they protect against different shapes of failure.
 
 ## A transaction's lifecycle: begin, operate, then commit or rollback
 
@@ -41,6 +48,15 @@ path isn't a special case bolted on afterward; it's the transaction
 system's _default_ response to any failure, which is exactly why the
 naive two-step version's bug (an unrolled-back stock decrement) simply
 can't happen inside a real transaction.
+
+The important timeline is simple:
+
+| Moment         | What other requests can see                            |
+| -------------- | ------------------------------------------------------ |
+| Before begin   | Only the old, committed data                           |
+| During work    | The transaction's private, not-yet-final changes       |
+| After commit   | The completed changes, now permanent and visible       |
+| After rollback | The original state, as if the failed attempt never ran |
 
 ## Without transactions vs. with transactions
 

@@ -28,6 +28,22 @@ why "the important combinations, picked by hand" quietly stops being a
 representative sample as flag count grows: the space of possibilities
 is growing far faster than anyone's list of "important" ones.
 
+This is exponential growth: the count multiplies each time you add one
+more independent choice. Linear growth would add a fixed amount each time
+(4, 5, 6, 7). Flag states do not behave that way; they double (4, 8, 16, 32) because every old state can now appear with the new flag off _and_
+with the new flag on.
+
+## How to read the notation
+
+| Notation | Read it as                                       | Example                           |
+| -------- | ------------------------------------------------ | --------------------------------- |
+| `n`      | Total items available                            | 5 candidates                      |
+| `r`      | Items chosen or arranged                         | Pick 3 of those candidates        |
+| `4!`     | `4 × 3 × 2 × 1`                                  | 24 ordered arrangements           |
+| `2^4`    | `2 × 2 × 2 × 2`                                  | 16 on/off flag states             |
+| `nPr`    | Arrange `r` chosen items from `n`; order matters | 1st/2nd/3rd places from finalists |
+| `nCr`    | Choose `r` items from `n`; order does not matter | A team of 3 from 5 candidates     |
+
 ## Permutations: when order matters
 
 **Suppose 3 finalists need to be ranked 1st, 2nd, and 3rd — how many
@@ -65,13 +81,24 @@ every group of reorderings down to a single outcome.
 **Is the flag-combination problem a permutation or a combination
 problem?** Neither, exactly — it's a third pattern: each of `n`
 independent items has 2 states (on/off), giving `2^n` total
-combinations, rather than choosing or arranging a subset of items. But
+states. People may casually call these "combinations," but the formula
+`nCr` is a narrower mathematical tool for choosing groups. But
 combinations become directly useful once the question shifts to
 _pairs_ of flags — "how many distinct pairs of flags are there to
 check together?" is a combination question (`nC2`), and it's the key
 to the fix in L3: instead of hoping a hand-picked list happens to
 cover every pair, compute exactly which pairs exist and check whether
 each one was actually tested.
+
+For four flags A, B, C, D, the distinct pairs are:
+
+```text
+AB, AC, AD, BC, BD, CD
+```
+
+That is 6 pairs. The shortcut `nC2 = n(n - 1) / 2` gives the same answer:
+`4 × 3 / 2 = 6`. We divide by 2 because `AB` and `BA` are the same pair,
+not two different pairs.
 
 ## The generalizable lesson
 

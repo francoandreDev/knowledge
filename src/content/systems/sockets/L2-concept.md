@@ -19,6 +19,18 @@ A single machine can run many programs simultaneously, each bound to its
 own port — the OS routes incoming data to whichever program is listening
 on the port a packet was addressed to.
 
+At the API level, the roles look like this:
+
+| Side   | What it does conceptually                                      |
+| ------ | -------------------------------------------------------------- |
+| Server | `bind` to a port, `listen` for callers, `accept` a connection  |
+| Client | `connect` to the server's IP and port                          |
+| Both   | Once connected, `read` bytes from the socket and `write` bytes |
+
+The names vary by language, but the shape is stable: one side waits at
+a known address, the other dials that address, and both end up with a
+socket they can use for two-way byte flow.
+
 ## The three-way handshake: establishing a connection before any data flows
 
 **Does a TCP connection just start sending data immediately?** No — TCP
@@ -64,6 +76,17 @@ Whichever scheme is chosen, the receiving side needs to **buffer**
 incoming bytes across multiple `data` events until a complete message
 boundary is actually found — never assume a single `data` event contains
 exactly one message, because TCP makes no such promise.
+
+A protocol is more than just "where does the message end." A useful
+protocol also defines:
+
+| Rule type | Question it answers                                         |
+| --------- | ----------------------------------------------------------- |
+| Boundary  | Where does one message end and the next begin?              |
+| Format    | Is the message JSON, binary, plain text, or something else? |
+| Order     | Which message is allowed to come first, second, third?      |
+| Meaning   | What does each field or command actually mean?              |
+| Errors    | How does the receiver say "I could not understand that"?    |
 
 ## Why the localhost test never caught this
 

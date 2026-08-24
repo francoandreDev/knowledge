@@ -22,6 +22,13 @@ like?**
 > you to ship fast _and_ stay within guardrails we've already
 > checked, would that solve it for you?"
 
+The concrete language matters:
+
+| Less useful                                       | More useful                                                       |
+| ------------------------------------------------- | ----------------------------------------------------------------- |
+| "You keep overstepping and breaking our service." | "What do you need from this service that made the change urgent?" |
+| "We own it, so stop touching it."                 | "Our real concern is unreviewed changes taking onboarding down."  |
+
 **What did this exchange actually surface that "who owns it" never
 would have?** Neither team's real interest was "having their name on
 the service." Platform's interest was risk control; Growth's interest
@@ -50,6 +57,11 @@ wanted — it's a design that gives Platform reliable guardrails
 actually needed instead of staying stuck on who gets to claim the
 service.
 
+In plain language: Growth can make small changes that were already
+approved as safe; Platform reviews the unusual or risky changes. That
+is different from "Growth can do anything" or "Platform blocks
+everything."
+
 ## When the same conversation hits a genuine, unresolvable disagreement
 
 **A month later, a new question comes up: which team is on-call when
@@ -76,6 +88,11 @@ interests rather than complaints about the other team. Priya isn't
 being asked to referee a personality conflict — she's being asked to
 make one specific, well-framed decision.
 
+Escalate when both sides have already named legitimate interests and
+there is no design that can make both true at the same time. If the
+interests are still vague, keep clarifying. If the trade-off is real,
+bring the clear trade-off to the person with authority.
+
 ## What generalizes and what doesn't
 
 The core lesson — positions create false zero-sum conflicts, naming
@@ -92,6 +109,9 @@ if a third team also depended on this same notification service and
 had yet another set of interests, would the two-team pre-approved-list
 solution still work as-is, or does adding a third stakeholder change
 what kind of solution is even possible?
+The `reading-stakeholder-incentives` unit is a natural next step when
+the conflict has more than two stakeholders or when hidden incentives
+shape what each side can accept.
 
 ## Failure modes
 

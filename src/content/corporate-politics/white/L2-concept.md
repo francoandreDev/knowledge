@@ -15,6 +15,13 @@ flowchart LR
 
 This test is deliberately mechanical, not about intent alone — a genuinely generous favor and a calculated one can look identical from outside, but the test isn't "were you being nice," it's "does this mechanism require concealment to function." Reciprocity built through real help works exactly the same whether or not the other person consciously notices the pattern — telling them "I've been helping you because I value our working relationship" doesn't break it. A manipulation tactic, by contrast, typically stops working the instant it's named.
 
+An **ask** is a concrete request: "please support this proposal," "can
+you review this today," or "will you introduce me to this person?" The
+white-politics test asks whether the relationship would survive if that
+larger pattern were spoken plainly. "I help people because it is useful
+and it builds trust" can be said out loud. "I helped you so you would
+feel trapped into helping me later" cannot.
+
 ## Reciprocity: why genuine help compounds differently than transactional help
 
 Before the table: if a colleague helped you last month with no ask attached, and then this month explicitly reminded you of that favor while asking for something — does that later reminder change how the original help feels in hindsight? Most people say yes, which is itself evidence of how much the _timing_ of an ask matters, independent of whether the original help was real.
@@ -50,9 +57,20 @@ flowchart LR
 
 Visibility isn't self-promotion in the sense of exaggerating results — it's the deliberate act of making real work legible to people who'd otherwise never encounter it: a postmortem write-up, a brief share-out of what a project actually involved, a clear explanation of a hard trade-off that was navigated. None of this requires inflating anything; it requires the separate, often-skipped step of actually telling people, in a form they can absorb, what was true anyway.
 
+A postmortem is a short write-up after something important happened:
+what happened, why, and what was learned. A share-out is a brief
+explanation to people who were not there. A trade-off is a choice where
+you gain one thing and give up another. Sharing those accurately is not
+bragging; exaggerating them would be.
+
 ## Alliance-building as ongoing practice, not a single transaction
 
 `power-real-resource`'s case study showed a sponsor lending credibility to one specific proposal, and noted that sponsorship depends on a relationship built _before_ the ask. This unit generalizes that: alliance-building means treating relationships with people whose future support might matter as worth investing in continuously — genuinely helping with their priorities, being reliable on commitments, showing up for things that aren't immediately about your own agenda — specifically so that when a real ask eventually comes, it's landing on an already-established foundation of trust, not a cold introduction.
+
+A sponsor is someone whose support helps a proposal move. Lending
+credibility means their trust in you becomes part of why others take
+the proposal seriously. A cold introduction is the opposite: the first
+real contact happens only when you already need something.
 
 The three mechanisms aren't separate skills so much as the same underlying pattern (genuine investment, no immediate payoff, sustained over time) applied to three different surfaces:
 

@@ -30,6 +30,17 @@ folder listing. Reading `models/` before you've even found the route
 that triggers the bug spends time on code that may never come up in
 the actual trace.
 
+| Layer      | Plain role                                                     |
+| ---------- | -------------------------------------------------------------- |
+| Router     | Recognizes the URL and method, then sends the request onward   |
+| Controller | Translates web details like `req`, `res`, `params`, and `body` |
+| Service    | Applies the actual business rule, such as changing an order    |
+
+For HTTP basics like request, response, method, and status code, this
+connects to [HTTP request/response basics](/web/http-request-response-basics/).
+You do not need that whole unit first, but it explains the web words this
+example uses.
+
 ## Three techniques, three different questions
 
 **If exploring a whole codebase up front doesn't work, what's the
@@ -82,3 +93,8 @@ of the file.
   the code is _actually checked_ to do. When they disagree, the test
   is closer to ground truth, since it runs and fails if violated —
   the comment doesn't.
+
+  For example, a comment might say "duplicate discounts are rejected,"
+  while the test file only checks "unknown discounts are rejected." The
+  comment tells you what someone hoped was true; the missing test tells
+  you which behavior still needs a real, runnable check.

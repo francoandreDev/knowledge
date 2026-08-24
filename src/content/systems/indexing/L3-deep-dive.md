@@ -10,6 +10,11 @@ in real, runnable JavaScript rather than asserted — three lookup
 strategies over the same data, benchmarked at the exact 500-vs-2M
 row counts from the opening scenario.
 
+If the JavaScript feels dense, read this section for one question:
+how many items does each strategy have to touch before it finds one
+email? The code is only a measuring tool. The lesson is the search
+shape: scan many rows, cut the search area down, or jump by exact key.
+
 ```js
 function pad(i) {
   return String(i).padStart(7, "0");

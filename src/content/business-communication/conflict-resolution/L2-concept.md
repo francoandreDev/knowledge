@@ -15,6 +15,16 @@ real interests underneath haven't been named yet:
 | "We own this service." (Platform) | Changes need to go through review so reliability and on-call load stay manageable          |
 | "We own this service." (Growth)   | Experiments need to ship on a predictable schedule without waiting on another team's queue |
 
+Quick vocabulary for this table:
+
+| Term         | Plain meaning                                                                   |
+| ------------ | ------------------------------------------------------------------------------- |
+| Review       | Another person checks a change before it goes live                              |
+| On-call load | The burden of being responsible when something breaks, often outside work hours |
+| Queue        | Work waiting for a team to process it                                           |
+| Self-service | A safe way for another team to do routine work without asking every time        |
+| Guardrails   | Pre-agreed limits that make self-service safe                                   |
+
 **Do these two interests actually conflict with each other?** Not
 necessarily — Platform's interest is _process_ (review before
 changes ship), while Growth's interest is _speed_ (not being blocked
@@ -48,6 +58,11 @@ a real trade-off has to be made. But even then, knowing the actual
 interests makes the trade-off explicit and negotiable, instead of an
 unexplained "one team lost" outcome that breeds resentment.
 
+Reusable question: **what needs to be true for each team to accept the
+solution?** For Platform, the answer might be "risky changes are
+reviewed." For Growth, it might be "safe routine changes do not wait
+two weeks." A good design tries to make both statements true.
+
 ## What makes an escalation path effective, not just an excuse
 
 **If two teams can't resolve something themselves, is escalating to a
@@ -59,6 +74,19 @@ complaints about the other team. An ad hoc "I'll email your manager"
 escalation, with no agreed process, tends to feel personal and
 adversarial rather than a normal part of how the organization
 resolves ambiguity.
+
+A useful escalation packet is small and concrete:
+
+| Field          | What to write                                            |
+| -------------- | -------------------------------------------------------- |
+| Decision-maker | The person or forum with authority to decide             |
+| Exact question | The one trade-off that remains unresolved                |
+| Interest A     | What one side legitimately needs                         |
+| Interest B     | What the other side legitimately needs                   |
+| Deadline       | When the decision is needed and what happens if it waits |
+
+For more on naming who decides, connect this with
+`decision-making-frameworks`.
 
 ## Failure modes at this level
 

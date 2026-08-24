@@ -4,6 +4,17 @@ title: "L1 — Why doesn't being technically right guarantee being seen as senio
 
 import Scenario from "../../../components/Scenario.astro";
 
+Quick vocabulary before the scenario:
+
+| Term              | Read it as                                                                                       |
+| ----------------- | ------------------------------------------------------------------------------------------------ |
+| Off-by-one bug    | A counting mistake where the answer is one too high or one too low                               |
+| Debug log         | A message engineers use to understand what a system did while investigating a problem            |
+| Internal engineer | Someone inside the company, not a customer                                                       |
+| Production        | The real system customers use, not a practice or test copy                                       |
+| Promotion packet  | The written evidence used to argue that someone is ready for a higher job level                  |
+| Incident          | A visible system problem that needs a response, not just any small mistake found before it ships |
+
 <Scenario label="Two correct bug reports, two very different reviews">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
@@ -56,7 +67,9 @@ happened.
   involved, or how many other people's work depends on it.
 - **Impact** — the realized (or prevented) consequence of the work —
   scope multiplied by how likely the bad outcome actually was to
-  happen.
+  happen. If an error could affect 3,100 people and was very likely to
+  run, the prevented impact is high; if it could affect 3 people in a
+  private draft, the impact is much smaller.
 - **Blast radius** — a way of describing scope concretely: if this
   had gone wrong, what exactly would have broken, and how far would
   it have spread?

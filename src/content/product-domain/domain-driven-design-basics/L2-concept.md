@@ -33,9 +33,13 @@ subsystem, a business process) — inside which a term has one precise,
 agreed meaning. Outside that boundary, the same word may mean something
 else entirely, and that's expected, not a bug:
 
+For example, Billing may be a team, "invoices" may be a subsystem, and
+"collecting payment" may be a business process. The shared idea is: this
+is the area where one meaning is true.
+
 ```text
 Billing context:
-  "Customer" = BillingAccount (the entity that owns invoices)
+  "Customer" = BillingAccount (the thing/account that owns invoices)
 
 Support context:
   "Customer" = SupportContact (the person who opened the ticket)
@@ -58,6 +62,10 @@ counts."
 columns?** Not quite — it means capturing the actual rules the business
 operates by, as concepts the code enforces, not just data it stores.
 
+The names in backticks below are examples of names that might exist in
+code. The important part is not the syntax; it is that the name carries a
+business rule instead of being a loose storage box.
+
 | Just storing data                         | Modeling the domain                                                                        |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------ |
 | A `status` column that accepts any string | A `SubscriptionStatus` that can only move active → grace-period → cancelled, in that order |
@@ -79,3 +87,6 @@ _when_ a shared word is masking two genuinely different concepts with
 different rules and different questions asked of them — as opposed to a
 single concept that's simply described two ways — and only introducing a
 boundary where the underlying meanings have actually diverged.
+
+That is how the code stops fighting the business: it stops forcing
+everyone to use one word with a false or incomplete meaning.

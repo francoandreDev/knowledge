@@ -14,6 +14,10 @@ grouped as `(!isAdmin && isLoggedIn) || isOwner`, not
 _whole_ expression true, regardless of `isAdmin` — there's no way for
 `!isAdmin` to veto it.
 
+"Binds tighter" means "gets grouped first." Parentheses are the manual
+version of that grouping: solve what is inside them before combining it
+with the rest, just like arithmetic.
+
 ```mermaid
 flowchart TD
     subgraph actual["Actual grouping (no parens)"]
@@ -45,19 +49,32 @@ looking different?** Testing a few example inputs by hand can miss the
 one combination where they diverge — a truth table checks _every_
 combination, which is the only way to be certain.
 
-| isAdmin | isLoggedIn | isOwner | Actual: `(!isAdmin && isLoggedIn) \|\| isOwner` | Intended: `!isAdmin && (isLoggedIn \|\| isOwner)` |
-| ------- | ---------- | ------- | ----------------------------------------------- | ------------------------------------------------- |
-| true    | false      | true    | **true**                                        | **false**                                         |
-| true    | true       | true    | true                                            | false                                             |
-| false   | false      | true    | true                                            | true                                              |
-| false   | true       | false   | true                                            | true                                              |
+There are three yes/no inputs, and each has two possible values, so
+there are `2 x 2 x 2 = 8` rows to check.
 
-The first two rows are exactly the bug: an admin (`isAdmin: true`) who
+| isAdmin | isLoggedIn | isOwner | `!isAdmin` | `isLoggedIn \|\| isOwner` | Actual: `(!isAdmin && isLoggedIn) \|\| isOwner` | Intended: `!isAdmin && (isLoggedIn \|\| isOwner)` |
+| ------- | ---------- | ------- | ---------- | ------------------------- | ----------------------------------------------- | ------------------------------------------------- |
+| true    | true       | true    | false      | true                      | **true**                                        | **false**                                         |
+| true    | true       | false   | false      | true                      | false                                           | false                                             |
+| true    | false      | true    | false      | true                      | **true**                                        | **false**                                         |
+| true    | false      | false   | false      | false                     | false                                           | false                                             |
+| false   | true       | true    | true       | true                      | true                                            | true                                              |
+| false   | true       | false   | true       | true                      | true                                            | true                                              |
+| false   | false      | true    | true       | true                      | true                                            | true                                              |
+| false   | false      | false   | true       | false                     | false                                           | false                                             |
+
+The highlighted rows are exactly the bug: an admin (`isAdmin: true`) who
 owns the document (`isOwner: true`) gets `true` from the actual code —
 edit access — when the intended rule says `false`, because `!isAdmin`
-alone should have vetoed it. The last two rows show the versions
+alone should have vetoed it. Several other rows show the versions
 agreeing, which is exactly why some manual testing missed the bug: a
 non-admin owner behaves the same under both versions.
+
+Take the row `isAdmin=true`, `isLoggedIn=false`, `isOwner=true` slowly:
+`!isAdmin` becomes `false`, but the actual grouping still ends with
+`false || true`, which is `true`. The intended grouping ends with
+`false && true`, which is `false`. Same facts, different grouping,
+different access decision.
 
 ## Negating a compound condition: De Morgan's laws
 

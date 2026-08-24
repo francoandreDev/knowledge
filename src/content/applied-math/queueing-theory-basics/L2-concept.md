@@ -40,6 +40,18 @@ and that expression grows without bound as ρ approaches 1 — it's not
 a special case, it's the direct consequence of a server with less and
 less spare capacity to absorb any variation in arrivals.
 
+There are two closely related ways to read the formula:
+
+| Formula       | What it says in plain language                                |
+| ------------- | ------------------------------------------------------------- |
+| `1 / (1 - ρ)` | relative shape: divide by the fraction of capacity still free |
+| `1 / (μ - λ)` | actual average time when you know service speed and arrivals  |
+
+If `μ = 10` requests/second and `λ = 6`, then `1 / (10 - 6) = 0.25`
+seconds. If arrivals rise to `λ = 9`, then `1 / (10 - 9) = 1`
+second. The traffic rose 1.5x, but the spare capacity fell from 4
+requests/second to 1 request/second.
+
 ## Little's Law: a relationship that doesn't care about the details
 
 **Does the sharp-curve behavior depend on assuming a very specific
@@ -62,6 +74,11 @@ check: if you know two of the three numbers (say, arrival rate and
 observed average latency), you can compute the third (how many
 requests are "in flight" at once) without needing to know anything
 about the specific distribution of arrival or service times.
+
+This connects directly to `applied-math/statistics`: the law uses
+averages, not worst cases. A queue can satisfy the average relationship
+while still having bursts, outliers, and peak-hour behavior that need
+separate measurement.
 
 ## Throughput and latency are related, but not interchangeable
 

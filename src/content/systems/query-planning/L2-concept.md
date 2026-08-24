@@ -42,6 +42,18 @@ anyway?** Because normalization and denormalization optimize for
 different things, and the right choice depends on the actual access
 pattern:
 
+Here is the same customer in two shapes:
+
+| Shape        | Example picture                                                               |
+| ------------ | ----------------------------------------------------------------------------- |
+| Normalized   | `orders` stores `customerId: 7`; `customers` stores `id: 7, name: "Ava"` once |
+| Denormalized | every order row also stores `customerName: "Ava"` directly                    |
+
+Normalization does not automatically create N+1. A normalized design
+can still be read efficiently with one join. The N+1 bug appears when
+the app reassembles related data by asking the database one small
+question per row instead of asking one joined question.
+
 | Approach     | What it optimizes for                                                                       | What it costs                                                                                       |
 | ------------ | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | Normalized   | Writes stay simple — a customer's name is updated in exactly one place                      | Reads that need related data require a join or an extra lookup per item                             |
@@ -60,7 +72,8 @@ join cost on the rare read.
 - **Treating "add an index" as the fix for every slow query.** An
   index helps a single query find data faster — it does nothing about
   a query _pattern_ that issues N+1 separate queries in the first
-  place.
+  place. If the problem is "50,001 round trips," indexing may make
+  each trip cheaper, but it does not turn 50,001 trips into one.
 - **Denormalizing data without a plan for keeping duplicates in
   sync.** Duplicating a customer's name onto every order is only safe
   if there's a clear, enforced process for updating every copy when
@@ -70,3 +83,7 @@ join cost on the rare read.
   is often invisible at the data volumes present in development —
   this unit's Scenario is exactly that: 20 orders hides a problem that
   50,000 orders exposes.
+- **Forgetting the planner exists.** A single SQL query can still be
+  slow if the database chooses, or is forced into, an expensive plan:
+  scan too much data, sort too many rows, use the wrong join order, or
+  miss an index that would have narrowed the work.

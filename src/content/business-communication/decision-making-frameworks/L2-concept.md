@@ -19,6 +19,10 @@ Not a committee, not "the group" — one name. That single point of
 accountability is what a consensus-seeking meeting is missing by
 default.
 
+In plain words: one person must be answerable for the final call. A
+committee can advise, but if the committee is the Approver, nobody
+knows who is supposed to end the discussion.
+
 ## RACI: four different roles, for ongoing work
 
 **If DACI is for a single decision, what's RACI actually for?**
@@ -38,6 +42,13 @@ time, while DACI is built for one decision with a clear before/after.
 Using RACI to force a single meeting to a conclusion, or DACI to track
 a quarter-long project's task ownership, is reaching for the wrong
 tool for the job.
+
+| Situation                           | Better fit | Why                                        |
+| ----------------------------------- | ---------- | ------------------------------------------ |
+| Choose a logging vendor             | DACI       | One decision needs a final call            |
+| Decide a launch date                | DACI       | Input matters, but one person must approve |
+| Run weekly support operations       | RACI       | Ongoing work needs responsibility by task  |
+| Maintain a recurring review process | RACI       | People need stable roles over time         |
 
 ## How a decision actually moves under DACI
 
@@ -60,6 +71,16 @@ asynchronously — before the Approver ever has to weigh anything in
 real time. This is what makes the actual decision moment fast: by the
 time it happens, the hard part (surfacing the trade-offs) is already
 done.
+
+Before the meeting, the Driver should be able to fill this checklist:
+
+| Question               | Answer needed before meeting starts              |
+| ---------------------- | ------------------------------------------------ |
+| What exact decision?   | The specific call, not the general topic         |
+| Who approves?          | One named Approver                               |
+| Who contributes input? | Only people whose expertise changes the decision |
+| Who is only informed?  | People who need the outcome, not live debate     |
+| What summary goes out? | Decision, reason, trade-off, next step           |
 
 ## Why "everyone decides together" quietly fails
 

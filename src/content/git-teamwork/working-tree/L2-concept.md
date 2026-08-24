@@ -42,6 +42,17 @@ This is the exact mechanism from L1's incident: `shared-config.js` was identical
 `feature-a` and `feature-b`'s last commits, so branch B was taken — the uncommitted edit
 was never at risk, because checkout never needed to touch that file at all.
 
+Tracked and untracked files add one more beginner distinction:
+
+| File kind      | What Git knows                                            | What checkout compares                                            |
+| -------------- | --------------------------------------------------------- | ----------------------------------------------------------------- |
+| Tracked file   | The file exists in commits or has been added to the index | The committed versions on the current and target branch           |
+| Untracked file | The file is on disk, but not promised to history yet      | Usually nothing, because there is no committed version to compare |
+
+That means a brand-new file can be visible in `git status` without belonging to any branch
+or commit yet. It is at least as easy to forget as a modified tracked file, so the same
+habit applies: check status before switching, restoring, or cleaning.
+
 ## Reproducing the two different outcomes for real
 
 **The same starting point — an uncommitted edit — leads to two very different outcomes

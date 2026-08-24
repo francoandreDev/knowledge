@@ -27,6 +27,17 @@ changed since the last call. Every call to `toggleTaskNaive` blocks
 on `patchFn` before the caller has anything to show — this is
 exactly the 800ms gap from the opening scenario.
 
+## Reading the code names before the code
+
+| Code name            | Plain meaning                                                 |
+| -------------------- | ------------------------------------------------------------- |
+| `fetcher`            | Function that asks the server for the latest task list        |
+| `patchFn`            | Function that sends a task change to the server               |
+| `key`                | Cache key: the name of the remembered answer, like `tasks`    |
+| `onUpdate`           | Function the cache calls when background fresh data arrives   |
+| `onOptimisticUpdate` | Function that lets the UI show the user's intent immediately  |
+| `onRollback`         | Function that restores the exact prior UI state after failure |
+
 ## A real response cache with stale-while-revalidate
 
 **Before reading the implementation — what does the caller need back

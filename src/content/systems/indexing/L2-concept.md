@@ -29,6 +29,13 @@ same unchanged query degrades as a table grows: nothing about the
 query is wrong, the table simply outgrew the point where "just check
 every row" was cheap enough not to notice.
 
+Without the math words, the contrast is this: linear lookup is like
+checking every page in a notebook until you find a name. Logarithmic
+lookup is like using an ordered dictionary: open near the middle, see
+whether your word comes before or after, then keep cutting the search
+area down. You still search, but the amount left to search collapses
+fast.
+
 ```mermaid
 xychart-beta
     title "Full scan: worst-case comparisons (linear growth)"
@@ -59,6 +66,11 @@ all across the same four-thousand-x growth in data.
 index type — hash — exist at all?** Because a B-tree pays for one
 extra capability that a hash index doesn't need to support, and a
 hash index is faster at exactly the thing it's willing to give up:
+
+| Everyday picture        | Database shape | Good at                                     | Bad at                                             |
+| ----------------------- | -------------- | ------------------------------------------- | -------------------------------------------------- |
+| Ordered dictionary      | B-tree index   | Exact lookup, ranges, sorted output         | Slightly more work than a direct bucket            |
+| Labeled storage cubbies | Hash index     | One exact key: "where is this token/email?" | Questions that need order, before/after, or ranges |
 
 |                                                  | B-tree index                        | Hash index                                                                                                   |
 | ------------------------------------------------ | ----------------------------------- | ------------------------------------------------------------------------------------------------------------ |
@@ -94,6 +106,13 @@ defeat an index even though it exists:
   barely narrows anything when 95% of rows share the same value; the
   database may reasonably decide a full scan is cheaper than following
   an index into millions of matching rows anyway.
+
+That decision is made by the query planner: the part of the database
+that compares possible routes before running the query. An index is
+therefore not a command. It is an option the planner may choose when
+the option looks cheaper than scanning the table. If the indexed value
+matches almost every row, scanning can be the honest cheaper route.
+The `query-planning` unit goes deeper into this route-choosing idea.
 
 ## Failure modes at this level
 

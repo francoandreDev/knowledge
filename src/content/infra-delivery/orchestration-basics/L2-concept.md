@@ -10,6 +10,12 @@ for a human — it runs a loop, continuously, that compares what was
 declared ("5 replicas should exist") against what's actually observed
 running, and acts on any gap:
 
+Think of desired state like a classroom attendance target: "there
+should be 5 students in this group." If you count only 3, you do not
+need to guess whether the group is complete — the difference tells you
+that 2 are missing. The reconciliation loop does that count again and
+again for containers.
+
 ```mermaid
 flowchart TD
     A["Desired state:\n'5 replicas should run'"] --> C{"Compare to\nactual state"}
@@ -23,8 +29,10 @@ flowchart TD
 This loop runs constantly, not just when something breaks — most
 iterations find no gap and do nothing. The moment a node dies and
 takes containers with it, the very next comparison finds a gap, and
-the loop reacts within seconds, not whenever a human happens to be
-paged and awake.
+the loop normally reacts far faster than waiting for a human to be
+paged and awake. The exact time depends on the platform's checks,
+timeouts, and type of failure, but the important change is that recovery
+starts from the system observing a gap, not from a person noticing one.
 
 ## The scheduler: where does each container actually go?
 
@@ -36,9 +44,15 @@ each container's declared resource requirements to make the call:
 | Concept               | What it means                                                                  |
 | --------------------- | ------------------------------------------------------------------------------ |
 | Node capacity         | Total CPU/memory a machine has available for containers                        |
-| Pod resource request  | CPU/memory a container declares it needs, up front                             |
+| Pod resource request  | CPU/memory a pod asks the scheduler to reserve before it is placed             |
 | Placement decision    | Pick a node with enough _remaining_ capacity for that request                  |
 | Spreading vs. packing | Favor nodes with more free capacity (spread) vs. filling one node first (pack) |
+
+The resource request is not "how much CPU this pod is using this exact
+millisecond." It is the amount the scheduler promises not to overbook,
+like reserving seats before a trip: if a pod asks for 2 CPU and 4 GB of
+memory, the scheduler only places it where that much room is still
+available.
 
 A scheduler that always _packs_ the fullest node first leaves other
 nodes empty — efficient on paper, but a single node failure then takes

@@ -43,6 +43,13 @@ the other adds a verdict that isn't the writer's to give.**
 **What does the same event look like written to state facts and let
 the reader draw the conclusion?**
 
+Technical words in this example: **data corruption** means saved data
+was wrong; a **race condition** is a timing bug where two actions happen
+in an unlucky order; **log correlation** means comparing system records
+to see the pattern; a **backfill** repairs older affected data; and an
+**invariant check** is an automatic rule that verifies something
+important remains true.
+
 > "Diagnosed and fixed a data corruption bug affecting an estimated
 > 2% of customer records over 3 weeks, caused by a race condition in
 > the record-merge path. Traced it via log correlation (no existing
@@ -54,6 +61,10 @@ the reader draw the conclusion?**
 
 **What makes this version work, checked against L2's three
 elements?**
+
+You do not need to copy the technical level of this example. The
+structure matters more than the domain: fact, change, importance, and
+difficulty.
 
 - **What changed** — "2% of customer records," "3 weeks," "no
   existing alert had caught it," "added a new invariant check" — all
@@ -99,6 +110,15 @@ objective framing to a mentoring conversation that doesn't have an
 obvious "before/after" metric the way a performance bug does — what
 would the concrete, checkable version of "I helped a junior engineer
 grow" actually look like?
+
+Example: "Paired with a junior engineer for three sessions on debugging
+strategy; after that, they independently diagnosed and fixed the next
+two similar bugs without needing a rescue review." That is not a
+headline metric, but it is still concrete and checkable.
+
+A metric does not have to be a big number. It can be an observable sign:
+fewer repeated blockers, one task completed without help, a decision
+accepted by another team, or a clearer handoff that other people reused.
 
 ## Failure modes
 

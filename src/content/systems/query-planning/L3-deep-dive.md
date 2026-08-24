@@ -9,6 +9,11 @@ measure query count directly, without needing a real database
 server. What does the naive version of the Scenario's endpoint
 actually do?**
 
+This is a simulation of database behavior, not SQL syntax. A
+`findCustomerById` call represents "ask the database for one customer."
+A `findAllOrders` call represents "ask the database for the list of
+orders." The counter makes the hidden cost visible.
+
 ```js
 let queryCount = 0;
 
@@ -78,6 +83,12 @@ that's in-memory JavaScript work, not a separate database round-trip
 the same result with a `JOIN` clause; the underlying idea (fetch
 related data together, not one row at a time) is identical.
 
+In plain SQL words, the database version would ask: "return each order
+with the customer row whose `customers.id` equals
+`orders.customerId`." That is what a join does: it makes the database
+combine related rows inside one planned operation instead of making
+the app ask a new question for every order.
+
 **Does this fix mean query count stops mattering as the data grows?**
 No — it goes from _scaling with the number of orders_ to being
 _constant regardless of the number of orders_, which is the actual
@@ -133,7 +144,15 @@ lookup map, or use a SQL `JOIN`) applies to this specific
 one-list-one-related-table shape — a query needing data from three or
 four related tables needs the same _principle_ (fetch together, not
 per-item) applied to a more complex join or a differently-shaped
-batch fetch. **Try extending it yourself:** if each order also needed
+batch fetch.
+
+This does not mean "one query is always good" or "joins are always
+free." A single query can still have a bad plan if it scans too much,
+sorts too much, joins in a costly order, or lacks the index that would
+narrow the work. This unit's bug is query count; the wider query
+planning lesson is that the database always has to choose a route.
+
+**Try extending it yourself:** if each order also needed
 its list of line items (a one-to-many relationship, not the
 one-to-one customer lookup used here), would the same single-`Map`
 fix still work directly, or does a one-to-many relationship need a

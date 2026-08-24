@@ -43,12 +43,23 @@ specific; it's a closing phrase, not an opening one. **The subtext:**
 likely non-committal, possibly declining to debate it in front of
 others rather than genuinely planning a follow-up.
 
+Here, **substantive** does not mean "excited." It means the person is
+touching a concrete part of the plan. A calm question about timeline,
+cost, risk, ownership, or maintenance is often a stronger sign of real
+engagement than a warm but generic "interesting."
+
 **Director B's response has one real piece of content — "cost
 implications" — layered under the same hedge structure.** This is
 worth more than Director A's response: it names an actual concern,
 even if softened. **The subtext:** probably a real, specific
 reservation (cost) being raised gently rather than as a hard
 objection.
+
+The next move is to turn that named concern into a question: "When you
+say cost implications, which cost worries you most — infrastructure,
+maintenance, team time, or priority against other work?" That question
+does not accuse Director B of blocking the proposal; it converts a
+soft signal into a concrete issue.
 
 **Priya's silence is the loudest signal in the room, precisely
 because it's not what she normally does.** A peer who reliably asks
@@ -95,6 +106,12 @@ person to speak, offering immediate, detailed enthusiasm, and
 Director A and B's responses were unchanged — would that change how
 you'd read the room's overall reaction, even though the literal
 words from A and B are identical to the original scenario?
+
+Likely yes. Director A and B would still be cautious signals, but they
+would no longer be the only signals in the room. Priya's detailed
+enthusiasm would add one concrete piece of support, so the overall read
+would shift from "mostly unverified hedges and one strange silence" to
+"one real supporter, plus two leaders who still need follow-up."
 
 ## Failure modes
 

@@ -8,6 +8,11 @@ Take the bake-sale update from L1. Before looking at the diagram below: if you h
 
 The underlying facts don't change between audiences. What changes is which facts are **load-bearing** for that reader's decision, and how much unexplained context you can assume.
 
+A detail is **load-bearing** if removing it would change what the
+reader decides, feels, or does next. "Rain cut selling time in half"
+is load-bearing for the groupmate planning Saturday; "the trip is on
+track" is load-bearing for the principal.
+
 ```mermaid
 flowchart LR
     Facts["Core facts: what happened, why, what the plan is"] --> Filter{"Audience filter"}
@@ -22,13 +27,18 @@ The facts flowing into the filter are identical in all three branches. What diff
 
 Two messages can state the exact same fact and still fail differently — one by over-explaining, one by leaving out the one thing the reader actually needed. What's the underlying variable that predicts which failure you'll get?
 
-| Lens       | Question to answer before writing           | Groupmate                             | Teacher                                    | Principal                                    |
-| ---------- | ------------------------------------------- | ------------------------------------- | ------------------------------------------ | -------------------------------------------- |
-| Context    | What do they already know?                  | Was there, saw the rain and the crowd | Knows the $500 goal, not the table details | Knows nothing about how the sale ran         |
-| Incentives | What outcome are they measured on?          | Wants Saturday to go better           | Is accountable for hitting $500 in time    | Cares whether the trip happens, nothing else |
-| Channel    | What does this medium train them to expect? | A text or a quick word, informal      | A short note to the person in charge       | A one-line update, no detail expected        |
+| Lens       | Question to answer before writing                                                        | Groupmate                             | Teacher                                    | Principal                                    |
+| ---------- | ---------------------------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------ | -------------------------------------------- |
+| Context    | What do they already know?                                                               | Was there, saw the rain and the crowd | Knows the $500 goal, not the table details | Knows nothing about how the sale ran         |
+| Incentives | What outcome are they measured on? Or, simply: what do they need this message to settle? | Wants Saturday to go better           | Is accountable for hitting $500 in time    | Cares whether the trip happens, nothing else |
+| Channel    | What does this medium train them to expect?                                              | A text or a quick word, informal      | A short note to the person in charge       | A one-line update, no detail expected        |
 
 The higher up the audience sits from the actual event, the more the message needs to lead with the conclusion: a principal who has to read three sentences to find out whether the trip is still happening has already started worrying before reaching the answer.
+
+That hierarchy is only a shortcut, not a title-based rule. A senior
+person asking a narrow technical question still needs detail; a peer
+who only needs a yes/no may need the short version. The real signal is
+the reader's question and stake, not their title.
 
 ## What each failure actually costs
 
@@ -60,5 +70,14 @@ This is the mental checklist behind every rewrite in L3 — not a formula, but t
 2. **What are they actually measured on?** Filter the facts down to the ones that bear on that stake — a true fact that's irrelevant to their stake is noise, not detail, no matter how interesting it is.
 3. **What decision or reaction do I actually need from them?** This is the ask — even an informational message has an implicit one ("just be aware," "don't worry about this").
 4. **Does this channel expect the bottom line first?** If so, lead with the ask and follow with supporting detail; if not (a conversation with shared context), the supporting detail can come first and the ask can trail it.
+
+For the principal, the filled checklist is short:
+
+| Question        | Answer for the principal                                        |
+| --------------- | --------------------------------------------------------------- |
+| Already knows?  | Almost nothing about the sale itself                            |
+| Stake?          | Whether the field trip is still safe                            |
+| Needed reaction | Stay informed, do not panic, no decision needed yet             |
+| Channel?        | Bottom line first: "The trip is on track; final total Saturday" |
 
 The same four questions, asked in the same order, are what actually changed between the three versions in L3 — not a different process per audience, the same process applied to different answers.

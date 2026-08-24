@@ -8,6 +8,26 @@ title: "L3 — Reproducing the bug, proving an invariant misses it, and building
 tests actually look like, and why did all three pass despite the
 bug?** Interior values, one per tier, nowhere near the boundary:
 
+Read the code like this if you are new to programming:
+
+| Code piece        | Plain reading                          |
+| ----------------- | -------------------------------------- |
+| `function`        | Name a reusable rule                   |
+| `if (...)`        | If this condition is true              |
+| `return`          | Answer with this value and stop        |
+| `<`               | Less than                              |
+| `<=`              | Less than or equal                     |
+| `throw new Error` | Reject the input because it is invalid |
+
+In plain pseudocode, the buggy rule says:
+
+```text
+If weight is negative, reject it.
+If weight is less than 5, charge 4.99.
+If weight is less than 10, charge 8.99.
+Otherwise, charge 14.99.
+```
+
 ```js
 // Tested with weight = 2 (tier 1), 6 (tier 2), 15 (tier 3) — all pass.
 function shippingCostBuggy(weightKg) {
@@ -25,9 +45,21 @@ shippingCostBuggy(15); // 14.99 — correct
 shippingCostBuggy(5); // 8.99 — WRONG, business rule says 5kg is tier 1 (4.99)
 ```
 
+| Call                    | Expected by business rule | Buggy result | Why it matters        |
+| ----------------------- | ------------------------- | ------------ | --------------------- |
+| `shippingCostBuggy(2)`  | 4.99                      | 4.99         | Interior of tier 1    |
+| `shippingCostBuggy(5)`  | 4.99                      | 8.99         | Exact boundary        |
+| `shippingCostBuggy(6)`  | 8.99                      | 8.99         | Interior of tier 2    |
+| `shippingCostBuggy(10)` | 8.99                      | 14.99        | Second exact boundary |
+| `shippingCostBuggy(15)` | 14.99                     | 14.99        | Interior of tier 3    |
+
 Every interior test passes because the bug isn't in the interior —
 it's exactly at `weightKg === 5`, where `weightKg < 5` evaluates to
 `false` and control falls through to the next tier.
+
+In plain words, `weightKg < 5` asks "is this strictly below 5?" For
+`5.0`, the answer is no, so the function keeps moving to the next rule.
+That movement is what "falls through" means here.
 
 ## Testing the invariant first — and watching it miss the bug
 
@@ -50,6 +82,11 @@ checkMonotonic(shippingCostBuggy, 20, 0.5);
 // { violated: false } — the invariant holds across the entire range,
 // bug and all
 ```
+
+This helper walks through weights from `0` to `20` in steps of `0.5`.
+At each step, it checks whether the new price is lower than the previous
+price. It is useful, but it is checking one property only: "does price
+ever go down?"
 
 This is the exact point L2 made: the boundary bug moves `weightKg === 5`
 from `4.99` _up_ to `8.99` — the price still never _decreases_ as

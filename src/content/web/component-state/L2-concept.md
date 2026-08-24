@@ -37,6 +37,18 @@ from an action to a specific display — which is exactly the shortcut
 that let the quick-buy handler skip the header badge in the buggy
 version.
 
+## Where should the state live?
+
+The goal is not "make everything global." The goal is "put each piece of
+state in the smallest place that can still serve everyone who needs it."
+
+| Situation                                                  | Good owner                      | Why                                                                |
+| ---------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------ |
+| Only one component reads and changes it                    | Local component state           | No other part needs to coordinate with it                          |
+| Two nearby components show the same value                  | Their common parent             | Both can read one value without a global store                     |
+| Distant areas like header, drawer, and sidebar need it     | A focused store for that domain | The shared value has one owner without mixing unrelated state      |
+| Unrelated values like cart count, theme, and draft comment | Separate owners/stores          | One global object for everything recreates chaos at a larger scale |
+
 ## Scattered updates vs. a single store, side by side
 
 |                                   | Scattered direct updates                                  | Single store, unidirectional flow                                              |

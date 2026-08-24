@@ -15,6 +15,19 @@ flowchart LR
 
 The DOM tree is what most web development directly manipulates. The accessibility tree is a second structure the browser derives from the same markup, and it's what every non-visual way of using a page (screen readers, switch devices, voice control, browser "reader mode") actually reads. Semantic elements populate every branch of it correctly by default; a generic `<div>` populates none of it, because a `<div>` has no inherent role — its accessibility-tree entry is just "generic," carrying no information about what it does.
 
+The simplest way to hear the difference:
+
+```html
+<div>Sign up</div>
+<button type="button">Sign up</button>
+```
+
+A sighted mouse user may see the same words either way if CSS makes them look
+alike. A screen reader user hears the first as plain content, roughly "Sign
+up." The second is announced with its role, roughly "Sign up, button," and the
+keyboard behavior is already attached. The words are identical; the meaning
+and behavior are not.
+
 ## What a real `<button>` gives you, that a styled `<div>` doesn't
 
 | Behavior                | `<button>`                            | `<div onclick>` styled to look like a button                                                     |

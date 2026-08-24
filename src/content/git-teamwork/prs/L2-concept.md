@@ -46,6 +46,21 @@ territory that's already covered — the reviewer's actual value is in
 asking "what wasn't tested," "why this approach," and "what happens
 at the edges" — the questions no automated check can ask on its own.
 
+## Beginner reviewer checklist
+
+| Reviewer question                                     | Why it catches what CI may miss                                  |
+| ----------------------------------------------------- | ---------------------------------------------------------------- |
+| What new scenario does this change enable?            | New behavior may not have any tests yet                          |
+| What happens at zero, empty, huge, or invalid inputs? | Edge cases often reveal assumptions hidden in normal examples    |
+| Is there a simpler way to express this?               | Correct code can still be hard for the next person to understand |
+| Are tests added for the new behavior?                 | Review can turn a human insight into future automated protection |
+| Could this break callers outside the diff?            | The changed lines may not show every dependency in the codebase  |
+
+Good review culture is specific and collaborative: "What should happen
+if both discounts apply?" helps the author reason. "Bad approach" gives
+no path forward. A useful review leaves the code safer and leaves the
+author clearer about the system.
+
 ## Blocking checks: why "please run the tests" isn't enough
 
 **If a team asks engineers to run tests before merging, why do teams
@@ -67,6 +82,12 @@ flowchart TD
     F -->|"No"| G["Changes requested —\nauthor updates, cycle repeats"]
     F -->|"Yes"| H["Merge allowed"]
 ```
+
+Real tools often run CI and review in parallel, or rerun CI after the
+author pushes review fixes. The important invariant is not the exact
+order in the diagram. The important invariant is: before merge, the
+required automated checks have passed and the required reviewers have
+approved the final version.
 
 ## Failure modes at this level
 

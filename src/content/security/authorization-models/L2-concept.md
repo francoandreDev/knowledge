@@ -18,9 +18,13 @@ flowchart TD
 ```
 
 The invoice endpoint's bug lived specifically in the gap between B and C: it correctly
-confirmed A (a valid session existed) and implicitly assumed B (any logged-in user is a
-"customer" role allowed to view _some_ invoice), but never reached C — whether _this_
-invoice belonged to _this_ customer.
+confirmed A (a valid session existed) and effectively treated every logged-in customer as
+allowed to view _some_ invoice, but never reached C — whether _this_ invoice belonged to
+_this_ customer.
+
+Status-code shortcut: `401` means "we do not know who you are"; `403` means "we know who
+you are, but you cannot do this." For the HTTP foundation, use
+`/web/http-request-response-basics/`.
 
 ## RBAC: permissions attached to a role
 
@@ -65,6 +69,10 @@ resource (`invoice.ownerId`). No role-only system, however carefully designed, c
 this comparison, because roles don't carry per-resource identity — a "billing-viewer" role
 is the same role regardless of which specific invoice is being requested.
 
+Context is optional in this invoice example, but it matters in other rules: "only during
+work hours," "only from the company network," or "only while the account is active" are
+context attributes.
+
 ## Combining both, correctly
 
 **Does fixing the bug mean abandoning RBAC in favor of ABAC?** No — most real systems use
@@ -93,4 +101,5 @@ class of bug, unless an explicit ownership or relationship check runs before the
 returned. The practical audit question: **for every endpoint that accepts a resource
 identifier, is there a line of code that compares an attribute of the resource against an
 attribute of the requester — or is authentication alone silently standing in for that
-check?**
+check?** The identifier might be in the URL, or it might be a field sent inside a form or
+request body.

@@ -7,6 +7,11 @@ title: "L3 — Implementing least-squares regression, and forecasting the Scenar
 **Here's the actual data from the Scenario. How do we fit a single
 line through all twelve points, rather than just the last two?**
 
+If the code is new, keep the non-code picture in front: compute the average
+week and average signup count, measure how each point sits relative to those
+averages, then choose a line direction. `num` is "do later weeks generally
+have higher signups?" and `den` is "how spread out are the week numbers?"
+
 ```js
 const weeks = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 const signups = [30, 33, 35, 38, 36, 41, 44, 42, 47, 50, 80, 120];
@@ -41,10 +46,26 @@ much each week's deviation from the average week correlates with that
 week's deviation from the average signup count; `den` normalizes that
 by how spread out the weeks are.
 
+`correlates` here means "moves together." If later weeks tend to have higher
+signup counts, slope is positive. If later weeks tend to have lower counts,
+slope is negative. If week number tells you almost nothing, slope stays close
+to zero.
+
 ## How good is the fit? R²
 
 **A line can be fit through any set of points. How do we know if this
 particular line actually describes the data well?**
+
+`R²` compares two kinds of error:
+
+| Error bucket | Plain meaning                                     |
+| ------------ | ------------------------------------------------- |
+| `ssRes`      | squared error the line still leaves behind        |
+| `ssTot`      | squared spread you had before fitting any line    |
+| `R²`         | fraction of spread the line explains, from 0 to 1 |
+
+An `R²` near 1 means the line explains most of the visible pattern. An `R²`
+near 0 means the line is not doing much better than guessing the average.
 
 ```js
 function rSquared(xs, ys, slope, intercept) {
@@ -89,11 +110,11 @@ rSquared(
 ```
 
 The pre-spike ten weeks fit a line almost perfectly (`R² ≈ 0.944`);
-adding the two viral weeks back in nearly doubles the slope (2.04 →
-5.54) and drags `R²` down to 0.606. That gap is the number-level
-version of L2's warning: a couple of points at the edge of the data
-can swing the whole fitted line far more than "2 weeks out of 12"
-would suggest.
+adding the two viral weeks back in multiplies the slope by about 2.7
+(2.04 → 5.54) and drags `R²` down to 0.606. That gap is the
+number-level version of L2's warning: a couple of points at the edge
+of the data can swing the whole fitted line far more than "2 weeks
+out of 12" would suggest.
 
 ## Forecasting week 52, three ways
 
@@ -125,9 +146,9 @@ const preSpikeWeek52 = forecast(preSpikeFit.slope, preSpikeFit.intercept, 52);
 Three defensible-sounding methods, three very different year-end
 numbers: **1,720** (naive), **≈302** (full regression), **≈134**
 (pre-spike trend only). The naive number is the one the board actually
-heard — and it's roughly 13× the full-regression estimate, because it
-treated one unusually good week as the new weekly growth rate instead
-of as a single data point.
+heard — and it's roughly 5.7× the full-regression estimate, and about
+13× the pre-spike estimate, because it treated one unusually good
+week as the new weekly growth rate instead of as a single data point.
 
 **Which of these three should actually go in front of the board?**
 Neither extreme, and the code above doesn't resolve that by itself —
@@ -148,6 +169,9 @@ the further it's projected past the observed range — applies to any
 time series: server load, revenue, churn, latency percentiles. What's
 specific to this worked example: `linearRegression` fits a single
 straight line, which assumes the underlying trend really is linear.
+`applied-math/statistics` explains the mean/variance language behind
+`R²`, while `applied-math/math-tool-prediction` covers the broader habit
+of choosing a model before trusting a forecast.
 **Try extending it yourself:** if the twelve weeks of signups instead
 showed a repeating pattern — say, every fourth week dipping because of
 a recurring maintenance window — would a single straight line fit

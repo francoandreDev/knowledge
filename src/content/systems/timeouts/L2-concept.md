@@ -26,6 +26,13 @@ inventory service, each one still consuming a resource for the
 duration of the timeout — better than hanging forever, but still
 wasteful if the dependency is going to keep failing.
 
+A timeout shortens each wait; it does not reduce the number of tries.
+A retry adds more tries; it does not protect the dependency unless the
+tries are limited and spaced out. A circuit breaker stops a repeated
+bad pattern for a while. Backpressure is what the overloaded service
+does before collapse: reject new work, return `429` or `503`, shrink a
+queue, pause producers, or serve a cheaper degraded path.
+
 ## The states a circuit breaker actually moves through
 
 **Does a circuit breaker just permanently stop calling a failing
@@ -68,7 +75,14 @@ by the caller's own retry logic instead of a single hanging call.
   call, over and over with no delay, can actually make a struggling
   dependency's situation worse by adding more load right when it's
   least able to handle it.
+- **Retrying without a limit.** Three users making one request each
+  can become nine dependency calls if every request retries twice. At
+  large traffic, retries multiply load very quickly unless there is a
+  cap, backoff, and usually jitter.
 - **Treating circuit breakers as optional polish.** Without one, a
   timeout limits how long each request waits, but the caller keeps
   spending resources on doomed requests to an obviously-failing
   dependency indefinitely.
+- **Calling every overload "backpressure" without changing behavior.**
+  Logging "we are overloaded" is not backpressure. The sender must get
+  a usable signal or response that causes less work to arrive.

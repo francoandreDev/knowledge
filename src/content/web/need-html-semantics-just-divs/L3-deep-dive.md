@@ -42,7 +42,16 @@ This renders identically to a well-structured page if the CSS is right — that'
 </div>
 ```
 
-Same visual result with the same CSS classes — nothing about the _styling_ changed. What changed: `<nav>`/`<a>` are keyboard-focusable and Enter-activatable by default; `<button>` is too, and gets a "button" role and disabled-state handling for free; `<header>`/`<nav>`/`<main>` are real landmarks a screen reader can jump between; `<h1>` gives the page a real heading a screen reader's "jump to heading" command can find. `outer.class="page"` div stays a div deliberately — it has no semantic role of its own, it's purely a styling wrapper, which is exactly the legitimate use case for `<div>`.
+Same visual result with the same CSS classes — nothing about the _styling_ changed. What changed: `<nav>`/`<a>` are keyboard-focusable and Enter-activatable by default; `<button>` is too, and gets a "button" role and disabled-state handling for free; `<header>`/`<nav>`/`<main>` are real landmarks a screen reader can jump between; `<h1>` gives the page a real heading a screen reader's "jump to heading" command can find. The outer `<div class="page">` stays a div deliberately — it has no semantic role of its own, it's purely a styling wrapper, which is exactly the legitimate use case for `<div>`.
+
+| Original generic markup   | Semantic replacement | What the replacement adds                                        |
+| ------------------------- | -------------------- | ---------------------------------------------------------------- |
+| `<div class="topbar">`    | `<header>`           | Marks the page's introductory region                             |
+| `<div class="menu">`      | `<nav>`              | Creates a navigation landmark                                    |
+| `<div class="menu-item">` | `<a href="...">`     | Gives real link behavior: focus, Enter activation, destination   |
+| `<div class="content">`   | `<main>`             | Lets assistive tech jump straight to primary content             |
+| `<div class="title">`     | `<h1>`               | Gives the page a real heading                                    |
+| `<div class="cta">`       | `<button>`           | Gives button role, focus, Enter/Space activation, disabled state |
 
 ## A concrete, checkable model of keyboard accessibility
 

@@ -30,14 +30,20 @@ actually close the gap" — which is what keeps effort pointed at the
 right target instead of drifting into busywork that merely looks
 productive.
 
+A **gap** is the missing proof between where you are now and what the
+goal requires. An **evaluator** is whoever decides whether the goal is
+met. The **bar** is the standard they use to decide. If the goal is
+judged by another person, the safest first step is asking that person
+what proof they would need to see.
+
 ## Effort-based plan vs. gap-based plan
 
-|                           | Effort-based plan ("work harder")                       | Gap-based plan (skill gap analysis)                      |
-| ------------------------- | ------------------------------------------------------- | -------------------------------------------------------- |
-| Starting point            | A general intention to do more                          | A specific, named gap from a direct conversation         |
-| What "success" looks like | More hours, more visible activity                       | Visible evidence that closes exactly the named gap       |
-| Risk                      | Effort spent on things that don't map to the actual bar | None, as long as the identified gap was the right one    |
-| What the evaluator sees   | Generic busyness, hard to map to specific expectations  | A direct answer to the question they were already asking |
+|                           | Effort-based plan ("work harder")                       | Gap-based plan (skill gap analysis)                                                          |
+| ------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Starting point            | A general intention to do more                          | A specific, named gap from a direct conversation                                             |
+| What "success" looks like | More hours, more visible activity                       | Visible evidence that closes exactly the named gap                                           |
+| Risk                      | Effort spent on things that don't map to the actual bar | Lower risk, because the effort targets the named gap; still needs confirmation and check-ins |
+| What the evaluator sees   | Generic busyness, hard to map to specific expectations  | A direct answer to the question they were already asking                                     |
 
 ## Why guessing at the gap doesn't work as well as asking
 
@@ -60,3 +66,9 @@ specifically what's missing, design one deliberate way to produce
 visible evidence of it, and check back rather than assuming more
 effort in a general direction will eventually add up to the same
 thing.
+
+If there is no clear manager or evaluator, the same pattern still
+works: identify the most credible source of the standard, such as a
+rubric, a senior peer, a hiring manager, a teacher, or the person who
+will approve the next responsibility. The weaker the evaluator signal,
+the more important the check-back step becomes.

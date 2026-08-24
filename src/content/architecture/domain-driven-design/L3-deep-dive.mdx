@@ -25,7 +25,7 @@ less likely?**
 Aggregates live and die by the invariants they enforce, and a good chunk
 of that enforcement is "this constructor can't be called with an invalid
 combination of arguments" — TypeScript's structural typing plus
-`readonly`/private fields let the *type checker* reject a fair number of
+`readonly`/private fields let the _type checker_ reject a fair number of
 invalid states before a single test runs, which is exactly the kind of
 guarantee DDD's tactical patterns are trying to build by hand. Any
 statically-typed OO language works for this; TypeScript is used here
@@ -70,7 +70,9 @@ export class Money {
 
   private assertSameCurrency(other: Money): void {
     if (this.currency !== other.currency) {
-      throw new Error(`Currency mismatch: ${this.currency} vs ${other.currency}`);
+      throw new Error(
+        `Currency mismatch: ${this.currency} vs ${other.currency}`,
+      );
     }
   }
 }
@@ -81,7 +83,7 @@ Floating-point dollars accumulate rounding error across enough `add()`
 calls — a value object's whole job is to be trustworthy every time it's
 compared, so the internal representation has to make `equals()` actually
 mean what it says. Note there's no setter anywhere: every operation
-returns a *new* `Money`, which is what "value objects are immutable"
+returns a _new_ `Money`, which is what "value objects are immutable"
 means in code, not just in a diagram.
 
 ## OrderLine: an entity, scoped to this aggregate
@@ -113,7 +115,7 @@ export class OrderLine {
 }
 ```
 
-`OrderLine`'s `id` only needs to be unique *within* one `Order` — it has
+`OrderLine`'s `id` only needs to be unique _within_ one `Order` — it has
 no meaning to any other aggregate, which is why `Order` is free to
 generate it however it likes (a counter, a UUID) without coordinating
 with anything else in the system.
@@ -140,11 +142,33 @@ export class Order {
     public readonly version: number = 0, // optimistic concurrency, see below
   ) {}
 
+  copy(): Order {
+    return this.cloneWithVersion(this.version);
+  }
+
+  withVersion(version: number): Order {
+    return this.cloneWithVersion(version);
+  }
+
+  private cloneWithVersion(version: number): Order {
+    const clone = new Order(this.id, this.creditLimit, version);
+    clone.lines = [...this.lines];
+    clone.status = this.status;
+    clone.pendingEvents = [...this.pendingEvents];
+    clone.nextLineId = this.nextLineId;
+    return clone;
+  }
+
   addLine(productId: string, quantity: number, unitPrice: Money): void {
     if (this.status !== "OPEN") {
       throw new Error("Cannot add a line to an order that's already placed");
     }
-    const line = new OrderLine(String(this.nextLineId++), productId, quantity, unitPrice);
+    const line = new OrderLine(
+      String(this.nextLineId++),
+      productId,
+      quantity,
+      unitPrice,
+    );
     const prospectiveTotal = this.total().add(line.lineTotal());
     if (prospectiveTotal.isGreaterThan(this.creditLimit)) {
       throw new Error(
@@ -167,7 +191,10 @@ export class Order {
   }
 
   total(): Money {
-    return this.lines.reduce((sum, line) => sum.add(line.lineTotal()), Money.fromDollars(0));
+    return this.lines.reduce(
+      (sum, line) => sum.add(line.lineTotal()),
+      Money.fromDollars(0),
+    );
   }
 
   // Drains and returns events raised since the last pull — called by the
@@ -183,8 +210,14 @@ export class Order {
 Both invariants from L1 — "no changes after placed" and "total ≤ credit
 limit" — are checked inside `addLine`, on every single call, with no
 code path that skips them. There is no `order.lines.push(...)` available
-from outside the class: `lines` is private, so the *only* way to add a
+from outside the class: `lines` is private, so the _only_ way to add a
 line is through the method that enforces the rule.
+
+The `copy()` method exists only because this lesson uses an in-memory
+repository. A real repository would rebuild a fresh aggregate instance
+from rows or documents every time it loads. The important idea is that
+two requests must not share the same mutable JavaScript object; they
+must each carry the version they read.
 
 ## The domain event
 
@@ -229,13 +262,14 @@ export class ConcurrencyConflictError extends Error {
 
 ```ts
 // in-memory-order-repository.ts
-import { Order, OrderRepository, ConcurrencyConflictError } from "./order-repository";
+import { Order } from "./order";
+import { OrderRepository, ConcurrencyConflictError } from "./order-repository";
 
 export class InMemoryOrderRepository implements OrderRepository {
   private store = new Map<string, { order: Order; version: number }>();
 
   async findById(orderId: string): Promise<Order | undefined> {
-    return this.store.get(orderId)?.order;
+    return this.store.get(orderId)?.order.copy();
   }
 
   async save(order: Order): Promise<void> {
@@ -247,7 +281,10 @@ export class InMemoryOrderRepository implements OrderRepository {
       throw new ConcurrencyConflictError(order.id);
     }
     const nextVersion = (existing?.version ?? 0) + 1;
-    this.store.set(order.id, { order, version: nextVersion });
+    this.store.set(order.id, {
+      order: order.withVersion(nextVersion),
+      version: nextVersion,
+    });
   }
 }
 ```
@@ -257,24 +294,28 @@ export class InMemoryOrderRepository implements OrderRepository {
 ```ts
 const repo = new InMemoryOrderRepository();
 const order = new Order("order-4471", Money.fromDollars(100));
+order.addLine("sku-existing", 1, Money.fromDollars(90));
 await repo.save(order); // version 0 -> stored at version 1
 
 // Both requests load the SAME snapshot, at version 1.
-const forRequestA = await repo.findById("order-4471")!;
-const forRequestB = await repo.findById("order-4471")!;
+const forRequestA = (await repo.findById("order-4471"))!;
+const forRequestB = (await repo.findById("order-4471"))!;
 
-forRequestA.addLine("sku-1", 1, Money.fromDollars(10)); // total now $10, OK
+forRequestA.addLine("sku-1", 1, Money.fromDollars(10)); // total now $100, OK
 await repo.save(forRequestA); // succeeds, stored at version 2
 
-forRequestB.addLine("sku-2", 1, Money.fromDollars(8)); // computed against its OWN in-memory total ($8)
+forRequestB.addLine("sku-2", 1, Money.fromDollars(8)); // computed against its stale total ($98)
 await repo.save(forRequestB);
 // throws ConcurrencyConflictError: forRequestB still carries version 1,
 // but the store is now at version 2. Request B must reload the current
-// Order (now at $10, one line) and retry addLine against reality — at
-// which point it would correctly compute $18, still under the $100
-// limit, and succeed. If the retried total had exceeded the limit,
-// addLine's own invariant check would have rejected it.
+// Order (now at $100) and retry addLine against reality — at which point
+// addLine's own invariant check rejects $108 before anything is saved.
 ```
+
+With L1's exact `$95 + $10` numbers, the aggregate would reject Request A
+even earlier because `$105` already exceeds the limit. The `$90 + $10 +
+$8` replay isolates the lost-update shape: each request looks legal from
+its stale snapshot, but the combined result is not legal.
 
 **Why does raising an error on the second write count as "fixing" the
 race, rather than just moving the bug to a different line?** Because the
@@ -309,7 +350,11 @@ export interface StockAvailability {
 }
 
 export class LegacyInventoryAdapter {
-  constructor(private readonly legacyClient: { getStock(sku: string): Promise<LegacyStockRow> }) {}
+  constructor(
+    private readonly legacyClient: {
+      getStock(sku: string): Promise<LegacyStockRow>;
+    },
+  ) {}
 
   async checkAvailability(productId: string): Promise<StockAvailability> {
     const row = await this.legacyClient.getStock(productId);
@@ -330,30 +375,36 @@ file changes.
 
 ## Trade-offs, edge cases, failure modes
 
-| Situation                                                  | What goes wrong                                                                                             | The actual trade-off                                                                                   |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| Aggregate drawn too large (e.g. `Order` contains `Customer`)    | Every order write contends for a lock on the customer record; unrelated customer edits block order placement       | Smaller aggregates reduce contention but push more rules into cross-aggregate coordination (below)          |
-| Aggregate drawn too small (e.g. `OrderLine` is its own aggregate) | The credit-limit invariant now spans two aggregates, which can't be checked atomically in one transaction          | Needs a domain service or a saga to check-then-compensate, trading strict consistency for availability       |
-| Publishing the event before the save commits                   | Downstream sees `OrderPlaced` for an order that then fails to persist                                               | Always publish from `pullDomainEvents()` after a successful `save()`, never from inside the constructor/method |
-| Save succeeds but the event never gets published (crash in between) | Order exists in storage but Billing never hears about it — a real "dual write" problem                        | An outbox table (write the event in the same transaction as the aggregate, publish it from a separate poller) trades some publish latency for guaranteed at-least-once delivery |
-| Retrying a `ConcurrencyConflictError` blindly, without reloading | The retry recomputes against the same stale snapshot and conflicts again, forever                                  | A retry must reload the current aggregate first — optimistic concurrency assumes the caller re-reads reality  |
-| Treating every relationship between contexts as "just an API"   | A genuine customer-supplier relationship (same org, negotiable) gets treated as conformist (no leverage assumed)   | Misclassifying the pattern means either wasted effort building unneeded translation, or missed leverage to negotiate a breaking change |
+| Situation                                                           | What goes wrong                                                                                                  | The actual trade-off                                                                                                                                                            |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Aggregate drawn too large (e.g. `Order` contains `Customer`)        | Every order write contends for a lock on the customer record; unrelated customer edits block order placement     | Smaller aggregates reduce contention but push more rules into cross-aggregate coordination (below)                                                                              |
+| Aggregate drawn too small (e.g. `OrderLine` is its own aggregate)   | The credit-limit invariant now spans two aggregates, which can't be checked atomically in one transaction        | Needs a domain service or a saga to check-then-compensate, trading strict consistency for availability                                                                          |
+| Publishing the event before the save commits                        | Downstream sees `OrderPlaced` for an order that then fails to persist                                            | Always publish from `pullDomainEvents()` after a successful `save()`, never from inside the constructor/method                                                                  |
+| Save succeeds but the event never gets published (crash in between) | Order exists in storage but Billing never hears about it — a real "dual write" problem                           | An outbox table (write the event in the same transaction as the aggregate, publish it from a separate poller) trades some publish latency for guaranteed at-least-once delivery |
+| Retrying a `ConcurrencyConflictError` blindly, without reloading    | The retry recomputes against the same stale snapshot and conflicts again, forever                                | A retry must reload the current aggregate first — optimistic concurrency assumes the caller re-reads reality                                                                    |
+| Treating every relationship between contexts as "just an API"       | A genuine customer-supplier relationship (same org, negotiable) gets treated as conformist (no leverage assumed) | Misclassifying the pattern means either wasted effort building unneeded translation, or missed leverage to negotiate a breaking change                                          |
 
 ## Extend it yourself
+
+These exercises assume basic TypeScript/JavaScript comfort: classes,
+arrays, `Map`, copying objects, thrown errors, and test assertions. If
+those are new, treat the code as executable pseudocode first: identify
+the root, the invariant, the repository boundary, and the event before
+trying to type every line from memory.
 
 **Everything above assumes a single order, single currency, single
 writer conflict.** Two directions worth working through on your own,
 using the same `Order` class as a starting point:
 
-1. What changes if `addLine` also needs to check *live* warehouse stock
+1. What changes if `addLine` also needs to check _live_ warehouse stock
    (not just the credit limit) before accepting a line — would you call
    `LegacyInventoryAdapter` synchronously from inside `addLine`, or does
    putting a network call inside an aggregate root's method violate
    something this unit already established about what an aggregate is
    supposed to guard?
-2. What if the business rule got *worse* — not "total ≤ credit limit" but
+2. What if the business rule got _worse_ — not "total ≤ credit limit" but
    "total ≤ credit limit, and no more than 3 orders per customer may be
-   `OPEN` at once"? That second clause needs data from *outside* this
+   `OPEN` at once"? That second clause needs data from _outside_ this
    aggregate (how many other open orders this customer has). Would you
    pass that count in as a value at the time of the call (the same way
    `creditLimit` is passed into the constructor), or does it change

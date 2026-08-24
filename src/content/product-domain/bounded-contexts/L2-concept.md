@@ -17,6 +17,11 @@ word is used.
 
 ## The context map
 
+In this diagram, **context** means "the place where a word has one
+specific meaning." It may be a team, a service, or just a part of a
+system. `ShipmentRequest` means Warehouse's own instruction to prepare a
+package; it is not the same thing as Sales' `Order`.
+
 ```mermaid
 flowchart LR
     subgraph Sales["Sales context"]
@@ -57,12 +62,18 @@ without Warehouse's own internal model having to change every time.
 | Conformist           | Downstream context just adopts the upstream model as-is, no translation                       | Downstream has little or no influence over the upstream team (e.g. a third-party API)             |
 | Shared kernel        | Both contexts deliberately share a small, jointly-owned piece of the model                    | The two teams are willing to coordinate tightly on that shared piece and change it together       |
 
+A shared kernel works best when it stays small: for example, both teams
+might jointly protect a tiny `PaymentConfirmed` event. It becomes risky
+when the shared piece grows into a large object that neither team can
+change freely without slowing the other one down.
+
 ## What a context map is actually for
 
 **Is a context map just an architecture diagram with extra jargon?**
 It's specifically about where meaning changes, not just where a network
-call crosses a service boundary — two services can share one bounded
-context (same meanings throughout), and a single service can quietly
+call crosses a service boundary. A service is one running part of a
+software system, such as the part that handles checkout or shipping. Two
+services can share one bounded context (same meanings throughout), and a single service can quietly
 straddle two bounded contexts if a word's guarantees change partway
 through it. The map's job is to make each context's boundary and its
 upstream/downstream relationships explicit, so a downstream team knows

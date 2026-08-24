@@ -11,6 +11,14 @@ since they last matched. Every day a branch stays open, both trunk and
 the branch have another chance to touch the same file without either
 side knowing about the other's change:
 
+Strictly speaking, Git only reports a merge conflict when it cannot
+combine the exact changed lines or regions automatically. Two people
+can edit different functions in the same file and Git may merge them
+cleanly. This lesson uses "same hot files" as a beginner-friendly
+proxy for rising overlap risk: same-file work is not guaranteed to
+conflict, but it is a place where reconciliation becomes more likely
+and more worth checking early.
+
 ```mermaid
 flowchart TD
     A["Branch created —\ntrunk and branch identical"] --> B["Day 1: trunk changes X,\nbranch changes Y"]
@@ -42,6 +50,14 @@ isolation is genuinely useful for work that shouldn't be visible on
 trunk at all yet (a major rewrite, a security-sensitive change). The
 trade is speed and frequency of small conflicts against the comfort of
 deferring all of it to one larger reconciliation.
+
+| Team situation                                            | Strategy that usually fits better | Reason                                                                        |
+| --------------------------------------------------------- | --------------------------------- | ----------------------------------------------------------------------------- |
+| Strong CI, small PRs, frequent deployments, feature flags | Trunk-based                       | The team can integrate often without exposing unfinished behavior             |
+| Release trains, regulated approvals, long QA windows      | Gitflow or release branches       | The team needs a stable branch for certification or scheduled release control |
+| Major rewrite that should not touch trunk yet             | Longer-lived branch               | Isolation may be worth the later reconciliation cost                          |
+| Security-sensitive work with limited visibility           | Longer-lived protected branch     | Access control and timing may matter more than daily integration              |
+| Many engineers touching the same modules every day        | Trunk-based, if discipline exists | Frequent reconciliation keeps overlap small and recent                        |
 
 ## Why merge cost isn't proportional to code volume
 

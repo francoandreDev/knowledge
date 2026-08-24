@@ -40,6 +40,12 @@ fast?** Usually, but the diff result still has to go through the
 browser's actual rendering pipeline, and not every kind of DOM change
 costs the same:
 
+Think of it like changing a room. **Reflow** is moving furniture and
+measuring where everything now fits. **Repaint** is keeping the layout
+but changing the visible surface, like repainting a wall. **Composite**
+is placing already-painted layers together, like sliding a transparent
+sheet over the room without moving the furniture underneath.
+
 | Stage           | What happens                                                     | Triggered by                                                                |
 | --------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | Reflow (layout) | Browser recalculates the position and size of affected elements  | Adding/removing elements, changing dimensions, changing text content length |
@@ -69,3 +75,7 @@ thousands of rows' content, forcing reflow work across all of them.
   unit's Scenario, a diffing inefficiency can be invisible at 5 items
   and severe at 5,000 — the underlying algorithmic behavior doesn't
   change, only whether its cost is noticeable.
+- **Optimizing before measuring.** A slow page can be waiting on the
+  network, running too much JavaScript, recalculating layout, painting
+  too many pixels, or rendering too many nodes. Guessing the category
+  first often leads to fixing the wrong layer.

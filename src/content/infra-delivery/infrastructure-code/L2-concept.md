@@ -11,12 +11,12 @@ steps do I run," while the file answers "what should exist" — and
 that difference is exactly what determines whether re-running it
 twice is safe:
 
-|                    | Imperative (a script of steps)                                         | Declarative (a description of state)                     |
-| ------------------ | ---------------------------------------------------------------------- | -------------------------------------------------------- |
-| Answers            | "What commands do I run?"                                              | "What should this look like?"                            |
-| Running it twice   | May run the resize command twice — depends on the script being careful | Second run computes zero changes — nothing to do         |
-| Detecting drift    | Nothing — the script doesn't know or check current state               | The tool compares declared state to what it last applied |
-| What IaC tools use | Rarely, for exactly this reason                                        | Almost universally (Terraform, CloudFormation, Pulumi)   |
+|                    | Imperative (a script of steps)                                         | Declarative (a description of state)                            |
+| ------------------ | ---------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Answers            | "What commands do I run?"                                              | "What should this look like?"                                   |
+| Running it twice   | May run the resize command twice — depends on the script being careful | Second run computes zero changes — nothing to do                |
+| Detecting drift    | Nothing — the script doesn't know or check current state               | The tool can compare its state file to what is actually running |
+| What IaC tools use | Rarely, for exactly this reason                                        | Almost universally (Terraform, CloudFormation, Pulumi)          |
 
 A script that says "resize `web-1` to `large`" doesn't know or care
 whether `web-1` is already `large` — it just runs the command. A
@@ -30,6 +30,12 @@ thing it does, before touching anything.
 changes to running infrastructure, should it just make them?** No —
 a plan step exists specifically to show the _computed_ difference
 before anything is touched, so a human can review it first:
+
+Use the three pictures from L1: the declared config says what you want,
+the state file says what the tool remembers from last time, and the
+actual cloud is what really exists. A normal plan mostly compares
+declared config against the tool's recorded state; a drift check asks
+whether the recorded state still matches actual cloud reality.
 
 ```mermaid
 flowchart TD
@@ -56,8 +62,10 @@ a line in the wrong file) before it happens, not after.
 
 **If the console change from the opening scenario had happened, but
 the team used IaC, would the tool have noticed?** Only because of the
-state file — it's the one place that remembers what the tool
-_believes_ is true, separate from what's _actually_ true:
+state file, and only when someone runs a plan, refresh, or drift check
+that compares that memory against reality. The state file is the one
+place that remembers what the tool _believes_ is true, separate from
+what's _actually_ true:
 
 ```mermaid
 flowchart LR

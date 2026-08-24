@@ -10,13 +10,15 @@ right about something with almost no consequence, or right about
 something enormous. Plotting a few real examples on both axes at once
 makes the gap visible:
 
-| Example                                                                 | Correct? | Scope                                                                         |
-| ----------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------- |
-| Fixing a typo in an internal wiki page                                  | Yes      | Tiny — a handful of readers, no downstream effect                             |
-| Priya's debug-log off-by-one fix                                        | Yes      | Small — 2 internal engineers, no customer or revenue impact                   |
-| Renegotiating a cross-team API contract that three other teams build on | Yes      | Large — every team downstream inherits the new contract's guarantees or flaws |
-| Sam's billing bug catch                                                 | Yes      | Large — 3,100 customers, $186,000 in prevented erroneous charges              |
-| A beautifully refactored function nobody was going to touch again       | Yes      | Tiny — correctness and craft, but no one downstream was waiting on it         |
+| Example                                                                  | Correct? | Scope                                                                         |
+| ------------------------------------------------------------------------ | -------- | ----------------------------------------------------------------------------- |
+| Fixing a typo in an internal wiki page                                   | Yes      | Tiny — a handful of readers, no downstream effect                             |
+| Correcting the date on a school invitation sent to 3 people              | Yes      | Tiny — easy to tell those 3 people and resend                                 |
+| Correcting the same wrong date after the invitation went to 3,000 people | Yes      | Large — many people may arrive at the wrong time                              |
+| Priya's debug-log off-by-one fix                                         | Yes      | Small — 2 internal engineers, no customer or revenue impact                   |
+| Renegotiating a cross-team API contract that three other teams build on  | Yes      | Large — every team downstream inherits the new contract's guarantees or flaws |
+| Sam's billing bug catch                                                  | Yes      | Large — 3,100 customers, $186,000 in prevented erroneous charges              |
+| A beautifully refactored function nobody was going to touch again        | Yes      | Tiny — correctness and craft, but no one downstream was waiting on it         |
 
 Notice every row in that table is marked "Yes" under correctness —
 that column does no work at distinguishing the rows from each other.
@@ -24,6 +26,11 @@ that column does no work at distinguishing the rows from each other.
 read as more senior than others.** This is the core reason "being
 right" isn't a differentiator on its own: it's necessary, but it
 doesn't vary across the rows that matter most.
+
+For the API example: an **API contract** is an agreement about how two
+systems talk to each other. **Downstream** means the teams or systems
+that depend on that output, the way later students in a relay depend on
+the first student's handoff being correct.
 
 ## Estimating scope before the work is finished, not after
 
@@ -41,12 +48,18 @@ flowchart TD
     D -->|"Spreads, compounds,\nor hard to reverse\nonce it happens"| F["Large scope —\nflag it immediately,\nfix it, and make the\nrisk visible to others"]
 ```
 
+Simple reading of the flowchart: first ask, "Who cares if this is
+wrong?" Then ask, "If it stays wrong, how hard would the damage be to
+undo?" Small scope can be fixed quietly. Larger scope should be made
+visible early, because other people may need to plan around the risk.
+
 Sam's bug read as senior partly because Sam asked "what happens if
 this stays wrong" _before_ the batch job ran, not after a real
 customer complaint forced the question. Priya's fix never needed to
 ask this question at all — the debug-log path had no other consumers
-and no compounding failure mode, so "small scope" was the correct
-read of the situation, not a failure on Priya's part.
+— no other systems or people relying on that result — and no
+compounding failure mode, so "small scope" was the correct read of the
+situation, not a failure on Priya's part.
 
 ## Why difficulty of the fix isn't the same thing as scope either
 
@@ -61,6 +74,10 @@ blast radius actually was before it ran. A genuinely hard fix to a
 tiny-scope problem still reads as tiny-scope; a trivial fix to a
 large-scope problem still reads as large-scope, once someone actually
 does the work of tracing out the consequences.
+
+An **incident** is a problem that reaches users, customers, or a team
+that has to respond visibly. Prevention matters because the useful work
+may be exactly that the incident never happened.
 
 ## Failure modes at this level
 

@@ -4,6 +4,16 @@ title: "L3 — A real salted-hash implementation, and a real rainbow-table attac
 
 ## A real salted hash, using Node's built-in crypto
 
+Read the first code block as this human workflow:
+
+| Code piece         | Human idea                                                 |
+| ------------------ | ---------------------------------------------------------- |
+| `randomBytes(16)`  | Make a new unpredictable salt                              |
+| `scryptSync(...)`  | Run a slow password hash/KDF                               |
+| `toString("hex")`  | Store the bytes as readable text                           |
+| `Buffer.from(...)` | Turn stored text back into bytes for comparison            |
+| `timingSafeEqual`  | Compare without leaking where the first difference appears |
+
 ```js
 // auth.mjs — real, runnable salted password hashing with Node's scrypt
 // (a real key-derivation function, not a raw fast hash — see the failure
@@ -38,13 +48,14 @@ This is a genuine, runnable demonstration of exactly why salting matters — not
 
 ```js
 // rainbow-table-demo.mjs
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, scryptSync } from "node:crypto";
 
 function unsaltedHash(password) {
   return createHash("sha256").update(password).digest("hex");
 }
 
-// The attacker precomputes this ONCE, entirely offline, no target needed yet.
+// The attacker precomputes this ONCE, entirely offline: no requests to the
+// site, just work against a stolen database copy.
 const commonPasswords = [
   "123456",
   "password",
@@ -62,7 +73,6 @@ console.log(rainbowTable.get(user1Hash)); // "password" — cracked instantly vi
 console.log(rainbowTable.get(user2Hash)); // "password" — the SAME precomputed lookup cracks user 2 too
 
 // Now with per-user salts:
-import { scryptSync, randomBytes } from "node:crypto";
 const salt1 = randomBytes(16).toString("hex");
 const salt2 = randomBytes(16).toString("hex");
 const salted1 = scryptSync("password", salt1, 32).toString("hex");
@@ -87,10 +97,10 @@ xychart-beta
     bar [10.5, 2, 1.3, 1]
 ```
 
-The bar heights above are exponents, not guesses — `10.5` means roughly 3×10^10 guesses/second, `1` means about 10 guesses/second. That gap, not the algorithm names, is the entire reason "just hash it" isn't good enough advice.
+The bar heights above are exponents, not guesses — `10^2` means 100, `10^10` means 10,000,000,000, and `10.5` means roughly 3×10^10 guesses/second. That gap, not the algorithm names, is the entire reason "just hash it" isn't good enough advice.
 
 - **Using a fast, general-purpose hash (like raw SHA-256) instead of a real key-derivation function.** `sha256(password)` is cryptographically "one-way" in the abstract sense, but it's designed to be _fast_ — which is exactly wrong for passwords, because it means an attacker can try billions of guesses per second against a stolen hash. `scrypt`/`bcrypt`/`Argon2` are deliberately slow and tunable, trading login-time cost (milliseconds, imperceptible to a real user) for attacker cost (a brute-force attempt now costs the same milliseconds, times however many guesses).
-- **Comparing hashes with `===` instead of a constant-time comparison.** A normal string/byte comparison typically returns as soon as it finds the first mismatched byte — which means comparison time leaks _how many leading bytes matched_, a real (if narrow) side channel an attacker can exploit to guess a hash byte-by-byte over many requests. `timingSafeEqual` (or an equivalent) always takes the same time regardless of where the mismatch is, closing that channel.
+- **Comparing hashes with `===` instead of a constant-time comparison.** A normal string/byte comparison typically returns as soon as it finds the first mismatched byte — like a lock that pauses a little longer when the first part of the key is right. That comparison time leaks _how many leading bytes matched_, a real (if narrow) side channel an attacker can exploit to guess a hash byte-by-byte over many requests. `timingSafeEqual` (or an equivalent) always takes the same time regardless of where the mismatch is, closing that channel.
 - **Reusing the same salt across all users ("a pepper," misapplied), or hardcoding it.** A single shared salt still defeats a _generic_ precomputed rainbow table, but it means one precomputation effort (targeting that specific salt) cracks every user in the database at once — the actual protection salting is supposed to provide requires a salt unique _per user_, generated randomly, not a single constant baked into the code.
 - **Rolling a custom authentication scheme instead of using audited libraries.** Every mechanism in this unit (salting, slow hashing, constant-time comparison) is individually simple, which is exactly what makes hand-rolling the whole system tempting and risky — a single subtle mistake in any one piece (a salt that isn't actually random, a comparison that isn't actually constant-time) silently reintroduces the vulnerability the mechanism exists to prevent, and it usually isn't discovered until it's exploited.
 

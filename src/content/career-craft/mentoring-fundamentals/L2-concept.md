@@ -17,6 +17,14 @@ flowchart TD
     D -- "No, they have the\npieces, just haven't\nconnected them" --> F["Ask a diagnostic question\nthat points at the gap"]
 ```
 
+Three concrete cases before the abstract labels:
+
+| What you see                                                    | What it usually means | Better mentor move                                   |
+| --------------------------------------------------------------- | --------------------- | ---------------------------------------------------- |
+| They try a new idea, observe the result, and update their guess | Productive struggle   | Let them continue, maybe ask one clarifying question |
+| They repeat the same attempt with different wording             | Wasted struggle       | Interrupt the loop with a diagnostic question        |
+| They are missing a fact they could not infer                    | Missing prerequisite  | Give that fact briefly, then hand the problem back   |
+
 The signal isn't time elapsed — Sam's 40 minutes doesn't by itself mean
 "intervene now." The signal is whether each new attempt is testing a
 different idea than the last one. A mentee who has cycled through the same
@@ -45,6 +53,12 @@ never encountered test mocking at all, starting at stage 3 would waste
 time neither of them has — stage 1 or 2 first (show the concept, then do
 one together) would get to a productive stage 3 much faster on the _next_
 bug.
+
+The same gradient works outside software. Learning a math method often
+goes: teacher solves one while narrating, teacher and student solve one
+together, student solves one while the teacher watches, then student solves
+the next one alone. The point is not "never show the answer"; it is moving
+responsibility over as the learner can carry it.
 
 ## Matching the stage to the mentee, not to the mentor's default
 

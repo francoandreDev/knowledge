@@ -17,6 +17,7 @@ import Scenario from "../../../components/Scenario.astro";
     <div class="not-prose flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
       <div class="flex items-center gap-1.5"><span>🚫</span> Checkout must never fail because loyalty is down</div>
     </div>
+
   </Fragment>
 
 You need `priceOrder(order)`: apply the customer's tier discount, apply any
@@ -29,6 +30,21 @@ Checkout must never fail because the loyalty partner is having a bad day.
 Same requirement, same discount math, built four times below. Watch what
 changes in the code itself — not just the diagram — and, more importantly,
 watch what happens to each version the moment the loyalty API goes down.
+
+If JavaScript is not familiar yet, read each snippet as pseudocode:
+
+| Syntax      | Meaning while reading this page                      |
+| ----------- | ---------------------------------------------------- |
+| `function`  | a named action the program can run                   |
+| `{ ... }`   | a group of related values, like an order or customer |
+| `return`    | the value sent back to whoever called the function   |
+| `require()` | this file depends on code from another file          |
+| callback    | a function saved to run later when an event arrives  |
+| `catch`     | what happens if an attempted network call fails      |
+
+The code is here to make the architecture visible. You do not need to memorize
+the syntax to follow the comparison: look for where the loyalty call lives,
+whether checkout waits for it, and which file or service owns each decision.
 
 ## Version 1: layered
 
@@ -69,7 +85,7 @@ module.exports = { priceOrder, tierDiscount, applyDiscounts };
 between two lines that have nothing to do with loyalty. If it throws or
 hangs, `priceOrder` never returns — checkout is down because a partner
 integration is down, which directly violates the constraint above. Nothing
-in the *shape* of this code stops that; it has to be caught by discipline
+in the _shape_ of this code stops that; it has to be caught by discipline
 (a try/catch, a timeout) added after the fact, not by the structure itself.
 
 ## Version 2: hexagonal / clean
@@ -153,11 +169,16 @@ module.exports = { makeCheckoutUseCase };
 no database, no network, no mocking framework — it's a pure function.
 **What it costs:** four files instead of one for the same feature, and a
 new engineer has to learn "ports point in, adapters point out" before the
-structure makes sense. Note this version *still* has the same synchronous
-loyalty call the layered version did — hexagonal fixes *where* the decision
-about failure handling lives (the adapter, in one place), not *whether* a
+structure makes sense. Note this version _still_ has the same synchronous
+loyalty call the layered version did — hexagonal fixes _where_ the decision
+about failure handling lives (the adapter, in one place), not _whether_ a
 slow partner can still add latency to checkout. That's a separate problem,
 solved by the next version.
+
+In plain language: hexagonal architecture makes the core rule easier to test
+and protect, but it does not automatically make slow work asynchronous. The
+shape isolates the loyalty decision; it does not remove the waiting unless
+the use case chooses not to wait.
 
 ## Version 3: event-driven
 
@@ -172,7 +193,11 @@ const { priceOrder: computeTotal } = require("./domain/pricing");
 
 function priceOrder(order, customer, promo) {
   const { total } = computeTotal(order, customer, promo);
-  bus.publish("OrderPriced", { orderId: order.id, customerId: order.customerId, total });
+  bus.publish("OrderPriced", {
+    orderId: order.id,
+    customerId: order.customerId,
+    total,
+  });
   return total; // returns without waiting on anything downstream
 }
 module.exports = { priceOrder };
@@ -200,10 +225,15 @@ separate logs (the publish, and the handler's own log) instead of one.
 That's the cost of coupling-in-time instead of coupling-in-code: it moves,
 it doesn't disappear.
 
+Event-driven also means the customer-visible truth may arrive in two steps:
+checkout can complete now, while points appear later. That is eventual
+consistency. It is acceptable only when the product can tolerate "correct
+soon" instead of "correct immediately."
+
 ## Version 4: microservices — the same split, at the deployment level
 
 Pulling `loyaltyHandler` out of the same process and into its own
-service is a *further* step past event-driven, not a different mechanism —
+service is a _further_ step past event-driven, not a different mechanism —
 the event contract barely changes, but the deploy unit, data ownership, and
 failure blast radius all do.
 
@@ -234,21 +264,26 @@ flowchart LR
 ```
 
 The code inside each service looks almost identical to Version 3's handler
-and publisher — the *shape* of the message-passing didn't change. What
+and publisher — the _shape_ of the message-passing didn't change. What
 changed is that `pricing-service` and `loyalty-service` can now be deployed
 by different people, on different schedules, without either one blocking
 the other's release — at the cost of two CI pipelines, two on-call
 rotations, and a network hop (the event bus itself) that is now a piece of
 production infrastructure someone has to run and monitor.
 
+`docker-compose`, `AMQP`, CI pipelines, and on-call rotations are operational
+costs, not style decorations. They mean someone must build, deploy, monitor,
+debug, and wake up for each running service and for the message system between
+them.
+
 ## Comparing all four against the actual requirement
 
-| Version       | Blocks checkout if loyalty is down? | Files/services to maintain | New failure mode introduced                          |
-| -------------- | ------------------------------------ | ---------------------------- | -------------------------------------------------------- |
-| Layered        | **Yes** — violates the constraint    | 1 file                       | Synchronous coupling to a partner's uptime                |
-| Hexagonal      | **Yes** — same call, better isolated | 4 files                      | Same as layered, just easier to test in isolation         |
-| Event-driven   | No                                   | 1 process, 2 modules         | Debugging spans an event log, not one call stack           |
-| Microservices  | No                                   | 2 services, 2 pipelines      | Event-driven's failure mode, plus deploy/ops overhead      |
+| Version       | Blocks checkout if loyalty is down?  | Files/services to maintain | New failure mode introduced                           |
+| ------------- | ------------------------------------ | -------------------------- | ----------------------------------------------------- |
+| Layered       | **Yes** — violates the constraint    | 1 file                     | Synchronous coupling to a partner's uptime            |
+| Hexagonal     | **Yes** — same call, better isolated | 4 files                    | Same as layered, just easier to test in isolation     |
+| Event-driven  | No                                   | 1 process, 2 modules       | Debugging spans an event log, not one call stack      |
+| Microservices | No                                   | 2 services, 2 pipelines    | Event-driven's failure mode, plus deploy/ops overhead |
 
 The requirement ("checkout must never fail because loyalty is down") is
 what actually rules two of the four out — not a general preference for one
@@ -270,6 +305,10 @@ rather than being mutually exclusive.
   `loyaltyHandler` needs to recognize "I've already awarded points for this
   orderId" — the event contract has to include enough information for the
   consumer to dedupe, or points get double-awarded.
+- **At-least-once delivery** means the bus prefers "better deliver a duplicate
+  than lose the event." **Idempotency** means a consumer can safely receive the
+  same event twice and still perform the side effect once, usually by checking
+  an identifier like `orderId`.
 - **Microservices without a real seam creates a distributed monolith** —
   two services that must be deployed together to avoid breaking each
   other have all of microservices' operational cost and none of its

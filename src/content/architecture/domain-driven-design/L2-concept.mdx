@@ -6,18 +6,26 @@ title: "L2 — Aggregates as consistency boundaries, and how contexts become rea
 
 **Each individual write in L1's race was inside a valid SQL transaction.
 So why wasn't "wrap it in a transaction" the fix?** A transaction
-guarantees that *one* write either fully happens or doesn't — it says
+guarantees that _one_ write either fully happens or doesn't — it says
 nothing about which writes are even allowed to happen, or what has to
 stay true across several of them at once. `AddItemService` and
 `PlaceOrderService` each had their own perfectly valid transaction; there
 was simply no rule, anywhere, saying "before you commit, check the
 combined total against the credit limit." A transaction protects
-*atomicity*. It doesn't know what "consistent" means for your domain —
+_atomicity_. It doesn't know what "consistent" means for your domain —
 only your code can define that.
 
 That's what an **aggregate** actually is: not a database concept, a
 **modeling decision** about which objects have to be checked together,
 every time, because a business rule spans more than one of them.
+
+That does **not** mean the database is useless. A database can enforce
+atomic commit/rollback, unique constraints, row locks, isolation levels,
+and version checks. Those tools are essential, and `systems/transactions`
+goes deeper on them. What they do not decide for you is _which facts form
+one business rule_. The aggregate answers that modeling question first;
+then the repository uses database tools to persist that answer without a
+silent lost update.
 
 ```mermaid
 flowchart TB
@@ -37,9 +45,9 @@ check needs its data too?** Because `Customer` has its own lifecycle,
 its own invariants (address changes, plan upgrades), and its own write
 volume — folding it into `Order` would mean every order write also locks
 the customer record, and every customer write has to worry about
-in-flight orders. The aggregate boundary is drawn around *the smallest
+in-flight orders. The aggregate boundary is drawn around _the smallest
 cluster of objects that must be consistent with each other on every
-single write* — not around "everything this feature happens to touch."
+single write_ — not around "everything this feature happens to touch."
 `Order` needs the customer's credit limit as an input value at the
 moment of the check, not permanent joint custody of the `Customer`
 object.
@@ -78,7 +86,7 @@ credit-limit check to a separate validation step run before "place
 order"?** The order could sit in an invalid state — over the limit — for
 however long it takes someone to call that separate check, and any other
 code path that reads the order in between sees a value that shouldn't be
-possible. Checking the invariant *inside* the same method that changes
+possible. Checking the invariant _inside_ the same method that changes
 the state is what makes "the aggregate is never observably invalid"
 true, not just usually true.
 
@@ -94,11 +102,11 @@ identity to track; you never ask "which $10 is this?", only "is this
 amount equal to that one?" That's a **value object**: interchangeable,
 immutable, compared purely by its fields.
 
-| Question to ask                                    | Entity                                    | Value object                                    |
-| ----------------------------------------------------- | -------------------------------------------- | --------------------------------------------------- |
-| Does "which one, specifically" matter?                | Yes — tracked by an ID                       | No — only "what does it equal"                       |
-| Can it change over time and stay the same thing?      | Yes (`OrderLine #7`'s quantity can change)   | No — a change produces a *new* value, not a mutation |
-| Two instances with identical fields — same or equal?  | Different, even with identical fields        | The same, by definition                              |
+| Question to ask                                      | Entity                                     | Value object                                         |
+| ---------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------- |
+| Does "which one, specifically" matter?               | Yes — tracked by an ID                     | No — only "what does it equal"                       |
+| Can it change over time and stay the same thing?     | Yes (`OrderLine #7`'s quantity can change) | No — a change produces a _new_ value, not a mutation |
+| Two instances with identical fields — same or equal? | Different, even with identical fields      | The same, by definition                              |
 
 Getting this backwards has a real cost: modeling `Money` as an entity
 means writing identity-tracking and mutation code nothing needs, and
@@ -125,7 +133,7 @@ interface OrderRepository:
 
 **Why not just let each aggregate's fields be `public` and skip a whole
 interface for what's really a `SELECT`/`UPDATE`?** Because the
-repository's job isn't fetching rows — it's guaranteeing that the *only*
+repository's job isn't fetching rows — it's guaranteeing that the _only_
 way to persist a change to `order_items` is by first going through
 `Order`'s methods, then handing the entire, now-valid aggregate to
 `save()`. There's no `OrderLineRepository`. That absence is deliberate.
@@ -137,7 +145,7 @@ just call their APIs directly from inside the method?** No — that would
 make `Order` depend on every downstream context's availability and
 shape, the exact coupling bounded contexts exist to prevent. Instead,
 the aggregate root records that something happened — `OrderPlaced` — and
-hands that record off *after* the transaction that changed its own state
+hands that record off _after_ the transaction that changed its own state
 commits. Other contexts subscribe to the event; `Order` never learns they
 exist.
 
@@ -157,11 +165,17 @@ sequenceDiagram
     Bus-->>Fulfillment: OrderPlaced
 ```
 
-**Why publish *after* the save commits, instead of the instant
+**Why publish _after_ the save commits, instead of the instant
 `record()` is called?** Because if the save then fails — a constraint
 violation, a dropped connection — you'd have already told Billing an
 order exists that was never actually persisted. Publishing after commit
 means the event is only ever true.
+
+This is the bridge to `architecture/event-driven-architecture`: a domain
+event starts as a fact raised inside one aggregate. Publishing it is a
+separate application/infrastructure concern, often handled with an
+outbox or broker so other contexts can react without the aggregate
+calling them directly.
 
 ## From contexts to code: what a context map actually compiles into
 
@@ -171,19 +185,19 @@ actually look like in a real codebase — a folder? A package? A
 service?** All three, at different points of a system's growth, and the
 context map's job is to say which:
 
-| Context map pattern                          | What it looks like in code                                                                 | When it fits                                                              |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| (already known) Anticorruption layer           | A dedicated adapter module at the boundary, translating one context's model into another's     | The two contexts' models carry genuinely different guarantees                  |
-| (already known) Conformist                     | Downstream just imports/deserializes the upstream shape directly, no translation module        | No leverage to negotiate the upstream model (e.g. a third-party API)           |
-| **Customer-supplier**                          | Upstream team's release process has a formal input — a ticket queue, a contract test suite — that the downstream team's needs feed into | Both teams answer to the same organization and can prioritize each other's asks |
-| **Open host service / published language**     | Upstream context exposes one stable, versioned API/schema (a "published language") instead of many bespoke integrations per consumer | Many downstream contexts need the same upstream data; one stable contract beats N custom ones |
+| Context map pattern                        | What it looks like in code                                                                                                              | When it fits                                                                                  |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| (already known) Anticorruption layer       | A dedicated adapter module at the boundary, translating one context's model into another's                                              | The two contexts' models carry genuinely different guarantees                                 |
+| (already known) Conformist                 | Downstream just imports/deserializes the upstream shape directly, no translation module                                                 | No leverage to negotiate the upstream model (e.g. a third-party API)                          |
+| **Customer-supplier**                      | Upstream team's release process has a formal input — a ticket queue, a contract test suite — that the downstream team's needs feed into | Both teams answer to the same organization and can prioritize each other's asks               |
+| **Open host service / published language** | Upstream context exposes one stable, versioned API/schema (a "published language") instead of many bespoke integrations per consumer    | Many downstream contexts need the same upstream data; one stable contract beats N custom ones |
 
 **Why does it matter which pattern a given relationship actually is,
 instead of just calling everything "an API"?** Because each implies a
-different failure mode if ignored: treating a *conformist* relationship
-like a *customer-supplier* one means filing feature requests a
+different failure mode if ignored: treating a _conformist_ relationship
+like a _customer-supplier_ one means filing feature requests a
 third-party vendor will never see; treating a genuine
-*customer-supplier* relationship like *conformist* means quietly eating
+_customer-supplier_ relationship like _conformist_ means quietly eating
 breaking changes you actually had standing to negotiate against.
 
 ```mermaid
@@ -202,7 +216,7 @@ flowchart LR
 ```
 
 A context's boundary is drawn once, in the design conversation. It gets
-*enforced* every day by: which repo/package the code lives in, which
+_enforced_ every day by: which repo/package the code lives in, which
 service owns the deployment, and which of these four patterns governs
 each edge on the map. L3 builds the `Order` aggregate, its repository,
 its domain event, and an anticorruption layer against a legacy inventory

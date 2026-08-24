@@ -17,6 +17,12 @@ fixed and identical for both versions:
 | Assumed household water use | 0.5 gallons/day filtered                        |
 | Comparison: bottled water   | $1.50/bottle, 2 bottles/day                     |
 
+The table uses two kinds of cost. A one-time cost is paid once, like
+buying the pitcher. A recurring cost keeps coming back, like buying
+replacement filters or bottled water. The bottled-water comparison
+also assumes the two daily bottles add up to roughly the same amount
+of water the household wants filtered.
+
 **Before reading the two pitches below — using only this table, what
 would the top of the "so what" ladder from L2 actually say for this
 specific pitcher?** Working the numbers: bottled water costs
@@ -25,6 +31,12 @@ up front plus roughly 4.56 replacement filters/year at $8 each
 (182.5 gallons/year ÷ 40 gallons/filter) — **$66.50 in year one**,
 then about **$36.50/year** after that. That's the number the value
 pitch should lead with.
+
+Step by step: bottles cost $1,095 for the year; the pitcher plus
+filters cost $66.50 for the first year; the first-year difference is
+$1,095 - $66.50 = **$1,028.50**. After year one, the pitcher itself is
+already bought, so the ongoing comparison is about $1,095 versus
+$36.50.
 
 ## Pitch A: feature-first
 
@@ -85,16 +97,21 @@ before.
 
 **Try extending it yourself:** suppose the listener is someone who
 already makes their own coffee at home and never buys bottled water —
-the $1,028/year savings claim doesn't apply to them at all. What
+the $1,028 first-year savings claim doesn't apply to them at all. What
 would the top of the "so what" ladder say for that specific listener
 instead, using the same underlying product facts?
 
+One possible answer: "Your coffee and tea taste cleaner because the
+water no longer has that chlorine taste, without needing to buy
+bottled water first." Same product facts, different value, because the
+listener's current habit is different.
+
 ## Failure modes
 
-| Failure mode                                                                                | What it gets wrong                                                                                                                                                                      |
-| ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Leading with value but never answering "how does it actually work" when asked               | A listener who's convinced enough to ask a follow-up deserves accurate feature detail, not just repeated value language                                                                 |
-| Computing the value number for a generic listener instead of the actual one in front of you | The $1,028/year figure assumes 2 bottles/day — a listener who drinks less bottled water gets a smaller, still-true number, and using the generic figure on them overstates the value    |
-| Treating "removes 99.9% of contaminants" as value language                                  | It's still a feature — a percentage without context still requires the listener to supply the "so what" themselves                                                                      |
-| Skipping the arithmetic and asserting "saves you money" with no number                      | An unquantified claim is weaker than a specific, checkable one — "$1,028 less this year" is more convincing precisely because it can be verified                                        |
-| Assuming value framing replaces honesty about trade-offs                                    | If the pitcher genuinely tastes worse than bottled water for some users, value framing that omits this isn't more effective persuasion — it's a setup for disappointment and lost trust |
+| Failure mode                                                                                | What it gets wrong                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Leading with value but never answering "how does it actually work" when asked               | A listener who's convinced enough to ask a follow-up deserves accurate feature detail, not just repeated value language                                                                    |
+| Computing the value number for a generic listener instead of the actual one in front of you | The $1,028 first-year figure assumes 2 bottles/day — a listener who drinks less bottled water gets a smaller, still-true number, and using the generic figure on them overstates the value |
+| Treating "removes 99.9% of contaminants" as value language                                  | It's still a feature — a percentage without context still requires the listener to supply the "so what" themselves                                                                         |
+| Skipping the arithmetic and asserting "saves you money" with no number                      | An unquantified claim is weaker than a specific, checkable one — "$1,028 less this year" is more convincing precisely because it can be verified                                           |
+| Assuming value framing replaces honesty about trade-offs                                    | If the pitcher genuinely tastes worse than bottled water for some users, value framing that omits this isn't more effective persuasion — it's a setup for disappointment and lost trust    |

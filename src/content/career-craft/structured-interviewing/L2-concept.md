@@ -12,6 +12,12 @@ interviewer noticing it's happening. Wanting to be fair doesn't disable
 the mechanism; it just makes the interviewer more confident in a judgment
 that was never actually re-examined.
 
+Everyday version: if you already like Candidate A, you may ask a warmer
+follow-up, accept a vague answer as "confident," and move on. If you are
+unsure about Candidate B, you may ask a harder follow-up and read the same
+hesitation as weakness. The bias lives in those tiny choices, not in an
+open decision to be unfair.
+
 ```mermaid
 flowchart TD
     Unstructured["Unstructured path"] --> Impression["Early impression forms"]
@@ -37,6 +43,11 @@ in advance, what a specific answer would need to include:
 | 3     | Identifies the core problem and proposes a reasonable approach, but doesn't consider trade-offs or edge cases               |
 | 5     | Identifies the core problem, considers at least one trade-off explicitly, and names a concrete way to validate the solution |
 
+A **trade-off** is a choice with a cost: "I would add targeted logging
+instead of redeploying repeatedly, because redeploying creates noise." An
+**edge case** is a rarer situation that still needs to work. To **validate**
+means checking with evidence, not just feeling that the answer sounds good.
+
 ## Why fixed questions matter as much as the rubric
 
 **If the rubric is well-anchored, does it matter whether every candidate
@@ -56,6 +67,9 @@ actual content of the answer, not the feeling the candidate left behind.
 Personal impressions can still inform other parts of a hiring decision
 (team fit conversations, for instance) as long as they're not smuggled
 into the competency scores themselves.
+"Team fit" should not mean "I personally enjoyed them." If it is evaluated
+at all, it needs its own observable criteria, such as whether the person
+can explain trade-offs respectfully or collaborate through disagreement.
 
 ## Comparing the two approaches
 

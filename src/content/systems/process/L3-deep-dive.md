@@ -143,6 +143,12 @@ kept alive so it isn't GC'd: 5000000
 
 On Linux (including under WSL), `/proc/self/maps` is the kernel's own record of a process's virtual memory regions — not a diagram, the actual page table's contents as text:
 
+This section is intentionally environment-specific. It works on Linux
+and usually on Windows through WSL; plain Windows does not expose
+`/proc/self/maps` because it has a different diagnostics interface.
+That does not change the concept from L1/L2, only the tool used to
+observe it.
+
 ```js
 // maps.mjs
 import { readFileSync } from "node:fs";

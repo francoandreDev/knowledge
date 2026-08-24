@@ -14,7 +14,7 @@ what does the loop version tell them to do instead?**
 A checklist mentality says "we already did Empathize and Define, we're
 done with those" and jumps straight to prototyping a fix for the
 register. The loop version says the new symptom is itself a signal to
-re-enter Empathize for *this* specific stall, because a Test finding
+re-enter Empathize for _this_ specific stall, because a Test finding
 about a different bottleneck doesn't get to skip straight to Prototype —
 it has to earn a fresh Define first.
 
@@ -30,14 +30,14 @@ flowchart LR
 ```
 
 Three different arrows come out of Test, not one — and which arrow fires
-depends on *what kind of surprise* the test produced, not on how the team
+depends on _what kind of surprise_ the test produced, not on how the team
 feels about the result.
 
-| Test result                                                | Loop back to | Why                                                              |
-| ------------------------------------------------------------ | ------------- | ------------------------------------------------------------------ |
-| The board helped, but kids still hesitate on combo meals      | Empathize     | A new group/moment of friction was never observed at all           |
-| The board's wording confused kids, even though the idea works | Prototype     | The concept is right; only the execution needs another pass        |
-| Kids read the board fine but still stall — comparing prices    | Define        | The problem was named wrong: it's price anxiety, not menu options  |
+| Test result                                                   | Loop back to | Why                                                               |
+| ------------------------------------------------------------- | ------------ | ----------------------------------------------------------------- |
+| The board helped, but kids still hesitate on combo meals      | Empathize    | A new group/moment of friction was never observed at all          |
+| The board's wording confused kids, even though the idea works | Prototype    | The concept is right; only the execution needs another pass       |
+| Kids read the board fine but still stall — comparing prices   | Define       | The problem was named wrong: it's price anxiety, not menu options |
 
 ## What each stage is actually answering
 
@@ -53,13 +53,24 @@ drink included?", stepping out of line to go back and check. A survey
 only captures what people can already articulate about their own
 behavior, which is usually not the actual friction point.
 
-| Stage      | Guiding question                                                   | Typical output                                | Signal you skipped it                                                        |
-| ---------- | ---------------------------------------------------------------------| ------------------------------------------------ | -------------------------------------------------------------------------------- |
-| Empathize  | What are people actually doing, not what do they say they do?         | Field notes, direct quotes, timed observations   | Your "finding" is really your own assumption, restated with more confidence      |
-| Define     | What's the human-centered problem, with no solution baked in?          | A one-sentence problem statement (a POV)         | The "problem statement" already contains a feature name or a product noun        |
-| Ideate     | What's the widest range of ways to address this, before judging any?   | A long list, deliberately including bad ideas    | The list has exactly one idea on it, and it's the one someone already wanted     |
-| Prototype  | What's the cheapest artifact that tests our riskiest assumption?       | A rough, disposable mockup                       | The "prototype" took longer to build than the actual feature would have          |
-| Test       | What did people actually do with it, not what did they say about it?   | Observed behavior, a measured before/after         | The only evidence is "they said they liked it"                                   |
+| Stage     | Guiding question                                                     | Typical output                                 | Signal you skipped it                                                        |
+| --------- | -------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------- |
+| Empathize | What are people actually doing, not what do they say they do?        | Field notes, direct quotes, timed observations | Your "finding" is really your own assumption, restated with more confidence  |
+| Define    | What's the human-centered problem, with no solution baked in?        | A one-sentence problem statement (a POV)       | The "problem statement" already contains a feature name or a product noun    |
+| Ideate    | What's the widest range of ways to address this, before judging any? | A long list, deliberately including bad ideas  | The list has exactly one idea on it, and it's the one someone already wanted |
+| Prototype | What's the cheapest artifact that tests our riskiest assumption?     | A rough, disposable mockup                     | The "prototype" took longer to build than the actual feature would have      |
+| Test      | What did people actually do with it, not what did they say about it? | Observed behavior, a measured before/after     | The only evidence is "they said they liked it"                               |
+
+Quick vocabulary bridge:
+
+| Term       | Meaning in this unit                                                |
+| ---------- | ------------------------------------------------------------------- |
+| POV        | "Point of view": a one-sentence statement of who needs what and why |
+| Bottleneck | The slowest step that controls the whole flow                       |
+| Assumption | Something the team believes is true but has not proven              |
+| Prototype  | The cheapest artifact that can test one assumption                  |
+| Divergent  | Opening the search wide before judging ideas                        |
+| Convergent | Narrowing ideas using explicit criteria after the wide search       |
 
 ## Define: writing a problem statement that isn't a solution in disguise
 
@@ -77,7 +88,7 @@ ever naming one:
 > **[the underlying reason, not the requested item]**.
 
 For the cafeteria: "Students at the food station need a way to decide
-what to take *before* they reach the counter, because deciding under
+what to take _before_ they reach the counter, because deciding under
 time pressure with a line behind them is what's causing the stall" — no
 mention of a board, a sign, or any specific fix. That sentence can be
 answered by a dozen different ideas, which is exactly the point.
@@ -91,7 +102,7 @@ instead of going straight for the best one?**
 
 Because judging ideas while generating them collapses the search to
 whatever's already familiar — usually a version of the first fix anyone
-thought of. Idea *volume* is a rough proxy for solution *coverage*: a
+thought of. Idea _volume_ is a rough proxy for solution _coverage_: a
 bigger net catches ideas nobody would have reached by direct reasoning
 from the problem statement, including some of the best ones.
 
@@ -109,10 +120,10 @@ strongest ideas tend to show up once the obvious ones are exhausted and
 the group has to reach further. This is also why Ideate has two distinct
 halves, not one continuous activity:
 
-| Half        | What happens                                        | Rule                          |
-| ------------ | ------------------------------------------------------ | -------------------------------- |
-| Divergent    | Generate as many candidate ideas as possible             | Defer judgment, quantity first  |
-| Convergent   | Group, vote, and narrow to a short list worth prototyping | Apply judgment, criteria stated |
+| Half       | What happens                                              | Rule                            |
+| ---------- | --------------------------------------------------------- | ------------------------------- |
+| Divergent  | Generate as many candidate ideas as possible              | Defer judgment, quantity first  |
+| Convergent | Group, vote, and narrow to a short list worth prototyping | Apply judgment, criteria stated |
 
 Skipping straight to convergent — picking a favorite in the first five
 minutes — is the same mistake as writing a solution-shaped Define
@@ -124,14 +135,14 @@ The group picks "a menu board with photos, prices grouped by wait time to
 prepare" from their narrowed list. **Should they hire a sign shop before
 lunch tomorrow, or something else?**
 
-Something else — a laminated sign is a *finished* artifact, and finished
+Something else — a laminated sign is a _finished_ artifact, and finished
 artifacts are expensive to change if the idea turns out wrong. A
 Prototype only needs to be real enough to test the riskiest assumption
 ("will a visible board actually shorten decision time"), so a sheet of
 poster paper taped up for one lunch period tests that just as well as a
 professionally printed sign, at a fraction of the cost of being wrong.
 
-Test then means timing the *real* line with the paper board up — not
+Test then means timing the _real_ line with the paper board up — not
 asking students in the hallway afterward "did you like the sign?" A
 "yes" to that question is weak evidence; a stopwatch reading is direct
 evidence, because it measures the actual behavior the Define statement

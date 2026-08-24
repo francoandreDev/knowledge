@@ -30,6 +30,10 @@ built and shipped costs the entire implementation cycle, redone. And the
 cost doesn't grow at a flat rate — the later the gap is caught, the more
 work sits on top of the wrong assumption:
 
+The numbers in the chart are illustrative, not a measurement from this
+team. They make one pattern visible: the later an unclear requirement is
+discovered, the more already-built work may need to be rethought.
+
 ```mermaid
 xychart-beta
     title "Relative cost to fix, by when the gap is caught"
@@ -60,9 +64,17 @@ engineer, or QA, or the original requester six months later, can look at
 the built thing and the requirement side by side and get the same yes/no
 answer independently.
 
+Two phrases in that table are easy to overread. **95th percentile** means
+roughly "even the 95th slowest user out of 100 should pass this target,"
+not just the average user. **Persists** means the filter stays applied
+after the page reloads, instead of disappearing.
+
 ## User stories: capturing who and why, not just what
 
 **If Sam's requirement had only said "bulk status changes for accounts," would he have known to add an audit log entry?** Almost certainly not — nothing in "bulk status changes" implies logging. This is exactly the gap a user story's "so that" clause exists to close.
+
+A user story is a short way to write three things together: who needs the
+change, what capability they need, and why that capability matters.
 
 ```
 As a [role], I want [capability], so that [benefit].
@@ -96,6 +108,10 @@ Acceptance criteria:
       audit log entry per account, consistent with single-item changes
 - [ ] Bulk delete is explicitly OUT of scope for this story
 ```
+
+**Out of scope** means "not promised in this version," even if it sounds
+related. Writing that down prevents the team from silently assuming
+delete is included just because the phrase "bulk actions" was broad.
 
 Without acceptance criteria, "done" is a private judgment call made
 twice — once by whoever built it, once by whoever asked for it — and those

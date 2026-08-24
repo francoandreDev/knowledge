@@ -14,6 +14,12 @@ else's three weeks of work is harder to explain as accidental,
 especially if the colleague was in meetings where the actual work was
 visibly being done.
 
+A school version of the distinction: if a group presentation forgets
+to say who made the chart, that might be an oversight. If one student
+says "I made this chart" while knowing another student made it, that
+is an authorship claim. The second case needs a firmer response because
+the words actively move credit.
+
 **What would make this clearly part of a pattern rather than an
 isolated incident?** If this is the first time it's happened, treat
 it seriously but not yet as proven intent. If it's the second or
@@ -40,6 +46,11 @@ the engineer's name next to the work, in the same room, without
 confrontation — enough to correct the record for anyone paying
 attention, without escalating.
 
+"Calibrated" here means proportional: not staying silent, but also not
+turning the meeting into a public trial. "Correcting the record" means
+making the true ownership visible again. The line protects your credit
+without forcing everyone in the room to choose sides on intent.
+
 ## What happens after the meeting
 
 **Does a calm in-meeting correction mean the issue is fully
@@ -59,6 +70,12 @@ of publicly?** It keeps the door open for a legitimate explanation
 while still making clear the engineer noticed — and if the same thing
 happens again after this conversation, that repeat is much stronger
 evidence of intent than the first incident alone.
+
+Different answers mean different things. A real apology plus a visible
+correction points toward a lapse. A verifiable confusion about who was
+presenting what may still need cleanup, but is not the same as intent.
+An evasive answer, anger that you noticed, or a repeat after this
+conversation makes the pattern much harder to dismiss.
 
 ## When it becomes a pattern instead of an incident
 
@@ -94,6 +111,13 @@ case of scapegoating — a colleague publicly blaming the engineer for
 a decision the engineer never actually made — would the same
 in-the-moment, low-confrontation move work, or does scapegoating need
 a different kind of immediate response?
+
+Short answer: scapegoating needs a different immediate response. With
+credit-stealing, the clean move is to attach your name back to the
+work. With scapegoating, the clean move is to attach the decision back
+to the actual facts: "I want to separate two things: I implemented the
+change after the decision was made, but I did not make the decision to
+ship it." Same calibration principle, different factual correction.
 
 ## Failure modes
 

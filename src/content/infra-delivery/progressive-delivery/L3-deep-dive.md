@@ -9,6 +9,12 @@ and the same user consistently getting the same version throughout
 the rollout (not flipping back and forth on every request). Here's an
 implementation using a deterministic hash.**
 
+Without code, the idea is: put every user into one of 100 numbered
+buckets, always using the same rule. If the rollout is 5%, only buckets
+0 through 4 go to the new version. If it grows to 25%, buckets 0
+through 24 go to the new version. The same user keeps landing in the
+same bucket, so they do not bounce between old and new on every request.
+
 ```js
 function hashUserId(userId) {
   let hash = 0;
@@ -56,9 +62,13 @@ usersAffectedByBug(users, 25); // ~24,988
 usersAffectedByBug(users, 100); // 100,000
 ```
 
+`makeUsers(100000)` is standing in for "imagine we have 100,000 user
+ids to route." The exact ids are not the lesson; the lesson is how many
+of them cross the current canary threshold.
+
 At a 5% canary stage, roughly 5,000 of 100,000 users would have hit
-the bug — not zero, but two orders of magnitude fewer than the
-Scenario's actual 100,000. This is the concrete version of "progressive
+the bug — not zero, but about 20 times fewer than the Scenario's actual
+100,000. This is the concrete version of "progressive
 delivery doesn't prevent the bug, it limits exposure to it" — the
 same bug, the same code, radically different blast radius depending
 entirely on what percentage of traffic it reached before being caught.
@@ -81,6 +91,10 @@ function shouldHaltRollout(errorCount, totalRequests, thresholdPercent) {
 shouldHaltRollout(50, 1000, 2); // true — 5% error rate exceeds a 2% threshold
 shouldHaltRollout(5, 1000, 2); // false — 0.5% error rate is within threshold
 ```
+
+The first call computes `50 / 1000 * 100 = 5%`, and 5% is above the 2%
+threshold, so the rollout halts. The second computes `5 / 1000 * 100 =
+0.5%`, which stays below the threshold.
 
 At the 5% canary stage, even a relatively small absolute number of
 errors (50 out of 1,000 canary requests) produces an error rate high
@@ -114,5 +128,5 @@ surface quickly?
 | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Using random assignment instead of a deterministic hash for canary routing                      | Random assignment means the same user can flip between old and new versions on different requests, producing an inconsistent experience and muddying monitoring signals |
 | Monitoring only crash/error-count in absolute terms, not as a rate                              | An absolute error count means nothing without knowing the traffic volume it came from — a rate-based threshold is what makes small-canary monitoring meaningful         |
-| Assuming a bug that's uniform across users will be caught by a percentage-based canary          | A bug that only affects a specific user segment might be underrepresented or absent entirely in a small percentage-based sample, delaying detection                     |
+| Assuming a segment-specific bug will be caught by a percentage-based canary                     | A bug that only affects a specific user segment might be underrepresented or absent entirely in a small percentage-based sample, delaying detection                     |
 | Treating a canary stage as time-based only ("wait 10 minutes") without an explicit health check | A canary stage advancing purely on elapsed time, with no explicit rate check, provides no actual protection — it's progressive delivery in name only                    |

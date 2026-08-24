@@ -30,6 +30,16 @@ I've got it"). The active loop closes it on a _result_ ("I either produced
 night was five trips around the passive loop; Wednesday's quiz was the first
 time anyone ran the active loop on her at all.
 
+Quick vocabulary bridge before the technical terms:
+
+| Term               | Plain meaning                                  | 7×8 example                                 |
+| ------------------ | ---------------------------------------------- | ------------------------------------------- |
+| Familiarity        | "I have seen this before"                      | The row looks familiar                      |
+| Perceptual fluency | The page feels easier because you have seen it | Reading "7×8 = 56" feels smooth             |
+| Recognition        | You can pick the right thing when it is shown  | Seeing 56 and thinking "yes, that is right" |
+| Retrievability     | You can pull it from memory without help       | Saying 56 with no page                      |
+| Production         | You can use it in the real task                | Answering a cold quiz question              |
+
 The passive loop is comfortable, and the "getting it" feeling it produces is
 genuine, not faked — which is exactly what makes it deceptive. The active
 loop is uncomfortable by design: it's supposed to surface exactly where the
@@ -75,12 +85,11 @@ chapter hoping the unclear part sinks in this time.
 
 ## Does this claim only apply to formal studying — and does this site actually practice what it teaches here?
 
-The exercise system in this curriculum (`exercises.json`, self-graded
-quizzes) is a direct application of this unit's claim: reading L1/L2/L3 is
-the exposure step, and the exercises exist specifically because reading
-isn't the same as knowing — answering a question without re-reading the
-level first forces the same kind of retrieval Priya's Wednesday quiz forced
-on her. The spaced-repetition re-exam (`spaced-repetition.ts`) exists for
-the same reason a single Wednesday quiz wouldn't have been the end of the
-story: a successful retrieval today doesn't guarantee it's still retrievable
-in a month without reinforcement.
+The exercises in this curriculum are a direct application of this unit's
+claim: reading L1/L2/L3 is the exposure step, and the questions exist
+because reading is not the same as knowing. Answering without re-reading
+the level first forces the same kind of retrieval Priya's Wednesday quiz
+forced on her. The later re-exam schedule uses the same idea as
+[spaced repetition](/learning-craft/spaced-repetition/): one successful
+retrieval today does not guarantee it will still be retrievable in a
+month without reinforcement.

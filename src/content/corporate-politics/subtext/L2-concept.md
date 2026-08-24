@@ -13,6 +13,13 @@ or when disagreeing publicly could look like undermining a colleague.
 Hedge language exists specifically to let someone avoid committing
 to a position without creating that conflict:
 
+Do not read the next table as a secret dictionary where every phrase
+always means the same thing. A useful read needs three pieces together:
+the phrase, the lack of a concrete next action, and the context you
+expected. "Interesting" plus a specific question can be real interest;
+"interesting" alone, when real interest would normally ask something
+specific, is the signal.
+
 | Phrase                                       | Common subtext                                                              | What it usually is NOT                                                |
 | -------------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | "Let's take it offline"                      | "I'm not going to debate this here, and I may not actually follow up"       | A guaranteed commitment to a real follow-up conversation              |
@@ -20,6 +27,12 @@ to a position without creating that conflict:
 | "Worth exploring"                            | Mild, hedged interest that commits to nothing concrete                      | Approval to proceed                                                   |
 | "I'd want to think about that"               | Real hesitation being deferred rather than stated                           | A rhetorical formality before agreeing                                |
 | "Let me loop in [someone else]"              | Delegating the actual decision (or the risk of saying no) to another person | Simple information-sharing                                            |
+
+"Loop in" just means bringing another person into the conversation.
+Sometimes that is normal information-sharing. Sometimes it means "I do
+not want to be the person who says yes or no." The difference depends
+on whether the next person actually has authority or whether the topic
+is being passed around to avoid a clear answer.
 
 **Is every use of these phrases actually a hedge?** No — that's the
 central caution of this level. The same words can be literal:
@@ -62,6 +75,18 @@ follow-up that turns the ambiguous signal into real information:
 I go further with it?" This works whether the read was right or
 wrong: if there was a real concern, it usually surfaces once asked
 directly and privately; if there wasn't, nothing is lost by asking.
+
+Useful follow-up questions sound like this:
+
+- Soft: "I noticed we did not get many concrete questions. Is there a
+  risk I should check before going further?"
+- Specific: "When you mentioned cost, which cost worries you most:
+  infrastructure, maintenance, or priority against other projects?"
+- To a senior person: "You were quieter than usual on this topic, and
+  I value your read. Is there anything I am missing?"
+
+These are low-stakes because they do not accuse. They give the other
+person an easy path to share information.
 
 ## Failure modes at this level
 

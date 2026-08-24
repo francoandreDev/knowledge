@@ -15,6 +15,13 @@ when the source text isn't there to lean on.
 
 ## The four-step loop, precisely
 
+Before the bicycle example in L3, try the loop on something ordinary:
+explaining why `7 x 8 = 56` without just saying "because I memorized it,"
+or explaining how boiling water cooks pasta without stopping at "because
+it gets hot." In both cases, the moment you reach for "just because,"
+"somehow," or "that's how it works," you have found the exact place to
+go back and study.
+
 ```mermaid
 flowchart TD
     Explain["1. Explain it in plain\nlanguage, as if teaching\na genuine beginner"] --> Notice["2. Notice exactly where\nthe explanation breaks\ndown or gets vague"]
@@ -61,6 +68,14 @@ rather than explaining why it's true. These are the concrete signals that
 the loop's second step is watching for — not a vague overall feeling of
 difficulty, but a locatable point in the explanation itself.
 
+A useful self-check is to pause whenever your explanation says the same
+sentence twice with different words. "Bikes balance because of momentum"
+may sound cleaner than "bikes stay up because they are moving," but if it
+still does not say what motion changes, what force moves where, or what
+gets corrected, it has not filled the gap. A real mechanism names the
+chain: what happens first, what that causes next, and why that result
+answers the original question.
+
 ## The generalizable lesson
 
 **Is this really just a studying trick, or a broader principle?** The
@@ -70,4 +85,7 @@ material can be mistaken for genuine understanding: reviewing your own
 notes right before a decision, or nodding along in a meeting to an
 explanation you could actually restate. Teach-back works precisely
 because generation is a harder, more honest test than recognition, in
-any domain it's applied to.
+any domain it's applied to. When the second pass fails because you do not
+know which words to search for, the next move is the same refinement habit
+covered in [search literacy](/learning-craft/search-literacy/): search
+for the exact gap, not the whole topic again.

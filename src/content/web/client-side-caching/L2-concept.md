@@ -59,6 +59,13 @@ confirmation catches up in the background.
 | What's shown while waiting | The previously cached response       | The assumed post-write state                           |
 | Risk if wrong              | Cached data is stale                 | Optimistic state has to be rolled back                 |
 
+In plain language:
+
+| Story                      | What the app is doing            | Main sync question                                                   |
+| -------------------------- | -------------------------------- | -------------------------------------------------------------------- |
+| "Open the task list again" | Reading data it may already have | Can we show remembered data while checking for freshness?            |
+| "Check off Buy milk"       | Changing data the server owns    | Can we show the user's intent now and undo it if the server says no? |
+
 **Stale-while-revalidate**, the most common caching pattern, resolves
 the "reading" side: show the cached response immediately (even if
 it's a few seconds old), then quietly re-fetch in the background and
@@ -73,6 +80,21 @@ flowchart LR
     E -->|"Yes"| F["Update UI with\nfresh data"]
     E -->|"No"| G["Leave UI as-is —\nno visible change"]
     B -->|"No"| H["Fetch, show\nloading state"]
+```
+
+After a write succeeds, the app must also decide what cached reads became
+untrustworthy. If checking a task changes the `tasks` list, the cached `tasks`
+answer is no longer safely reusable as-is. The app can either update that cache
+with the confirmed task list or mark it stale so the next read fetches fresh
+data instead of resurrecting the old unchecked version.
+
+```mermaid
+flowchart LR
+    A["PATCH /tasks/1 succeeds"] --> B{"Do we know the\nnew list exactly?"}
+    B -->|"Yes"| C["Update cache\nfor tasks"]
+    B -->|"No"| D["Invalidate tasks\ncache key"]
+    C --> E["Next read does not\nshow old data"]
+    D --> F["Next read fetches\nfresh data"]
 ```
 
 ## What has to be true for a rollback to be honest

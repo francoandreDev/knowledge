@@ -18,6 +18,12 @@ nothing to say and avoids the conversation entirely:
 | "We're happy with what we have."         | Status quo bias — the current approach's flaws are familiar and survivable; a new approach's flaws are unknown.               |
 | "It's a bit expensive for us right now." | The price itself isn't the issue — the buyer doesn't yet have a way to justify the cost internally to whoever they report to. |
 
+Read the table as possible clues, not as a mind-reading machine. A
+buyer may be telling the whole truth, or they may be naming the
+easiest professional reason while a harder concern sits underneath.
+The skill is to ask in a way that lets the real concern surface
+without making the buyer feel accused.
+
 **Is this table saying every stated objection is a cover story?**
 No — sometimes "it's expensive" really does just mean the budget
 isn't there. The table is a set of common patterns, not a rule that
@@ -31,6 +37,13 @@ cheaper than what they have?** Because "better and cheaper" is a
 comparison about the _product_ — but the buyer isn't just evaluating
 the product, they're evaluating their own risk in recommending it:
 
+B2B means business-to-business: one company selling to another
+company. That usually means the buyer is not spending only their own
+money; they may need approval, they may need to explain the decision
+to a boss, and they may risk their reputation if the new choice fails.
+To "stake their credibility" simply means to put their reputation on
+the line.
+
 ```mermaid
 flowchart LR
     A["Product comparison\n(better + cheaper)"] --> B{"Buyer's actual\ndecision"}
@@ -43,6 +56,10 @@ expensive," "not the right time") because that's the comfortable,
 professional-sounding thing to say — but the actual decision weighs
 the buyer's personal exposure just as heavily, often more, and that
 part rarely gets said out loud unprompted.
+
+In text form: the buyer is not just asking "is this product better?"
+They are also asking "can I safely recommend this, get it approved,
+and survive the consequences if it goes badly?"
 
 ## Surfacing the real objection without accusing anyone
 

@@ -6,6 +6,18 @@ title: "L2 — Scope, not skill, is the axis levels actually measure"
 
 Jordan and Alex, from L1, both know how to fix a bug. So if the skill is the same, what's actually different about the _size_ of problem each of them is trusted to touch without asking first?
 
+Professional shorthand in this section:
+
+| Phrase                 | Means in simpler language                                               |
+| ---------------------- | ----------------------------------------------------------------------- |
+| Clear spec             | Someone already wrote what "done" means                                 |
+| Owner                  | The person or team responsible for making sure the problem gets handled |
+| Unowned problem        | A real problem that nobody has been assigned yet                        |
+| Direction across teams | Helping multiple groups choose the same future path                     |
+| Performance review     | A scheduled moment where work is evaluated                              |
+| Lateral hire           | Someone hired into a level from outside the company                     |
+| Retention              | Keeping someone from leaving, often through pay/title changes           |
+
 ```mermaid
 flowchart LR
     A["Well-defined task\n(clear spec, clear owner)"] --> B["Project with unclear edges\n(you fill gaps in the spec)"]
@@ -14,6 +26,10 @@ flowchart LR
 ```
 
 Each stage doesn't retire the previous skill — someone operating at stage D still writes code, still solves well-defined tasks sometimes. What changes is what's _expected by default_: at stage A, someone else has already resolved the ambiguity before it reaches you; at stage D, resolving ambiguity nobody assigned is the actual job.
+This is not a moral ladder where "task work" is bad and "cross-team work"
+is good. A clear task can be the right scope for a real need. The level
+question is narrower: what scope does this person reliably handle by
+default, across many situations?
 
 ## The four dimensions, applied concretely
 
@@ -51,3 +67,8 @@ This is why "I write better code than most seniors on my team" doesn't, by itsel
 If someone's actual day-to-day scope has already widened, why doesn't their title catch up the same week?
 
 Titles are assigned in a process (performance review, promotion committee) that happens on a cadence — quarterly, annually. Actual scope expansion happens continuously and unevenly. This produces the two most common sources of leveling friction: someone already operating at wider scope than their title reflects (the title hasn't caught up), or someone whose title outran their current actual scope (a lateral hire, a title inflated for retention). Neither case means the framework is wrong — it means title, as a lagging indicator, is expected to occasionally disagree with the scope someone is really operating at.
+Think of a title like a grade posted after an exam period: the work happened
+first, the official label arrives later. Sometimes the posted grade is late,
+sometimes it is noisy, and sometimes a different school uses the same label
+for a slightly different standard. The label matters, but it is not the
+underlying work itself.

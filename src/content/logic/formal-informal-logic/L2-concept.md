@@ -9,11 +9,26 @@ The bakery from L1 has a rule: the lights are always on while it's open (they tu
 ```mermaid
 flowchart TD
     P["Premises assumed true"] --> S{"Does the conclusion\nnecessarily follow?"}
-    S -- "Yes, in every case" --> V["Valid — structure is sound"]
+    S -- "Yes, in every case" --> V["Valid — conclusion is forced"]
     S -- "No, there's a case where\npremises hold but conclusion fails" --> I["Invalid — structure is broken"]
 ```
 
 Validity never asks "is this true in reality" — it asks "if I grant the premises, am I forced into the conclusion." That's testable with the bakery's own rule: "if open, then lights on" is the premise everyone agrees on. The question is which direction the reasoning is allowed to run.
+
+That "if P then Q" shape is one-way unless the premise explicitly says
+otherwise:
+
+| Symbol shape  | Spoken version                               |
+| ------------- | -------------------------------------------- |
+| `if P then Q` | If the condition happens, the result follows |
+| `P`           | The condition happens                        |
+| `Q`           | The result happens                           |
+| `not Q`       | The result does not happen                   |
+
+In logic vocabulary, `P` is the **antecedent** (the condition) and `Q`
+is the **consequent** (what follows if the condition happens). You do
+not need to memorize the Latin names first; the important habit is
+checking which direction the rule actually points.
 
 ## Four shapes, same two premises, different validity
 
@@ -48,6 +63,11 @@ xychart-beta
 
 The curve climbs fast at first and flattens out approaching, but never touching, 100% — that gap is exactly the difference between an inductive conclusion and a deductively valid one. (This particular curve is a simplified illustration, not a rigorous statistical model — the real math behind updating confidence from evidence is its own field. The shape — climbing, flattening, never reaching certainty — is the part worth remembering.)
 
+When you later want the actual math for "how much should confidence
+change after new evidence?", connect this idea to
+`applied-math/statistics`. Here, the chart is only a visual reminder
+that stronger evidence still is not deductive certainty.
+
 ## Where informal logic picks up
 
 Formal structure alone doesn't catch what went wrong with the third friend from L1 ("it was open once, so 'always closed' is just wrong"). Both "closed every Monday, no exceptions" and "closed most Mondays, usually" use ordinary words that sound almost interchangeable in casual speech — but they make different-strength claims, and a single counterexample does different amounts of damage to each:
@@ -58,3 +78,8 @@ Formal structure alone doesn't catch what went wrong with the third friend from 
 | "It's closed most Mondays" | Inductive generalization          | No — it weakens the pattern, doesn't disprove it |
 
 Informal logic is the discipline of noticing _which_ of these two someone actually meant — often from tone and context rather than an explicit "every" or "most" — before deciding whether a single counterexample settles the argument or just nudges it.
+
+This is also where `logic/fallacies` becomes useful: many bad arguments
+are not formally invalid-looking at first glance; they persuade by
+ambiguity, missing premises, emotional pressure, or shifting what a word
+means mid-conversation.
