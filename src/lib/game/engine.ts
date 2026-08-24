@@ -41,6 +41,12 @@
 // src/lib/game/settings.ts) disables all glow entirely. Also added a dt
 // clamp (MAX_DT) so a real tab-backgrounding gap can't produce one huge
 // catch-up frame — a gap flagged but deferred back in Phase 2.
+// Phase 9 scope, layered on top: Phase 8's single-primitive drawShape()
+// calls were extracted into src/lib/game/sprites.ts and given per-kind
+// composite detail (eyes, wings, a hood, a coin ring, a projectile trail,
+// etc.) — still pure Canvas drawing, no external image assets, per
+// GAME-DESIGN.md's "Visual style" note that this swap was always expected.
+// engine.ts's simulation code is untouched; only render() changed.
 //
 // Spawn/collision math is kept intentionally cheap (linear scans over small
 // arrays, no quadtree) and the density ramp is floored at a minimum interval
@@ -64,6 +70,13 @@ import {
   playEvolution,
   playDeath,
 } from "./audio";
+import {
+  drawPlayer,
+  drawEnemy,
+  drawGem,
+  drawCoin,
+  drawProjectile,
+} from "./sprites";
 
 const log = createLogger("engine");
 
@@ -101,7 +114,8 @@ const MIN_SPAWN_INTERVAL_MS = 150; // perf floor — see file header
 const MAX_ALIVE_ENEMIES = 60; // perf cap — see file header
 
 // --- Phase 2: enemy roster ---
-type EnemyKind = "zombie" | "bat" | "skeleton" | "ghost" | "ogre" | "reaper";
+export type EnemyKind =
+  "zombie" | "bat" | "skeleton" | "ghost" | "ogre" | "reaper";
 
 // --- Phase 5: enemy tiers, weighted by shop powerIndex ---
 type EnemyTier = "normal" | "veteran" | "elite";
@@ -564,64 +578,6 @@ function darkenHexColor(hex: string, amount: number): string {
   return `rgb(${r | 0}, ${g | 0}, ${b | 0})`;
 }
 
-// --- Phase 8: geometric-shape rendering (GAME-DESIGN.md "Visual style") ---
-type Shape = "circle" | "triangle" | "square" | "diamond";
-
-const ENEMY_SHAPE: Record<EnemyKind, Shape> = {
-  zombie: "circle",
-  bat: "triangle",
-  skeleton: "square",
-  ghost: "circle",
-  ogre: "square",
-  reaper: "circle",
-};
-
-// Draws a filled, outlined shape, with an optional glow (shadowBlur).
-// Glow is intentionally opt-in per call site, not automatic — see the
-// Phase 8 header note on why it's reserved for the player/boss/elites only.
-function drawShape(
-  ctx: CanvasRenderingContext2D,
-  shape: Shape,
-  x: number,
-  y: number,
-  radius: number,
-  color: string,
-  opts: { glow?: boolean; glowColor?: string } = {},
-) {
-  ctx.save();
-  if (opts.glow) {
-    ctx.shadowColor = opts.glowColor ?? color;
-    ctx.shadowBlur = radius * 1.1;
-  }
-  ctx.fillStyle = color;
-  ctx.strokeStyle = "rgba(255,255,255,0.4)";
-  ctx.lineWidth = Math.max(1, radius * 0.14);
-  ctx.beginPath();
-  if (shape === "circle") {
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-  } else if (shape === "square") {
-    ctx.rect(x - radius, y - radius, radius * 2, radius * 2);
-  } else if (shape === "diamond") {
-    ctx.moveTo(x, y - radius);
-    ctx.lineTo(x + radius, y);
-    ctx.lineTo(x, y + radius);
-    ctx.lineTo(x - radius, y);
-    ctx.closePath();
-  } else {
-    for (let i = 0; i < 3; i++) {
-      const a = -Math.PI / 2 + (i * Math.PI * 2) / 3;
-      const px = x + Math.cos(a) * radius;
-      const py = y + Math.sin(a) * radius;
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-  }
-  ctx.fill();
-  ctx.stroke();
-  ctx.restore();
-}
-
 export function startGame(
   canvas: HTMLCanvasElement,
   callbacks: GameCallbacks,
@@ -661,6 +617,7 @@ export function startGame(
   }) as unknown as GameObject & { hp: number; lastHitAt: number };
   player.hp = PLAYER_MAX_HP;
   player.lastHitAt = -Infinity;
+  let playerFacingAngle = -Math.PI / 2; // Phase 9: sprite orientation, faces up by default
 
   // --- Phase 7: dynamic virtual joystick (pointer events on the canvas) ---
   interface JoystickState {
@@ -1508,6 +1465,7 @@ export function startGame(
         }
       }
       if (moveMagnitude > 0) {
+        playerFacingAngle = Math.atan2(moveY, moveX); // Phase 9: sprite orientation
         const speed =
           PLAYER_SPEED * speedMult * upgradeEffects.speedMult * moveMagnitude;
         player.x = Math.min(
@@ -1717,40 +1675,39 @@ export function startGame(
     render() {
       context.clearRect(0, 0, canvas.width, canvas.height);
       for (const g of gems) {
-        drawShape(context, "diamond", g.x, g.y, GEM_RADIUS, g.color);
+        drawGem(context, g.x, g.y, GEM_RADIUS, g.color);
       }
       for (const c of coinPickups) {
-        drawShape(context, "circle", c.x, c.y, COIN_RADIUS, c.color);
+        drawCoin(context, c.x, c.y, COIN_RADIUS, c.color);
       }
       // Elite/boss get a glow (GAME-DESIGN.md "Distinct glow/aura"); Veteran
       // instead gets a plain color tint, applied at spawn time via
       // darkenHexColor(). Glow is skipped for ordinary enemies to keep
       // shadowBlur's per-draw cost bounded at up to 60 alive (Phase 8).
+      // Per-kind composite detail (eyes, wings, a hood, etc.) is Phase 9,
+      // see src/lib/game/sprites.ts's drawEnemy().
       for (const e of enemies) {
         const isElite = e.tier === "elite";
         const isBoss = e.kind === "reaper";
-        drawShape(context, ENEMY_SHAPE[e.kind], e.x, e.y, e.radius, e.color, {
+        drawEnemy(context, e.kind, e.x, e.y, e.radius, e.color, {
           glow: !reduceMotion && (isElite || isBoss),
           glowColor: isElite ? "rgba(250, 204, 21, 0.9)" : e.color,
         });
       }
       for (const p of projectiles) {
-        drawShape(context, "circle", p.x, p.y, p.width / 2, p.color);
+        drawProjectile(context, p.x, p.y, p.width / 2, p.color, p.dx, p.dy);
       }
       for (const p of enemyProjectiles) {
-        drawShape(context, "circle", p.x, p.y, p.width / 2, p.color);
+        drawProjectile(context, p.x, p.y, p.width / 2, p.color, p.dx, p.dy);
       }
-      drawShape(
+      drawPlayer(
         context,
-        "circle",
         player.x,
         player.y,
         PLAYER_RADIUS,
         "#38bdf8",
-        {
-          glow: !reduceMotion,
-          glowColor: "#38bdf8",
-        },
+        playerFacingAngle,
+        !reduceMotion,
       );
 
       // --- Phase 7: joystick visual (base at touch-down point, knob follows) ---

@@ -43,6 +43,12 @@ of every session that touches game code, before stopping.
   `game:audio-muted`), and `playPickup()`/`playHit()`/`playLevelUp()`/
   `playEvolution()`/`playDeath()`, called directly from `engine.ts` at the
   relevant event sites (not routed through `GameCallbacks`).
+- `src/lib/game/sprites.ts` — Phase 9's Canvas drawing layer: `drawShape()`
+  (the Phase 8 primitive, moved here unchanged) plus per-kind composite
+  functions (`drawPlayer`/`drawEnemy`/`drawGem`/`drawCoin`/`drawProjectile`)
+  that layer extra detail (eyes, wings, a hood, a coin ring, a motion
+  trail) on top. Pure rendering — no simulation/collision code lives here,
+  and `engine.ts`'s game logic is untouched by this file.
 - `src/lib/game/settings.ts` — Phase 8's reduce-motion setting
   (`isReducedMotion()`/`setReducedMotion()`/`toggleReducedMotion()`),
   persisted via `pStorage` (`game:reduce-motion`) — mirrors `audio.ts`'s
@@ -618,9 +624,67 @@ playing one run (ideally one long enough to see an Elite or two, and
 ideally with a deliberate tab-switch mid-run to exercise the dt clamp)
 would fully close this out.
 
+### Phase 9 — Composite Canvas sprites ✅ done, partially validated in-browser
+
+Not part of the original 8-phase plan — added after the user asked for
+"better assets" post-Phase 8. Scoped down from "external art" (this
+environment has no image-generation tool, and GAME-DESIGN.md deliberately
+avoids external assets for licensing reasons) to "richer detail within the
+existing Canvas-drawing approach," per the user's explicit choice when
+asked to pick a direction.
+
+- **New `src/lib/game/sprites.ts`**: `drawShape()` (Phase 8's single-
+  primitive draw call) moved here unchanged, plus five new composite
+  functions that layer extra detail on top of it:
+  - `drawPlayer()` — the base glowing circle plus a small bright "facing
+    nub" toward the last movement direction, so the otherwise-symmetric
+    player circle reads as oriented. Backed by a new `playerFacingAngle`
+    variable in `engine.ts`, updated whenever the player actually moves
+    (keyboard or joystick) and held steady when idle.
+  - `drawEnemy()` — the existing base shape (`ENEMY_SHAPE`, moved here from
+    `engine.ts` unchanged) plus per-kind accents: Zombie gets two eyes and
+    a crooked mouth line, Bat gets two extra small wing triangles + eyes,
+    Skeleton gets eyes plus a simple rib cross, Ghost gets eyes only (kept
+    minimal — its "keeps distance" behavior is the more legible tell),
+    Ogre gets a heavy brow line + larger eyes, and the Reaper boss gets a
+    dark hood overlay (a translucent triangle over the top half) plus two
+    glowing amber eyes. None of this is facing-dependent (only the player
+    tracks a facing angle) — kept cheap and simple by design.
+  - `drawGem()` — the existing diamond plus a single facet highlight line.
+  - `drawCoin()` — the existing circle plus an inner ring stroke, reading
+    more like a coin edge than a flat disc.
+  - `drawProjectile()` — the existing circle plus a short, fading trail
+    drawn opposite the projectile's velocity vector (`p.dx`/`p.dy`, already
+    on every `Projectile`) — fast bolts/darts now visibly streak instead of
+    just teleporting frame to frame.
+- **`engine.ts`** changes are rendering-only: `drawShape`/`ENEMY_SHAPE`
+  removed (now imported from `sprites.ts`), `render()`'s per-entity draw
+  calls swapped for the new composite functions, and `EnemyKind` is now
+  exported (needed by `sprites.ts`'s type import). No simulation, collision,
+  or balance code changed — same class of separation Phase 8 already
+  established (rendering only reads position/color/kind off entities that
+  the update loop owns).
+- **Perf-cost posture unchanged from Phase 8**: the new accents are cheap
+  primitives (dots, lines, one extra small triangle for Bats) with no
+  `shadowBlur` of their own — glow stays reserved for player/boss/elite,
+  same reasoning as Phase 8's header note.
+
+**Validated 2026-08-24**: guardrails (`bun run check`) pass. In-browser: a
+started run's canvas was screenshotted and the player rendered correctly
+as a glowing circle with a visible facing nub (confirming `drawPlayer()`
+runs without error against a real canvas context). **Not confirmed live**:
+the per-enemy-kind accents (eyes, wings, hood, etc.) and the projectile
+trail, since — same limitation as every phase since Phase 2 — no enemies
+or projectiles spawn while the automation environment's rAF loop is
+suspended. A real human playing one run remains the way to see the full
+composite roster (all 5 enemy kinds + boss + gems + coins + projectiles)
+at once.
+
 ## Current state
 
-**All 8 phases are now implemented.** Phases 1-3 are complete and validated
+**All 8 originally-planned phases, plus Phase 9 (composite sprite detail,
+added after the fact per user request), are now implemented.** Phases 1-3
+are complete and validated
 end-to-end, including Lv6 weapon evolutions. Phases 4 through 8 (real
 gating/lobby/results, coins/shop/enemy tiers, audio, mobile joystick, and
 visual/perf polish) are all believed correct from code review + guardrails
@@ -633,13 +697,14 @@ first documented (a single real click reliably produces at most one live
 frame before `visibilityState` reverts to `"hidden"`), and spoofing it
 doesn't work around it. The fastest, and really the only remaining,
 close-out step is **a real human playing one full run** — ideally long
-enough to see an Elite spawn, a weapon evolve, and (deliberately) a
-mid-run tab-switch to exercise Phase 8's new `dt` clamp — not more
-automation attempts. No further phases are planned; GAME-DESIGN.md is
-fully implemented as specced (with the small, explicitly-documented
-deviations noted throughout this file, e.g. the Phase 4 per-unit-not-per-
-level token grant, Phase 2's spawn-density floor/cap, and Phase 8's
-selective-glow decision).
+enough to see an Elite spawn, a weapon evolve, a boss with its hood
+rendered, and (deliberately) a mid-run tab-switch to exercise Phase 8's
+`dt` clamp — not more automation attempts. No further phases are planned;
+GAME-DESIGN.md is fully implemented as specced (with the small, explicitly-
+documented deviations noted throughout this file, e.g. the Phase 4
+per-unit-not-per-level token grant, Phase 2's spawn-density floor/cap,
+Phase 8's selective-glow decision, and Phase 9's composite-Canvas-detail
+scope instead of external art assets).
 
 ## Deliberate simplifications (intentional — not bugs)
 

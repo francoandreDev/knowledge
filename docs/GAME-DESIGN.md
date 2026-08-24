@@ -162,6 +162,8 @@ Web Audio API, synthesized procedurally (oscillators/envelopes) — no external 
 
 Sprites are **plain geometric shapes drawn on Canvas** (circles/rectangles/triangles with color, a soft glow, and an outline) — no external art assets, no licensing concerns, immediate to implement. Enemy tiers (Normal/Veteran/Elite) are distinguished by tint and size rather than distinct artwork. This can be swapped for real sprite assets later without touching game logic, since rendering is a separate concern from simulation.
 
+**Implementation note (Phase 9):** rather than swapping in external image assets, the geometric shapes were given richer per-kind composite detail while staying entirely within the "no external art" approach — see `src/lib/game/sprites.ts`. Each entity is now several layered Canvas draws instead of one (eyes, a bat's wings, a skeleton's ribs, the boss's hood, a coin's inner ring, a projectile's motion trail), still zero image files. External sprite assets remain a possible future swap if ever wanted — rendering is still fully decoupled from simulation, unchanged by this phase.
+
 ## Mobile controls
 
 A dynamic virtual joystick: the base circle spawns at the exact point the player's thumb touches inside the play area, rather than living in a fixed screen zone — comfortable regardless of how the phone is held, and the genre-standard approach.
