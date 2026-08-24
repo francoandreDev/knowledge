@@ -25,6 +25,14 @@ matches nearly everything. Two or three real anchors combined narrow the
 result set far more than either one alone, because a source has to match
 _all_ of them to surface.
 
+| Vague words                    | Stronger anchor terms                                       |
+| ------------------------------ | ----------------------------------------------------------- |
+| "phone problem"                | Phone model + exact message on screen                       |
+| "school form"                  | School name + form name + deadline year                     |
+| "stomach medicine side effect" | Medicine name + dose + symptom wording                      |
+| "math homework help"           | Exact topic + textbook section + problem type               |
+| "wifi broken"                  | Router model + "intermittent disconnect" + firmware version |
+
 ## The refinement loop
 
 **If the first search doesn't answer the question, was it wasted?** Not if
@@ -46,6 +54,12 @@ results) and the word "firmware" (used repeatedly by people describing
 similar symptoms). Neither was in the first query. Both were in the
 second.
 
+When skimming results, you are not opening everything. You are scanning
+the visible clues: the title, the short snippet, the site name or URL,
+the date if shown, and words that repeat across several relevant-looking
+results. If three results all use a term you did not know, that term may
+be the domain vocabulary your next query needs.
+
 ## When to stop searching and go to the source directly
 
 **Is there a point where more searching is the wrong move entirely?** Yes
@@ -55,6 +69,11 @@ the official documentation, the changelog, the manufacturer's support
 page, the spec itself. Searching _around_ that source (blog posts
 summarizing it, forum threads guessing at it) adds a layer of possible
 error the source itself doesn't have.
+
+"Official" is not magic, though. The official page can still be old,
+written for a different country, or about a different model/version. The
+reason to go there first is that it removes one layer of guessing; you
+still check whether the page actually matches your exact situation.
 
 | Signal                                                                                      | Suggests                                                               |
 | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |

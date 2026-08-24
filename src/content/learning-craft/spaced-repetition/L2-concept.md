@@ -28,7 +28,28 @@ enough time has passed that recalling it takes real effort — is what
 resets the curve and, done repeatedly, makes each following decline
 flatter than the last.
 
+"Curve" here does not require advanced math. It just means the shape of
+how remembering changes over time. "Decay" means the memory gets weaker;
+"reset" means a successful review lifts it back up; "flatter" means it
+falls more slowly next time.
+
+## How to tell you are near the point of forgetting
+
+You do not need an exact timer. You are close enough when recall is
+possible but no longer easy:
+
+| Signal during review                         | What it suggests                                                |
+| -------------------------------------------- | --------------------------------------------------------------- |
+| You can answer, but only after a pause       | Good spacing — the memory is being pulled back with effort      |
+| You remember the first half but need a hint  | Still useful — try before looking, then check the missing piece |
+| You instantly know everything with no effort | Probably too soon — little has faded yet                        |
+| You cannot even start without rereading      | Probably too late — you may be relearning more than reinforcing |
+
 ## Massed practice vs. spaced practice
+
+**Massed practice** (also called cramming) means packing most of the
+study into one block. It can work for tomorrow morning, but it leaves
+very little protection for next month.
 
 |                             | Massed practice (cramming)                                       | Spaced practice                                                          |
 | --------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------ |

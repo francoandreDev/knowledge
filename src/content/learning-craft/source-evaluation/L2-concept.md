@@ -28,6 +28,11 @@ flowchart LR
 
 Each arrow is a real opportunity for something to be simplified, misread, or subtly changed — and critically, **C never touched the primary source at all**. If A introduced a small error while summarizing (a common, non-malicious occurrence — summarizing always loses some precision), B and C both inherit it, and neither is positioned to catch it, because neither ever compared against the original.
 
+In everyday terms, this is how "the exam is Monday morning" can become
+"the exam is Monday" and then "the exam is sometime this week." No one
+had to lie. Each person kept the part they noticed and dropped a piece of
+precision the next person may have needed.
+
 ## If corroboration can be an illusion, how do you tell real agreement from copied agreement?
 
 You have to check what each source is actually citing — not just that they agree.
@@ -66,4 +71,17 @@ The ranking matters because the weakest signals (production quality, sheer repet
 
 ## Does a source's age tell you anything on its own?
 
-Not without knowing how fast the specific domain moves. A five-year-old article correctly explaining how TCP's three-way handshake works is still entirely correct today, because the mechanism hasn't changed; a five-year-old article benchmarking framework performance or describing a still-open security vulnerability is very likely stale, because both areas change on a timescale of months, not years. Even the exam-schedule rumor has a recency angle: a screenshot from this morning is far more likely to be current than one that's been recirculating since last week, in a class where the schedule has already changed once. The practical question isn't "how old is this" in isolation, it's "how fast does this specific kind of claim typically go stale," checked against the actual age.
+Not without knowing how fast the specific domain moves. A multiplication
+table does not go stale quickly; a bus schedule, store price, weather
+forecast, or class deadline can go stale in hours or days. The same rule
+applies in technical domains: a five-year-old article correctly
+explaining how TCP's three-way handshake works is still entirely correct
+today, because the mechanism hasn't changed; a five-year-old article
+benchmarking framework performance or describing a still-open security
+vulnerability is very likely stale, because both areas change on a
+timescale of months, not years. Even the exam-schedule rumor has a
+recency angle: a screenshot from this morning is far more likely to be
+current than one that's been recirculating since last week, in a class
+where the schedule has already changed once. The practical question isn't
+"how old is this" in isolation, it's "how fast does this specific kind of
+claim typically go stale," checked against the actual age.
