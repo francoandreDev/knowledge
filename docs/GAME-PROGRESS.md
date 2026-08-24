@@ -27,7 +27,11 @@ of every session that touches game code, before stopping.
   the `update`/`render` loop. `startGame(canvas, callbacks, options)` is the
   only export the page needs; `callbacks.onHudUpdate`/`onGameOver` are how
   the DOM-side HUD stays in sync without the engine touching the DOM
-  directly, and `options.durationS` sets the run's length (Phase 4).
+  directly, and `options.durationS` sets the run's length (Phase 4). Phase 13
+  added `enemyTimeScale()`/`computeThreatTier()` — enemy HP/contact-damage
+  now scale up (bounded, asymptotic) with elapsed run time, and
+  `GameHudState.threatTier` / `GameCallbacks.onThreatTierUp` expose a
+  cosmetic 1-5 readout of that same ramp.
 - `src/lib/game/tokens.ts` — token/run-duration/best-time bookkeeping
   (Phase 4), backed by `pStorage` (see that file's header for why, not raw
   `localStorage`).
@@ -59,7 +63,8 @@ of every session that touches game code, before stopping.
   rendering one icon constant at different sizes. Reused by Phase 11 for the
   HUD's live weapon-icon row. Phase 12 added a `UI_ICON` export (clock,
   skull, gem, star, ticket, trophy, sound/motion/shop/fullscreen/back/play)
-  for the lobby/HUD/results chrome.
+  for the lobby/HUD/results chrome. Phase 13 added a trending-up-line icon
+  (`UI_ICON.threat`) for the new threat-tier HUD chip/toast.
 - `src/lib/game/settings.ts` — Phase 8's reduce-motion setting
   (`isReducedMotion()`/`setReducedMotion()`/`toggleReducedMotion()`),
   persisted via `pStorage` (`game:reduce-motion`) — mirrors `audio.ts`'s
@@ -914,13 +919,69 @@ synthetic state (`hp: 42/120` → bar width `35%`, `xp: 18/44` → bar width
 callout and the real token-count decrement on return to the lobby. Zero
 console errors across the whole session.
 
+### Phase 13 — Balance pass: time-scaled enemy toughness + threat-tier readout ✅ done, validated in-browser
+
+The user flagged a real balance bug: as a run went longer it got _easier_,
+not harder — backwards from the intent. Root cause, confirmed by reading
+`engine.ts`: the only time-based ramp was spawn _density_
+(`currentSpawnIntervalMs()`); individual enemy HP/contact-damage were fixed
+per `EnemyKind` regardless of elapsed time (only the shop's permanent
+`powerIndex` affected per-enemy tier weighting, which doesn't change within
+a run), while the player's weapons/stat-cards compound in power every
+level-up. Net effect: DPS-per-enemy only ever went up over a run. The user
+also flagged the second half of the same problem — nothing signals to the
+player that the game is getting harder as time/difficulty increases.
+
+- **`enemyTimeScale(elapsedS, cap)`** (`engine.ts`): an asymptotic curve
+  (`1 - 0.5^(elapsedS / 90)`, the same shape already used for the spawn-rate
+  ramp) that scales enemy HP up to +200% (`ENEMY_HP_SCALE_CAP = 3`) and
+  contact damage up to +100% (`ENEMY_DAMAGE_SCALE_CAP = 2`) by roughly the
+  4-5 minute mark, then plateaus — deliberately bounded rather than
+  open-ended, since run length scales with site progress
+  (`tokens.ts`'s `computeRunDurationS()`) and can run well past that for an
+  engaged learner. Applied at spawn time in `spawnEnemy()` (multiplied into
+  the existing tier multiplier) and folded into `spawnBoss()`'s existing
+  `powerIndex` scale (both HP and the ring-attack damage, via
+  `bossPowerScale`).
+- **`computeThreatTier(elapsedS)`**: a 1-5 cosmetic readout driven by the
+  same curve, exposed on `GameHudState.threatTier` and via a new
+  `GameCallbacks.onThreatTierUp?(tier)` fired once per tier crossed (checked
+  every frame, not HUD-throttled, so the moment is precise).
+- **`icons.ts`**: a new trending-up-line icon (`UI_ICON.threat`), distinct
+  from the existing flame/damage icon since this is about the enemies'
+  rising toughness, not the player's own damage stat.
+- **`index.astro`**: a "Threat" chip added to the HUD's icon+number stat row
+  (orange, next to level/kills/gems/coins), plus a small auto-hiding toast
+  banner ("Threat rising — tier N") over the canvas on every `onThreatTierUp`
+  call, using the project's standard remove/reflow/re-add pattern to make
+  the one-shot `animate-fade-slide-in` re-triggerable on repeat tier-ups.
+
+**Validation:** guardrails (`bun run check`) pass. Sanity-checked the curve
+itself outside the browser (`node -e`): hp/damage scale = 1.00/1.00 at 0s,
+2.00/1.50 at 90s (tier 3), 2.69/1.84 at 240s (tier 5, cap effectively
+reached), 2.98/1.99 at 600s — confirms it's bounded, not runaway, for very
+long runs. In-browser (`claude --chrome` against a fresh `astro preview`
+build): the lobby/HUD/toast markup all render without console errors, and
+the new "Threat 1" chip is visible immediately on run start. Live rAF
+playback was suspended by the same tab-backgrounding limitation documented
+throughout this file (`document.visibilityState: "hidden"`), so
+`onHudUpdate`/`onThreatTierUp` firing during actual gameplay wasn't observed
+directly this session — instead confirmed by replicating the exact DOM
+updates those callbacks perform (HP bar → 42%, threat chip → "4", toast
+text/visibility) against the real page with synthetic state, screenshotted
+and visually confirmed correct; the toast's `animate-fade-slide-in` was
+further checked via `el.getAnimations()[0].finish()` per this file's
+established animation-verification technique, resolving to `opacity: 1` /
+no residual transform as intended.
+
 ## Current state
 
 **All 8 originally-planned phases, plus Phase 9 (composite sprite detail),
 Phase 10 (level-up card / shop UI redesign), Phase 11 (visible attacks +
-subtle character pass), and Phase 12 (game screen visual/UI redesign +
-fullscreen toggle), all added after the fact per user request, are now
-implemented.** Phases 1-3 are complete and validated end-to-end, including
+subtle character pass), Phase 12 (game screen visual/UI redesign +
+fullscreen toggle), and Phase 13 (time-scaled enemy toughness + threat-tier
+readout), all added after the fact per user request, are now implemented.**
+Phases 1-3 are complete and validated end-to-end, including
 Lv6 weapon evolutions. Phases 4 through 8 (real gating/lobby/results,
 coins/shop/enemy tiers, audio, mobile joystick, and visual/perf polish) are
 all believed correct from code review + guardrails (`bun run check` passing
@@ -941,10 +1002,13 @@ way to close out that remaining set. GAME-DESIGN.md is fully implemented as
 specced (with the small, explicitly-documented deviations noted throughout
 this file, e.g. the Phase 4 per-unit-not-per-level token grant, Phase 2's
 spawn-density floor/cap, Phase 8's selective-glow decision, and Phase 9's
-composite-Canvas-detail scope instead of external art assets). No further
-phases are currently planned — Phase 11 closed out the deferred item from
-Phase 10 (weapon icons in combat/HUD, the player's visual redesign, and
-visible attack/impact feedback).
+composite-Canvas-detail scope instead of external art assets, and Phase 13's
+bounded (not open-ended) time-scaling cap since run length varies with site
+progress). No further phases are currently planned — Phase 11 closed out
+the deferred item from Phase 10 (weapon icons in combat/HUD, the player's
+visual redesign, and visible attack/impact feedback), and Phase 13 closed
+out the user's balance-and-feedback report (enemies getting relatively
+easier over time, and no visible signal of rising difficulty).
 
 ## Deliberate simplifications (intentional — not bugs)
 

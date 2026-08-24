@@ -151,6 +151,10 @@ import Layout from "../../layouts/Layout.astro";
             <span class="text-amber-400" data-icon-coins></span>
             <span data-hud-coins>0</span>
           </span>
+          <span class="flex items-center gap-1">
+            <span class="text-orange-500" data-icon-threat></span>
+            <span data-hud-threat>1</span>
+          </span>
         </div>
         <div
           class="h-1 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"
@@ -173,6 +177,14 @@ import Layout from "../../layouts/Layout.astro";
           style="aspect-ratio: 420 / 500;"
           class="h-[min(58vh,500px)] w-auto rounded-lg border border-slate-300 bg-slate-900 dark:border-slate-700"
         ></canvas>
+
+        <div
+          data-threat-toast
+          class="animate-fade-slide-in pointer-events-none absolute top-2 left-1/2 z-10 hidden -translate-x-1/2 items-center gap-1.5 rounded-full border border-orange-400/50 bg-orange-950/90 px-3 py-1 text-xs font-medium text-orange-200"
+        >
+          <span data-icon-threat-toast></span>
+          <span data-threat-toast-text>Threat rising</span>
+        </div>
 
         <div
           data-levelup-overlay
@@ -333,6 +345,13 @@ import Layout from "../../layouts/Layout.astro";
       const xpBarEl = document.querySelector<HTMLElement>("[data-hud-xp-bar]");
       const weaponsEl =
         document.querySelector<HTMLElement>("[data-hud-weapons]");
+      const threatEl = document.querySelector<HTMLElement>("[data-hud-threat]");
+      const threatToastEl = document.querySelector<HTMLElement>(
+        "[data-threat-toast]",
+      );
+      const threatToastTextEl = document.querySelector<HTMLElement>(
+        "[data-threat-toast-text]",
+      );
       const levelUpOverlay = document.querySelector<HTMLElement>(
         "[data-levelup-overlay]",
       );
@@ -373,6 +392,9 @@ import Layout from "../../layouts/Layout.astro";
         !levelEl ||
         !xpBarEl ||
         !weaponsEl ||
+        !threatEl ||
+        !threatToastEl ||
+        !threatToastTextEl ||
         !levelUpOverlay ||
         !levelUpCardsEl
       ) {
@@ -398,6 +420,8 @@ import Layout from "../../layouts/Layout.astro";
       setIcon("[data-icon-kills]", UI_ICON.kills, "h-3.5 w-3.5");
       setIcon("[data-icon-gems]", UI_ICON.gems, "h-3.5 w-3.5");
       setIcon("[data-icon-coins]", UI_ICON.coins, "h-3.5 w-3.5");
+      setIcon("[data-icon-threat]", UI_ICON.threat, "h-3.5 w-3.5");
+      setIcon("[data-icon-threat-toast]", UI_ICON.threat, "h-3.5 w-3.5");
       setIcon("[data-icon-results-time]", UI_ICON.timer, "h-4 w-4");
       setIcon("[data-icon-results-kills]", UI_ICON.kills, "h-4 w-4");
       setIcon("[data-icon-results-level]", UI_ICON.level, "h-4 w-4");
@@ -514,6 +538,25 @@ import Layout from "../../layouts/Layout.astro";
         gameRoot!.classList.toggle("p-4", isFs);
       }
 
+      // Phase 13: brief "difficulty rising" banner, fired once per threat
+      // tier crossed (engine.ts's onThreatTierUp). Re-triggerable per the
+      // project's remove/reflow/re-add pattern for repeat one-shot CSS
+      // animations (see CLAUDE.md's "Micro-interactions and animation").
+      let threatToastTimeout: number | undefined;
+      function showThreatToast(tier: number) {
+        threatToastTextEl!.textContent = `Threat rising — tier ${tier}`;
+        threatToastEl!.classList.remove("hidden");
+        threatToastEl!.classList.add("flex");
+        threatToastEl!.classList.remove("animate-fade-slide-in");
+        void threatToastEl!.offsetWidth;
+        threatToastEl!.classList.add("animate-fade-slide-in");
+        if (threatToastTimeout) window.clearTimeout(threatToastTimeout);
+        threatToastTimeout = window.setTimeout(() => {
+          threatToastEl!.classList.add("hidden");
+          threatToastEl!.classList.remove("flex");
+        }, 2200);
+      }
+
       if (startButton.dataset.wired === "true") return;
       startButton.dataset.wired = "true";
       backToLobbyButton.dataset.wired = "true";
@@ -563,6 +606,8 @@ import Layout from "../../layouts/Layout.astro";
         log.log("start button clicked");
         levelUpOverlay!.classList.add("hidden");
         levelUpOverlay!.classList.remove("flex");
+        threatToastEl!.classList.add("hidden");
+        threatToastEl!.classList.remove("flex");
         lobby!.classList.add("hidden");
         playArea!.classList.remove("hidden");
         playArea!.classList.add("flex");
@@ -584,6 +629,7 @@ import Layout from "../../layouts/Layout.astro";
               gemsEl.textContent = String(state.gems);
               coinsEl.textContent = String(state.coins);
               levelEl.textContent = String(state.level);
+              threatEl.textContent = String(state.threatTier);
               xpBarEl.style.width = `${Math.max(0, Math.min(100, (state.xp / state.xpToNext) * 100))}%`;
               weaponsEl.innerHTML = state.weapons
                 .map(
@@ -597,6 +643,10 @@ import Layout from "../../layouts/Layout.astro";
                 </span>`,
                 )
                 .join("");
+            },
+            onThreatTierUp(tier) {
+              log.log("onThreatTierUp callback", { tier });
+              showThreatToast(tier);
             },
             onGameOver(summary) {
               log.log("onGameOver callback", summary);

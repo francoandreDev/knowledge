@@ -71,6 +71,20 @@
 // just after leveling up. No collision/damage-number changes — flashes and
 // sparks are purely visual, timed off the same elapsedMs the rest of the
 // engine already uses.
+// Phase 13 scope, layered on top: a balance fix. Until now, nothing in a
+// single run made individual enemies tougher over elapsed time — the only
+// time-based ramp was spawn *density* (currentSpawnIntervalMs()), while the
+// player's own weapons/stat-cards compound in power every level-up. Net
+// effect: the longer a run went, the easier it got, exactly backwards. Fixed
+// by enemyTimeScale() — an asymptotic (never-unbounded, so an extra-long run
+// from a high-progress profile can't produce absurd HP sponges) per-enemy
+// HP/contact-damage multiplier keyed off elapsedS at spawn time, applied in
+// spawnEnemy() and folded into spawnBoss()'s existing powerIndex scale. A
+// second, purely-cosmetic readout — computeThreatTier(), exposed on
+// GameHudState as threatTier and via a new onThreatTierUp callback fired
+// once per tier crossed — answers the other half of the ask ("nothing tells
+// the player they're facing more difficulty"): index.astro renders it as a
+// HUD chip plus a brief toast on every tier-up.
 //
 // Spawn/collision math is kept intentionally cheap (linear scans over small
 // arrays, no quadtree) and the density ramp is floored at a minimum interval
@@ -178,6 +192,37 @@ const BETTER_DROP_VALUE_MULT = 2;
 
 // --- Phase 5: boss scaling with powerIndex ---
 const BOSS_POWER_SCALING_PER_POINT = 0.02; // +2% HP/damage per powerIndex point
+
+// --- Phase 13: time-based enemy toughness ramp (balance fix — see file
+// header). Enemy hp/contactDamage scale up asymptotically with elapsedS so a
+// long run doesn't just get denser (more spawns) but also individually
+// harder, countering the player's own compounding weapon/stat growth. The
+// curve approaches its cap but never exceeds it, so it stays bounded however
+// long a run runs (durations scale with site progress, see tokens.ts).
+const ENEMY_STAT_RAMP_HALF_LIFE_S = 90;
+const ENEMY_HP_SCALE_CAP = 3; // up to +200% HP by the late game
+const ENEMY_DAMAGE_SCALE_CAP = 2; // up to +100% contact damage by the late game
+const THREAT_TIER_COUNT = 5; // cosmetic readout, see computeThreatTier()
+
+// 0..1, asymptotically approaching 1 — the shared curve shape driving both
+// enemy stat scaling and the threat-tier readout below.
+function threatRampProgress(elapsedS: number): number {
+  return 1 - Math.pow(0.5, elapsedS / ENEMY_STAT_RAMP_HALF_LIFE_S);
+}
+
+function enemyTimeScale(elapsedS: number, cap: number): number {
+  return 1 + (cap - 1) * threatRampProgress(elapsedS);
+}
+
+// 1-based, capped at THREAT_TIER_COUNT — purely a UI readout, doesn't itself
+// drive any stat; index.astro shows it as a HUD chip + a toast on tier-up.
+function computeThreatTier(elapsedS: number): number {
+  const progress = threatRampProgress(elapsedS);
+  return Math.min(
+    THREAT_TIER_COUNT,
+    1 + Math.floor(progress * THREAT_TIER_COUNT),
+  );
+}
 
 interface EnemyDef {
   kind: Exclude<EnemyKind, "reaper">;
@@ -417,6 +462,9 @@ export interface GameHudState {
   xp: number;
   xpToNext: number;
   weapons: { id: WeaponId; level: number }[];
+  /** Phase 13: 1-based, capped at 5 — cosmetic readout of enemyTimeScale()'s
+   * underlying ramp, so the player sees difficulty rising, not just feels it. */
+  threatTier: number;
 }
 
 export interface GameCallbacks {
@@ -428,6 +476,9 @@ export interface GameCallbacks {
     coinsEarned: number;
   }) => void;
   onLevelUp: (cards: LevelUpCard[], choose: (cardId: string) => void) => void;
+  /** Phase 13: fired once per threat tier crossed (1→2, 2→3, ...) — lets the
+   * page show a brief "getting harder" toast at the moment it happens. */
+  onThreatTierUp?: (tier: number) => void;
 }
 
 export interface GameOptions {
@@ -783,6 +834,7 @@ export function startGame(
   let bossSpawned = false;
   let bossPowerScale = 1; // set by spawnBoss(), used to scale ring damage too
   const unlockedPools = new Set<string>();
+  let lastThreatTier = 1; // Phase 13
 
   function pushHud() {
     callbacks.onHudUpdate({
@@ -797,6 +849,7 @@ export function startGame(
       xp,
       xpToNext: xpForNextLevel(playerLevel),
       weapons: ownedWeapons.map((w) => ({ id: w.id, level: w.level })),
+      threatTier: computeThreatTier(elapsedMs / 1000),
     });
   }
 
@@ -813,6 +866,8 @@ export function startGame(
     const tier = pickEnemyTier(powerIndex);
     const { x, y } = spawnEdgePosition(canvas);
     const sizeMult = TIER_SIZE_MULT[tier];
+    const timeHpScale = enemyTimeScale(elapsedS, ENEMY_HP_SCALE_CAP);
+    const timeDamageScale = enemyTimeScale(elapsedS, ENEMY_DAMAGE_SCALE_CAP);
     const sprite = Sprite({
       x,
       y,
@@ -823,10 +878,11 @@ export function startGame(
     }) as unknown as Enemy;
     sprite.kind = def.kind;
     sprite.tier = tier;
-    sprite.hp = def.hp * TIER_HP_MULT[tier];
+    sprite.hp = def.hp * TIER_HP_MULT[tier] * timeHpScale;
     sprite.alive = true;
     sprite.radius = def.radius * sizeMult;
-    sprite.contactDamage = def.contactDamage * TIER_DAMAGE_MULT[tier];
+    sprite.contactDamage =
+      def.contactDamage * TIER_DAMAGE_MULT[tier] * timeDamageScale;
     sprite.wigglePhase = Math.random() * Math.PI * 2;
     sprite.lastRangedAt = elapsedMs;
     sprite.slamReadyAt = elapsedMs;
@@ -843,7 +899,10 @@ export function startGame(
   }
 
   function spawnBoss() {
-    const scale = 1 + BOSS_POWER_SCALING_PER_POINT * powerIndex;
+    const powerScale = 1 + BOSS_POWER_SCALING_PER_POINT * powerIndex;
+    const elapsedS = elapsedMs / 1000;
+    const timeHpScale = enemyTimeScale(elapsedS, ENEMY_HP_SCALE_CAP);
+    const timeDamageScale = enemyTimeScale(elapsedS, ENEMY_DAMAGE_SCALE_CAP);
     const sprite = Sprite({
       x: canvas.width / 2,
       y: -40,
@@ -854,15 +913,18 @@ export function startGame(
     }) as unknown as Enemy;
     sprite.kind = "reaper";
     sprite.tier = "normal"; // the boss is unique per run, not tiered
-    sprite.hp = REAPER_HP * scale;
+    sprite.hp = REAPER_HP * powerScale * timeHpScale;
     sprite.alive = true;
     sprite.radius = REAPER_RADIUS;
-    sprite.contactDamage = REAPER_CONTACT_DAMAGE * scale;
+    sprite.contactDamage = REAPER_CONTACT_DAMAGE * powerScale * timeDamageScale;
     sprite.lastRingAt = elapsedMs;
     sprite.lastDashAt = elapsedMs;
     enemies.push(sprite);
     bossSpawned = true;
-    bossPowerScale = scale;
+    // Phase 13: ring damage now also reflects the time-based ramp, not just
+    // powerIndex — folded into this one scale so updateEnemyBehavior()'s
+    // existing `REAPER_RING_DAMAGE * bossPowerScale` needs no change.
+    bossPowerScale = powerScale * timeDamageScale;
     log.log("boss:spawned", {
       hp: sprite.hp,
       contactDamage: sprite.contactDamage,
@@ -1490,6 +1552,15 @@ export function startGame(
       if (status !== "running") return;
       elapsedMs += dt * 1000;
       const elapsedS = elapsedMs / 1000;
+
+      // --- Phase 13: threat-tier readout, checked every frame (not
+      // HUD-throttled) so the toast fires right when the tier crosses ---
+      const currentThreatTier = computeThreatTier(elapsedS);
+      if (currentThreatTier > lastThreatTier) {
+        lastThreatTier = currentThreatTier;
+        callbacks.onThreatTierUp?.(currentThreatTier);
+        log.log("threat:tierUp", { tier: currentThreatTier });
+      }
 
       // --- passive regen (Quick Recovery stacks + shop's Recovery) ---
       const totalRegenPerS = hpRegenPerS + upgradeEffects.regenPerS;

@@ -71,6 +71,12 @@ const ICON_MINIMIZE = `<svg ${ICON_ATTRS}><polyline points="3 8 8 8 8 3"/><polyl
 const ICON_ARROW_LEFT = `<svg ${ICON_ATTRS}><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>`;
 const ICON_PLAY = `<svg ${ICON_ATTRS} stroke-linejoin="round"><polygon points="6 4 20 12 6 20" fill="currentColor" stroke="none"/></svg>`;
 
+// Phase 13 — rising zigzag line, "difficulty trending up" (engine.ts's
+// threatTier HUD readout + onThreatTierUp toast). Distinct from ICON_FLAME
+// (raw damage output) since this is about the enemies' own escalating
+// toughness over time, not the player's damage stat.
+const ICON_TRENDING_UP = `<svg ${ICON_ATTRS}><polyline points="3 17 9 11 13 15 21 6"/><polyline points="15 6 21 6 21 12"/></svg>`;
+
 export const WEAPON_ICON: Record<
   "bladeArc" | "bolt" | "orbitShield" | "novaPulse" | "homingDart",
   string
@@ -125,6 +131,7 @@ export const UI_ICON = {
   minimize: ICON_MINIMIZE,
   back: ICON_ARROW_LEFT,
   play: ICON_PLAY,
+  threat: ICON_TRENDING_UP,
 } as const;
 
 // Injects a size/utility class onto an icon string's root <svg> tag —
