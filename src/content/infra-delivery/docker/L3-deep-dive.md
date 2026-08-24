@@ -50,6 +50,16 @@ Layer 3's cache key changed (the file content it copies changed), which cascades
 
 Yes — it's a pure function of two inputs (the layer list, and which named inputs changed), which is exactly what makes it testable instead of just observable in terminal output: a layer rebuilds if and only if its own inputs changed, or an earlier layer it depends on rebuilt — invalidation cascades forward, never backward.
 
+In plain pseudocode:
+
+1. Start at the top of the Dockerfile.
+2. For each step, ask "did this step's own input change?"
+3. If yes, mark this step as rebuilt.
+4. Once one step rebuilds, mark every later step as rebuilt too, because
+   each later step sits on top of the changed step.
+5. Never rebuild an earlier step because of a later edit; the cascade
+   only moves downward.
+
 ```js
 // layer-cache.mjs — models Docker's layer cache invalidation rule
 function computeRebuildPlan(layers, changedInputs) {
@@ -99,6 +109,10 @@ console.log(computeRebuildPlan(layers, new Set(["package.json"])));
 - **Using `latest` as a tag and assuming it's stable.** `latest` is just a tag like any other — it can be repointed to a different image at any time, meaning "pull `myapp:latest`" doesn't guarantee the same bytes twice, undermining the exact build-once-run-everywhere guarantee this unit is about. A specific version tag (or better, a content digest) is what actually pins it.
 - **Copying more than necessary into the build context.** Without a `.dockerignore`, `COPY . .` includes `node_modules/`, `.git/`, and other large or irrelevant directories in the build context sent to the Docker daemon — this slows every build (the whole context has to be sent and hashed) and can bloat layer 5's cache key with files that have nothing to do with the actual application. A `.dockerignore` works exactly like a `.gitignore`: one glob pattern per line, matched against paths relative to the build context root.
 
+  The **build context** is the folder Docker receives before it can run
+  the Dockerfile. If that folder includes junk, Docker still has to send,
+  scan, and hash the junk. A `.dockerignore` is the filter at the door.
+
   ```
   # .dockerignore
   node_modules/
@@ -109,5 +123,10 @@ console.log(computeRebuildPlan(layers, new Set(["package.json"])));
   ```
 
 - **Forgetting that multi-stage build stages don't share state except through explicit `COPY --from`.** A variable set, a file written, or a package installed in stage 1 does not exist in stage 2 unless it's named in a `COPY --from=<stage>` — treating stages as if they share an environment (the way a single-stage Dockerfile's instructions do) produces confusing "why isn't this here" failures in the final image.
+
+The code exercises below assume JavaScript comfort with arrays, objects,
+`Set`, loops, and simple string matching. If those are new, first solve
+the Docker reasoning without code: order the layers, mark which input
+changed, then draw the rebuild cascade by hand.
 
 The three real builds above are one worked example — a Node app with exactly five layers — not the whole territory. **What changes if the Dockerfile also has a `RUN apt-get install` step for a native dependency, positioned between the base image and the `COPY package.json` step?** (Its cache key depends only on the base image, same as `WORKDIR` — so it stays cached across both source _and_ dependency-manifest changes, and only reruns if the base image itself is bumped. That's an argument for pushing genuinely stable steps as early as possible, not just dependency installs.)

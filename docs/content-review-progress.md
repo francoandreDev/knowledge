@@ -5,7 +5,7 @@ detectar dudas que tendria una persona con base escolar, extender sin borrar
 contenido existente y validar que cada unidad responda la pregunta del
 roadmap.
 
-Avance actual: 100 de 133 unidades revisadas. Faltan 33.
+Avance actual: 104 de 133 unidades revisadas. Faltan 29.
 
 ## Criterio de revision
 
@@ -47,9 +47,10 @@ Avance actual: 100 de 133 unidades revisadas. Faltan 33.
 | 23    | `applied-math/math-tool-prediction`, `applied-math/measurement-theory`, `applied-math/orders-magnitude`, `applied-math/probability-distributions-uniform`                                                | Extendida; formato OK; `typecheck` OK; `build` OK; `validate:content` bloqueado por frontmatter faltante global |
 | 24    | `applied-math/queueing-theory-basics`, `applied-math/statistics`, `applied-math/time-series-basics`, `architecture/architecture-styles`                                                                  | Extendida; formato OK; `typecheck` OK; `build` OK; `validate:content` bloqueado por frontmatter faltante global |
 | 25    | `architecture/domain-driven-design`, `architecture/event-driven-architecture`, `architecture/hexagonal-clean-architecture`, `design/design-thinking-process`                                             | Extendida; formato OK; `typecheck` OK; `build` OK; `validate:content` bloqueado por frontmatter faltante global |
+| 26    | `design/information-architecture`, `design/usability-heuristics`, `design/visual-design-fundamentals`, `infra-delivery/docker`                                                                           | Extendida; formato OK; `typecheck` OK; `build` OK; `validate:content` bloqueado por frontmatter faltante global |
 
 ## Siguiente tanda sugerida
 
-| Tanda | Unidades                                                                                                                       | Estado    |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------ | --------- |
-| 26    | `design/information-architecture`, `design/usability-heuristics`, `design/visual-design-fundamentals`, `infra-delivery/docker` | Pendiente |
+| Tanda | Unidades                                                                                                                             | Estado    |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------ | --------- |
+| 27    | `infra-delivery/environment-parity`, `people-management/1`, `people-management/defining-role`, `people-management/delegation-levels` | Pendiente |
