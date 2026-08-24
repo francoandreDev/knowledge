@@ -37,6 +37,13 @@ spread back into the original units: "daily signups typically vary
 by about 2.14 from the mean of 5," which is directly interpretable in
 a way raw variance isn't.
 
+The `xs.length - 1` denominator is the sample-variance version. When you only
+have a sample, the sample mean was itself estimated from those same values,
+which makes the raw spread look a little too small. Dividing by `n - 1`
+instead of `n` is the standard correction for that undercount. For this unit,
+the important intuition is: variance measures squared spread; standard
+deviation converts that spread back into the original unit.
+
 ## Testing whether the Scenario's 12% vs. 18% is significant
 
 **Is 18% vs. 12% from 100 visitors each significant at the standard
@@ -44,6 +51,20 @@ a way raw variance isn't.
 measures how many standard errors apart the two observed rates are,
 under the assumption that they actually come from the same true
 rate.
+
+Read the formula's variables before the code:
+
+| Symbol / value  | Plain meaning                                                   |
+| --------------- | --------------------------------------------------------------- |
+| `p1`            | old button's observed rate, `12 / 100 = 0.12`                   |
+| `p2`            | new button's observed rate, `18 / 100 = 0.18`                   |
+| `pooled`        | one shared rate if we assume the button made no real difference |
+| `standardError` | how much a sample-to-sample rate gap would normally wobble      |
+| `z`             | the observed gap measured in standard-error units               |
+| `1.96`          | common 95% cutoff: about two standard errors from zero          |
+
+So the test is not asking "does 18 look bigger than 12?" It is asking "is the
+gap big compared with the wobble expected from samples this small?"
 
 ```js
 function twoProportionZTest(conversions1, visitors1, conversions2, visitors2) {
@@ -93,11 +114,13 @@ function neededSampleSizeForSignificance(p1, p2, targetZ = 1.96) {
 neededSampleSizeForSignificance(0.12, 0.18); // 300
 ```
 
-At the same 12%/18% rates, roughly 300 visitors per group (not 100)
-would be needed before the z-test reliably clears the significance
-threshold. This is the concrete, staff-level version of "wait for
-more data before shipping" — not a vague instinct, but a specific
-number derived from the actual effect size being measured.
+At the same observed 12%/18% rates, roughly 300 visitors per group (not 100)
+would be needed before this z-test crosses the significance threshold. This is
+the concrete, staff-level version of "wait for more data before shipping" —
+not a vague instinct, but a specific number derived from the effect size being
+measured. For planning a real experiment in advance, there is one more topic:
+statistical power, or how likely the test is to detect an effect of a chosen
+size if that effect is genuinely present.
 
 ## What generalizes and what doesn't
 

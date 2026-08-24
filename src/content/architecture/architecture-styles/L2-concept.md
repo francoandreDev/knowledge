@@ -7,7 +7,7 @@ title: "L2 — Four shapes for the same problem, and the forces that pick one"
 Take the checkout service from L1: price an order, apply discounts, and
 notify a loyalty-points partner. Before looking at the diagrams below — if
 the loyalty partner's system goes down for ten minutes, which of the four
-shapes below do you'd guess breaks checkout entirely, and which keeps
+shapes below would you guess breaks checkout entirely, and which keeps
 pricing orders regardless?
 
 ```mermaid
@@ -51,12 +51,12 @@ flowchart LR
 ```
 
 In the layered diagram, the pricing service calls the loyalty client
-*directly* — if that call is synchronous and the loyalty partner is down,
+_directly_ — if that call is synchronous and the loyalty partner is down,
 `priceOrder()` doesn't return, and checkout is broken by a dependency that
 has nothing to do with pricing. In the event-driven diagram, pricing
 publishes `OrderPriced` and returns immediately; the loyalty handler picks
 the event up whenever it can. Same feature, opposite failure behavior —
-that's not a coincidence, it's what each shape is *for*.
+that's not a coincidence, it's what each shape is _for_.
 
 ## What actually varies between the four
 
@@ -64,17 +64,17 @@ Before the table: hexagonal and layered both keep the code in one
 deployable unit — so what's the actual difference between them, if it's not
 "one has more services"?
 
-| Style              | Unit of deployment            | Where the domain rules live                          | Coupling axis it optimizes            | Coupling axis it accepts                          |
-| ------------------- | ------------------------------ | ------------------------------------------------------ | ---------------------------------------- | ---------------------------------------------------- |
-| Layered             | One app                        | Spread across layers, easy to leak into any of them    | Simplicity of the call graph             | Framework/DB details can leak into business logic     |
-| Hexagonal / clean   | One app                        | Isolated in the center, behind ports                   | Domain independent of infrastructure     | More files, more indirection, a learning curve        |
-| Event-driven        | One app or many                | Wherever handlers live; logic is spread across events  | Coupling *in time* (producer/consumer)   | Eventual consistency, harder-to-trace bugs             |
-| Microservices       | Many, independently deployable | Split per service, each service owns its own rules     | Team/deploy independence                 | Network calls, partial failure, operational overhead   |
+| Style             | Unit of deployment             | Where the domain rules live                           | Coupling axis it optimizes             | Coupling axis it accepts                             |
+| ----------------- | ------------------------------ | ----------------------------------------------------- | -------------------------------------- | ---------------------------------------------------- |
+| Layered           | One app                        | Spread across layers, easy to leak into any of them   | Simplicity of the call graph           | Framework/DB details can leak into business logic    |
+| Hexagonal / clean | One app                        | Isolated in the center, behind ports                  | Domain independent of infrastructure   | More files, more indirection, a learning curve       |
+| Event-driven      | One app or many                | Wherever handlers live; logic is spread across events | Coupling _in time_ (producer/consumer) | Eventual consistency, harder-to-trace bugs           |
+| Microservices     | Many, independently deployable | Split per service, each service owns its own rules    | Team/deploy independence               | Network calls, partial failure, operational overhead |
 
 The row that trips people up most is "layered vs. hexagonal" — they look
 almost the same on a whiteboard. The difference isn't visible in a folder
 listing; it's in which direction an import statement is allowed to point.
-Layered code *usually* lets a lower layer import from a higher one by
+Layered code _usually_ lets a lower layer import from a higher one by
 accident (nothing stops it); hexagonal code makes that a structural
 impossibility, because the domain layer never imports an adapter — adapters
 import the domain's port interfaces, never the reverse.
@@ -108,6 +108,12 @@ function isHexagonal(module):
 If a linter rule like this would fail on your "domain" folder today, the
 codebase isn't hexagonal no matter what the folder is named — the label
 means nothing without the enforced direction.
+
+If "import" is new: importing is one file depending on another file's code.
+The direction matters because a dependency is a kind of power line. If the
+domain imports the database adapter, the domain now knows database details. If
+the adapter imports the domain's port, the outside tool must adapt to the
+domain instead.
 
 ## Event-driven: what does "loose coupling" actually buy, and cost?
 
@@ -150,8 +156,8 @@ flowchart TB
     end
 ```
 
-A good boundary is drawn where the *conversation between two parts is
-already naturally rare and coarse* — pricing tells loyalty "an order was
+A good boundary is drawn where the _conversation between two parts is
+already naturally rare and coarse_ — pricing tells loyalty "an order was
 priced," once, and moves on. A bad boundary is drawn through a concept two
 parts both need constantly (like "what tier is this customer" or "is this
 order valid") — splitting that apart doesn't remove the coupling, it just
@@ -163,6 +169,11 @@ loyalty are the same two people, splitting them into two services buys
 you two deploy pipelines to babysit and very little independence, because
 the person making the change is the same person who'd have to coordinate
 across both anyway.
+
+Conway's Law in human terms: if two groups rarely talk clearly, the systems
+they build will often communicate awkwardly too. A service boundary works best
+when it matches a real ownership boundary and a naturally small conversation,
+not just a folder someone wanted to rename into a service.
 
 ## The decision procedure
 
@@ -181,8 +192,8 @@ flowchart TD
     Q3 -->|No| Layered["Plain layered, one app"]
 ```
 
-Team count dominates because it's the one axis that changes the *cost of
-being wrong* by an order of magnitude: a bad layer boundary is a refactor
+Team count dominates because it's the one axis that changes the _cost of
+being wrong_ by an order of magnitude: a bad layer boundary is a refactor
 inside one repo; a bad service boundary is a multi-team, multi-deploy
 migration. That's why "how many teams" is question two in L1's list, not an
 afterthought — everything downstream of it (whether event-driven fits,
@@ -193,3 +204,8 @@ This is the same procedure L3 applies to one concrete service, structured
 four different ways, with the actual code and config each shape produces —
 not a different process per style, the same four questions applied to
 different answers.
+
+The "Try it" demo below counts possible coordination pairs with
+`n × (n - 1) / 2`. It is not a law of nature or a prediction of exact meeting
+time; it is a visualization of why person-to-person coordination gets crowded
+fast as a single shared codebase grows.

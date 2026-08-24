@@ -24,6 +24,17 @@ applies to an A/B test: two groups seeing the exact same button could
 still convert at slightly different rates purely from which visitors
 happened to land in each group.
 
+The hidden distinction is individual spread vs. measurement spread:
+
+| Term               | What varies                                     | Example                                   |
+| ------------------ | ----------------------------------------------- | ----------------------------------------- |
+| Standard deviation | individual observations around their average    | daily signups vary around 5               |
+| Standard error     | the estimate you got from one sample to another | a 100-person conversion rate moves around |
+
+More data does not make people stop varying. It makes the **measured average**
+less jumpy from sample to sample, which is why confidence intervals narrow as
+sample size grows.
+
 ## What a confidence interval actually represents
 
 **If the true conversion rate is unknown, what does a "12% ± 6%"
@@ -43,6 +54,11 @@ wrong?** No — it means the sample size wasn't large enough to pin the
 true value down tightly. The interval is being honest about how much
 uncertainty the data actually supports, which is exactly the point.
 
+The common 95% language is a convention, not a magic guarantee. It means the
+method is designed so that, across many repeated samples, intervals built this
+way would contain the true rate about 95% of the time. One interval from one
+experiment is still a careful estimate, not certainty.
+
 ## What "statistically significant" is actually claiming
 
 **Does "significant" mean the difference is large, important, or
@@ -53,6 +69,11 @@ commonly 5%) that treating it as a real effect is reasonable. A tiny,
 practically meaningless difference can be "significant" with enough
 data; a huge-looking difference can fail to be significant with too
 little data.
+
+In L3, the formal test starts from a plain assumption: **suppose the button
+made no real difference**. Under that assumption, both groups are samples
+from one shared conversion rate. The z-test then asks how surprising the
+observed gap would be if that assumption were true.
 
 **Is a bigger observed difference always more trustworthy than a
 smaller one?** Not by itself — trustworthiness depends on the

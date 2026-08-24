@@ -30,6 +30,19 @@ slope and intercept that minimize the total squared vertical distance
 between the line and every one of the twelve points — not just the
 last two.
 
+In this unit, read that line as:
+
+| Piece       | Meaning here                                     |
+| ----------- | ------------------------------------------------ |
+| `x`         | week number                                      |
+| `y`         | predicted signups for that week                  |
+| `slope`     | how many signups the line adds per week          |
+| `intercept` | where the line would start if extended to week 0 |
+
+If a line predicts 42 signups and the real value was 47, its vertical error is
+`47 - 42 = 5`. Least squares compares many candidate lines by adding up those
+errors after squaring them.
+
 ```mermaid
 flowchart LR
     A["Full time series\n(12 weeks of signups)"] --> B["Least-squares regression\nfits one line through\nevery point at once"]
@@ -43,6 +56,11 @@ flowchart LR
 Squaring the distances (rather than, say, just averaging them) means
 points far from the line count more heavily than points close to it —
 which matters for what comes next.
+
+Tiny manual example: an error of `2` contributes `2² = 4`; an error of `10`
+contributes `10² = 100`. The large miss counts 25 times as much, not 5 times
+as much. That is why a very unusual week can pull the fitted line strongly,
+especially when it sits near the edge of the observed range.
 
 ## Even a full regression can be fooled by one point
 
@@ -64,6 +82,11 @@ recent point — whether examined alone, as the naive forecast did, or
 folded into a regression at the edge of the data — can carry far more
 influence over a forecast than its status as "one week out of twelve"
 would suggest.
+
+That edge influence is called **leverage**. A point near the end of the time
+range can rotate the future part of the line more dramatically than a point
+near the middle, because forecasts are made by extending the line beyond that
+edge.
 
 ## Extrapolation gets riskier the further out you go
 

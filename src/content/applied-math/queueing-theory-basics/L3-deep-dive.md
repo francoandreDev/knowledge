@@ -4,6 +4,18 @@ title: "L3 — Simulating a queue, confirming the math, and finding the checkout
 
 ## Simulating arrivals and service with real randomness
 
+This L3 uses code as a laboratory, but the model is small: **M/M/1** means
+one server, random arrivals, random service times, and steady average rates.
+It is not claiming every checkout system is literally this simple. It is a
+controlled first model that lets us see the queueing cliff without guessing.
+
+| M/M/1 phrase        | Plain meaning                                     |
+| ------------------- | ------------------------------------------------- |
+| single server       | one cashier/register/worker handles the line      |
+| random arrivals     | customers do not arrive on a perfectly even beat  |
+| random service time | some requests finish faster than others           |
+| stable average      | average arrivals stay below average service speed |
+
 A seeded PRNG (so results are reproducible) plus exponentially
 distributed random draws — the standard way to model "requests arrive
 at random, but at a known average rate":
@@ -29,7 +41,24 @@ random service duration — averaging `1 / rate` but varying randomly
 around it, which is what makes bursts and lulls happen naturally in
 the simulation rather than requests arriving on a perfectly even beat.
 
+`seeded PRNG` just means "random-looking numbers we can replay." A seed is
+the starting value; using the same seed gives the same simulated line again,
+which makes the example checkable instead of changing every time you read it.
+
 ## Simulating a single-server queue (checkout, one register open)
+
+Before reading the loop, follow five customers by hand:
+
+| Customer | Arrives | Cashier free at | Starts | Leaves |
+| -------- | ------- | --------------- | ------ | ------ |
+| 1        | 0.10s   | 0.00s           | 0.10s  | 0.22s  |
+| 2        | 0.18s   | 0.22s           | 0.22s  | 0.35s  |
+| 3        | 0.50s   | 0.35s           | 0.50s  | 0.62s  |
+| 4        | 0.55s   | 0.62s           | 0.62s  | 0.80s  |
+| 5        | 0.57s   | 0.80s           | 0.80s  | 0.90s  |
+
+`start = max(arrival, serverFreeAt)` is only saying: if the cashier is free,
+start immediately; otherwise wait until the earlier customer leaves.
 
 ```js
 function simulateQueue(arrivalRate, serviceRate, numCustomers, seed) {
@@ -66,6 +95,11 @@ not assumed, but computed the same way you'd measure it from a real
 system's logs.
 
 ## Confirming the simulation matches the closed-form math
+
+Closed-form math means a direct formula that predicts the average without
+simulating customer by customer. The simulation asks, "if we play the line out
+50,000 times, what average appears?" The formula asks, "what average should
+appear if this simple model is true?"
 
 ```js
 function theoreticalMM1(arrivalRate, serviceRate) {
