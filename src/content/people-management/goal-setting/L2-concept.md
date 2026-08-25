@@ -21,6 +21,10 @@ flowchart TD
     B --> E["Key result 3:\nrunbook coverage for\ntop 10 failure modes"]
 ```
 
+("P1" here is short for "priority-1" — the highest-severity tier for an
+incident, the kind that actually threatens a customer renewal, as
+opposed to a minor bug.)
+
 **Does every team goal need to trace all the way up to a company
 priority like this?** Yes, in spirit — even goals about internal
 tooling or team health should be traceable to _something_ the

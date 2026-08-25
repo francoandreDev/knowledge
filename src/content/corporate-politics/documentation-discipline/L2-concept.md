@@ -1,0 +1,78 @@
+---
+title: 'L2 — What actually separates "professional" documentation from "paranoid" documentation'
+---
+
+## The gap is smaller than it feels
+
+**If sending a confirmation email feels like publicly doubting a
+colleague, how is it ever not paranoid?** Because what makes it read
+as paranoid usually isn't the act of writing something down — it's
+the framing, the audience, and the timing. The exact same information,
+written two different ways, lands completely differently.
+
+| Element  | Reads as paranoid                                                        | Reads as professional                                                                 |
+| -------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| Framing  | "I want this on record in case you deny it later"                        | "Just confirming what we agreed, so I have it for my notes"                           |
+| Audience | Sent to the director's manager or a wide group, without them in the loop | Sent directly to the person who gave the instruction, as the primary recipient        |
+| Timing   | Sent only after a problem has already surfaced                           | Sent right after the conversation, as a routine habit, before anything has gone wrong |
+| Tone     | Detailed, defensive, anticipating an argument                            | Short, neutral, restating facts without editorializing                                |
+
+**Does this mean documentation only works if sent immediately?** Not
+strictly — but the closer to the original conversation it's sent, the
+more it reads as routine practice rather than a reaction to trouble,
+which is exactly the distinction that keeps it from looking paranoid.
+
+## When it matters most
+
+**Every verbal decision could theoretically be documented — is that
+actually the standard to aim for?** No — documenting literally
+everything would itself start to read as excessive and would bury the
+decisions that actually matter. The signal to watch for is **stakes
+and ambiguity together**: a decision that's low-stakes, or one that's
+completely unambiguous and easy to remember correctly, doesn't need a
+written trail. The Scenario's decision — skip a security review, under
+schedule pressure, with real consequences if something goes wrong — is
+exactly the combination that calls for it.
+
+```mermaid
+flowchart TD
+    A["Verbal decision made"] --> B{"High stakes if\ndisputed later?"}
+    B -->|No| C["Low documentation need"]
+    B -->|Yes| D{"Easy to remember\nexactly and\nunambiguously?"}
+    D -->|Yes| C
+    D -->|No| E["Send a short written\nconfirmation, promptly"]
+```
+
+## What a good written confirmation actually contains
+
+**What makes a confirmation useful later, versus vague enough to be
+disputed anyway?** It has to restate the specific decision, not just
+that "a conversation happened."
+
+| Weak confirmation                                      | Strong confirmation                                                                                                                                    |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| "Thanks for the chat earlier!"                         | "Confirming what we discussed: we're shipping the payments feature without the security review this sprint, and will schedule the review post-launch." |
+| "Following up on our conversation about the timeline." | "Confirming: the security review is deferred until after the Mar 15 launch, per your instruction, given the schedule pressure this sprint."            |
+
+A strong confirmation names the specific decision, the reasoning
+given (if any), and — implicitly, just by existing — the date. It
+doesn't need to say "in case this comes up later"; the written record
+speaks for itself without that framing ever needing to be stated.
+
+## Failure modes at this level
+
+- **Waiting until a dispute is already brewing to start documenting.**
+  By the time a problem has surfaced, any documentation sent looks
+  reactive and defensive — exactly the paranoid framing this unit is
+  trying to avoid. The habit only works as a habit, applied
+  consistently before trouble, not as a tool reached for once trouble
+  starts.
+- **Documenting everything, regardless of stakes.** This doesn't
+  protect anyone more — it just trains colleagues to see every
+  message from this person as a potential paper trail, which produces
+  exactly the paranoid reputation the careful, selective version
+  avoids.
+- **Writing a vague confirmation that doesn't actually restate the
+  decision.** "Thanks for the chat" creates no more of a record than
+  no message at all — the specific content of the decision has to be
+  in writing, not just evidence that a conversation occurred.
