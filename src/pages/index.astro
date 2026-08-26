@@ -4,15 +4,25 @@ import TrackIcon from "../components/TrackIcon.astro";
 import TrackIllustration from "../components/TrackIllustration.astro";
 import TopicMythModal from "../components/TopicMythModal.astro";
 import ProgressGauge from "../components/ProgressGauge.astro";
-import { Search, ArrowRight, Sparkles, HelpCircle } from "lucide-astro";
-import { roadmap } from "../data/roadmap";
+import {
+  Search,
+  ArrowRight,
+  Sparkles,
+  HelpCircle,
+  Shuffle,
+} from "lucide-astro";
+import { roadmap, getUnit } from "../data/roadmap";
 import { getWrittenUnits } from "../lib/curriculum";
 import { groupSlugsByTrack } from "../lib/progress-gauges";
 
 const writtenUnits = await getWrittenUnits();
 const writtenByTrack = new Map<string, number>();
+const writtenSlugsByTrack = new Map<string, Set<string>>();
 for (const u of writtenUnits) {
   writtenByTrack.set(u.track, (writtenByTrack.get(u.track) ?? 0) + 1);
+  if (!writtenSlugsByTrack.has(u.track))
+    writtenSlugsByTrack.set(u.track, new Set());
+  writtenSlugsByTrack.get(u.track)!.add(u.unitSlug);
 }
 
 // Embedded for the client-side gauge script (see the bottom script block) —
@@ -25,19 +35,51 @@ const tracksStarted = roadmap.tracks.filter(
   (t) => (writtenByTrack.get(t.name) ?? 0) > 0,
 ).length;
 
+const GAUGE_RADIUS = 16;
+const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_RADIUS;
+
 // Client-side "continue learning" needs to resolve a bare track/slug key
 // (pStorage's progress:<track>/<slug>, scoped to the active profile) back
 // to a title + href — embed the minimal lookup table it needs rather than
 // shipping the whole roadmap.
 const unitLookup = roadmap.tracks.flatMap((t) =>
   t.units
-    .filter((u) => writtenByTrack.get(t.name) && u.status !== "planned")
+    .filter((u) => writtenSlugsByTrack.get(t.name)?.has(u.slug))
     .map((u) => ({
       track: t.name,
       slug: u.slug,
       problem: u.problem,
     })),
 );
+
+// Per-track, in roadmap order, written units only — lets the "continue
+// where you left off" carousel find what comes right after the reader's
+// current unit without ever linking to a merely-planned page.
+const trackSequences = Object.fromEntries(
+  roadmap.tracks.map((t) => [
+    t.name,
+    t.units
+      .filter((u) => writtenSlugsByTrack.get(t.name)?.has(u.slug))
+      .map((u) => ({ slug: u.slug, problem: u.problem })),
+  ]),
+);
+
+// "Surprise me" picks uniformly from every written unit — a flat href list
+// is all the client needs.
+const writtenUnitHrefs = writtenUnits.map((u) => `/${u.track}/${u.unitSlug}/`);
+
+// Fixed pick for brand-new readers with no progress yet: the most
+// foundational problem on the site, one most other web/ units assume you
+// already feel. Shown in place of "continue learning" only when there's
+// nothing yet to continue.
+const STARTER_UNIT = {
+  track: "web",
+  slug: "http-request-response-basics",
+  reason:
+    "The most foundational problem on the site — most other web/ units assume you already feel this one.",
+};
+const starterProblem =
+  getUnit(STARTER_UNIT.track, STARTER_UNIT.slug)?.problem ?? "";
 
 // Per-track tag vocabulary, embedded as a data attribute below — lets the
 // client-side personalization script (see the bottom script block) decide
@@ -48,6 +90,10 @@ const trackTags = new Map<string, string[]>(
     t.name,
     Array.from(new Set(t.units.flatMap((u) => u.tags))),
   ]),
+);
+
+const gaugeTracks = roadmap.tracks.filter(
+  (t) => (writtenByTrack.get(t.name) ?? 0) > 0,
 );
 ---
 
@@ -93,7 +139,64 @@ const trackTags = new Map<string, string[]>(
       >
         Search
       </button>
+      <button
+        type="button"
+        data-surprise-me
+        title="Open a random written unit"
+        class="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:text-slate-100"
+      >
+        <Shuffle class="h-4 w-4" aria-hidden="true" />
+        <span class="hidden sm:inline">Surprise me</span>
+      </button>
     </form>
+
+    <div
+      data-content-preview
+      class="mt-6 max-w-xl rounded-xl border border-slate-200 bg-white p-4 text-left sm:mx-0 dark:border-slate-800 dark:bg-slate-900/50"
+    >
+      <p
+        class="text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-500"
+      >
+        Try a real question
+      </p>
+      <p class="mt-1.5 text-sm font-medium text-slate-900 dark:text-slate-100">
+        What does an HTTP 429 response mean?
+      </p>
+      <div class="mt-3 grid gap-2">
+        <button
+          type="button"
+          data-preview-choice
+          class="rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition hover:border-slate-400 disabled:cursor-default dark:border-slate-800 dark:hover:border-slate-600"
+        >
+          A server-side error — try again later
+        </button>
+        <button
+          type="button"
+          data-preview-choice
+          data-correct="true"
+          class="rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition hover:border-slate-400 disabled:cursor-default dark:border-slate-800 dark:hover:border-slate-600"
+        >
+          Too many requests — the client should back off
+        </button>
+        <button
+          type="button"
+          data-preview-choice
+          class="rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition hover:border-slate-400 disabled:cursor-default dark:border-slate-800 dark:hover:border-slate-600"
+        >
+          The resource moved permanently
+        </button>
+      </div>
+      <a
+        data-preview-followup
+        href="/web/http-request-response-basics/"
+        class="mt-3 hidden items-center gap-1 text-sm font-medium hover:underline"
+        style="color: var(--accent-text)"
+      >
+        See the full breakdown of status codes in
+        web/http-request-response-basics
+        <ArrowRight class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      </a>
+    </div>
 
     <div
       class="mt-8 grid grid-cols-3 gap-4 border-t border-slate-200 pt-6 sm:max-w-xl dark:border-slate-800"
@@ -127,6 +230,49 @@ const trackTags = new Map<string, string[]>(
         </div>
       </div>
     </div>
+
+    <div
+      data-streak-gauge
+      class="mt-6 flex max-w-xl items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:mx-0 dark:border-slate-800 dark:bg-slate-900/50"
+    >
+      <span class="inline-flex items-center">
+        <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+          <circle
+            cx="20"
+            cy="20"
+            r={GAUGE_RADIUS}
+            fill="none"
+            stroke-width="4"
+            class="stroke-slate-200 dark:stroke-slate-800"></circle>
+          <circle
+            data-streak-arc
+            cx="20"
+            cy="20"
+            r={GAUGE_RADIUS}
+            fill="none"
+            stroke-width="4"
+            stroke-linecap="round"
+            stroke-dasharray={GAUGE_CIRCUMFERENCE}
+            stroke-dashoffset={GAUGE_CIRCUMFERENCE}
+            transform="rotate(-90 20 20)"
+            class="transition-[stroke-dashoffset] duration-500"
+            style="stroke: var(--gauge-accent)"></circle>
+        </svg>
+      </span>
+      <div>
+        <p
+          class="text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-500"
+        >
+          This week
+        </p>
+        <p
+          data-streak-label
+          class="text-sm font-medium text-slate-900 dark:text-slate-100"
+        >
+          0/5 units done
+        </p>
+      </div>
+    </div>
   </section>
 
   <section
@@ -138,14 +284,30 @@ const trackTags = new Map<string, string[]>(
     >
       Continue where you left off
     </p>
+    <div data-continue-cards class="mt-2 flex gap-3 overflow-x-auto pb-1"></div>
+  </section>
+
+  <section
+    data-starter-suggestion
+    class="mt-10 hidden animate-fade-slide-in rounded-xl border p-4"
+    style="border-color: var(--accent-soft-border); background: var(--accent-soft-bg)"
+  >
+    <p
+      class="text-xs font-semibold tracking-wide uppercase"
+      style="color: var(--accent-text)"
+    >
+      New here? Start with this one
+    </p>
     <a
-      data-continue-link
-      href="#"
+      href={`/${STARTER_UNIT.track}/${STARTER_UNIT.slug}/`}
       class="mt-1.5 flex items-center justify-between gap-3 font-medium text-slate-900 hover:underline dark:text-slate-100"
     >
-      <span data-continue-title></span>
+      <span>{starterProblem}</span>
       <ArrowRight class="h-4 w-4 shrink-0" aria-hidden="true" />
     </a>
+    <p class="mt-1.5 text-xs text-slate-600 dark:text-slate-400">
+      {STARTER_UNIT.reason}
+    </p>
   </section>
 
   <p
@@ -160,6 +322,74 @@ const trackTags = new Map<string, string[]>(
     >
     for everything, or update your interests from the profile menu.
   </p>
+
+  <section
+    class="mt-10 animate-fade-slide-in rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900/50"
+  >
+    <div class="flex flex-wrap items-center gap-6">
+      <div class="flex items-center gap-3">
+        <span class="inline-flex items-center">
+          <svg width="64" height="64" viewBox="0 0 40 40" aria-hidden="true">
+            <circle
+              cx="20"
+              cy="20"
+              r={GAUGE_RADIUS}
+              fill="none"
+              stroke-width="4"
+              class="stroke-slate-200 dark:stroke-slate-800"></circle>
+            <circle
+              data-overall-arc
+              cx="20"
+              cy="20"
+              r={GAUGE_RADIUS}
+              fill="none"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-dasharray={GAUGE_CIRCUMFERENCE}
+              stroke-dashoffset={GAUGE_CIRCUMFERENCE}
+              transform="rotate(-90 20 20)"
+              class="transition-[stroke-dashoffset] duration-500"
+              style="stroke: var(--gauge-accent)"></circle>
+          </svg>
+        </span>
+        <div>
+          <p
+            class="text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-500"
+          >
+            Your progress
+          </p>
+          <p
+            data-overall-label
+            class="text-sm font-medium text-slate-900 dark:text-slate-100"
+          >
+            Nothing done yet
+          </p>
+        </div>
+      </div>
+      <div
+        class="grid flex-1 grid-cols-4 gap-3 border-l border-slate-200 pl-6 sm:grid-cols-6 dark:border-slate-800"
+      >
+        {
+          gaugeTracks.map((t) => (
+            <div
+              class="flex flex-col items-center gap-1 text-center"
+              title={t.name}
+            >
+              <ProgressGauge
+                trackName={t.name}
+                total={writtenByTrack.get(t.name) ?? 0}
+                size={28}
+              />
+              <span class="flex items-center gap-1 text-[10px] font-medium text-slate-600 dark:text-slate-400">
+                <TrackIcon track={t.name} class="h-3 w-3 shrink-0" />
+                <span class="max-w-[4.5rem] truncate">{t.name}</span>
+              </span>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
 
   <div data-track-grid class="mt-10 grid gap-4 sm:grid-cols-2">
     {
@@ -240,13 +470,28 @@ const trackTags = new Map<string, string[]>(
   />
   <script
     type="application/json"
+    id="track-sequences"
+    set:html={JSON.stringify(trackSequences)}
+  />
+  <script
+    type="application/json"
     id="track-unit-slugs"
     set:html={JSON.stringify(trackUnitSlugs)}
+  />
+  <script
+    type="application/json"
+    id="written-unit-hrefs"
+    set:html={JSON.stringify(writtenUnitHrefs)}
   />
 
   <script>
     import { pStorage, getActiveProfile } from "../lib/profile";
-    import { applyTrackGauges } from "../lib/progress-gauges";
+    import {
+      applyTrackGauges,
+      countTotalDone,
+      countDoneInLastDays,
+      GAUGE_CIRCUMFERENCE,
+    } from "../lib/progress-gauges";
 
     interface ProgressState {
       done: boolean;
@@ -259,21 +504,54 @@ const trackTags = new Map<string, string[]>(
       slug: string;
       problem: string;
     }
+    interface SequenceUnit {
+      slug: string;
+      problem: string;
+    }
+
+    function buildContinueCard(
+      problem: string,
+      href: string,
+      eyebrow: string,
+      highlighted: boolean,
+    ): HTMLAnchorElement {
+      const a = document.createElement("a");
+      a.href = href;
+      a.className = highlighted
+        ? "group flex w-56 shrink-0 flex-col rounded-lg border p-3 transition hover:brightness-95"
+        : "group flex w-56 shrink-0 flex-col rounded-lg border border-slate-200 p-3 transition hover:border-slate-400 dark:border-slate-800 dark:hover:border-slate-600";
+      if (highlighted) {
+        a.style.borderColor = "var(--accent-soft-border)";
+        a.style.background = "var(--accent-soft-bg)";
+      }
+      const eyebrowEl = document.createElement("span");
+      eyebrowEl.className =
+        "text-[10px] font-semibold tracking-wide uppercase text-slate-500 dark:text-slate-500";
+      eyebrowEl.textContent = eyebrow;
+      const titleEl = document.createElement("span");
+      titleEl.className =
+        "mt-1 text-sm font-medium text-slate-900 group-hover:underline dark:text-slate-100";
+      titleEl.textContent = problem;
+      a.append(eyebrowEl, titleEl);
+      return a;
+    }
 
     function initContinueLearning() {
-      const section = document.querySelector<HTMLElement>(
+      const continueSection = document.querySelector<HTMLElement>(
         "[data-continue-learning]",
       );
-      const link = document.querySelector<HTMLAnchorElement>(
-        "[data-continue-link]",
+      const cardsHost = document.querySelector<HTMLElement>(
+        "[data-continue-cards]",
       );
-      const title = document.querySelector<HTMLElement>(
-        "[data-continue-title]",
+      const starterSection = document.querySelector<HTMLElement>(
+        "[data-starter-suggestion]",
       );
       const lookupEl = document.getElementById("unit-lookup");
-      if (!section || !link || !title || !lookupEl) return;
-      if (section.dataset.wired === "true") return;
-      section.dataset.wired = "true";
+      const sequencesEl = document.getElementById("track-sequences");
+      if (!continueSection || !cardsHost || !starterSection || !lookupEl)
+        return;
+      if (continueSection.dataset.wired === "true") return;
+      continueSection.dataset.wired = "true";
 
       let lookup: UnitRef[];
       try {
@@ -282,6 +560,13 @@ const trackTags = new Map<string, string[]>(
         return;
       }
       const byKey = new Map(lookup.map((u) => [`${u.track}/${u.slug}`, u]));
+
+      let sequences: Record<string, SequenceUnit[]> = {};
+      try {
+        sequences = JSON.parse(sequencesEl?.textContent || "{}");
+      } catch {
+        // Malformed embed — fall back to no sequence data.
+      }
 
       // Prefer the most recently touched unit that isn't currently marked
       // done — either never finished, or a spaced-repetition reset just
@@ -310,13 +595,46 @@ const trackTags = new Map<string, string[]>(
       }
 
       const pick = bestNotDone ?? bestDone;
-      if (!pick) return;
+      if (!pick) {
+        // Nothing to continue yet — invite a brand-new reader to a fixed
+        // starting point instead.
+        starterSection.classList.remove("hidden");
+        return;
+      }
       const unit = byKey.get(pick.key);
-      if (!unit) return;
+      if (!unit) {
+        starterSection.classList.remove("hidden");
+        return;
+      }
 
-      title.textContent = unit.problem;
-      link.href = `/${unit.track}/${unit.slug}/`;
-      section.classList.remove("hidden");
+      cardsHost.innerHTML = "";
+      cardsHost.appendChild(
+        buildContinueCard(
+          unit.problem,
+          `/${unit.track}/${unit.slug}/`,
+          "Continue",
+          true,
+        ),
+      );
+      const seq = sequences[unit.track] ?? [];
+      const idx = seq.findIndex((u) => u.slug === unit.slug);
+      if (idx >= 0) {
+        const labels = ["Next", "Then"];
+        for (let i = 0; i < 2; i++) {
+          const next = seq[idx + 1 + i];
+          if (!next) break;
+          cardsHost.appendChild(
+            buildContinueCard(
+              next.problem,
+              `/${unit.track}/${next.slug}/`,
+              labels[i],
+              false,
+            ),
+          );
+        }
+      }
+
+      continueSection.classList.remove("hidden");
     }
 
     initContinueLearning();
@@ -332,6 +650,46 @@ const trackTags = new Map<string, string[]>(
         return;
       }
       applyTrackGauges(map);
+
+      const totalWritten = Object.values(map).reduce(
+        (n, arr) => n + arr.length,
+        0,
+      );
+      const done = countTotalDone(map);
+      const fraction = totalWritten > 0 ? done / totalWritten : 0;
+      const overallArc =
+        document.querySelector<SVGCircleElement>("[data-overall-arc]");
+      const overallLabel = document.querySelector<HTMLElement>(
+        "[data-overall-label]",
+      );
+      if (overallArc) {
+        overallArc.style.strokeDashoffset = String(
+          GAUGE_CIRCUMFERENCE * (1 - fraction),
+        );
+      }
+      if (overallLabel) {
+        overallLabel.textContent =
+          totalWritten > 0
+            ? `${done}/${totalWritten} done (${Math.round(fraction * 100)}%)`
+            : "Nothing written yet";
+      }
+
+      const streakArc =
+        document.querySelector<SVGCircleElement>("[data-streak-arc]");
+      const streakLabel = document.querySelector<HTMLElement>(
+        "[data-streak-label]",
+      );
+      const streakGoal = 5;
+      const streakDone = countDoneInLastDays(7);
+      const streakFraction = Math.min(1, streakDone / streakGoal);
+      if (streakArc) {
+        streakArc.style.strokeDashoffset = String(
+          GAUGE_CIRCUMFERENCE * (1 - streakFraction),
+        );
+      }
+      if (streakLabel) {
+        streakLabel.textContent = `${streakDone}/${streakGoal} units done`;
+      }
     }
     initTrackGauges();
     document.addEventListener("astro:page-load", initTrackGauges);
@@ -373,5 +731,76 @@ const trackTags = new Map<string, string[]>(
     }
     initInterestPersonalization();
     document.addEventListener("astro:page-load", initInterestPersonalization);
+
+    function initContentPreview() {
+      const root = document.querySelector<HTMLElement>(
+        "[data-content-preview]",
+      );
+      if (!root || root.dataset.wired === "true") return;
+      root.dataset.wired = "true";
+
+      const choices = Array.from(
+        root.querySelectorAll<HTMLButtonElement>("[data-preview-choice]"),
+      );
+      const followup = root.querySelector<HTMLElement>(
+        "[data-preview-followup]",
+      );
+
+      for (const btn of choices) {
+        btn.addEventListener("click", () => {
+          const pickedCorrect = btn.dataset.correct === "true";
+          for (const b of choices) {
+            b.disabled = true;
+            if (b.dataset.correct === "true") {
+              b.classList.add(
+                "border-emerald-500",
+                "bg-emerald-50",
+                "font-semibold",
+                "text-emerald-700",
+                "dark:border-emerald-400",
+                "dark:bg-emerald-950/40",
+                "dark:text-emerald-300",
+              );
+            }
+          }
+          if (!pickedCorrect) {
+            btn.classList.add(
+              "border-rose-400",
+              "bg-rose-50",
+              "text-rose-700",
+              "dark:border-rose-500",
+              "dark:bg-rose-950/40",
+              "dark:text-rose-300",
+            );
+          }
+          followup?.classList.remove("hidden");
+          followup?.classList.add("flex", "animate-fade-slide-in");
+        });
+      }
+    }
+    initContentPreview();
+    document.addEventListener("astro:page-load", initContentPreview);
+
+    function initSurpriseMe() {
+      const btn =
+        document.querySelector<HTMLButtonElement>("[data-surprise-me]");
+      const el = document.getElementById("written-unit-hrefs");
+      if (!btn || !el || btn.dataset.wired === "true") return;
+      btn.dataset.wired = "true";
+
+      btn.addEventListener("click", () => {
+        let hrefs: string[];
+        try {
+          hrefs = JSON.parse(el.textContent || "[]");
+        } catch {
+          return;
+        }
+        if (hrefs.length === 0) return;
+        const pick = hrefs[Math.floor(Math.random() * hrefs.length)];
+        window.location.href = pick;
+      });
+    }
+    initSurpriseMe();
+    document.addEventListener("astro:page-load", initSurpriseMe);
   </script>
 </Layout>

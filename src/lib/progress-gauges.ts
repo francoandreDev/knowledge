@@ -43,6 +43,34 @@ export function countDoneByTrack(
   return counts;
 }
 
+/** Total units marked done across every track — powers the homepage's overall gauge. */
+export function countTotalDone(trackUnits: TrackUnitMap): number {
+  const counts = countDoneByTrack(trackUnits);
+  return Object.values(counts).reduce((a, b) => a + b, 0);
+}
+
+interface ProgressStateWithDate extends ProgressState {
+  doneAt?: number;
+}
+
+/** Units marked done within the last N days — powers the homepage's weekly streak gauge. */
+export function countDoneInLastDays(days: number): number {
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  let count = 0;
+  for (const key of pStorage.keys()) {
+    if (!key.startsWith("progress:")) continue;
+    const raw = pStorage.getItem(key);
+    if (!raw) continue;
+    try {
+      const state: ProgressStateWithDate = JSON.parse(raw);
+      if (state.done && state.doneAt && state.doneAt >= cutoff) count++;
+    } catch {
+      // Malformed entry — ignore.
+    }
+  }
+  return count;
+}
+
 const GAUGE_RADIUS = 16;
 export const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_RADIUS;
 
