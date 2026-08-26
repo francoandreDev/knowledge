@@ -2,11 +2,14 @@
 import { ArrowLeft, HelpCircle } from "lucide-astro";
 import Layout from "../../layouts/Layout.astro";
 import TrackIcon from "../../components/TrackIcon.astro";
+import TrackIllustration from "../../components/TrackIllustration.astro";
 import StatusBadge from "../../components/StatusBadge.astro";
+import ProgressGauge from "../../components/ProgressGauge.astro";
 import TopicMythModal from "../../components/TopicMythModal.astro";
 import { UNIT_TEASERS } from "../../data/unit-teasers";
 import { roadmap, getTrack } from "../../data/roadmap";
 import { getWrittenUnits } from "../../lib/curriculum";
+import { groupSlugsByTrack } from "../../lib/progress-gauges";
 
 export function getStaticPaths() {
   return roadmap.tracks.map((track) => ({
@@ -17,9 +20,14 @@ export function getStaticPaths() {
 const { track: trackName } = Astro.params;
 const track = getTrack(trackName!)!;
 const writtenUnits = await getWrittenUnits();
-const writtenSlugs = new Set(
-  writtenUnits.filter((u) => u.track === trackName).map((u) => u.unitSlug),
-);
+const trackWrittenUnits = writtenUnits.filter((u) => u.track === trackName);
+const writtenSlugs = new Set(trackWrittenUnits.map((u) => u.unitSlug));
+
+// Embedded for the client-side gauge script (see the bottom script block) —
+// same mechanism as the homepage and roadmap: the gauge shows how much of
+// *this reader's own* progress covers what's written, not just how much of
+// the track exists.
+const trackUnitSlugs = groupSlugsByTrack(trackWrittenUnits);
 ---
 
 <Layout title={track.name} ogImage={`/og/${track.name}.png`}>
@@ -30,22 +38,54 @@ const writtenSlugs = new Set(
     <ArrowLeft class="h-3.5 w-3.5" aria-hidden="true" />
     all tracks
   </a>
-  <div class="mt-3 flex items-center gap-3">
-    <div
-      class="rounded-lg bg-slate-100 p-2.5 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
-    >
-      <TrackIcon track={track.name} class="h-6 w-6" />
+
+  <div class="mt-3 flex flex-wrap items-center gap-4">
+    <TrackIllustration
+      track={track.name}
+      class="hidden w-40 shrink-0 sm:block"
+    />
+    <div class="min-w-0 flex-1">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <div
+            class="rounded-lg bg-slate-100 p-2.5 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+          >
+            <TrackIcon track={track.name} class="h-6 w-6" />
+          </div>
+          <h1 class="text-3xl font-bold tracking-tight">{track.name}/</h1>
+        </div>
+        <ProgressGauge
+          trackName={track.name}
+          total={writtenSlugs.size}
+          size={32}
+          class="gap-2"
+        >
+          <span
+            data-gauge-frac
+            class="text-xs font-medium tabular-nums text-slate-500 dark:text-slate-500"
+          >
+            {
+              writtenSlugs.size > 0
+                ? `0/${writtenSlugs.size} done`
+                : "Not started"
+            }
+          </span>
+        </ProgressGauge>
+      </div>
+      <p class="mt-1 text-xs text-slate-400 dark:text-slate-600">
+        {writtenSlugs.size} of {track.units.length} units written
+      </p>
     </div>
-    <h1 class="text-3xl font-bold tracking-tight">{track.name}/</h1>
   </div>
 
-  <ol class="mt-8 divide-y divide-slate-200 dark:divide-slate-800">
+  <ol class="mt-6 space-y-2">
     {
       track.units.map((unit) => {
         const isWritten = writtenSlugs.has(unit.slug);
+        const status = isWritten ? "done" : unit.status;
         const hasTeaser = Boolean(UNIT_TEASERS[`${track.name}/${unit.slug}`]);
         return (
-          <li class="relative py-3">
+          <li class="relative flex items-start gap-3 rounded-lg border border-slate-200 p-3 transition hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700">
             {isWritten && (
               <a
                 href={`/${track.name}/${unit.slug}/`}
@@ -53,19 +93,35 @@ const writtenSlugs = new Set(
                 class="absolute inset-0 z-0"
               />
             )}
-            <div class="flex items-baseline gap-3">
-              <span class="pointer-events-none w-6 shrink-0 text-right text-xs text-slate-400 tabular-nums">
-                {unit.number}
-              </span>
+            <span
+              aria-hidden="true"
+              class={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
+                status === "done"
+                  ? "bg-[var(--gauge-accent)]"
+                  : status === "in-progress"
+                    ? "bg-[var(--gauge-warn)]"
+                    : "border border-slate-400 dark:border-slate-600"
+              }`}
+            />
+            <div class="pointer-events-none min-w-0 flex-1">
               <span
                 class={
                   isWritten
-                    ? "pointer-events-none text-slate-900 underline decoration-slate-300 underline-offset-4 dark:text-slate-100 dark:decoration-slate-700"
-                    : "pointer-events-none text-slate-500 dark:text-slate-500"
+                    ? "text-sm font-medium text-slate-900 dark:text-slate-100"
+                    : "text-sm text-slate-500 dark:text-slate-500"
                 }
               >
                 {unit.problem}
               </span>
+              <div class="mt-1.5 flex flex-wrap gap-1.5">
+                {unit.tags.map((tag) => (
+                  <span class="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-500">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div class="flex shrink-0 items-center gap-1.5">
               {hasTeaser && (
                 <button
                   type="button"
@@ -77,9 +133,7 @@ const writtenSlugs = new Set(
                   <HelpCircle class="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
               )}
-              <span class="pointer-events-none ml-auto shrink-0">
-                <StatusBadge status={isWritten ? "written" : unit.status} />
-              </span>
+              <StatusBadge status={isWritten ? "written" : unit.status} />
             </div>
           </li>
         );
@@ -88,4 +142,28 @@ const writtenSlugs = new Set(
   </ol>
 
   <TopicMythModal />
+
+  <script
+    type="application/json"
+    id="track-unit-slugs"
+    set:html={JSON.stringify(trackUnitSlugs)}
+  />
+
+  <script>
+    import { applyTrackGauges } from "../../lib/progress-gauges";
+
+    function initTrackGauges() {
+      const el = document.getElementById("track-unit-slugs");
+      if (!el) return;
+      let map: Record<string, string[]>;
+      try {
+        map = JSON.parse(el.textContent || "{}");
+      } catch {
+        return;
+      }
+      applyTrackGauges(map);
+    }
+    initTrackGauges();
+    document.addEventListener("astro:page-load", initTrackGauges);
+  </script>
 </Layout>
