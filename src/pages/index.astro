@@ -3,15 +3,21 @@ import Layout from "../layouts/Layout.astro";
 import TrackIcon from "../components/TrackIcon.astro";
 import TrackIllustration from "../components/TrackIllustration.astro";
 import TopicMythModal from "../components/TopicMythModal.astro";
+import ProgressGauge from "../components/ProgressGauge.astro";
 import { Search, ArrowRight, Sparkles, HelpCircle } from "lucide-astro";
 import { roadmap } from "../data/roadmap";
 import { getWrittenUnits } from "../lib/curriculum";
+import { groupSlugsByTrack } from "../lib/progress-gauges";
 
 const writtenUnits = await getWrittenUnits();
 const writtenByTrack = new Map<string, number>();
 for (const u of writtenUnits) {
   writtenByTrack.set(u.track, (writtenByTrack.get(u.track) ?? 0) + 1);
 }
+
+// Embedded for the client-side gauge script (see the bottom script block) —
+// the pool of slugs a reader could have marked done, per track.
+const trackUnitSlugs = groupSlugsByTrack(writtenUnits);
 
 const totalUnits = roadmap.tracks.reduce((n, t) => n + t.units.length, 0);
 const totalWritten = writtenUnits.length;
@@ -192,15 +198,22 @@ const trackTags = new Map<string, string[]>(
                     {track.name}
                   </h2>
                   <span class="shrink-0 text-xs text-slate-500 dark:text-slate-500">
-                    {written}/{track.units.length}
+                    {written}/{track.units.length} written
                   </span>
                 </div>
-                <div class="mt-3 h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800">
-                  <div
-                    class="h-1.5 rounded-full bg-slate-900 transition-all duration-500 dark:bg-slate-100"
-                    style={`width: ${track.units.length ? (written / track.units.length) * 100 : 0}%`}
-                  />
-                </div>
+                <ProgressGauge
+                  trackName={track.name}
+                  total={written}
+                  size={30}
+                  class="mt-3 gap-2"
+                >
+                  <span
+                    data-gauge-frac
+                    class="text-xs font-medium tabular-nums text-slate-500 dark:text-slate-500"
+                  >
+                    {written > 0 ? `0/${written} done` : "Not started"}
+                  </span>
+                </ProgressGauge>
               </div>
             </div>
             <button
@@ -225,9 +238,15 @@ const trackTags = new Map<string, string[]>(
     id="unit-lookup"
     set:html={JSON.stringify(unitLookup)}
   />
+  <script
+    type="application/json"
+    id="track-unit-slugs"
+    set:html={JSON.stringify(trackUnitSlugs)}
+  />
 
   <script>
     import { pStorage, getActiveProfile } from "../lib/profile";
+    import { applyTrackGauges } from "../lib/progress-gauges";
 
     interface ProgressState {
       done: boolean;
@@ -302,6 +321,20 @@ const trackTags = new Map<string, string[]>(
 
     initContinueLearning();
     document.addEventListener("astro:page-load", initContinueLearning);
+
+    function initTrackGauges() {
+      const el = document.getElementById("track-unit-slugs");
+      if (!el) return;
+      let map: Record<string, string[]>;
+      try {
+        map = JSON.parse(el.textContent || "{}");
+      } catch {
+        return;
+      }
+      applyTrackGauges(map);
+    }
+    initTrackGauges();
+    document.addEventListener("astro:page-load", initTrackGauges);
 
     function initInterestPersonalization() {
       const grid = document.querySelector<HTMLElement>("[data-track-grid]");

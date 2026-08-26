@@ -4,20 +4,54 @@ import TrackIcon from "../components/TrackIcon.astro";
 import StatusBadge from "../components/StatusBadge.astro";
 import TrackIllustration from "../components/TrackIllustration.astro";
 import TopicMythModal from "../components/TopicMythModal.astro";
-import { Search, X, HelpCircle } from "lucide-astro";
+import ProgressGauge from "../components/ProgressGauge.astro";
+import { Search, X, HelpCircle, ChevronRight } from "lucide-astro";
 import { roadmap, type UnitStatus } from "../data/roadmap";
 import { getWrittenUnits } from "../lib/curriculum";
+import { groupSlugsByTrack } from "../lib/progress-gauges";
 
 const writtenUnits = await getWrittenUnits();
 const writtenKeys = new Set(
   writtenUnits.map((u) => `${u.track}/${u.unitSlug}`),
 );
 
+// Embedded for the client-side gauge script (see the bottom script block) —
+// the pool of slugs a reader could have marked done, per track.
+const trackUnitSlugs = groupSlugsByTrack(writtenUnits);
+
 const STATUSES: UnitStatus[] = ["planned", "in-progress", "done"];
 
 const ALL_TAGS = Array.from(
   new Set(roadmap.tracks.flatMap((t) => t.units.flatMap((u) => u.tags))),
 ).sort();
+
+// Embedded for the wizard's tag step (see the bottom script block) — which
+// tags actually occur within each track, so picking tracks in step 1
+// narrows the tag options offered in step 2 instead of always showing every
+// tag in the roadmap.
+const tagsByTrack: Record<string, string[]> = {};
+for (const track of roadmap.tracks) {
+  tagsByTrack[track.name] = Array.from(
+    new Set(track.units.flatMap((u) => u.tags)),
+  );
+}
+
+// Content-coverage stats for the overview strip — these are the same for
+// every visitor (how much of the roadmap is written), unlike the per-track
+// gauges below (how much *this reader* has completed of what's written).
+const totalUnitsAll = roadmap.tracks.reduce((n, t) => n + t.units.length, 0);
+const tracksStartedCount = roadmap.tracks.filter((t) =>
+  t.units.some((u) => writtenKeys.has(`${t.name}/${u.slug}`)),
+).length;
+const inProgressCount = roadmap.tracks.reduce(
+  (n, t) =>
+    n +
+    t.units.filter(
+      (u) =>
+        !writtenKeys.has(`${t.name}/${u.slug}`) && u.status === "in-progress",
+    ).length,
+  0,
+);
 ---
 
 <Layout title="Roadmap">
@@ -27,31 +61,132 @@ const ALL_TAGS = Array.from(
     still <code>planned</code>.
   </p>
 
-  <div class="mt-6 space-y-3">
-    <div class="relative max-w-lg">
+  <div class="mt-6 grid grid-cols-3 gap-3 sm:max-w-xl">
+    <div
+      class="flex items-center gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800"
+    >
+      <ProgressGauge
+        fraction={totalUnitsAll ? writtenUnits.length / totalUnitsAll : 0}
+        size={32}
+      />
+      <div>
+        <div class="text-sm font-bold tabular-nums">
+          {writtenUnits.length}<span class="text-slate-400 dark:text-slate-600"
+            >/{totalUnitsAll}</span
+          >
+        </div>
+        <div
+          class="text-[10px] tracking-wide text-slate-500 uppercase dark:text-slate-500"
+        >
+          units
+        </div>
+      </div>
+    </div>
+    <div
+      class="flex items-center gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800"
+    >
+      <ProgressGauge
+        fraction={roadmap.tracks.length
+          ? tracksStartedCount / roadmap.tracks.length
+          : 0}
+        size={32}
+      />
+      <div>
+        <div class="text-sm font-bold tabular-nums">
+          {tracksStartedCount}<span class="text-slate-400 dark:text-slate-600"
+            >/{roadmap.tracks.length}</span
+          >
+        </div>
+        <div
+          class="text-[10px] tracking-wide text-slate-500 uppercase dark:text-slate-500"
+        >
+          tracks
+        </div>
+      </div>
+    </div>
+    <div
+      class="flex items-center gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800"
+    >
+      <ProgressGauge
+        fraction={totalUnitsAll ? inProgressCount / totalUnitsAll : 0}
+        size={32}
+        color="warn"
+      />
+      <div>
+        <div class="text-sm font-bold tabular-nums">{inProgressCount}</div>
+        <div
+          class="text-[10px] tracking-wide text-slate-500 uppercase dark:text-slate-500"
+        >
+          in progress
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stepper: Track -> Tags -> Status -> Results. Skippable at every step
+       (each step's own footer has a "skip" action); jumping back via a pill
+       is always allowed, jumping forward only once that step's been reached. -->
+  <nav
+    class="mt-8 flex items-center"
+    data-wizard-stepper
+    aria-label="Roadmap filter steps"
+  >
+    {
+      ["Track", "Tags", "Status", "Results"].map((name, i) => (
+        <>
+          <button
+            type="button"
+            data-wizard-step-btn={i + 1}
+            class="flex shrink-0 items-center gap-2 text-sm font-semibold text-slate-400 dark:text-slate-600"
+          >
+            <span
+              data-step-dot
+              class="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-xs tabular-nums dark:border-slate-700"
+            >
+              {i + 1}
+            </span>
+            <span class="hidden sm:inline">{name}</span>
+          </button>
+          {i < 3 && (
+            <div
+              data-step-connector
+              class="mx-2 h-px flex-1 bg-slate-200 dark:bg-slate-800"
+            />
+          )}
+        </>
+      ))
+    }
+  </nav>
+
+  <!-- Step 1: track -->
+  <div data-wizard-step="1" class="mt-6">
+    <h2 class="text-lg font-semibold tracking-tight">
+      Which tracks are you interested in?
+    </h2>
+    <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
+      Pick as many as you like, or skip and browse everything.
+    </p>
+    <div class="relative mt-4 max-w-lg">
       <Search
         class="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400"
         aria-hidden="true"
       />
       <input
         type="search"
-        data-roadmap-search
-        placeholder='Search by topic, e.g. "caching", "feedback", "rebase"...'
+        data-track-search
+        placeholder='Search tracks, e.g. "web", "security"...'
         class="w-full rounded-lg border border-slate-200 bg-white py-2.5 pr-3 pl-9 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-slate-600"
       />
     </div>
-
-    <div class="flex flex-wrap items-center gap-1.5">
-      <span class="mr-1 text-xs font-medium text-slate-500 dark:text-slate-500"
-        >Track:</span
-      >
+    <div class="mt-4 flex flex-wrap items-center gap-1.5">
       {
         roadmap.tracks.map((track) => (
           <button
             type="button"
             data-track-chip={track.name}
+            data-search-label={track.name}
             aria-pressed="false"
-            class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:border-slate-400 aria-pressed:border-slate-900 aria-pressed:bg-slate-900 aria-pressed:text-white dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600 dark:aria-pressed:border-slate-100 dark:aria-pressed:bg-slate-100 dark:aria-pressed:text-slate-900"
+            class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:border-slate-400 aria-pressed:border-[var(--gauge-accent)] aria-pressed:bg-[var(--gauge-accent)] aria-pressed:text-white dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600"
           >
             <TrackIcon track={track.name} class="h-3 w-3" />
             {track.name}
@@ -59,142 +194,381 @@ const ALL_TAGS = Array.from(
         ))
       }
     </div>
+    <div
+      class="mt-6 flex items-center justify-between border-t border-slate-200 pt-4 dark:border-slate-800"
+    >
+      <span></span>
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          data-wizard-skip="1"
+          class="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:border-slate-400 dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600"
+        >
+          Skip — all tracks
+        </button>
+        <button
+          type="button"
+          data-wizard-continue="1"
+          class="rounded-lg bg-[var(--gauge-accent)] px-4 py-2 text-sm font-semibold text-white"
+        >
+          Continue →
+        </button>
+      </div>
+    </div>
+  </div>
 
-    <div class="flex flex-wrap items-center gap-1.5">
-      <span class="mr-1 text-xs font-medium text-slate-500 dark:text-slate-500"
-        >Tags:</span
-      >
+  <!-- Step 2: tags -->
+  <div data-wizard-step="2" class="mt-6 hidden">
+    <h2 class="text-lg font-semibold tracking-tight">
+      Narrow it down by topic?
+    </h2>
+    <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
+      Optional — tags reflect the tracks picked in step 1.
+    </p>
+    <div class="relative mt-4 max-w-lg">
+      <Search
+        class="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400"
+        aria-hidden="true"
+      />
+      <input
+        type="search"
+        data-tag-search
+        placeholder='Search tags, e.g. "caching", "feedback"...'
+        class="w-full rounded-lg border border-slate-200 bg-white py-2.5 pr-3 pl-9 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-slate-600"
+      />
+    </div>
+    <div class="mt-4 flex flex-wrap items-center gap-1.5">
       {
         ALL_TAGS.map((tag) => (
           <button
             type="button"
             data-tag-chip={tag}
+            data-search-label={tag}
             aria-pressed="false"
-            class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:border-slate-400 aria-pressed:border-slate-900 aria-pressed:bg-slate-900 aria-pressed:text-white dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600 dark:aria-pressed:border-slate-100 dark:aria-pressed:bg-slate-100 dark:aria-pressed:text-slate-900"
+            class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:border-slate-400 aria-pressed:border-[var(--gauge-accent)] aria-pressed:bg-[var(--gauge-accent)] aria-pressed:text-white dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600"
           >
             {tag}
           </button>
         ))
       }
     </div>
-
-    <div class="flex flex-wrap items-center gap-1.5">
-      <span class="mr-1 text-xs font-medium text-slate-500 dark:text-slate-500"
-        >Status:</span
+    <p
+      data-tag-empty
+      class="mt-4 hidden text-sm text-slate-500 dark:text-slate-500"
+    >
+      No tags match this search among the selected tracks.
+    </p>
+    <div
+      class="mt-6 flex items-center justify-between border-t border-slate-200 pt-4 dark:border-slate-800"
+    >
+      <button
+        type="button"
+        data-wizard-back="2"
+        class="text-sm font-medium text-slate-500 hover:text-slate-900 dark:text-slate-500 dark:hover:text-slate-100"
       >
+        ← Back
+      </button>
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          data-wizard-skip="2"
+          class="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:border-slate-400 dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600"
+        >
+          Skip — no tag filter
+        </button>
+        <button
+          type="button"
+          data-wizard-continue="2"
+          class="rounded-lg bg-[var(--gauge-accent)] px-4 py-2 text-sm font-semibold text-white"
+        >
+          Continue →
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3: status -->
+  <div data-wizard-step="3" class="mt-6 hidden">
+    <h2 class="text-lg font-semibold tracking-tight">Filter by status?</h2>
+    <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
+      Optional — see only what's written, in progress, or still planned.
+    </p>
+    <div class="relative mt-4 max-w-lg">
+      <Search
+        class="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400"
+        aria-hidden="true"
+      />
+      <input
+        type="search"
+        data-status-search
+        placeholder='Search status, e.g. "done"...'
+        class="w-full rounded-lg border border-slate-200 bg-white py-2.5 pr-3 pl-9 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-slate-600"
+      />
+    </div>
+    <div class="mt-4 flex max-w-md flex-col gap-2">
       {
         STATUSES.map((status) => (
           <button
             type="button"
             data-status-chip={status}
+            data-search-label={status}
             aria-pressed="false"
-            class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 capitalize transition hover:border-slate-400 aria-pressed:border-slate-900 aria-pressed:bg-slate-900 aria-pressed:text-white dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600 dark:aria-pressed:border-slate-100 dark:aria-pressed:bg-slate-100 dark:aria-pressed:text-slate-900"
+            class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3.5 py-2.5 text-left text-sm font-medium text-slate-600 capitalize transition hover:border-slate-400 aria-pressed:border-[var(--gauge-accent)] dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600"
           >
-            {status}
+            <span class="flex items-center gap-2">
+              <span
+                aria-hidden="true"
+                class={`h-2.5 w-2.5 shrink-0 rounded-full ${
+                  status === "done"
+                    ? "bg-[var(--gauge-accent)]"
+                    : status === "in-progress"
+                      ? "bg-[var(--gauge-warn)]"
+                      : "border border-slate-400 dark:border-slate-600"
+                }`}
+              />
+              {status}
+            </span>
+            <span
+              data-status-count
+              class="text-xs font-normal text-slate-400 tabular-nums normal-case dark:text-slate-600"
+            />
           </button>
         ))
       }
+    </div>
+    <div
+      class="mt-6 flex items-center justify-between border-t border-slate-200 pt-4 dark:border-slate-800"
+    >
+      <button
+        type="button"
+        data-wizard-back="3"
+        class="text-sm font-medium text-slate-500 hover:text-slate-900 dark:text-slate-500 dark:hover:text-slate-100"
+      >
+        ← Back
+      </button>
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          data-wizard-skip="3"
+          class="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:border-slate-400 dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600"
+        >
+          Skip — all statuses
+        </button>
+        <button
+          type="button"
+          data-wizard-continue="3"
+          class="rounded-lg bg-[var(--gauge-accent)] px-4 py-2 text-sm font-semibold text-white"
+        >
+          See results →
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 4: results -->
+  <div data-wizard-step="4" class="mt-6 hidden">
+    <div class="flex flex-wrap items-center gap-2" data-filter-summary>
       <button
         type="button"
         data-clear-filters
-        class="ml-2 inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-900 dark:text-slate-500 dark:hover:text-slate-100"
+        class="inline-flex items-center gap-1 text-xs font-medium hover:underline"
+        style="color: var(--accent-text)"
       >
         <X class="h-3 w-3" aria-hidden="true" />
-        Clear filters
+        Start over
       </button>
     </div>
 
-    <p data-match-count class="text-xs text-slate-500 dark:text-slate-500">
+    <div class="relative mt-4 max-w-lg">
+      <Search
+        class="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400"
+        aria-hidden="true"
+      />
+      <input
+        type="search"
+        data-roadmap-search
+        placeholder='Search within your results, e.g. "rebase"...'
+        class="w-full rounded-lg border border-slate-200 bg-white py-2.5 pr-3 pl-9 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-slate-600"
+      />
+    </div>
+
+    <p data-match-count class="mt-3 text-xs text-slate-500 dark:text-slate-500">
       {writtenUnits.length} of {
         roadmap.tracks.reduce((n, t) => n + t.units.length, 0)
       } units written
     </p>
-  </div>
 
-  <p
-    data-empty-state
-    class="mt-10 hidden text-center text-sm text-slate-500 dark:text-slate-500"
-  >
-    No units match these filters.
-  </p>
+    <p
+      data-empty-state
+      class="mt-10 hidden text-center text-sm text-slate-500 dark:text-slate-500"
+    >
+      No units match these filters.
+    </p>
 
-  <div class="mt-6 space-y-10">
-    {
-      roadmap.tracks.map((track) => (
-        <section data-track-section={track.name}>
-          <div class="flex flex-wrap items-center gap-4">
-            <TrackIllustration
-              track={track.name}
-              class="hidden w-40 shrink-0 sm:block"
-            />
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2">
-                <div class="rounded-md bg-slate-100 p-1.5 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                  <TrackIcon track={track.name} class="h-4 w-4" />
-                </div>
-                <h2 class="text-lg font-semibold tracking-tight">
-                  {track.name}/
-                </h2>
-              </div>
-              <button
-                type="button"
-                data-myth-trigger={track.name}
-                class="mt-1.5 inline-flex items-center gap-1 text-xs font-medium hover:underline"
-                style="color: var(--accent-text)"
-              >
-                <HelpCircle class="h-3.5 w-3.5" aria-hidden="true" />
-                What is this, really?
-              </button>
-            </div>
-          </div>
-          <ol class="mt-3 divide-y divide-slate-200 dark:divide-slate-800">
-            {track.units.map((unit) => {
-              const isWritten = writtenKeys.has(`${track.name}/${unit.slug}`);
-              const status = isWritten ? "done" : unit.status;
-              const searchText =
-                `${unit.problem} ${unit.slug} ${track.name}`.toLowerCase();
-              return (
-                <li
-                  data-unit-row
-                  data-track={track.name}
-                  data-status={status}
-                  data-search={searchText}
-                  data-tags={unit.tags.join(" ")}
-                  class="flex items-center justify-between gap-4 py-2"
-                >
-                  <span class="flex items-baseline gap-3">
-                    <span class="w-6 shrink-0 text-right text-xs text-slate-400 tabular-nums">
-                      {unit.number}
-                    </span>
-                    {isWritten ? (
-                      <a
-                        href={`/${track.name}/${unit.slug}/`}
-                        class="text-sm text-slate-900 underline decoration-slate-300 underline-offset-4 hover:decoration-slate-900 dark:text-slate-100 dark:decoration-slate-700 dark:hover:decoration-slate-100"
-                      >
-                        {unit.problem}
-                      </a>
-                    ) : (
-                      <span class="text-sm text-slate-500 dark:text-slate-500">
-                        {unit.problem}
+    <div class="mt-6 space-y-3">
+      {
+        roadmap.tracks.map((track) => {
+          const trackWrittenCount = track.units.filter((u) =>
+            writtenKeys.has(`${track.name}/${u.slug}`),
+          ).length;
+          return (
+            <section
+              data-track-section={track.name}
+              class="border-t border-slate-200 pt-3 first:border-t-0 first:pt-0 dark:border-slate-800"
+            >
+              <div class="flex flex-wrap items-center gap-4">
+                <TrackIllustration
+                  track={track.name}
+                  class="hidden w-40 shrink-0 sm:block"
+                />
+                <div class="min-w-0 flex-1">
+                  <button
+                    type="button"
+                    data-track-toggle
+                    class="flex w-full flex-wrap items-center justify-between gap-3 text-left"
+                  >
+                    <span class="flex items-center gap-2">
+                      <ChevronRight
+                        data-track-chevron
+                        class="h-4 w-4 shrink-0 text-slate-400 transition-transform dark:text-slate-500"
+                        aria-hidden="true"
+                      />
+                      <span class="rounded-md bg-slate-100 p-1.5 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                        <TrackIcon track={track.name} class="h-4 w-4" />
                       </span>
-                    )}
-                  </span>
-                  <span class="shrink-0">
-                    <StatusBadge status={isWritten ? "written" : unit.status} />
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
-        </section>
-      ))
-    }
+                      <span class="text-lg font-semibold tracking-tight">
+                        {track.name}/
+                      </span>
+                    </span>
+                    <span class="flex items-center gap-3">
+                      <ProgressGauge
+                        trackName={track.name}
+                        total={trackWrittenCount}
+                        size={26}
+                        class="gap-2"
+                      >
+                        <span
+                          data-gauge-frac
+                          class="text-xs font-medium tabular-nums text-slate-500 dark:text-slate-500"
+                        >
+                          {trackWrittenCount > 0
+                            ? `0/${trackWrittenCount} done`
+                            : "Not started"}
+                        </span>
+                      </ProgressGauge>
+                      <span
+                        data-track-count
+                        class="text-xs text-slate-400 tabular-nums dark:text-slate-600"
+                      >
+                        {track.units.length} units
+                      </span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    data-myth-trigger={track.name}
+                    class="mt-1.5 inline-flex items-center gap-1 text-xs font-medium hover:underline"
+                    style="color: var(--accent-text)"
+                  >
+                    <HelpCircle class="h-3.5 w-3.5" aria-hidden="true" />
+                    What is this, really?
+                  </button>
+                </div>
+              </div>
+              <ol data-track-body class="mt-3 hidden space-y-2">
+                {track.units.map((unit) => {
+                  const isWritten = writtenKeys.has(
+                    `${track.name}/${unit.slug}`,
+                  );
+                  const status = isWritten ? "done" : unit.status;
+                  const searchText =
+                    `${unit.problem} ${unit.slug} ${track.name}`.toLowerCase();
+                  return (
+                    <li
+                      data-unit-row
+                      data-track={track.name}
+                      data-status={status}
+                      data-search={searchText}
+                      data-tags={unit.tags.join(" ")}
+                      class="flex items-start gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800"
+                    >
+                      <span
+                        aria-hidden="true"
+                        class={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
+                          status === "done"
+                            ? "bg-[var(--gauge-accent)]"
+                            : status === "in-progress"
+                              ? "bg-[var(--gauge-warn)]"
+                              : "border border-slate-400 dark:border-slate-600"
+                        }`}
+                      />
+                      <div class="min-w-0 flex-1">
+                        {isWritten ? (
+                          <a
+                            href={`/${track.name}/${unit.slug}/`}
+                            class="text-sm font-medium text-slate-900 hover:underline dark:text-slate-100"
+                          >
+                            {unit.problem}
+                          </a>
+                        ) : (
+                          <span class="text-sm text-slate-500 dark:text-slate-500">
+                            {unit.problem}
+                          </span>
+                        )}
+                        <div class="mt-1.5 flex flex-wrap gap-1.5">
+                          {unit.tags.map((tag) => (
+                            <span class="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-500">
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <span class="shrink-0">
+                        <StatusBadge
+                          status={isWritten ? "written" : unit.status}
+                        />
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
+          );
+        })
+      }
+    </div>
   </div>
 
   <TopicMythModal />
 
+  <script
+    type="application/json"
+    id="track-unit-slugs"
+    set:html={JSON.stringify(trackUnitSlugs)}
+  />
+  <script
+    type="application/json"
+    id="tags-by-track"
+    set:html={JSON.stringify(tagsByTrack)}
+  />
+
   <script>
-    import { getActiveProfile } from "../lib/profile";
+    import { getActiveProfile, updateProfileInterests } from "../lib/profile";
+    import { applyTrackGauges } from "../lib/progress-gauges";
+
+    function initTrackGauges() {
+      const el = document.getElementById("track-unit-slugs");
+      if (!el) return;
+      let map: Record<string, string[]>;
+      try {
+        map = JSON.parse(el.textContent || "{}");
+      } catch {
+        return;
+      }
+      applyTrackGauges(map);
+    }
+    initTrackGauges();
+    document.addEventListener("astro:page-load", initTrackGauges);
 
     function initRoadmapFilters() {
       const root = document.body;
@@ -226,11 +600,24 @@ const ALL_TAGS = Array.from(
         document.querySelector<HTMLElement>("[data-match-count]");
       const emptyState =
         document.querySelector<HTMLElement>("[data-empty-state]");
+      const filterSummary = document.querySelector<HTMLElement>(
+        "[data-filter-summary]",
+      );
       if (!searchInput || !matchCount || !emptyState) return;
 
       const activeTracks = new Set<string>();
       const activeStatuses = new Set<string>();
       const activeTags = new Set<string>();
+
+      // The roadmap's tags step *is* the interests picker now (the profile
+      // modal's separate one was removed) — whatever tags are active here
+      // persist as the active profile's interests, the same way the old
+      // modal chips did on every click.
+      function syncInterestsFromTags() {
+        const profile = getActiveProfile();
+        if (!profile) return;
+        updateProfileInterests(profile.id, [...activeTags]);
+      }
 
       function applyFilters() {
         const query = searchInput!.value.trim().toLowerCase();
@@ -256,14 +643,94 @@ const ALL_TAGS = Array.from(
 
         for (const section of sections) {
           const name = section.dataset.trackSection ?? "";
-          const hasVisibleRow = rows.some(
-            (r) => r.dataset.track === name && !r.classList.contains("hidden"),
-          );
-          section.classList.toggle("hidden", !hasVisibleRow);
+          const sectionRows = rows.filter((r) => r.dataset.track === name);
+          const visibleCount = sectionRows.filter(
+            (r) => !r.classList.contains("hidden"),
+          ).length;
+          section.classList.toggle("hidden", visibleCount === 0);
+          const countEl =
+            section.querySelector<HTMLElement>("[data-track-count]");
+          if (countEl) {
+            countEl.textContent =
+              visibleCount === sectionRows.length
+                ? `${visibleCount} units`
+                : `${visibleCount} of ${sectionRows.length} units`;
+          }
         }
 
         matchCount!.textContent = `${visible} of ${rows.length} units match`;
         emptyState!.classList.toggle("hidden", visible !== 0);
+        renderFilterSummary();
+        updateAccordionDefaults();
+      }
+
+      // Track sections stay collapsed by default — the exception is landing
+      // on exactly one visible track, where opening it saves a click since
+      // there's nothing else to scan. This recomputes on every filter
+      // change (not just once on load), so browsing back out to a broader
+      // set of tracks collapses things again rather than leaving a stale
+      // manually-opened section behind.
+      function setSectionOpen(section: HTMLElement, open: boolean) {
+        const body = section.querySelector<HTMLElement>("[data-track-body]");
+        const chevron = section.querySelector<HTMLElement>(
+          "[data-track-chevron]",
+        );
+        body?.classList.toggle("hidden", !open);
+        chevron?.classList.toggle("rotate-90", open);
+      }
+
+      function updateAccordionDefaults() {
+        const visibleSections = sections.filter(
+          (s) => !s.classList.contains("hidden"),
+        );
+        const openBecauseOnly = visibleSections.length === 1;
+        for (const section of sections) {
+          if (section.classList.contains("hidden")) continue;
+          setSectionOpen(section, openBecauseOnly);
+        }
+      }
+
+      sections.forEach((section) => {
+        const toggle = section.querySelector<HTMLButtonElement>(
+          "[data-track-toggle]",
+        );
+        toggle?.addEventListener("click", () => {
+          const body = section.querySelector<HTMLElement>("[data-track-body]");
+          const isOpen = body ? !body.classList.contains("hidden") : false;
+          setSectionOpen(section, !isOpen);
+        });
+      });
+
+      function renderFilterSummary() {
+        if (!filterSummary) return;
+        const startOverButton = filterSummary.querySelector(
+          "[data-clear-filters]",
+        );
+        filterSummary
+          .querySelectorAll("[data-summary-chip]")
+          .forEach((el) => el.remove());
+        const parts: string[] = [];
+        if (activeTracks.size)
+          parts.push(`Track: ${[...activeTracks].join(", ")}`);
+        if (activeTags.size) parts.push(`Tags: ${[...activeTags].join(", ")}`);
+        if (activeStatuses.size)
+          parts.push(`Status: ${[...activeStatuses].join(", ")}`);
+        if (parts.length === 0) {
+          const chip = document.createElement("span");
+          chip.dataset.summaryChip = "true";
+          chip.className = "text-xs text-slate-500 dark:text-slate-500";
+          chip.textContent = "No filters — showing everything";
+          filterSummary.insertBefore(chip, startOverButton);
+        } else {
+          for (const part of parts) {
+            const chip = document.createElement("span");
+            chip.dataset.summaryChip = "true";
+            chip.className =
+              "rounded-full border border-slate-200 px-2.5 py-0.5 text-xs text-slate-600 dark:border-slate-800 dark:text-slate-400";
+            chip.textContent = part;
+            filterSummary.insertBefore(chip, startOverButton);
+          }
+        }
       }
 
       searchInput.addEventListener("input", applyFilters);
@@ -276,6 +743,7 @@ const ALL_TAGS = Array.from(
           if (nowActive) activeTracks.add(name);
           else activeTracks.delete(name);
           applyFilters();
+          filterTagOptionsByTrack();
         });
       });
 
@@ -298,11 +766,12 @@ const ALL_TAGS = Array.from(
           if (nowActive) activeTags.add(tag);
           else activeTags.delete(tag);
           applyFilters();
+          syncInterestsFromTags();
         });
       });
 
-      clearButton?.addEventListener("click", () => {
-        searchInput.value = "";
+      function resetWizard() {
+        searchInput!.value = "";
         activeTracks.clear();
         activeStatuses.clear();
         activeTags.clear();
@@ -310,12 +779,19 @@ const ALL_TAGS = Array.from(
           chip.setAttribute("aria-pressed", "false"),
         );
         applyFilters();
-      });
+        filterTagOptionsByTrack();
+        syncInterestsFromTags();
+        goToStep(1);
+      }
+
+      clearButton?.addEventListener("click", resetWizard);
 
       // Progressive-enhancement target for the homepage's search box
       // (submits a plain GET form to /roadmap?search=...) — prefill and
       // run the filter once on load so it works even if this script is the
-      // first thing to touch the input.
+      // first thing to touch the input. A reader arriving with an explicit
+      // query already knows what they want, so they land straight on the
+      // results step instead of the track/tags/status wizard.
       const params = new URLSearchParams(location.search);
       const initialQuery = params.get("search");
       if (initialQuery) searchInput.value = initialQuery;
@@ -336,6 +812,207 @@ const ALL_TAGS = Array.from(
       }
 
       applyFilters();
+
+      // ---- wizard: steps, per-step search, tag narrowing, status counts ----
+
+      const stepPanels = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-wizard-step]"),
+      );
+      const stepButtons = Array.from(
+        document.querySelectorAll<HTMLButtonElement>("[data-wizard-step-btn]"),
+      );
+      const connectors = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-step-connector]"),
+      );
+      let currentStep = 1;
+      let maxStepReached = 1;
+
+      function goToStep(step: number) {
+        currentStep = step;
+        maxStepReached = Math.max(maxStepReached, step);
+        for (const panel of stepPanels) {
+          panel.classList.toggle(
+            "hidden",
+            Number(panel.dataset.wizardStep) !== step,
+          );
+        }
+        for (const btn of stepButtons) {
+          const n = Number(btn.dataset.wizardStepBtn);
+          const dot = btn.querySelector<HTMLElement>("[data-step-dot]");
+          const isCurrent = n === step;
+          const isDone = n < step;
+          btn.classList.toggle("text-slate-400", !isCurrent);
+          btn.classList.toggle("dark:text-slate-600", !isCurrent);
+          btn.classList.toggle("text-slate-900", isCurrent);
+          btn.classList.toggle("dark:text-slate-100", isCurrent);
+          if (dot) {
+            dot.textContent = isDone ? "✓" : String(n);
+            dot.classList.toggle(
+              "border-[var(--gauge-accent)]",
+              isCurrent || isDone,
+            );
+            dot.classList.toggle("text-[var(--gauge-accent)]", isCurrent);
+            dot.classList.toggle("bg-[var(--gauge-accent)]", isDone);
+            dot.classList.toggle("text-white", isDone);
+            dot.classList.toggle("border-slate-300", !isCurrent && !isDone);
+            dot.classList.toggle(
+              "dark:border-slate-700",
+              !isCurrent && !isDone,
+            );
+          }
+        }
+        connectors.forEach((c, i) => {
+          c.classList.toggle("bg-[var(--gauge-accent)]", i + 1 < step);
+          c.classList.toggle("bg-slate-200", i + 1 >= step);
+          c.classList.toggle("dark:bg-slate-800", i + 1 >= step);
+        });
+        if (step === 3) updateStatusCounts();
+      }
+
+      stepButtons.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const n = Number(btn.dataset.wizardStepBtn);
+          if (n <= maxStepReached) goToStep(n);
+        });
+      });
+
+      document
+        .querySelector('[data-wizard-continue="1"]')
+        ?.addEventListener("click", () => goToStep(2));
+      document
+        .querySelector('[data-wizard-skip="1"]')
+        ?.addEventListener("click", () => {
+          trackChips.forEach((c) => {
+            c.setAttribute("aria-pressed", "false");
+            activeTracks.delete(c.dataset.trackChip!);
+          });
+          applyFilters();
+          filterTagOptionsByTrack();
+          goToStep(2);
+        });
+
+      document
+        .querySelector('[data-wizard-back="2"]')
+        ?.addEventListener("click", () => goToStep(1));
+      document
+        .querySelector('[data-wizard-continue="2"]')
+        ?.addEventListener("click", () => goToStep(3));
+      document
+        .querySelector('[data-wizard-skip="2"]')
+        ?.addEventListener("click", () => {
+          tagChips.forEach((c) => {
+            c.setAttribute("aria-pressed", "false");
+            activeTags.delete(c.dataset.tagChip!);
+          });
+          applyFilters();
+          syncInterestsFromTags();
+          goToStep(3);
+        });
+
+      document
+        .querySelector('[data-wizard-back="3"]')
+        ?.addEventListener("click", () => goToStep(2));
+      document
+        .querySelector('[data-wizard-continue="3"]')
+        ?.addEventListener("click", () => goToStep(4));
+      document
+        .querySelector('[data-wizard-skip="3"]')
+        ?.addEventListener("click", () => {
+          statusChips.forEach((c) => {
+            c.setAttribute("aria-pressed", "false");
+            activeStatuses.delete(c.dataset.statusChip!);
+          });
+          applyFilters();
+          goToStep(4);
+        });
+
+      // Each step's own search box filters that step's option list (which
+      // tracks/tags/statuses are offered), not the final unit results.
+      function wireOptionSearch(
+        inputSelector: string,
+        chips: HTMLButtonElement[],
+        emptySelector?: string,
+      ) {
+        const input = document.querySelector<HTMLInputElement>(inputSelector);
+        if (!input) return;
+        input.addEventListener("input", () => {
+          const q = input.value.trim().toLowerCase();
+          let visibleCount = 0;
+          for (const chip of chips) {
+            if (chip.classList.contains("hidden-by-track")) continue;
+            const label = (chip.dataset.searchLabel ?? "").toLowerCase();
+            const show = !q || label.includes(q);
+            chip.classList.toggle("hidden", !show);
+            if (show) visibleCount++;
+          }
+          if (emptySelector) {
+            document
+              .querySelector(emptySelector)
+              ?.classList.toggle("hidden", visibleCount !== 0);
+          }
+        });
+      }
+      wireOptionSearch("[data-track-search]", trackChips);
+      wireOptionSearch("[data-tag-search]", tagChips, "[data-tag-empty]");
+      wireOptionSearch("[data-status-search]", statusChips);
+
+      // Tags step: narrow the offered tag chips to only those that occur in
+      // at least one currently-selected track (all tags stay available if no
+      // track is selected — "skip" broadens scope, it doesn't empty it).
+      let tagsByTrack: Record<string, string[]> = {};
+      try {
+        tagsByTrack = JSON.parse(
+          document.getElementById("tags-by-track")?.textContent || "{}",
+        );
+      } catch {
+        tagsByTrack = {};
+      }
+
+      function filterTagOptionsByTrack() {
+        const allowed =
+          activeTracks.size === 0
+            ? null
+            : new Set([...activeTracks].flatMap((t) => tagsByTrack[t] ?? []));
+        for (const chip of tagChips) {
+          const tag = chip.dataset.tagChip!;
+          const allowedByTrack = allowed === null || allowed.has(tag);
+          chip.classList.toggle("hidden-by-track", !allowedByTrack);
+          if (!allowedByTrack) chip.classList.add("hidden");
+          else {
+            const searchInputEl =
+              document.querySelector<HTMLInputElement>("[data-tag-search]");
+            const q = (searchInputEl?.value ?? "").trim().toLowerCase();
+            const label = (chip.dataset.searchLabel ?? "").toLowerCase();
+            chip.classList.toggle("hidden", !(!q || label.includes(q)));
+          }
+        }
+      }
+      filterTagOptionsByTrack();
+
+      // Status step: show how many currently track/tag-matching units fall
+      // into each status, so picking one isn't a guess.
+      function updateStatusCounts() {
+        for (const chip of statusChips) {
+          const status = chip.dataset.statusChip!;
+          const count = rows.filter((r) => {
+            const matchesTrack =
+              activeTracks.size === 0 ||
+              activeTracks.has(r.dataset.track ?? "");
+            const rowTags = (r.dataset.tags ?? "").split(" ");
+            const matchesTags =
+              activeTags.size === 0 || rowTags.some((t) => activeTags.has(t));
+            return matchesTrack && matchesTags && r.dataset.status === status;
+          }).length;
+          const countEl = chip.querySelector("[data-status-count]");
+          if (countEl) countEl.textContent = `${count} units`;
+        }
+      }
+
+      if (initialQuery) {
+        goToStep(4);
+      } else {
+        goToStep(1);
+      }
     }
 
     initRoadmapFilters();
