@@ -1,0 +1,227 @@
+---
+title: "L3 — Implementing least-squares regression, and forecasting the Scenario's signups honestly"
+---
+
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 established the concepts — least squares, leverage, extrapolation risk —
+in words and a diagram. This level implements the actual regression from
+scratch, applies it to the Scenario's twelve weeks of signups, and compares
+three real forecasts for week 52.
+
+<LevelIntro
+  items={[
+    "Implementing least-squares regression",
+    "Measuring fit quality with R²",
+    "Comparing three real forecasts",
+  ]}
+/>
+
+## Fitting a line through all the data
+
+**Here's the actual data from the Scenario. How do we fit a single
+line through all twelve points, rather than just the last two?**
+
+If the code is new, keep the non-code picture in front: compute the average
+week and average signup count, measure how each point sits relative to those
+averages, then choose a line direction. `num` is "do later weeks generally
+have higher signups?" and `den` is "how spread out are the week numbers?"
+
+```js
+const weeks = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+const signups = [30, 33, 35, 38, 36, 41, 44, 42, 47, 50, 80, 120];
+
+function linearRegression(xs, ys) {
+  const n = xs.length;
+  const xMean = xs.reduce((a, b) => a + b, 0) / n;
+  const yMean = ys.reduce((a, b) => a + b, 0) / n;
+
+  let num = 0;
+  let den = 0;
+  for (let i = 0; i < n; i++) {
+    num += (xs[i] - xMean) * (ys[i] - yMean);
+    den += (xs[i] - xMean) ** 2;
+  }
+
+  const slope = num / den;
+  const intercept = yMean - slope * xMean;
+  return { slope, intercept };
+}
+```
+
+```js
+linearRegression(weeks, signups);
+// { slope: 5.54, intercept: 13.67 }  (rounded)
+```
+
+`slope` and `intercept` together define the line `y = slope * x +
+intercept` that minimizes the total squared distance to every point —
+the "least squares" the technique is named for. `num` accumulates how
+much each week's deviation from the average week correlates with that
+week's deviation from the average signup count; `den` normalizes that
+by how spread out the weeks are.
+
+`correlates` here means "moves together." If later weeks tend to have higher
+signup counts, slope is positive. If later weeks tend to have lower counts,
+slope is negative. If week number tells you almost nothing, slope stays close
+to zero.
+
+<Checkpoint question="linearRegression(weeks, signups) returns a slope of about 5.54. In plain terms, what does that number mean for this dataset?">
+
+It means the fitted line predicts roughly 5.54 additional signups per week,
+on average, across all twelve weeks of data — not "5.54 more signups than
+last week," which is a different (naive, two-point) calculation. This is the
+number that will get plugged into `forecast()` a few sections down to
+project week 52, so it's worth being clear on what it actually represents
+before that happens.
+
+</Checkpoint>
+
+## How good is the fit? R²
+
+**A line can be fit through any set of points. How do we know if this
+particular line actually describes the data well?**
+
+`R²` compares two kinds of error:
+
+| Error bucket | Plain meaning                                     |
+| ------------ | ------------------------------------------------- |
+| `ssRes`      | squared error the line still leaves behind        |
+| `ssTot`      | squared spread you had before fitting any line    |
+| `R²`         | fraction of spread the line explains, from 0 to 1 |
+
+An `R²` near 1 means the line explains most of the visible pattern. An `R²`
+near 0 means the line is not doing much better than guessing the average.
+
+```js
+function rSquared(xs, ys, slope, intercept) {
+  const yMean = ys.reduce((a, b) => a + b, 0) / ys.length;
+  let ssRes = 0;
+  let ssTot = 0;
+  for (let i = 0; i < xs.length; i++) {
+    const predicted = slope * xs[i] + intercept;
+    ssRes += (ys[i] - predicted) ** 2;
+    ssTot += (ys[i] - yMean) ** 2;
+  }
+  return 1 - ssRes / ssTot;
+}
+```
+
+```js
+const { slope, intercept } = linearRegression(weeks, signups);
+rSquared(weeks, signups, slope, intercept);
+// 0.606
+```
+
+`R²` (R-squared) measures how much of the actual variation in signups
+the line explains, from 0 (no better than just guessing the average
+every time) to 1 (the line passes through every point exactly). An
+`R²` of 0.606 means this line leaves a lot unexplained — consistent
+with L2's point that weeks 11–12 don't fit the same pattern as weeks
+1–10. Fitting the same function to just the first ten (pre-spike)
+weeks makes that concrete:
+
+```js
+const preSpikeWeeks = weeks.slice(0, 10);
+const preSpikeSignups = signups.slice(0, 10);
+const preSpikeFit = linearRegression(preSpikeWeeks, preSpikeSignups);
+rSquared(
+  preSpikeWeeks,
+  preSpikeSignups,
+  preSpikeFit.slope,
+  preSpikeFit.intercept,
+);
+// preSpikeFit.slope ≈ 2.04, preSpikeFit.intercept ≈ 28.40
+// R² ≈ 0.944
+```
+
+The pre-spike ten weeks fit a line almost perfectly (`R² ≈ 0.944`);
+adding the two viral weeks back in multiplies the slope by about 2.7
+(2.04 → 5.54) and drags `R²` down to 0.606. That gap is the
+number-level version of L2's warning: a couple of points at the edge
+of the data can swing the whole fitted line far more than "2 weeks
+out of 12" would suggest.
+
+<Checkpoint question="The full 12-week fit has R² ≈ 0.606; the pre-spike 10-week fit has R² ≈ 0.944. Which fit should you trust more as a description of the *underlying weekly growth rate*, and why?">
+
+The pre-spike fit — its much higher R² means the line explains nearly all
+the variation in those ten weeks, while the full fit's lower R² means a lot
+of the signups data isn't actually following that line. This matters for
+the very next section: three different forecasts for week 52 get built from
+these two fits (plus the naive one), and R² is the tool that tells you which
+of those forecasts to trust before you even look at the resulting numbers.
+
+</Checkpoint>
+
+## Forecasting week 52, three ways
+
+**With a fitted line, forecasting is just plugging in a future week
+number. How differently do the naive, full-regression, and
+pre-spike approaches actually forecast the board's year-end
+number?**
+
+```js
+function forecast(slope, intercept, x) {
+  return slope * x + intercept;
+}
+
+// naive: extend the week 11 -> week 12 jump in a straight line
+const naiveWeeklyIncrease = signups[11] - signups[10]; // 40
+const naiveWeek52 = signups[11] + naiveWeeklyIncrease * (52 - 12);
+// 1720
+
+// full regression: fit on all 12 weeks
+const fullFit = linearRegression(weeks, signups);
+const fullWeek52 = forecast(fullFit.slope, fullFit.intercept, 52);
+// ≈ 301.7
+
+// pre-spike regression: fit on weeks 1-10 only
+const preSpikeWeek52 = forecast(preSpikeFit.slope, preSpikeFit.intercept, 52);
+// ≈ 134.3
+```
+
+Three defensible-sounding methods, three very different year-end
+numbers: **1,720** (naive), **≈302** (full regression), **≈134**
+(pre-spike trend only). The naive number is the one the board actually
+heard — and it's roughly 5.7× the full-regression estimate, and about
+13× the pre-spike estimate, because it treated one unusually good
+week as the new weekly growth rate instead of as a single data point.
+
+**Which of these three should actually go in front of the board?**
+Neither extreme, and the code above doesn't resolve that by itself —
+it's a modeling judgment, not a technical answer the regression can
+make for you. The full-regression number is defensible as a
+data-driven midpoint, but note where it lands: closer to the
+pre-spike trend line (≈134) than to the naive claim (1,720),
+because that's the direction the earlier, larger data points pull the
+fit. What the numbers rule out with more confidence is the naive
+approach standing unquestioned.
+
+## What generalizes and what doesn't
+
+The core lesson — a trend fit from all the available data is more
+defensible than one read off the two most recent points, a fit's `R²`
+tells you how much to trust it, and any forecast's reliability drops
+the further it's projected past the observed range — applies to any
+time series: server load, revenue, churn, latency percentiles. What's
+specific to this worked example: `linearRegression` fits a single
+straight line, which assumes the underlying trend really is linear.
+`applied-math/statistics` explains the mean/variance language behind
+`R²`, while `applied-math/math-tool-prediction` covers the broader habit
+of choosing a model before trusting a forecast.
+**Try extending it yourself:** if the twelve weeks of signups instead
+showed a repeating pattern — say, every fourth week dipping because of
+a recurring maintenance window — would a single straight line fit
+through all the data still produce a high `R²`, or would the model
+itself need to change to capture a repeating pattern on top of a
+trend?
+
+## Failure modes
+
+| Failure mode                                                          | What it gets wrong                                                                                                                             |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Computing a "trend" from only the two most recent points              | Any two points define a line by definition — it says nothing about whether the broader data actually behaves that way, as the `R²` gap shows   |
+| Reporting a regression's forecast without checking its `R²`           | A low `R²` (like the full fit's 0.606) means the line leaves most of the variation unexplained — the forecast inherits that uncertainty        |
+| Extrapolating forty weeks out with the same confidence as four        | Nothing in the observed range confirms the trend holds that far forward — the further past the data, the more the forecast is a guess          |
+| Assuming a linear model is the right model without checking the shape | Least-squares regression always returns _a_ line — it can't tell you the underlying process is actually curved, seasonal, or has a step change |

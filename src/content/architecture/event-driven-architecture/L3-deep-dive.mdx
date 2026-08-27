@@ -3,6 +3,8 @@ title: "L3 — How do services react to what happened without polling each other
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="What actually breaks in production">
   <Fragment slot="facts">
@@ -42,6 +44,14 @@ yet. The exercises below assume arrays, objects, `Set`, loops,
 `async`/`await`, and `reduce`; the architecture idea to track first is
 the path of one event from "published" to "stored," "projected," and
 "possibly redelivered."
+
+<LevelIntro
+  items={[
+    "A working broker with retry, dead-lettering, and partition keys",
+    "An event-sourced aggregate rebuilt by folding, with snapshots",
+    "A CQRS projector that stays correct under redelivery",
+  ]}
+/>
 
 ## Part 1 — the domain events
 
@@ -147,6 +157,12 @@ function rebuildFromSnapshot(
 }
 ```
 
+<Checkpoint question="A Snapshot only stores atEventIndex and the folded state at that point — it doesn't store the events themselves. If OrderShipped's shape changes six months from now, does an old snapshot taken before that change still replay correctly?">
+
+Not automatically — a snapshot is a cached fold result, so it's exactly as sensitive to the events it was folded from as any other rebuild. If `applyEvent`'s handling of `OrderShipped` changes to expect a new required field, an old snapshot built under the old logic can end up silently wrong, or a later `rebuildFromSnapshot` call folding _new_ events on top of it can throw once it reaches a differently-shaped event `applyEvent` wasn't written to expect. Snapshots don't sidestep the schema-evolution problem the log itself has (see "Edge cases" below) — they just move where you'd feel it: either invalidate old snapshots on a shape change and rebuild them from the raw log, or keep `applyEvent` tolerant of every shape that's ever existed.
+
+</Checkpoint>
+
 ## Part 3 — a minimal broker: topics, consumer groups, acknowledgment
 
 Real brokers differ a lot in delivery mechanics, but nearly all of them
@@ -231,6 +247,12 @@ land on different workers. Keying by `orderId` guarantees every event for
 _that_ order goes to the same worker in publish order, while different
 orders still parallelize freely. This is exactly what Kafka partitions
 and SQS FIFO message groups do under different names.
+
+<Checkpoint question="deliverWithRetry calls handler(envelope.event) again after a failure, with no change to the event itself. If a handler already applied half its side effects before throwing, what does the broker's retry guarantee actually promise — exactly once, or something weaker?">
+
+Something weaker: at-least-once, not exactly-once. The broker's only promise is that it keeps retrying (up to `maxDeliveries`) until the handler returns without throwing — it has no way to know whether the handler's side effects (an email sent, a row inserted) already happened before the failure, so a retry can genuinely re-run work that partially or fully succeeded the first time. That gap is exactly why every subscriber below has to be written to tolerate being called twice with the same event, rather than trusting the broker to hand it exactly one delivery — the CQRS projector next is a direct example of building for that guarantee instead of wishing it away.
+
+</Checkpoint>
 
 ## Part 4 — CQRS projector: building a read model from the stream
 

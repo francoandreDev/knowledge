@@ -3,6 +3,8 @@ title: "L3 — Building the Order aggregate, its repository, and a domain event 
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="Fixing Order #4471 for real">
   <Fragment slot="facts">
@@ -19,6 +21,14 @@ and when, to make the exact race from L1 impossible rather than just
 less likely?**
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "Money, OrderLine, and Order in real code",
+    "Optimistic concurrency in the repository",
+    "An anticorruption layer against a legacy system",
+  ]}
+/>
 
 ## Why TypeScript for this one
 
@@ -219,6 +229,19 @@ from rows or documents every time it loads. The important idea is that
 two requests must not share the same mutable JavaScript object; they
 must each carry the version they read.
 
+<Checkpoint question="`addLine` checks `prospectiveTotal.isGreaterThan(this.creditLimit)` before pushing the new line, not after. If that check ran after the push instead, what observable state would become possible that the current code makes impossible?">
+
+An order could briefly (or, if the check were skipped on some code path,
+permanently) hold more line items than its credit limit allows —
+exactly L1's bug, reintroduced by moving the guard to the wrong side of
+the mutation. Because `addLine` validates before mutating `lines`, there
+is no instant, however brief, where `total()` could return a value over
+`creditLimit`; any code reading the order mid-call still sees the
+last-known-valid state. This is also why `lines` stays private: the
+guard only protects the one method that owns the mutation.
+
+</Checkpoint>
+
 ## The domain event
 
 ```ts
@@ -288,6 +311,19 @@ export class InMemoryOrderRepository implements OrderRepository {
   }
 }
 ```
+
+<Checkpoint question="Requests A and B both call `findById` and get a copy of the order at version 1. A saves first and succeeds. When B calls `save`, what does the repository compare to decide whether to accept or reject B's write — and is it comparing against the version B read, or the version currently stored?">
+
+`save` compares the version on the `Order` object being saved
+(`order.version`, still 1 for B — the version it read) against the
+version currently in the store (now 2, after A's save committed). They
+don't match, so `save` throws `ConcurrencyConflictError` instead of
+overwriting A's write — this is what makes the check "did anything
+change since I read this?" rather than "does what I'm writing look
+valid in isolation," which is exactly the gap a plain database
+transaction left open in L1 and L2.
+
+</Checkpoint>
 
 ## Replaying L1's race with the fix in place
 

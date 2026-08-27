@@ -1,22 +1,29 @@
 ---
-import { FileText, Lightbulb, Code2 } from "lucide-astro";
+import { FileText, Lightbulb, Code2, Check, ArrowRight } from "lucide-astro";
 
 interface Props {
   hasL1: boolean;
   hasL2: boolean;
   hasL3: boolean;
+  track: string;
+  unitSlug: string;
 }
 
-const { hasL1, hasL2, hasL3 } = Astro.props;
+const { hasL1, hasL2, hasL3, track, unitSlug } = Astro.props;
 const levels = [
   { id: "l1", label: "L1 · Summary", icon: FileText, available: hasL1 },
   { id: "l2", label: "L2 · Concept", icon: Lightbulb, available: hasL2 },
   { id: "l3", label: "L3 · Deep dive", icon: Code2, available: hasL3 },
 ] as const;
 const firstAvailable = levels.find((l) => l.available)?.id ?? "l1";
+const nextOf: Record<string, (typeof levels)[number] | null> = {
+  l1: levels.find((l) => l.id === "l2" && l.available) ?? null,
+  l2: levels.find((l) => l.id === "l3" && l.available) ?? null,
+  l3: null,
+};
 ---
 
-<div data-level-tabs>
+<div data-level-tabs data-track={track} data-unit={unitSlug}>
   <div
     class="sticky top-14 z-[5] flex gap-1 border-b border-slate-200 bg-white/95 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95"
     role="tablist"
@@ -33,74 +40,181 @@ const firstAvailable = levels.find((l) => l.available)?.id ?? "l1";
         >
           <level.icon class="h-4 w-4" aria-hidden="true" />
           {level.label}
+          <Check
+            data-read-check={level.id}
+            class="hidden h-3.5 w-3.5 text-emerald-500 dark:text-emerald-400"
+            aria-hidden="true"
+          />
         </button>
       ))
     }
   </div>
 
   <div class="pt-6">
-    <div
-      data-tab-panel="l1"
-      class:list={["prose-panel", firstAvailable !== "l1" && "hidden"]}
-    >
-      <slot name="l1" />
-    </div>
-    <div
-      data-tab-panel="l2"
-      class:list={["prose-panel", firstAvailable !== "l2" && "hidden"]}
-    >
-      <slot name="l2" />
-    </div>
-    <div
-      data-tab-panel="l3"
-      class:list={["prose-panel", firstAvailable !== "l3" && "hidden"]}
-    >
-      <slot name="l3" />
-    </div>
+    {
+      levels.map((level) => (
+        <div
+          data-tab-panel={level.id}
+          class:list={["prose-panel", firstAvailable !== level.id && "hidden"]}
+        >
+          <slot name={level.id} />
+          <div data-level-end={level.id} />
+          {nextOf[level.id] && (
+            <div class="not-prose mt-8 flex justify-end border-t border-slate-200 pt-6 dark:border-slate-800">
+              <button
+                type="button"
+                data-next-level-button
+                data-target={nextOf[level.id]!.id}
+                class="inline-flex items-center gap-1.5 rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-500"
+              >
+                Next: {nextOf[level.id]!.label}
+                <ArrowRight class="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </div>
+          )}
+        </div>
+      ))
+    }
   </div>
 </div>
 
 <script>
+  function lastLevelKey(track: string, unit: string) {
+    return `level-last:${track}/${unit}`;
+  }
+  function readLevelsKey(track: string, unit: string) {
+    return `level-read:${track}/${unit}`;
+  }
+
+  function getReadLevels(track: string, unit: string): Set<string> {
+    try {
+      const raw = localStorage.getItem(readLevelsKey(track, unit));
+      return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  function markLevelRead(root: HTMLElement, level: string) {
+    const track = root.dataset.track!;
+    const unit = root.dataset.unit!;
+    const read = getReadLevels(track, unit);
+    if (read.has(level)) return;
+    read.add(level);
+    localStorage.setItem(readLevelsKey(track, unit), JSON.stringify([...read]));
+    const check = root.querySelector<HTMLElement>(
+      `[data-read-check="${level}"]`,
+    );
+    check?.classList.remove("hidden");
+  }
+
+  function activateTab(root: HTMLElement, target: string) {
+    const buttons =
+      root.querySelectorAll<HTMLButtonElement>("[data-tab-button]");
+    const targetButton = root.querySelector<HTMLButtonElement>(
+      `[data-tab-button="${target}"]`,
+    );
+    if (!targetButton || targetButton.disabled) return;
+
+    buttons.forEach((b) =>
+      b.setAttribute("aria-selected", String(b.dataset.tabButton === target)),
+    );
+    root.querySelectorAll<HTMLElement>("[data-tab-panel]").forEach((panel) => {
+      const isTarget = panel.dataset.tabPanel === target;
+      panel.classList.toggle("hidden", !isTarget);
+      // A one-shot keyframe animation (see global.css) rather than a
+      // transition-based fade — a transition needs a "before" frame to
+      // actually paint before its target changes, which a JS-scheduled
+      // rAF class-swap can miss entirely if the tab isn't foregrounded at
+      // that instant. An `animation` applied directly has no such timing
+      // dependency.
+      if (isTarget) {
+        panel.classList.remove("animate-fade-slide-in");
+        void panel.offsetWidth;
+        panel.classList.add("animate-fade-slide-in");
+      }
+    });
+    // A panel just un-hid — any Mermaid diagram inside it that was skipped
+    // at page load (because it was hidden then) needs to render for real
+    // now that it's actually visible. See Layout.astro's mermaid script for
+    // why this matters.
+    document.dispatchEvent(new CustomEvent("mermaid:rerun"));
+
+    const track = root.dataset.track!;
+    const unit = root.dataset.unit!;
+    localStorage.setItem(lastLevelKey(track, unit), target);
+  }
+
   function initLevelTabs() {
     document
       .querySelectorAll<HTMLElement>("[data-level-tabs]")
       .forEach((root) => {
-        const buttons =
-          root.querySelectorAll<HTMLButtonElement>("[data-tab-button]");
-        buttons.forEach((button) => {
-          button.addEventListener("click", () => {
-            if (button.disabled) return;
-            const target = button.dataset.tabButton!;
-            buttons.forEach((b) =>
-              b.setAttribute(
-                "aria-selected",
-                String(b.dataset.tabButton === target),
-              ),
-            );
-            root
-              .querySelectorAll<HTMLElement>("[data-tab-panel]")
-              .forEach((panel) => {
-                const isTarget = panel.dataset.tabPanel === target;
-                panel.classList.toggle("hidden", !isTarget);
-                // A one-shot keyframe animation (see global.css) rather than
-                // a transition-based fade — a transition needs a "before"
-                // frame to actually paint before its target changes, which a
-                // JS-scheduled rAF class-swap can miss entirely if the tab
-                // isn't foregrounded at that instant. An `animation` applied
-                // directly has no such timing dependency.
-                if (isTarget) {
-                  panel.classList.remove("animate-fade-slide-in");
-                  void panel.offsetWidth;
-                  panel.classList.add("animate-fade-slide-in");
-                }
-              });
-            // A panel just un-hid — any Mermaid diagram inside it that was
-            // skipped at page load (because it was hidden then) needs to
-            // render for real now that it's actually visible. See
-            // Layout.astro's mermaid script for why this matters.
-            document.dispatchEvent(new CustomEvent("mermaid:rerun"));
-          });
+        const track = root.dataset.track!;
+        const unit = root.dataset.unit!;
+
+        // Reflect already-read levels (from a previous visit) as checkmarks.
+        getReadLevels(track, unit).forEach((level) => {
+          root
+            .querySelector<HTMLElement>(`[data-read-check="${level}"]`)
+            ?.classList.remove("hidden");
         });
+
+        if (root.dataset.wired !== "true") {
+          root.dataset.wired = "true";
+
+          root
+            .querySelectorAll<HTMLButtonElement>("[data-tab-button]")
+            .forEach((button) => {
+              button.addEventListener("click", () => {
+                if (button.disabled) return;
+                activateTab(root, button.dataset.tabButton!);
+              });
+            });
+
+          root
+            .querySelectorAll<HTMLButtonElement>("[data-next-level-button]")
+            .forEach((button) => {
+              button.addEventListener("click", () => {
+                activateTab(root, button.dataset.target!);
+                root.scrollIntoView({ behavior: "smooth", block: "start" });
+              });
+            });
+
+          // A sentinel div sits right after each panel's content — once it
+          // scrolls into view the reader has reached the end of that level,
+          // so mark it read. threshold 0 + a small rootMargin means it fires
+          // as soon as any part of the sentinel is visible, not only when
+          // fully in view (which the last sentinel on the page might never
+          // reach if it's short).
+          const observer = new IntersectionObserver(
+            (entries) => {
+              entries.forEach((entry) => {
+                const target = entry.target as HTMLElement;
+                // A hidden (display:none) tab panel's sentinel collapses to
+                // a zero-size rect at (0,0), which Chrome can still report
+                // as isIntersecting: true against the top-left of the
+                // viewport — guard with offsetParent (null while
+                // display:none) so switching tabs can't falsely mark the
+                // newly-shown panel as already read.
+                if (!entry.isIntersecting || target.offsetParent === null) {
+                  return;
+                }
+                markLevelRead(root, target.dataset.levelEnd!);
+                observer.unobserve(target);
+              });
+            },
+            { rootMargin: "0px 0px -10% 0px" },
+          );
+          root
+            .querySelectorAll<HTMLElement>("[data-level-end]")
+            .forEach((el) => observer.observe(el));
+        }
+
+        // Restore the last level the reader was on for this unit, if it's
+        // still available on this load (falls back to whatever the server
+        // already rendered as active otherwise).
+        const last = localStorage.getItem(lastLevelKey(track, unit));
+        if (last) activateTab(root, last);
       });
   }
 

@@ -59,7 +59,8 @@ If `bun run check` fails, fix the root cause — don't work around it by skippin
 5. **L3 may span multiple sessions.** If a topic is large, split `L3-deep-dive/` into a folder with `part-1-<slug>.md`, `part-2-<slug>.md`, etc., plus a short `00-index.md` listing the parts and their status (done / in progress / planned). Never leave a part half-written across a session boundary — finish the part you're on, then stop.
    5b. **Add exercises when the unit supports it** (see "Exercises" below) — not strictly mandatory like L1–L3, but the default expectation for any unit where a real quiz question or code exercise is possible, which is most of them. Skipping exercises should be the exception, made consciously, not the default because it's less work.
    5c. **Default to visual elements, micro-interactions, and a real interactive demo — push for them, don't wait for an excuse to add them.** This was piloted end-to-end on `business-communication/audience-awareness` (visual `Scenario` callouts, per-pool `reference`/`learnMore`, the whiteboard, reveal/feedback animations, and a slider-driven `interactives.json` demo tied to the unit's own problem) and confirmed by direct user review — treat that unit as the reference bar for every unit going forward, not a one-off showcase. Concretely, for every unit ask, and actually try, before deciding something doesn't apply: - Does a relationship in the content (a formula, a trade-off, a threshold, "what happens as X grows") support a slider-driven `interactives.json` demo? If yes, build one — see "Interactive demos" below. Don't settle for a static chart when a draggable one would teach the same idea better. - Does the problem/scenario callout have a fact worth visualizing (a quantity vs. a goal, a short list of categories/roles, a proportion)? Put it in the `Scenario` `facts` slot as a bar/icon-row/mini-table, not prose-with-bold-numbers. - Do failed exercises point somewhere concrete? Author `reference` and `learnMore` per pool (see "Exercises" below) rather than leaving a wrong answer to stand alone with just its built-in explanation. - Reach for the shared animation classes (`animate-fade-slide-in`, `animate-pop`, `animate-shake`, `animate-fill-bar` — see "Micro-interactions and animation" below) on any new interactive element a unit's content introduces, the same way `ExercisePanel`/`LevelTabs`/`ProgressToggle` already do, instead of shipping it static.
-   Skipping any of these should be a deliberate, stated call ("this unit's relationship isn't really draggable" / "there's no natural quantity to chart here") — not silence because it wasn't considered.
+   - Does each level open with a `LevelIntro` right after the hook resolves, and does L2/L3 have 1–2 `Checkpoint` recall prompts at points where a concept lands before the next section builds on it? See "Checkpoints and level intros" below — these exist specifically so a level doesn't read as one continuous wall of prose.
+     Skipping any of these should be a deliberate, stated call ("this unit's relationship isn't really draggable" / "there's no natural quantity to chart here") — not silence because it wasn't considered.
 6. **Update `PROGRESS.md` at the end of every session** that produces or completes content: date, unit touched, what level(s) were written, and what's next.
 7. **Update `ROADMAP.md`** whenever a unit is added, reordered, split, or reworded — the roadmap must always reflect reality, not the original plan.
 8. **Don't pad.** If a unit's concept is simple, L2 can be short. Depth should track the actual complexity of the problem, not a page-count target.
@@ -193,6 +194,48 @@ Format:
 - The component renders one range `<input>` per param (live-updating value label), the current computed output(s), and an SVG line chart showing every output across the _full range_ of `chartParam` (other params held at their current values) with a marker at the current point — this is what answers "what effect would that variation have," not just the single current number.
 - `validate:content` checks structure (params/outputs non-empty, `chartParam` names a real param, defaults within `[min, max]`) but can't verify `compute` actually runs correctly — **test it yourself in the browser** (drag every slider to its min and max, not just the default) before marking a unit done.
 
+## Checkpoints and level intros
+
+Two small components that exist to stop a level from reading as one continuous wall of prose — piloted on `web/http-request-response-basics` and confirmed by direct user review. Both are ungraded and have no effect on `ProgressToggle` gating (same status as Interactive demos above) — they're pacing/orientation devices, not assessment.
+
+**`LevelIntro.astro`** — a compact "in this level" callout naming 3 short items the level covers, placed **once per level, after the opening problem/scenario hook resolves and before the first `##` structured section begins** — never at the very top of the file. Rule 4b's problem-first mandate still governs the open: the hook comes first, `LevelIntro` is the bridge from "here's why you should care" into "here's what's coming," not a table-of-contents substitute for the hook itself.
+
+```mdx
+import LevelIntro from "../../../components/LevelIntro.astro";
+
+<LevelIntro
+  items={[
+    "How a URL becomes a request",
+    "The 3 parts of a request/response",
+    "What status code ranges mean",
+  ]}
+/>
+```
+
+- Exactly 3 items, each a short noun phrase (not a full sentence) naming a concept the level actually covers — not a rehash of the hook's scenario.
+- One per level (L1, L2, and L3 each get their own, worded for what that specific level covers — not copy-pasted across levels).
+- Not every level opens with a `<Scenario>` — some (typically L2) open straight into a `##` guiding question with no hook at all. `LevelIntro` still can't sit at the very top in that case: write one short bridging sentence connecting back to what the previous level established (see `web/http-request-response-basics/L2-concept.mdx` or `git-teamwork/merge-rebase/L2-concept.mdx` for the pattern), then `LevelIntro`, then the first `##`. Never place `LevelIntro` before any prose at all.
+
+**`Checkpoint.astro`** — a mid-content active-recall question: a one-line prompt with a "Show answer" toggle, the answer written in the default slot (any markdown/JSX, matching `Checkpoint.astro`'s reveal styling). The point is forcing the reader to commit to an answer before the content resolves it, the same problem-first/test-before-teach instinct as rule 4b's guiding questions — this makes that instinct interactive instead of purely rhetorical.
+
+```mdx
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Checkpoint question="A load balancer sends your login POST to server A, and your very next request to server B. If there's no cookie or token involved, will server B know you just logged in?">
+
+No — and that's statelessness working exactly as designed, not a bug. ...
+
+</Checkpoint>
+```
+
+- Place one at each point in L2/L3 where a concept just landed and the next section would otherwise build on it unchecked — typically 1–2 per level, not one per section (over-placing turns a pacing device into an obstacle course). Concretely: right after a `##` section's explanation has fully resolved — its closing paragraph, table, code block, or (for prose-only soft-skill units with neither) a worked scenario/example running its course — not mid-explanation, and only where a later section depends on the reader actually having that concept solid.
+  - **"Resolved" isn't the same as "no longer relevant."** A section can wrap up cleanly and still be load-bearing several sections later (e.g. import direction from an earlier section deciding whether a later one counts as "hexagonal"). Those are exactly the spots worth a `Checkpoint` — a section whose idea is fully self-contained and never revisited doesn't need one just because it ended.
+  - A section that's independent of what came before doesn't need one before it.
+- The question must be answerable from what's already been said above it — it's recall/application of the preceding paragraph, not a preview of content not yet introduced.
+- Don't duplicate an existing guiding-question subheading (rule 4b) as a `Checkpoint` — a `##` guiding question that the following prose immediately answers doesn't need a second reveal-gated copy of the same question right next to it. Use `Checkpoint` where the guiding question would otherwise just be asserted-and-resolved in the same breath; skip it where the surrounding structure already makes the reader pause.
+- **In non-technical/soft-skill tracks (rule 9), a `Checkpoint` answer is exactly the kind of "explain a judgment" content that rule 9's ban on fake pseudocode targets** — write it as connected reasoning prose (cause → why → implication), never as staccato "step 1 / step 2" phrasing that reads like disguised code, even though nothing here forces a code block.
+- Both require converting the file to `.mdx` if it's currently plain `.md` (rule 4's per-level files are `.md` by default; only files that import a component need the extension change — same as `Scenario`).
+
 ## Whiteboard (freehand scratch space)
 
 A slide-in drawer attached to a problem callout or an exercise, letting the reader freehand-draw their own reasoning (pen/eraser/clear) next to a read-only recap of that block's key facts — not graded, not a note-taking textarea, purely a persistent scratchpad. Built once as a shared client module, `mountWhiteboardTrigger()` in `src/lib/whiteboard.ts`, and reused from two call sites:
@@ -210,10 +253,10 @@ The reference panel's own background/styling is intentionally **independent of b
 
 1. User picks (or confirms) a track + unit.
 2. Confirm scope for that unit in one or two sentences before writing (especially if it's ambiguous or large) — no need for a full approval cycle each time, just a sanity check.
-3. Write the level(s) in scope for the session, under `src/content/<track>/<unit-slug>/`.
+3. Write the level(s) in scope for the session, under `src/content/<track>/<unit-slug>/` — including a `LevelIntro` after each level's opening hook and 1–2 `Checkpoint` recall prompts in L2/L3 (see "Checkpoints and level intros" above).
 4. Write `exercises.json` for that unit unless there's a real reason not to (see "Exercises" above) — quiz items for L1/L2 concepts, code items for L3 code. Add an `interactives.json` demo too if the topic has a real variable relationship worth exploring (see "Interactive demos" above) — not mandatory, but don't skip it just because it's more work than a quiz.
 5. Update `ROADMAP.md` status markers (`planned` → `in-progress` → `done`) and run `bun run generate:roadmap`.
 6. **`bun run check`** (see "Guardrails" above) — not just `build`. Fix anything it flags before moving on.
-7. Spin up `astro preview --background` and actually look at the rendered unit at least once per session — click through the exercises yourself (answer right, answer wrong, run code with a broken and a correct implementation) to confirm grading and the solution/explanation reveal actually work, not just that `check` passed. Don't just trust that markdown parsed.
+7. Spin up `astro preview --background` and actually look at the rendered unit at least once per session — click through the exercises yourself (answer right, answer wrong, run code with a broken and a correct implementation) to confirm grading and the solution/explanation reveal actually work, not just that `check` passed. Click every `Checkpoint`'s "Show answer" toggle too. Don't just trust that markdown parsed.
 8. Update `PROGRESS.md`.
 9. Suggest — don't decide — what a sensible next unit could be, across any track.

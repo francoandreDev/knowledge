@@ -3,8 +3,18 @@ title: "L2 — The model: application core, ports, and adapters"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 **Where does the boundary actually go, and who's allowed to depend on whom across it?** L1 named the pieces — core, port, adapter — this section is about the shape they form together and the one rule that keeps that shape from collapsing back into the tangled version.
+
+<LevelIntro
+  items={[
+    "Why the hexagon's arrows point inward",
+    "Primary vs. secondary adapters",
+    "Who owns a port's shape, and the composition root",
+  ]}
+/>
 
 ## The hexagon is a dependency diagram, not a shape requirement
 
@@ -44,6 +54,12 @@ socket. The diagram may draw a line outward to the port so you can see
 the need, but the code dependency still points inward because the core
 owns the interface name and shape.
 
+<Checkpoint question="A file inside the application core adds `import { Pool } from 'pg'` just to type a local variable — nothing else about it changes. Does this file still count as part of the core in this pattern?">
+
+No. The moment a core file imports anything from a specific adapter's technology — Postgres's `pg` package, Express, a queue client — the dependency arrow has flipped outward, regardless of how small or well-intentioned the import is. This is exactly the kind of thing worth checking mechanically later (L3 shows the actual grep-for-imports test): "resolved" here doesn't mean the rule stops mattering, it means every later section — including which adapter can be swapped for which — assumes this direction still holds.
+
+</Checkpoint>
+
 ## Two families of adapters, two different questions
 
 <Scenario label="A team's actual confusion">
@@ -78,6 +94,12 @@ contract. Same app, different question.
 **If the core needs "something that can save an order," does the database team design that interface, or does the core?** The core does — always. A port's method signatures are written in the vocabulary of the business rule that uses them (`save(order: Order): Promise<void>`), not in the vocabulary of whatever will eventually implement it (no `INSERT INTO`, no connection string, no `AWS.DynamoDB.DocumentClient`). If the shape of a port is dictated by what's convenient for Postgres, the dependency has silently flipped — the core is now shaped by the database, even though the arrow on the diagram still points the "right" way.
 
 **What breaks first if that rule is violated?** Usually testability: a port whose method takes a raw SQL `WHERE` clause as a string can't be satisfied by an honest in-memory fake — the fake would have to embed a tiny SQL interpreter just to pass. That's the tell that a port leaked its adapter's shape instead of the core's.
+
+<Checkpoint question="A teammate proposes changing OrderRepository.save() to accept a raw SQL WHERE-clause string, because it would make the Postgres adapter simpler to write. Should the port's signature change to match?">
+
+No — that's the port being reshaped around one adapter's convenience instead of the core's actual need ("save an order"), which is the exact violation this section just described. Once one adapter's shape leaks into the port, every other adapter — including the in-memory one used for fast tests — has to fake understanding that adapter's technology just to compile, which is precisely what the composition root below is designed to avoid having to do.
+
+</Checkpoint>
 
 ## Composition: where the adapters actually get plugged in
 

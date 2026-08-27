@@ -2,6 +2,24 @@
 title: "L2 — Aggregates as consistency boundaries, and how contexts become real code"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 named the concepts a lost update like Order #4471 exposes —
+aggregate, aggregate root, invariant, entity vs. value object,
+repository, domain event — without yet showing why wrapping each write
+in its own database transaction couldn't have prevented it. L2 works
+through that gap, then follows bounded contexts one level deeper into
+the module, service, and deployment boundaries they actually become.
+
+<LevelIntro
+  items={[
+    "Why transactions alone don't enforce invariants",
+    "Entities vs. value objects, in practice",
+    "Context mapping into real code boundaries",
+  ]}
+/>
+
 ## Why the database transaction alone didn't save Order #4471
 
 **Each individual write in L1's race was inside a valid SQL transaction.
@@ -51,6 +69,19 @@ single write_ — not around "everything this feature happens to touch."
 `Order` needs the customer's credit limit as an input value at the
 moment of the check, not permanent joint custody of the `Customer`
 object.
+
+<Checkpoint question="A teammate says: 'every order write already goes through a database transaction, so we're covered against Order #4471's bug.' Using the transaction/aggregate distinction just established, what's wrong with that claim?">
+
+A transaction only guarantees that one write fully happens or fully
+fails — it never decides which combined facts are allowed to be true at
+once. `AddItemService`'s write and `PlaceOrderService`'s write were each
+inside a valid transaction; the credit-limit check spanning both of them
+simply had no code enforcing it anywhere. "Covered" would require an
+aggregate — a modeling decision about which objects must be checked
+together on every change — not just a transaction boundary around each
+individual write.
+
+</Checkpoint>
 
 ## The aggregate root is the only door in
 
@@ -113,6 +144,19 @@ means writing identity-tracking and mutation code nothing needs, and
 modeling `OrderLine` as a value object means losing the ability to say
 "update line 7's quantity" without it silently becoming a different
 line.
+
+<Checkpoint question="A second $10 line item gets added to Order #4471, and later its quantity is corrected from 2 to 3. Which of these two facts — the $10 amount, or the line itself — needs to keep the same identity across that correction, and which one doesn't?">
+
+The line needs to keep its identity: it's still `OrderLine #7` before and
+after the quantity changes, which is exactly what makes it an entity.
+The `$10` amount doesn't need identity at all — two `Money($10)`
+instances are simply equal, and a "changed" amount is just a new `Money`
+value, not the same object mutated. Getting this backwards is the
+mistake L2 already flagged: treating `Money` as an entity adds
+identity-tracking nothing needs, and treating `OrderLine` as a value
+object loses the ability to say "update line 7" at all.
+
+</Checkpoint>
 
 ## Repositories: the aggregate's only door to storage
 

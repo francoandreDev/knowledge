@@ -3,6 +3,8 @@ title: "L3 — Building it: a port, two adapters, and the swap that costs zero c
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 This deep dive uses **TypeScript** — its structural interfaces map directly onto "a port is a contract, an adapter is an implementation" with no extra ceremony, and it's the language the rest of this track's readers are most likely to run into ports-and-adapters code in on the job. The ideas transfer directly to Go (interfaces), Java/Kotlin (interfaces), or Python (`Protocol`/ABCs) — only the syntax changes.
 
@@ -23,6 +25,14 @@ This deep dive uses **TypeScript** — its structural interfaces map directly on
 </Scenario>
 
 It shouldn't — and the port is what makes that true in code, not just in principle.
+
+<LevelIntro
+  items={[
+    "A port and two adapters in TypeScript",
+    "Testing the core against a fake, not Postgres",
+    "Trade-offs and real failure modes",
+  ]}
+/>
 
 Read the code in four layers:
 
@@ -62,6 +72,12 @@ export interface StockChecker {
 }
 ```
 
+<Checkpoint question="Both ports above are written entirely in plain TypeScript types (string, number, boolean, Promise) with no import from 'pg' anywhere. Was that an accident of this example, or a requirement of the pattern?">
+
+A requirement. A port is supposed to describe what the core needs, in the core's own vocabulary — not a hint about which database will eventually answer it. If `OrderRepository.save()` took a `pg.QueryConfig` or a raw SQL string, the interface itself would already be committing to Postgres, which means every other adapter (including the in-memory one used for fast tests) would have to fake understanding Postgres just to satisfy the type.
+
+</Checkpoint>
+
 ### The core: business rules, zero infrastructure imports
 
 ```typescript
@@ -99,6 +115,12 @@ export class PlaceOrderUseCase {
 ```
 
 Nothing above this line imports `pg`, `express`, or any driver. Grep the file for `import` and every result is either another port or a language built-in — that grep is a real, mechanical check you can run on any codebase claiming to follow this pattern.
+
+<Checkpoint question="Someone later adds a debug line to place-order.ts: import { Pool } from 'pg'; console.log(new Pool()) — just to check something during local dev, planning to remove it before merging. If it merged by accident, would the grep-for-imports check above still catch it, and would that matter for the two adapters coming up next?">
+
+Yes to both. The grep is mechanical and doesn't care about intent — any `pg` import in a core file fails it, "just for debugging" or not. It matters for what's next because the two adapters below, and the test after them, both depend on the core never having committed to a specific technology; a single leaked import is enough to make swapping `PostgresOrderRepository` for `InMemoryOrderRepository` no longer a zero-core-change operation.
+
+</Checkpoint>
 
 ### Two adapters implementing the same port
 
