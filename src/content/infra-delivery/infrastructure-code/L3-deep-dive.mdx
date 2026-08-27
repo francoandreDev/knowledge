@@ -2,6 +2,22 @@
 title: "L3 — Building a real plan/apply engine, and reproducing the opening scenario's drift"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 worked out what `plan` and `apply` compute in principle, and why the
+state file is what makes drift detectable at all. L3 builds all three —
+`diffResources`, `applyPlan`, and `detectDrift` — as real, runnable code,
+then uses them to reproduce the opening scenario's drift step by step.
+
+<LevelIntro
+  items={[
+    "A real create/update/delete diff, matched by resource id",
+    "Verifying idempotency by re-planning against unchanged config",
+    "Reproducing the opening scenario's drift with detectDrift",
+  ]}
+/>
+
 ## Computing a plan: create, update, delete
 
 **Before writing `apply` — what does `plan` actually need to compare
@@ -111,6 +127,25 @@ const plan4 = diffResources(desired3, stateFile1);
 // — removing a resource from desired config marks it for deletion
 ```
 
+<Checkpoint question="plan3 recomputed web-1 as an update because its size changed from small to large in the desired config. Suppose instead the id itself changed — the config still authored a 'small' server, but its id went from web-1 to web-1-primary. Would diffResources treat that as an update to the same resource, or as something else?">
+
+Something else — a delete of `web-1` plus a create of `web-1-primary`,
+even though to a human it's obviously "the same server, just renamed."
+`diffResources` matches resources purely by `id`: it builds its
+desired-by-id and current-by-id maps from that field alone, so an id
+change looks identical to deleting the old resource and creating an
+unrelated new one with the same config. This matters beyond the diff
+output itself — `applyPlan` would actually destroy and recreate the
+real infrastructure behind that id, which for a server might mean
+downtime, and for a database would mean data loss, none of which the
+person renaming a field in the config file necessarily intends. Real
+IaC tools solve this with an explicit "move" or "import" operation that
+tells the tool "this new id refers to the same real resource as that
+old id" — precisely because id-based matching alone can't distinguish
+a rename from a genuine replace.
+
+</Checkpoint>
+
 ## Reproducing the opening scenario's drift, exactly
 
 **Now the actual failure mode from L1 — someone resizes `web-1`
@@ -183,6 +218,24 @@ That update is not malicious and not random. It is the tool obeying the
 only declared source of truth it has. The incident fix lived only in
 the console, so the next routine deploy treated that console-only
 change as something to overwrite.
+
+<Checkpoint question="detectDrift compared stateFile1 against actualCloudWithDrift and found web-1 drifted. planAgainstActual compared desired1 against actualCloudWithDrift and found web-1 needs an update back to small. Both comparisons involve web-1 and actualCloudWithDrift — so why did one report 'drift' and the other report a normal 'update'?">
+
+Because the two functions are answering different questions with the
+same actual-cloud snapshot, not because one of them is wrong. `detectDrift`
+asks "does the tool's memory (the state file) still match reality" —
+and since the state file says `small` while reality says `xlarge`, that's
+a mismatch the tool never intended and has to surface as an anomaly. `diffResources`
+asks a completely different, ordinary question: "does reality match what's
+declared" — and a mismatch there is exactly what a plan is designed to
+find and fix every single time, whether or not anything unusual happened.
+The state file is what turns the second gap into something worth flagging
+specially: without it, `xlarge` vs. `small` would just look like a routine
+update, same as any other config change, and nobody would ever learn that
+this particular gap was caused by someone bypassing the tool rather than
+by someone editing the declared config on purpose.
+
+</Checkpoint>
 
 ## What generalizes and what doesn't
 

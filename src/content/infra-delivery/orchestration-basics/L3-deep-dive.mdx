@@ -3,6 +3,8 @@ title: "L3 — Implementing a spread scheduler and a reconciliation loop, then r
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="Same cluster, two different amounts of headroom">
   <Fragment slot="facts">
@@ -20,6 +22,14 @@ running correctly" stop being the same thing as "the app is fully
 back up"?**
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "A real spread scheduler implementation",
+    "Reconciliation after a node failure, with and without headroom",
+    "What headroom a cluster actually needs to survive a failure",
+  ]}
+/>
 
 ## Implementing a spread scheduler
 
@@ -122,6 +132,20 @@ nothing left `pending`. This is self-healing actually working — the
 spread scheduler's earlier decision to leave headroom on every node is
 exactly what makes this recovery possible.
 
+<Checkpoint question="In Scenario A, nodeA and nodeB each had roughly 1 CPU and 5-6 memory of spare capacity left after the initial placement, and together they absorbed nodeC's 2 lost pods (p1: 1 CPU/2 mem, p4: 1 CPU/2 mem) with nothing pending. If nodeC had instead been hosting 4 pods of that same size instead of 2, would you expect the same clean recovery?">
+
+Not necessarily — the recovery in Scenario A worked because the total
+spare capacity on the surviving nodes happened to exceed the total
+demand of the lost pods, not because reconciliation has some inherent
+ability to always absorb a failure. Doubling nodeC's lost pods to 4
+would double the demand being rescheduled (roughly 4 CPU/8 mem) while
+the survivors' spare capacity stays exactly what it was, so some of
+those pods could easily end up `pending` instead of placed. The
+scheduler and reconciliation logic themselves don't change at all
+between these cases — only whether the numbers happen to work out.
+
+</Checkpoint>
+
 ## Scenario B: extend it — what if there's no headroom left?
 
 **Using the same `scheduleSpread` and reconciliation logic, what
@@ -162,6 +186,23 @@ correctly running and correctly reporting the gap — but "correctly
 running" and "the app is actually back up" have stopped being the same
 thing. **The loop never manufactures capacity that isn't there; it can
 only redistribute what's already spare.**
+
+<Checkpoint question="An on-call engineer sees the reconciliation loop's dashboard showing 'reconciling: in progress' for p2 and p4, hours after nodeB failed in Scenario B. Is 'in progress' an accurate status, or is the loop actually stuck?">
+
+It's technically accurate but misleading if read as "this will resolve
+itself." The loop genuinely is still running and still comparing
+desired state to actual state every cycle — that part of "in progress"
+is true. What it can't communicate through that status alone is that
+the comparison keeps producing the exact same gap every single time,
+because `nodeA` has zero CPU and memory left to give p2 or p4. Nothing
+about the loop's own behavior will change this outcome; only adding
+capacity (a new node) or freeing existing capacity (removing or
+resizing something already running) breaks the stall. Reading "in
+progress" as "will eventually finish" instead of "will keep retrying
+against a constraint it cannot remove" is exactly the mistake the
+failure-modes table below calls out.
+
+</Checkpoint>
 
 ## Extend it further: how much headroom would Scenario B have needed?
 

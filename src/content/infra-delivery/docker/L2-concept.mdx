@@ -3,6 +3,8 @@ title: "L2 — Layers, caching, and the image/container relationship"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="The rebuild that shouldn't take 20 seconds">
   <Fragment slot="facts">
@@ -30,6 +32,14 @@ dependencies didn't change, why did it rerun?**
 The answer isn't a caching bug — it's a Dockerfile that puts the expensive
 step in the wrong order, relative to what actually changed. Understanding
 _why_ requires seeing where layers fit between an image and a container.
+
+<LevelIntro
+  items={[
+    "How a Dockerfile becomes an image, a registry entry, and a container",
+    "What actually decides whether a layer reruns or is reused",
+    "Why multi-stage builds trim what ships to production",
+  ]}
+/>
 
 ## Where do layers fit between "a Dockerfile" and "a running container"?
 
@@ -66,6 +76,21 @@ Read the cascade like a row of stacked boxes:
 
 Each instruction produces a layer, cached by a hash of its inputs (the previous layer plus the instruction itself, plus any files it copies in). Editing `server.js` changes layer 5's cache key — layers 1 through 4 are untouched and reused instantly, so `npm ci` doesn't rerun. Editing `package.json` changes layer 3's cache key, which cascades: layers 3, 4, and 5 all rebuild, because each depends on the one before it. This is exactly why dependency-manifest files are copied and installed _before_ the rest of the source in a well-ordered Dockerfile — it maximizes how often the expensive `npm ci` layer gets reused. **The teammate's slow rebuild above is what happens when `COPY . .` comes before the dependency install instead** — every source edit then invalidates the install layer too, because the install now depends on the whole source tree, not just the two manifest files.
 
+<Checkpoint question="A Dockerfile copies the whole source tree with COPY . . as its very first instruction, then installs dependencies afterward. A teammate edits only a README file — no code, no dependencies. Will npm ci rerun on the next build, and why?">
+
+Yes, it reruns — and that's the exact failure mode this section just walked
+through, just triggered by an even smaller change than `server.js`. Because
+`COPY . .` comes before the install step, the install layer's cache key
+depends on the entire source tree's content, and a README is part of that
+tree. Docker has no way to know the README is irrelevant to `npm ci`; it
+only knows the layer's declared inputs changed, so it invalidates that
+layer and everything after it. The fix isn't "ignore README edits" as a
+special case — it's the general one already established above: put the
+manifest copy and install ahead of the broad `COPY . .`, so only changes to
+the manifest files can touch that layer at all.
+
+</Checkpoint>
+
 ## What happens to the build tools once the app is actually shipped?
 
 A single-stage Dockerfile keeps everything it ever used — compilers, dev dependencies, raw source — in the final image, whether or not the running app needs any of it. Multi-stage builds separate "what's needed to build" from "what's needed to run":
@@ -89,6 +114,20 @@ CMD ["node", "dist/server.js"]
 ```
 
 The final image (built from `runtime`) never contains the TypeScript compiler, dev dependencies, or raw source files stage 1 used — only what `COPY --from=build` explicitly pulled across. This directly serves two things: a smaller final image (less to pull, less disk), and a smaller attack surface (a compiler or dev tool sitting in a production image is one more thing that could be exploited if the container is ever compromised, for no runtime benefit).
+
+<Checkpoint question="In the two-stage Dockerfile above, stage 1 (build) writes compiled output to /app/dist. If stage 2's Dockerfile forgot the COPY --from=build /app/dist ./dist line entirely, would /app/dist exist in the final runtime image?">
+
+No. Each `FROM` starts a completely fresh stage with none of the previous
+stage's filesystem carried over automatically — the only way anything
+crosses from one stage to another is an explicit `COPY --from=<stage>`
+naming exactly what to pull across. Forgetting that line wouldn't produce
+an error at build time; it would produce a runtime image with no `dist`
+folder at all, and the container would fail the moment it tried to run
+`node dist/server.js`. This is precisely why the final image never carries
+stage 1's compiler or dev dependencies either — nothing crosses by default,
+only what's named explicitly does.
+
+</Checkpoint>
 
 ## How does any of this actually reach production?
 

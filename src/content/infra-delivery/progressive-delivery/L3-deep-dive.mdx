@@ -2,6 +2,23 @@
 title: "L3 — Building the canary router and error-rate monitor that would have caught the Scenario's bug"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 established the staged-rollout model in the abstract — percentages,
+health checks, halt-and-rollback. This level implements the two pieces
+that make that model real: a router that consistently assigns each
+user to old or new, and a monitor that decides when a stage is
+unhealthy.
+
+<LevelIntro
+  items={[
+    "A consistent-hashing canary router",
+    "Measuring exposure at each stage",
+    "An automatic error-rate halt check",
+  ]}
+/>
+
 ## Routing a consistent percentage of users to the new version
 
 **A canary router needs two properties: a controllable percentage,
@@ -41,6 +58,21 @@ properties at once: the assignment is deterministic (the same user id
 always hashes to the same bucket), and the _percentage_ of users
 routed to "new" is controlled entirely by moving the threshold — no
 per-user state needs to be stored anywhere.
+
+<Checkpoint question="A rollout advances from a 5% canary stage to 25%. Using hashUserId and assignVersion above, does every user who was already routed to 'new' at 5% stay routed to 'new' at 25%, or could some of them flip back to 'old'?">
+
+They stay routed to "new." Each user's bucket (`hashUserId(userId) %
+100`) never changes — only the threshold being compared against it
+does. A user in bucket 3 was already below the 5% threshold, and
+bucket 3 is still below the 25% threshold, so nothing about their
+assignment flips. Raising the percentage only ever adds users whose
+bucket number falls in the newly-included range (5 through 24 here);
+it never removes anyone who already qualified at a lower percentage.
+That one-directional property is exactly why this scheme avoids the
+"same user bounces between versions" problem a random per-request
+assignment would have.
+
+</Checkpoint>
 
 ## Measuring exactly how many users the Scenario's bug would have reached
 
@@ -102,6 +134,21 @@ enough to trip a 2% threshold — which is exactly the point: catching
 a spike in a _rate_, computed only from the small canary population,
 rather than waiting for someone to notice a much larger absolute
 number of affected users at 100%.
+
+<Checkpoint question="Two canary stages both see exactly 20 errors. Stage A is at 5% traffic (1,000 requests); stage B is at 50% traffic (10,000 requests). Using shouldHaltRollout with a 1% threshold, does the same raw error count of 20 trigger a halt at both stages?">
+
+No — the error rate, not the raw count, is what the check compares
+against the threshold, and the same 20 errors produce very different
+rates depending on the traffic volume they came from. At stage A,
+20/1,000 = 2%, which exceeds the 1% threshold and halts the rollout.
+At stage B, 20/10,000 = 0.2%, which stays well under 1% and does not
+halt. This is why `shouldHaltRollout` divides by `totalRequests`
+instead of comparing `errorCount` directly against some fixed number
+— an absolute error count means nothing without knowing how much
+traffic it's a fraction of, and a rate-based check is what lets the
+same threshold stay meaningful as the canary stage grows.
+
+</Checkpoint>
 
 ## What generalizes and what doesn't
 

@@ -2,6 +2,23 @@
 title: "L2 — What plan and apply actually compute, and why a state file is what makes drift visible"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 named the three pictures — declared config, state file, actual cloud —
+and the failure mode that happens when a change only ever touches the
+third one. L2 works out exactly what `plan` and `apply` compute from
+those three pictures, and why the state file specifically is what turns
+"someone changed something" into something a tool can actually detect.
+
+<LevelIntro
+  items={[
+    "Declarative vs. imperative, and why it decides re-run safety",
+    "What plan computes and why apply waits for review",
+    "Why idempotency means 'same end state,' not 'does nothing'",
+  ]}
+/>
+
 ## Declarative vs. imperative: two different questions to answer
 
 **If someone hands you a script that runs `resize-server web-1 large`,
@@ -58,6 +75,23 @@ production server — showing "3 to create, 1 to update, 0 to delete"
 lets a human catch a mistake (like an accidental delete from removing
 a line in the wrong file) before it happens, not after.
 
+<Checkpoint question="A plan shows '2 to create, 1 to update, 0 to delete.' Which of those three lists comes from a resource that exists in the state file but no longer appears in the declared config?">
+
+The delete list. Plan is a three-way classification built from comparing
+declared config against the state file by resource id: an id present in
+declared config but missing from state is a create, an id present in
+both but with a config that differs is an update, and an id present in
+state but no longer present in declared config is a delete. So "0 to
+delete" here means every resource the tool remembers creating is still
+named somewhere in the declared config — nothing has been removed from
+that file since the last apply. This is also exactly why a reviewer
+reads the delete list most carefully: it's the one outcome that can lose
+real, running infrastructure, and it's produced automatically the moment
+a resource's block is deleted or renamed in the config, whether or not
+that was intentional.
+
+</Checkpoint>
+
 ## Why the state file is what makes drift detectable at all
 
 **If the console change from the opening scenario had happened, but
@@ -81,6 +115,24 @@ last time. A declarative tool's state file is exactly that memory,
 and drift detection is just "does the state file's record still
 match reality" — the same comparison a plan does against declared
 config, but against what actually exists instead.
+
+<Checkpoint question="A plan diffs declared config against the state file. A drift check diffs the state file against the actual cloud. Why are these two different comparisons, rather than the same one run twice?">
+
+Because they're checking two different relationships, and each one can
+be wrong independently of the other. Declared config vs. state file
+asks "does what I've asked for match what the tool last did" — a
+normal, expected mismatch whenever someone edits the config file, and
+exactly what a plan is supposed to surface before an apply. State file
+vs. actual cloud asks a completely different question: "does the
+tool's memory still match reality" — and a mismatch there means
+something changed the real infrastructure without going through the
+tool at all, which a plan alone would never catch, because a plan never
+looks at the actual cloud. The opening scenario's console resize is
+invisible to a plan (declared config and state file still agree with
+each other) but would show up immediately in a drift check, which is
+exactly why relying on plan review alone misses this failure mode.
+
+</Checkpoint>
 
 ## Idempotency: why re-running the same apply twice has to be safe
 

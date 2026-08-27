@@ -2,6 +2,22 @@
 title: "L3 — Watching cache hits happen for real, and modeling the invalidation rule in code"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 described the cache-invalidation cascade as a rule. L3 watches that same
+rule play out in real `docker build` terminal output across three actual
+builds, then turns the rule into a small, testable function instead of
+leaving it as something only observable by staring at build logs.
+
+<LevelIntro
+  items={[
+    "Real docker build output, cold cache vs. cache hits",
+    "The invalidation rule expressed as a pure function",
+    "Four Dockerfile mistakes that quietly defeat caching",
+  ]}
+/>
+
 ## What does a cache hit actually look like, in real `docker build` output?
 
 Captured terminal output, real Docker behavior — first build (cold cache):
@@ -45,6 +61,19 @@ $ docker build -t myapp .
 ```
 
 Layer 3's cache key changed (the file content it copies changed), which cascades to layer 4 (`npm ci` reruns, since its own cache key includes layer 3's output) and layer 5 — exactly the cascade described in L2, now observed as real build output rather than asserted.
+
+<Checkpoint question="If a fourth build only bumped the base image tag from node:20.11-bookworm-slim to node:20.12-bookworm-slim, and nothing else changed, which of the five layers above would show CACHED and which would rebuild?">
+
+None of the five would show `CACHED` — all five would rebuild. Layer 1
+(`FROM`) is the foundation every later layer is built on top of, so
+changing its cache key invalidates it, and the cascade rule from L2 says
+once one layer rebuilds, every layer after it rebuilds too, regardless of
+whether their own individual inputs (the manifest files, the source tree)
+changed at all. This is why a base-image bump is the most expensive kind of
+change to make casually — it throws away the entire cache, not just the
+layer that technically changed.
+
+</Checkpoint>
 
 ## Can the rule behind all three builds be expressed as code, not just described?
 

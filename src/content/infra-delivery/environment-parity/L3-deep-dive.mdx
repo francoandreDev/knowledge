@@ -3,6 +3,8 @@ title: "L3 — A real drift bug, and the minimal Dockerfile that eliminates its 
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label='The "only happens in CI" bug, isolated down to one function'>
   <Fragment slot="facts">
@@ -28,6 +30,14 @@ repro steps.
 identical in both places — what's left that could possibly differ?**
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "A worked timezone drift bug, and its actual fix",
+    "A minimal, real Dockerfile that eliminates its class",
+    "What container parity does and doesn't cover, with real failure modes",
+  ]}
+/>
 
 ## A real drift bug: implicit timezone dependence
 
@@ -66,6 +76,12 @@ function isToday(timestampMs, timezone, referenceNowMs = Date.now()) {
 
 The fix isn't "set `TZ=UTC` everywhere and hope" (that's still an ambient, easy-to-forget setting) — it's removing the function's dependence on ambient environment state entirely by making the timezone an explicit parameter. This is the same principle containers apply at the infrastructure level, applied to a single function: don't let correctness depend on something outside the artifact itself.
 
+<Checkpoint question="A teammate proposes fixing the CI failure by adding `ENV TZ=UTC` to the CI runner's setup instead of changing `isToday`. Would that actually fix the bug, or just relocate it?">
+
+It would relocate it, not fix it. Pinning `TZ=UTC` on the CI runner makes CI's behavior match production's UTC setting by coincidence, but `isToday` still silently reads whatever the host's ambient timezone happens to be — it's still an implicit dependency, just one that now happens to agree across two of the three environments instead of disagreeing. The bug reappears the moment any environment's `TZ` differs again (a new hire's laptop, a future CI migration, a customer running the code in their own region). `report-fixed.mjs`'s explicit `timezone` parameter is the only version of the fix that removes the dependency itself rather than getting lucky about what value it currently resolves to.
+
+</Checkpoint>
+
 ## A minimal real Dockerfile
 
 This is a genuinely runnable, minimal image definition for a small Node service — small enough to read end to end, but every line is doing real work, not filler:
@@ -95,6 +111,12 @@ CMD ["node", "server.js"]
 Building this (`docker build -t my-service .`) produces one immutable image. Running it (`docker run -p 3000:3000 my-service`) on a laptop, in CI, or on a production host executes the _exact same bytes_ — same Node binary, same OS libraries, same `node_modules` tree — every time. The only thing that can differ between environments now is what's explicitly passed in at `docker run` time (environment variables, mounted volumes), which is deliberate configuration, not accidental drift.
 
 Note what this Dockerfile does **not** do: it doesn't set `TZ`. That's deliberate — pinning the container's ambient timezone would paper over the exact bug above rather than fix it. `report-fixed.mjs`'s explicit `timezone` parameter is the actual fix; a container-level `TZ` pin is a second, weaker line of defense at best, not a substitute for removing the ambient dependency from the code itself.
+
+<Checkpoint question="If a teammate edits this Dockerfile to swap `npm ci --omit=dev` for `npm install --omit=dev` to 'save a step,' what specifically breaks about the parity guarantee this image is supposed to provide?">
+
+`npm ci` requires `package-lock.json` to exactly match `package.json` and installs precisely the locked dependency tree, refusing to proceed otherwise; `npm install` will happily resolve slightly different transitive dependency versions if the lockfile and the registry's available versions have drifted since the lockfile was last written. That reopens exactly the gap this whole Dockerfile exists to close: two builds of the "same" image, run at different times, could end up with different transitive dependencies baked in — drift moved from between environments to between builds of a single environment, but still drift, and still invisible until something built on one of the differing versions breaks.
+
+</Checkpoint>
 
 ## How much does an undetected drift bug actually cost, as a function of where it's caught?
 

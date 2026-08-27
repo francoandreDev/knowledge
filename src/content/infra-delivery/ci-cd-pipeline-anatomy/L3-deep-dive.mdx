@@ -3,6 +3,8 @@ title: "L3 — Reproducing the bypassed gate, and modeling pipeline logic in cod
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="Same pipeline config, one leftover flag">
   <Fragment slot="facts">
@@ -17,6 +19,14 @@ special-case logic to protect against a failed test step, or should
 "halt on failure" be the pipeline's default behavior everywhere?**
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "The actual YAML that shipped the incident, and its one-line fix",
+    "Modeling gate logic as runnable, testable code",
+    "Artifact promotion and review rigor applied to pipeline config",
+  ]}
+/>
 
 ## The actual pipeline config, reproducing the incident
 
@@ -108,6 +118,22 @@ produces completely different outcomes purely based on one boolean flag
 on one step. This mirrors the real incident precisely: the bug was never
 in the pipeline's core logic, it was in one leftover configuration value.
 
+<Checkpoint question="If you added a fourth step to buggyPipeline — a 'deploy-staging' step with continueOnError: false, placed between test and deploy-production — would that change the outcome of the incident scenario above?">
+
+No. `runPipeline` stops at the _first_ step that both fails and has
+`continueOnError: false`. In the incident, the `test` step fails but has
+`continueOnError: true`, so the loop never treats it as a stopping
+condition — it just records the failure and moves on. Whether a
+`deploy-staging` step exists afterward doesn't matter, because the loop
+never reaches the point of evaluating it as a halt condition; it would
+run (and presumably "pass," since nothing about it is broken) exactly
+like `deploy-production` did. The bug isn't about how many steps come
+after the flaky flag — it's that the one step actually capable of
+catching the real problem was told to never stop anything, no matter
+what came next.
+
+</Checkpoint>
+
 ## Artifact promotion, modeled the same way
 
 ```js
@@ -137,6 +163,22 @@ sequence — `build-8231` that passes staging's smoke tests is the _exact
 same build_ that later needs production's approval gate, never a
 freshly-rebuilt copy that could have drifted from what staging actually
 verified.
+
+<Checkpoint question="Suppose promoteThroughEnvironments were rewritten so each environment called its own 'npm run build' right before checking its gate, instead of reusing one artifactId passed in from outside. Would the function's return value still tell you anything meaningful about whether staging and production ran the same code?">
+
+Not reliably. The whole guarantee of `promoteThroughEnvironments` comes
+from passing a single, already-built `artifactId` through every
+environment's gate unchanged — the function's return value (`promoted`,
+`blockedAt`) is only meaningful as a claim about _that one artifact_
+passing or failing each gate. If each environment rebuilt from source
+instead, `env.gate(artifactId)` would be checking a fresh build that
+merely shares a source commit with the others, not the literal thing
+that passed the previous gate. The function would still run and return
+something, but "staging passed" would no longer imply "the thing
+approved for staging is the thing reaching production" — which is
+exactly the guarantee artifact promotion exists to provide.
+
+</Checkpoint>
 
 ## Extend the incident: what if the bypassed gate had been caught in review?
 

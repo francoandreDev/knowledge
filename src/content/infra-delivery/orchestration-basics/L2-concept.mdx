@@ -2,6 +2,23 @@
 title: "L2 — The reconciliation loop, and how a scheduler picks a node"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 named the missing piece in the 3am scenario as something that
+constantly checks desired state against actual state and acts on any
+gap. L2 works out exactly how that reconciliation loop operates, and
+how the scheduler it depends on decides which node each container
+lands on.
+
+<LevelIntro
+  items={[
+    "The reconciliation loop's compare-and-act cycle",
+    "How a scheduler picks a node from available capacity",
+    "Spreading vs. packing, and what each trades away",
+  ]}
+/>
+
 ## The reconciliation loop: comparing desired state to actual state
 
 **If nobody is watching the cluster, how does a dead node's containers
@@ -34,6 +51,21 @@ paged and awake. The exact time depends on the platform's checks,
 timeouts, and type of failure, but the important change is that recovery
 starts from the system observing a gap, not from a person noticing one.
 
+<Checkpoint question="A reconciliation loop just found a gap — 2 fewer replicas running than desired — and scheduled 2 replacement containers. Ten seconds later, before those replacements have finished starting up, the loop runs its comparison again. Does it schedule 2 more replacements on top of the first 2?">
+
+No — as long as the loop's actual-state observation counts containers
+that are scheduled-but-still-starting as already accounted for, not
+just fully-running ones. If it didn't, every comparison cycle would
+re-detect the same gap and pile on duplicate replacements faster than
+they could start, which is exactly the kind of bug a real
+reconciliation loop has to guard against. The loop's whole value comes
+from comparing against the true current state, including
+in-flight work, not just a stale snapshot from before the last
+corrective action — otherwise "continuously compare and act" turns
+into "continuously over-correct."
+
+</Checkpoint>
+
 ## The scheduler: where does each container actually go?
 
 **Once the reconciliation loop decides a container needs to exist,
@@ -61,6 +93,21 @@ across nodes with the most free capacity trades some packing
 efficiency for exactly the property that makes self-healing
 practical: no single node failure wipes out an outsized share of the
 fleet.
+
+<Checkpoint question="Two nodes, A and B, both currently have identical free capacity: 4 CPU and 8 GB memory. A new pod requesting 1 CPU and 1 GB memory needs to be placed. Does a spreading scheduler's choice between A and B matter much here, and why would spreading start to matter more as more pods get placed?">
+
+Not much for this single placement — with equal free capacity, either
+node works equally well right now. Spreading's benefit compounds over
+many placements, not one: each time the scheduler picks the node with
+the most remaining room, it keeps every node's free capacity roughly
+balanced as pods accumulate, rather than letting one node quietly fill
+up first. That balance is what matters later, because it determines
+how much spare room is left on any given node if it has to absorb a
+failed neighbor's containers — a single early placement barely moves
+that number, but hundreds of placements without spreading would leave
+some nodes packed tight and others nearly empty.
+
+</Checkpoint>
 
 ## Manual ops vs. an orchestrator: what actually changes
 

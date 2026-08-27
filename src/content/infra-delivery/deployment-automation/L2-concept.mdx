@@ -2,6 +2,22 @@
 title: "L2 — What a scripted deploy pipeline enforces that a checklist can't"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 named the failure mode behind Deploy 9 — a manual checklist depends on
+a human remembering and correctly sequencing every step. L2 works through
+what a scripted deploy pipeline actually looks like, step by step, and why
+each part of it is specifically what a checklist can't reliably guarantee.
+
+<LevelIntro
+  items={[
+    "The fixed step order of a scripted pipeline",
+    "Why the health check runs before the atomic switch",
+    "How an automatic rollback replaces a remembered one",
+  ]}
+/>
+
 ## Turning the checklist into a fixed pipeline
 
 **If the steps were already written down on a wiki page, why did skipping
@@ -43,6 +59,21 @@ deliberately the very last thing that can affect user traffic:
 extracting, installing, migrating, and proving the candidate healthy all
 happen while the _old_ release is still live and serving every request.
 
+<Checkpoint question="In the diagram above, extract, install, migrate, and the health check all run while the old release is still serving traffic. If a fresh production incident showed that users had briefly received a mix of old and new code during a deploy, which single step in the diagram would you suspect first, and why?">
+
+The atomic symlink switch — specifically, whether it was actually atomic
+in the real implementation, or whether something upstream of it (like
+extracting the new release directly into the live directory instead of a
+separate one) let partially-written files become reachable before the
+switch happened. Every step before the switch is deliberately inert with
+respect to user traffic: extract, install, migrate, and health-check all
+operate on a release directory nobody is being routed to yet. If users
+saw a mix of old and new code, the boundary that's supposed to make that
+impossible — the single-pointer flip — is the first place to look,
+because every earlier step should be invisible to traffic by design.
+
+</Checkpoint>
+
 ## What "atomic" actually buys you
 
 **Could the pipeline just overwrite the old release's files in place
@@ -69,6 +100,20 @@ _is_ the rollback, conditioned on the health check's result.
 | Skipped step                 | Possible, and often invisible until it fails | Not reachable — each step runs unconditionally           |
 | Detecting a bad deploy       | Someone notices symptoms, then investigates  | Health check runs automatically, before traffic switches |
 | Recovering from a bad deploy | Someone manually re-runs the old steps       | Rollback step runs automatically on health-check failure |
+
+<Checkpoint question="The table above says a scripted pipeline detects a bad deploy 'before traffic switches.' Given what you now know about step order, would a health check that only ran after 'restart service' still count as catching Deploy 9's mistake before users were affected?">
+
+No. By the time `restart service` has run, the atomic switch has
+already happened, which means real traffic is already being routed to
+the new release. A health check placed after that point can still
+detect the failure and trigger a rollback, but it can no longer prevent
+users from having been served the broken version in the meantime — it
+would be closer to the manual checklist's "someone notices symptoms,
+then investigates" row than to the scripted pipeline's actual guarantee.
+The ordering in the diagram — health check strictly before the switch —
+is what turns "detect and recover" into "prevent in the first place."
+
+</Checkpoint>
 
 ## The generalizable lesson
 

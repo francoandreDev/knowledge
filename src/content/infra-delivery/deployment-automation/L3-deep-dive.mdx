@@ -3,6 +3,8 @@ title: "L3 — A real deploy pipeline function, and why a scripted step can't be
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="Deploy 9, reproduced as data">
   <Fragment slot="facts">
@@ -18,6 +20,14 @@ the end, what actually stops the manual one from being incomplete in a
 way the scripted one can't be?**
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "A deploy pipeline modeled as a function, not typed steps",
+    "A real health-check-gated rollback implementation",
+    "Extending a pass/fail health check into a retry policy",
+  ]}
+/>
 
 ## Modeling the pipeline as a function, not a list someone types
 
@@ -71,6 +81,23 @@ step, because there's no path through the function that skips the
 `install-deps` line — the only way to change what it returns is to
 change the function itself, which is a deliberate, reviewable edit,
 not a slip made at 5pm on a Friday.
+
+<Checkpoint question="Suppose someone edits buildDeploySteps to accidentally remove the install-deps line, and the change passes code review because nobody notices. Is the resulting deploy pipeline now just as unsafe as Deploy 9's manual checklist?">
+
+Not in the same way, even though the immediate symptom — a missing
+`install-deps` step — looks identical. Deploy 9's failure mode was that
+the same steps could silently vary from one run to the next depending on
+who typed them and how careful they were that day; nothing recorded what
+"should" have run, so the omission was invisible until the crash.
+`buildDeploySteps` doesn't have that failure mode: whatever it returns is
+now returned on every single call, consistently, and the change that
+removed the line is a diffable, reviewable edit sitting in version
+control with a name attached. The bug is now a normal code-review miss —
+still worth catching, but a fundamentally different (and far more
+tractable) problem than "the correctness of this deploy depends on
+someone's memory being perfect under time pressure."
+
+</Checkpoint>
 
 ## A real health check and rollback
 
@@ -131,6 +158,22 @@ recover." It is "the new version failed the candidate check, so the
 pipeline never points user traffic at it." A real system may implement
 that candidate check with a temporary port, preview route, or separate
 process, but the rule is the same: test before traffic depends on it.
+
+<Checkpoint question="runGatedDeploy calls healthCheckFn() exactly once. If that single call happens to return false for a deploy that is actually fine — say the service just hadn't finished starting up yet — what does the function do, and is that the right behavior?">
+
+It appends `keep-live:${currentRelease}` and returns `{ success: false, ... }`
+— in other words, it treats a single failed check as decisive and never
+switches traffic to the new release, even though the new release was
+never actually broken. That's the correct behavior for the specific
+failure `runGatedDeploy` is built to prevent — routing traffic to a
+release that's genuinely unhealthy — but it's the wrong behavior for a
+release that's healthy and just slow to warm up, since it rolls back a
+deploy that didn't need one. A single pass/fail call can't tell those two
+cases apart on its own; distinguishing them needs the health check itself
+to account for warm-up time, which is exactly the gap the retry policy
+below closes.
+
+</Checkpoint>
 
 ## Extend it: what if the health check is flaky, not just pass/fail?
 
