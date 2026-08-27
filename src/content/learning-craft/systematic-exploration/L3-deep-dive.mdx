@@ -2,6 +2,22 @@
 title: "L3 — Tracing the discount bug: entry point, execution, tests, fix"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 explained why folder structure isn't execution order and worked out
+what each technique answers in the abstract. L3 runs all three
+techniques against the actual discount-bug scenario from L1, in real
+code, start to finish.
+
+<LevelIntro
+  items={[
+    "Finding the entry point in real code",
+    "Tracing three real layers of a bug",
+    "Reading tests, writing a fix, adding a regression test",
+  ]}
+/>
+
 ## Step 1: finding the entry point
 
 The bug report says "applying a discount code twice." The first
@@ -68,6 +84,19 @@ function calls, the service holds the actual business logic. **The
 most relevant place to inspect is `orderService.applyDiscount` — it's
 the only layer that touches `order.total` or `appliedDiscounts` at all**,
 which tracing just confirmed rather than assumed.
+
+<Checkpoint question="Tracing has now confirmed that orderService.applyDiscount is the only layer that touches order.total or appliedDiscounts, and that nothing in it checks for a repeat code. Is that enough to go write the fix, or is a step still missing?">
+
+A step is still missing. Tracing has done its job — it narrowed the bug
+down to one specific function and confirmed what that function currently
+does. But it hasn't confirmed what that function is supposed to do, or
+what error-handling style the rest of the codebase already expects for
+rejecting bad input. Writing a fix straight from the trace risks bolting
+on a check that works but doesn't match how this codebase already
+signals invalid input elsewhere. The next step, reading the existing
+tests, is what supplies that missing half.
+
+</Checkpoint>
 
 ## Step 3: reading the existing tests before touching anything
 
@@ -139,6 +168,23 @@ try {
 }
 // "Discount already applied" 90 — total stayed at the single-discount value
 ```
+
+<Checkpoint question="The fix above throws an Error with a specific message, the same style as the existing 'Unknown discount code' check, instead of just silently returning the order unchanged when a duplicate code is applied. Silently returning would also stop the double discount — so why does the throw-based version matter, given that both would fix the reported bug?">
+
+Both would stop the double discount, but only one fits the codebase the
+fix has to live in. The existing tests already established that this
+service signals invalid input by throwing a specific, checkable error
+message — the controller layer even depends on that, catching thrown
+errors and turning them into a 400 response. A silent no-op would still
+pass the bug report's specific scenario, but it would introduce a second,
+inconsistent way of handling invalid input right next to the first, and
+the controller would have no way to tell the caller anything went wrong
+at all — the request would just come back looking like a success. Matching
+the established pattern isn't a style preference; it keeps the rest of
+the system (the controller, and whoever reads this code next) able to
+rely on one consistent contract instead of two.
+
+</Checkpoint>
 
 ## Step 5: adding the missing regression test
 
