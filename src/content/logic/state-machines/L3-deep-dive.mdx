@@ -3,6 +3,8 @@ title: "L3 — Reproducing the boolean-flag bug, then making it structurally imp
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="Same event sequence, two different implementations">
   <Fragment slot="facts">
@@ -20,6 +22,14 @@ just expressed differently — or is there literally no way to write
 that particular mistake in a state machine?**
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "Reproducing L1's exact bug in real boolean-flag code",
+    "A transition-table implementation that structurally rejects it",
+    "Extending the table for stateful rules like a retry limit",
+  ]}
+/>
 
 ## Reproducing the bug: the legacy boolean-flag version
 
@@ -132,6 +142,20 @@ The expression `transitions[state] && transitions[state][event]` is a
 JavaScript way to ask, "does this row exist, and does this event have a
 next state from that row?"
 
+<Checkpoint question="The legacy SUCCESS handler forgot to reset isUploading. Could the same category of mistake — editing one piece of state and forgetting to update a related one — happen inside transition() the way it happened inside legacyHandleEvent()?">
+
+No, not in the same shape. `legacyHandleEvent` mutates several independent
+fields, so leaving one stale is a matter of remembering to touch it every
+time — an easy line to skip. `transition` only ever does one thing:
+look up `transitions[state][event]` and return whatever single value is
+there. There's no second field to forget, because there's no second
+field at all — the entire state is the one string it returns. A bug
+could still exist in the _table itself_ (a wrong or missing entry), but
+that is a different, much easier bug to spot and review than a missing
+line buried inside a multi-branch handler.
+
+</Checkpoint>
+
 ## The transition table also rejects genuinely invalid sequences
 
 ```js
@@ -173,6 +197,22 @@ Verified: the pause/resume path and the retry-after-failure path both
 work exactly as the diagram in L2 describes — `error` isn't a dead
 end, `START` from `error` is an explicit, defined transition back to
 `uploading`.
+
+<Checkpoint question="Both paths above call transition(state, event) repeatedly and only ever pass in the current state and the event that just happened — never any history of how that state was reached. Does the machine's next state depend on anything beyond those two values?">
+
+No — that's the whole design. `transitions[state][event]` is a pure
+lookup: give it the same state and the same event, and it always
+returns the same next state, regardless of how many times you've been
+through `uploading` before or which path got you there. This is why
+the retry-after-failure path works with the exact same `transition`
+function as the first path — the function has no memory of anything
+except the single current state string. It also sets up exactly the
+limitation the next section runs into: a rule like "at most 2 retries"
+needs the next state to depend on _more_ than just current state and
+event, since two visits to `error` need to behave differently the
+second time.
+
+</Checkpoint>
 
 ## Extend it: what changes if a "retry limit" needs to be added?
 
