@@ -3,6 +3,8 @@ title: "L3 — Reproducing the full incident, command by command, in a real repo
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="The full incident, start to finish">
   <Fragment slot="facts">
@@ -30,6 +32,14 @@ at which of the four numbered steps does the edit actually get lost — the swit
 feature-b, the restore on feature-b, or the switch back to feature-a?**
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "The incident reproduced command by command",
+    "Exactly which step actually destroys the edit",
+    "Why a genuinely diverged file can't fail this way",
+  ]}
+/>
 
 ## The full transcript
 
@@ -79,6 +89,21 @@ history, a backup tool, or an operating-system snapshot might have a copy, but t
 be outside Git. From Git's point of view, the safety net starts when work enters the
 repository.
 
+<Checkpoint question="Of the four numbered steps in this incident — edit, checkout feature-b, restore ., checkout feature-a — which one actually destroyed the edit, and why do the two checkouts get blamed anyway?">
+
+Step 3, `git restore .` on `feature-b`, is the only command that discarded anything —
+it wiped every uncommitted change in the working tree it ran against, including an edit
+that had nothing to do with why the developer ran it. Both checkouts get blamed instead
+because they're the commands that visibly "moved" the developer between branches, and
+the loss only becomes visible after the second one — by the time `feature-a` shows the
+old content, the actual destructive command is two steps back and easy to forget. The
+lesson generalizes: when uncommitted work disappears around a branch switch, the switch
+itself is rarely the culprit, because checkout only overwrites files it can prove differ
+between two commits — a bare `restore`, `checkout -- .`, or `reset --hard` run on
+_either_ branch is what actually throws work away.
+
+</Checkpoint>
+
 ```
 $ git checkout feature-a
 $ git status --short
@@ -121,6 +146,19 @@ producing a confusing merge, so Git stops before doing anything. The incident ab
 only possible **because** the file happened to be identical between branches — the
 "protected" case (genuine divergence) is actually the safer one; the "convenient" case
 (no divergence) is the one that quietly set up the loss.
+
+<Checkpoint question="Suppose the developer in this incident had, instead of running git restore ., run git stash right after the edit on feature-a, then switched to feature-b and back. Would step 3's git restore . on feature-b still have destroyed the edit?">
+
+No. `git stash` moves the uncommitted edit into a dedicated stash entry, which lives in
+the repository's stash list, not in the working tree — at that point the edit is no
+longer "uncommitted work sitting on disk" that a bare `restore .` can see or touch.
+`git restore .` on `feature-b` only discards uncommitted changes present in that working
+tree at the time it runs; a stashed edit is untouched by it and can be reapplied later
+with `git stash pop`, on whichever branch actually needs it. This is exactly why L1 and
+L2's warning is to commit or stash _before_ switching, not to rely on the working tree's
+silent carry-over behavior to keep an edit safe.
+
+</Checkpoint>
 
 ## What actually would have prevented this
 

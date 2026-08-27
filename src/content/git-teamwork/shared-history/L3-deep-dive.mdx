@@ -2,6 +2,24 @@
 title: "L3 — Simulating the Scenario's force-push, and how --force-with-lease catches it"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 established that a normal push checks whether the remote's tip is an
+ancestor of what's being pushed, and that force-pushing simply replaces the
+ref without asking that question. L3 turns both of those into runnable
+code — a small commit-history model that measures exactly which commit the
+Scenario's force-push destroys, and a working `--force-with-lease` check
+that would have caught it first.
+
+<LevelIntro
+  items={[
+    "A minimal commit-history model with reachability",
+    "Measuring exactly which commit a force-push discards",
+    "Implementing the `--force-with-lease` check itself",
+  ]}
+/>
+
 ## Modeling commit history well enough to measure the actual loss
 
 **A real git repository is more machinery than needed to see what
@@ -67,6 +85,19 @@ exactly one commit reachable from the old tip but not the new one:
 teammate's commit disappeared" — not a metaphor, an actual reachability
 calculation.
 
+<Checkpoint question="If the developer had fetched right before rebasing, so their local history included D as C's child and E were rebased on top of D instead of C, what would commitsLostByForcePush(history, 'D', 'E') return, and why?">
+
+It would return an empty array. `reachableHashes` walking backward from
+the new local tip `E` would now pass through `D` on its way to `C`,
+`B`, and `A`, so every commit reachable from the old remote tip `D`
+would also be reachable from the new tip. Nothing computed as "lost"
+because nothing actually would be — this is the mechanical reason
+"fetch before you rewrite" fixes the problem: it's not a superstition,
+it's ensuring the new tip's reachable set is a superset of the old
+one's.
+
+</Checkpoint>
+
 ## Reproducing why a normal push would have caught this
 
 **Before force was involved, would a normal `git push` have allowed
@@ -125,6 +156,23 @@ remote tip (`D`) at push time. Because they don't match, the push is
 rejected — the developer is forced to fetch, see the teammate's
 commit, and reconcile before any history gets overwritten. A plain
 `--force` never asks this question at all.
+
+<Checkpoint question="isAncestor(history, 'D', 'E') returns false, and forceWithLease(remoteRef, 'C', 'E') also throws. Both reject the same push — so is forceWithLease just reimplementing the normal push's ancestor check under a different name?">
+
+No — they catch the same accident here, but by checking different
+things. The ancestor check (`isAncestor`) is a property of the commit
+graph itself: is the remote tip reachable by walking backward from the
+new tip, regardless of when anyone looked. `forceWithLease` checks a
+snapshot in time: does the remote's tip right now match what the
+pusher's client last saw, which is exactly the check a plain
+`--force` skips on purpose so it can override history that a normal
+push would reject. They agree in this example because the developer's
+stale expectation (`C`) genuinely isn't the remote's real tip (`D`) —
+but `forceWithLease` is the one built to run even when force is
+intentional, which is the whole reason it exists as a separate flag
+rather than just "always do the ancestor check."
+
+</Checkpoint>
 
 Fetching is only the start of the safe behavior. If fetching shows the
 remote now has commits you did not include, you still have to

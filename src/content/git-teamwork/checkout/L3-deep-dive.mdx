@@ -3,6 +3,8 @@ title: "L3 — Real sessions with reset, revert, and checkout, including the rec
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="The scenario">
   <Fragment slot="facts">
@@ -43,6 +45,14 @@ flowchart TD
     Q -->|Yes, committed at least once| R["reset moved the pointer past it —\nrecoverable via reflog"]
     Q -->|No, only staged or untracked| U["reset --hard overwrote it —\nno recovery path, ever"]
 ```
+
+<LevelIntro
+  items={[
+    "Restoring one file without a whole-directory wipe",
+    "The unrecoverable case: reset --hard on uncommitted work",
+    "revert on a shared branch, from a teammate's view",
+  ]}
+/>
 
 ## Restoring a single file without touching anything else
 
@@ -100,6 +110,22 @@ d4e5f6a HEAD@{1}: commit: Fix typo in README
 
 `reset --hard` unstaged _and_ deleted `notes.txt` from disk, because it was newly-created (never committed) — there is no `git` command that recovers a file that was never committed at all. Notice what the reflog above actually contains: two entries about the branch pointer's own position, nothing about `notes.txt`. The reflog only helps recover _commits_, not uncommitted working-directory content, which answers the question above — had `notes.txt` been committed even once before the reset, that commit (and the file inside it) would show up as a recoverable `HEAD@{n}` entry the same way. This is the exact scenario L1 warns about: no confirmation, no undo, and it's indistinguishable from any other `reset --hard` until it's too late.
 
+<Checkpoint question="The reflog above only shows two entries about the branch pointer's own position — nothing about notes.txt. If notes.txt had been committed once before that reset --hard, would the reflog situation look any different, and what does that difference actually mean for what 'recoverable' means in this unit?">
+
+Yes — it would look different. The reflog is a record of where `HEAD`
+and branch pointers have moved, not a record of file contents in
+general. A file that was committed at least once has its content
+preserved inside that commit object, and the commit itself would still
+show up as a `HEAD@{n}` entry in the reflog even after a `reset --hard`
+moved the pointer past it — so checking out that old reflog entry would
+bring the file back. A file that was only staged or untracked was never
+wrapped in a commit object at all, so there is no commit for the reflog
+to point back to. "Recoverable" in this unit specifically means "captured
+in a commit somewhere," not "less risky-looking" — the scariness of the
+command has nothing to do with it.
+
+</Checkpoint>
+
 ## `revert` on a shared branch, and what teammates see
 
 ```
@@ -127,6 +153,20 @@ The broken commit (`c3d4e5f`) is still fully visible in history — anyone who a
 | Commits after the mistake             | Orphaned locally — vanish from anyone who re-pulls              | Untouched, still there             |
 | What teammates who already pulled see | A history that no longer matches theirs — conflict on next sync | One extra commit, arrives normally |
 | Mistake still visible in log?         | No                                                              | Yes — reverted, not erased         |
+
+<Checkpoint question="After the revert above, the commit c3d4e5f ('Add broken rate-limit check') is still sitting right there in git log --oneline, hash and all. Given that, what's the actual difference between 'the mistake is fixed' after a revert versus after a reset — is the broken code gone from history either way?">
+
+No — only `reset` removes it from the branch's reachable history (and
+even then, not permanently; it's still in the object store until garbage
+collected). `revert` never removes anything: `c3d4e5f` stays visible,
+checkoutable, and diffable forever, right alongside the new commit that
+cancels its effect. "Fixed" after a revert means the current state of the
+files no longer has the bug — it does not mean the bug's commit stops
+existing. That distinction is exactly why `revert` is safe on a shared
+branch and `reset` isn't: nothing anyone already pulled gets erased out
+from under them, it just becomes one commit further from HEAD.
+
+</Checkpoint>
 
 ## A real decision function
 

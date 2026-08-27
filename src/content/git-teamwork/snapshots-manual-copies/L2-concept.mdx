@@ -2,6 +2,22 @@
 title: "L2 — Snapshots, not diffs: the model underneath every git command"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 named the vocabulary — commit, branch, tracked, the three-state model —
+without yet showing the mechanism underneath any of it. L2 opens up what a
+commit actually stores, why branching is nearly free, and what stops Git
+from re-storing the same bytes over and over.
+
+<LevelIntro
+  items={[
+    "What a commit stores: full snapshots, not diffs",
+    "The working-directory / staging / repository mechanism",
+    "Content-addressing: why identical bytes are stored once",
+  ]}
+/>
+
 ## The manual-copies failure mode, made concrete — what does the mess actually look like at scale?
 
 ```
@@ -46,6 +62,21 @@ file; the repository is the archive where filed pages become part of
 the permanent record. `git status` tells you what is still on the desk
 and what is already in the tray.
 
+<Checkpoint question="You edit five files, but only three of them belong to the bug fix you're about to commit. Using the desk/tray/archive picture above, what sequence of commands lets you commit just those three without touching the other two yet?">
+
+`git add` the three files that belong to the fix, leaving the other two
+untouched on the "desk" (working directory). Then `git commit` — this only
+files what's currently in the "tray" (staging area), so the commit
+contains exactly the three staged files and nothing else. The other two
+edited files stay in the working directory, unstaged, ready to be added
+and committed separately (or together, or split further) whenever you're
+ready to describe them as their own coherent change. This is exactly what
+manual copies can't do: a zip file is all-or-nothing, but the staging area
+lets a single moment of "save everything" become several deliberate,
+individually-explainable commits.
+
+</Checkpoint>
+
 ## Why is creating a branch nearly instant, no matter how large the project is?
 
 Compare this to the manual-copies equivalent of "try an experimental change without risking the working version" — copying the entire project directory, which takes longer the bigger the project gets. A Git branch doesn't do that:
@@ -83,3 +114,19 @@ xychart-beta
 ```
 
 Ten manual saves of a project that includes one never-edited file means that file sits on disk ten separate times — once per zip. Ten Git commits over the same unchanged file mean it's hashed, found to already exist in the object store, and referenced ten times from one stored copy. This is the concrete mechanism behind "snapshots are cheap even though they're full" from L1 — try dragging the numbers in this page's interactive demo to see how the gap between manual copies and Git changes as the project gets bigger or a larger share of it changes each time.
+
+<Checkpoint question="A teammate says: 'Git must be comparing my new file against the previous commit's file to decide whether to store it again.' Based on how content-addressing actually works, what's wrong with that description?">
+
+Git doesn't compare the new file against the previous commit's version at
+all — it hashes the new file's content on its own and checks whether an
+object with that exact hash already exists anywhere in the object store,
+regardless of which commit or branch it came from. That's a subtle but
+real difference: the "previous commit" framing implies Git is diffing
+against one specific prior state, when it's really asking "have I ever
+seen these exact bytes before, anywhere in this repository's history."
+Two identical files that were never adjacent commits of each other — say,
+a config file re-added independently on two unrelated branches — would
+still be deduplicated to a single stored object, which a
+previous-commit-comparison model wouldn't predict.
+
+</Checkpoint>

@@ -3,6 +3,8 @@ title: "L3 — Proving the snapshot model with real commands and a real hash"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="The scenario">
   <Fragment slot="facts">
@@ -25,6 +27,14 @@ code that quantifies how much smaller Git's storage actually is than the
 zip-file approach from L1's opening scenario, for real numbers.
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "The three-state model, watched live in a real terminal session",
+    "Content-addressing, proven with an independent hash implementation",
+    "Storage growth, quantified with real numbers for manual copies vs. Git",
+  ]}
+/>
 
 ## Watching the three-state model in a real session — does `git status` actually report three genuinely different things?
 
@@ -59,6 +69,22 @@ Changes not staged for commit:
 
 Notice `git status` reports a _different_ state after each command, even though nothing was "undone" — that's the three-state model directly: the file on disk (working directory), what's staged for the next snapshot, and what's already permanently committed are three genuinely separate pieces of state, and every git command operates on exactly one of them.
 
+<Checkpoint question="In the terminal session above, right after `git add greeting.txt`, the file is staged but the commit hasn't happened yet. If you ran `echo \"a third version\" > greeting.txt` at that exact moment — without staging it again — which version of greeting.txt would `git commit -m \"...\"` actually record: the staged one, or the one now on disk?">
+
+The staged one — the version that was on disk at the moment `git add` ran,
+not whatever's on disk now. Staging takes a snapshot of the file's content
+at that instant and copies it into the staging area; it doesn't keep
+watching the file for further edits. So after this sequence, `git status`
+would show the file as both "changes to be committed" (the version from
+the first edit, already staged) and "changes not staged for commit" (the
+newest edit, not yet added) at the same time — the same filename appearing
+in two different states simultaneously is exactly the kind of thing a
+manual-copy workflow has no way to represent, and it's a direct
+consequence of the staging area being a separate, deliberate snapshot
+rather than a live mirror of the working directory.
+
+</Checkpoint>
+
 ## Proving content-addressing with a real hash — does an independent implementation, with no access to Git's source, actually reproduce Git's own output?
 
 Git's claim in L2 was: every stored object is identified by the SHA-1 hash of its own content. This is checkable — Git computes a blob's hash as `sha1("blob " + content.length + "\0" + content)`. Here's that computation done independently in Node, and compared against what `git hash-object` actually produces:
@@ -80,6 +106,21 @@ console.log(gitBlobHash(content));
 ```
 
 Running this prints `ce013625030ba8dba906f756967f9e9ca394464` — and running `git hash-object` on a file containing exactly `hello\n` (via `echo "hello" | git hash-object --stdin`) prints the **exact same hash**, computed by completely independent code. This is the practical proof behind "identical content is stored once": the storage key isn't a filename or a timestamp, it's a pure function of the bytes.
+
+<Checkpoint question="Two files in different branches both contain the exact text 'hello\n', but one was typed by hand and the other was copy-pasted from a different editor. Based on gitBlobHash above, would Git store these as one object or two, and why?">
+
+One object. `gitBlobHash` only looks at the bytes it's handed — `header +
+content`, run through SHA-1 — it has no way to know or care which editor
+produced those bytes, which branch the file lives on, or when it was
+typed. If the two files are byte-for-byte identical (same characters, same
+line ending, same encoding), they hash to the same value and Git stores
+them as a single object referenced from both places. The only thing that
+would produce two different objects is a difference in the actual bytes —
+which is exactly the trap the "beyond this one project" question below is
+pointing at: two files that look identical on screen can still be
+byte-different underneath.
+
+</Checkpoint>
 
 ## Why does this change what "undo" means, compared to the zip-file scenario from L1?
 
