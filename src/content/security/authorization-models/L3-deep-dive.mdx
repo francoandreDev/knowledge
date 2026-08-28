@@ -3,6 +3,8 @@ title: "L3 — Reproducing the IDOR bug and its fix in real, runnable code"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="One missing comparison, reproduced exactly">
   <Fragment slot="facts">
@@ -27,6 +29,14 @@ import Scenario from "../../../components/Scenario.astro";
 `users` or `invoices` data at all, or only the logic inside the handler function?**
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "The vulnerable handler and its fix, as real code",
+    "RBAC and ABAC checks as separate, composable functions",
+    "Extending ownership from a single ID to team membership",
+  ]}
+/>
 
 ## The vulnerable handler, reproducing the exact incident
 
@@ -112,6 +122,21 @@ entirely the added `isOwner`/`isAdmin` check — exactly the missing row from L1
 implemented as two boolean comparisons and a guard clause, meaning an early check that
 stops the function before private data can be returned.
 
+<Checkpoint question="getInvoiceFixed(1, 48212) succeeds because user 1 is a billing-admin, not because they own invoice 48212. Trace through the function: which specific line lets that request through, and why doesn't it need isOwner to be true?">
+
+The line is `if (!isOwner && !isAdmin) throw new Error("403 Forbidden")`.
+For user 1, `isOwner` evaluates to `false` (`invoice.ownerId` is `7`, not
+`1`), but `isAdmin` evaluates to `true` (`user.role === "billing-admin"`).
+Because the guard only throws when _both_ are false, a true `isAdmin`
+alone is enough to satisfy the condition and let execution continue past
+the guard to `return invoice`. This is exactly the OR-shaped rule from
+L2's ABAC example (`user.id == invoice.ownerId OR user.role ==
+"billing-admin"`) expressed as code: ownership and admin-role are two
+independent, either-is-sufficient paths to the same allow decision, not
+two things that both have to be true.
+
+</Checkpoint>
+
 ## The RBAC and ABAC checks, as separate, composable functions
 
 ```js
@@ -177,6 +202,25 @@ than strict ownership. **This is the actual generalizable lesson**: whatever the
 relationship is (owns, is-on-the-same-team-as, is-assigned-to), an authorization check has
 to encode it explicitly — authentication alone, and even a correct role check alone, never
 implies it.
+
+<Checkpoint question="A new feature lets invoices be shared with a specific list of individual coworkers, not just a team. Does abacAllowsViewTeamInvoice's shape (an attribute-of-user vs. attribute-of-resource comparison) still apply, or does sharing need a fundamentally different kind of check?">
+
+The same shape still applies. Ownership was a single-ID equality check
+(`invoice.ownerId === user.id`), team access widened that to a
+membership check against a list (`userTeamIds.includes(invoice.teamId)`),
+and per-user sharing is the same membership check with a different list —
+something like `invoice.sharedWithUserIds.includes(user.id)`. In every
+case the function is still comparing an attribute pulled from the
+requesting user against an attribute pulled from the resource; only the
+specific relationship being tested changes (owns, is-on-a-team-with,
+is-shared-with). What would actually require a different kind of check is
+a rule that can't be reduced to comparing the two sides at all — for
+example, "only during business hours" pulls in a fact about the current
+context instead of either the user or the resource, which is why ABAC
+treats context as a third, separate input alongside user and resource
+attributes.
+
+</Checkpoint>
 
 ## Failure modes
 

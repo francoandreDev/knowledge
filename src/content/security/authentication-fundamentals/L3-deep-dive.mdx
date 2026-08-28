@@ -2,6 +2,23 @@
 title: "L3 — A real salted-hash implementation, and a real rainbow-table attack against its absence"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 walked through the pseudocode for salting and hashing, and named
+constant-time comparison and slow key-derivation functions without
+showing them in real code. L3 makes all of that concrete: a real,
+runnable implementation, a real attack against its absence, and the
+failure modes that turn a correct-on-paper mechanism into a real hole.
+
+<LevelIntro
+  items={[
+    "A real salted-hash implementation with Node's crypto",
+    "A working rainbow-table attack, salted vs. unsalted",
+    "Four failure modes that silently reintroduce the vulnerability",
+  ]}
+/>
+
 ## A real salted hash, using Node's built-in crypto
 
 Read the first code block as this human workflow:
@@ -41,6 +58,24 @@ console.log(verifyLogin("wrong guess", salt, hash)); // false
 ```
 
 Every line here maps directly to L2's pseudocode: `register` generates a real random salt and derives a hash from password+salt; `verifyLogin` re-derives using the _stored_ salt and compares. The one addition L2 didn't cover is `timingSafeEqual` instead of a normal `===` comparison — that's a real, separate vulnerability class, explained below.
+
+<Checkpoint question="`verifyLogin` above uses `timingSafeEqual` instead of writing `attemptHash.toString('hex') === storedHash`. If it used the plain `===` version instead, would `register` and the salting logic still be correct? What exactly would be broken, and for whom?">
+
+Salting and hashing themselves would still be entirely correct — the
+stored data and the password-cracking resistance from L2 wouldn't
+change at all. What breaks is a different, narrower channel: a plain
+`===` (or byte-by-byte) comparison typically stops as soon as it hits
+the first mismatched byte, so a wrong guess that happens to share more
+leading bytes with the real hash takes microscopically longer to reject
+than one that doesn't. An attacker who can send enough login attempts
+and measure response time precisely enough can use that timing
+difference to reconstruct the hash one byte at a time, without ever
+needing the database to leak. `timingSafeEqual` always takes the same
+time regardless of where the mismatch falls, so no timing signal
+escapes — the fix is about how the comparison is done, not about
+salting or hashing at all.
+
+</Checkpoint>
 
 ## A real rainbow-table-style attack, demonstrated against unsalted hashes
 
@@ -84,6 +119,23 @@ console.log(salted1 === salted2); // false — same password, different hash, pe
 ```
 
 The `rainbowTable.get()` lookup succeeding for _both_ users from one precomputed table, unsalted, is the concrete proof of the vulnerability L2 described — and the salted version's `false` on the equality check is the concrete proof of the fix.
+
+<Checkpoint question="In the demo, `salt1` and `salt2` are each generated fresh with `randomBytes(16)` per user. Suppose the code instead reused one hardcoded salt constant for every user, but still ran the password through `scryptSync` (a real, slow KDF) — would the `rainbowTable.get()` lookup above still fail the way the salted version does?">
+
+Not against a rainbow table built specifically for that one hardcoded
+salt. `scryptSync` being a slow KDF only raises the cost of guessing
+each individual password — it doesn't create per-user uniqueness on its
+own. If every user's hash is derived from the same constant salt, two
+users who both chose "password" would still produce identical hashes to
+each other, exactly like the unsalted case, and an attacker only needs
+to precompute one table keyed to that specific salt to crack every
+reused password in the database at once. The demo's `salted1 !==
+salted2` result depends specifically on `salt1` and `salt2` being
+different values — the KDF's slowness and the salt's uniqueness are two
+separate protections, and a hardcoded salt loses the second one even
+with a strong KDF still in place.
+
+</Checkpoint>
 
 ## Failure modes
 

@@ -2,6 +2,22 @@
 title: "L2 — The authentication chain, and why hashing (not encryption) is the right primitive"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 established that a password must be hashed, never encrypted or stored
+in plain text, and sketched the categories a proof of identity can come
+from. L2 works out the actual chain a login runs through end to end, and
+the reasoning behind hashing and salting that L1 only named.
+
+<LevelIntro
+  items={[
+    "The full chain from password to session token",
+    "Why hashing beats encryption for passwords",
+    "Why salting defeats precomputed rainbow tables",
+  ]}
+/>
+
 ## What happens between "user types a password" and "user is logged in"?
 
 ```mermaid
@@ -26,6 +42,21 @@ That's the real question a storage decision has to answer — not "does this loo
 
 Encryption is the wrong primitive here specifically because it's designed to be reversible — that's exactly what makes it right for data you need to get back (a file, a message) and wrong for a password, which the system only ever needs to _verify_, never _retrieve_. A hash is deliberately one-way: there's no key that unlocks a hash back into the original password, because none was ever needed for the system's actual job.
 
+<Checkpoint question="A teammate proposes 'just AES-encrypt the passwords column, we already have a key management setup for other data.' Using the table above, what's the concrete problem with that plan — not just 'encryption is wrong,' but what an attacker specifically gains that hashing would have denied them?">
+
+If the database leaks, an attacker who also gets (or later obtains) the
+encryption key can decrypt every password back to its original plain
+text — the same outcome as Company A's plain-text breach in L1, just
+delayed by however hard the key is to also steal. That risk exists
+precisely because encryption is reversible by construction: the whole
+point of having a key is to be able to undo the transformation later.
+Hashing removes that risk category entirely, because there's no key to
+steal in the first place — a hash was never meant to be reversed, so a
+stolen hash alone never yields a real password, only something an
+attacker still has to guess and check.
+
+</Checkpoint>
+
 ## Two users pick the same password. Should their stored hashes look the same?
 
 No — and the reason why is the entire point of salting. If they did, an attacker only has to crack one hash to instantly know both passwords, and that trick scales to every user in the database who reused a common password.
@@ -43,6 +74,21 @@ function login(username, password):
 ```
 
 Without a salt, two users who happen to choose the same password ("password123") produce the identical hash — and a **rainbow table** (a precomputed table mapping common passwords to their hashes) cracks both instantly, along with every other user in the database using a common password, all from one precomputed lookup. With a unique salt per user, the same password produces a _different_ hash for each user, so a precomputed table has to be redone per salt — which defeats the entire economic advantage of precomputing in the first place. "Economic" here means saving work: calculate once, reuse many times.
+
+<Checkpoint question="Two different users both pick 'password' as their password. If the system uses a single shared salt (the same salt value baked into the code for every user, not a per-user random one), does that stop a rainbow-table attack against this database?">
+
+Only partially, and not in the way that matters. A shared salt does stop
+a _generic_ precomputed table built for plain, unsalted passwords — the
+attacker's off-the-shelf table won't match anymore. But because every
+user in the database shares that one salt, an attacker only has to
+precompute a single new table keyed to that specific salt value once,
+and it then cracks every user who reused a common password, exactly like
+the unsalted case in the pseudocode above. The actual protection salting
+promises requires the salt to be unique _per user_ — that's what forces
+the attacker to redo the precomputation work per account instead of
+once for the whole database.
+
+</Checkpoint>
 
 ## How much does "one-way" actually protect a password once the hash is stolen?
 
