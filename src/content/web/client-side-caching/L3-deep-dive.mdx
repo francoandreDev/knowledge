@@ -2,6 +2,21 @@
 title: "L3 — Building a real response cache and an optimistic update with a working rollback"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 worked out the timeline and the three pieces a rollback needs. L3 builds
+both fixes in real code: a stale-while-revalidate response cache for reads,
+and an optimistic update with a snapshot-based rollback for writes.
+
+<LevelIntro
+  items={[
+    "A naive fetch/patch pair made concrete in code",
+    "A stale-while-revalidate cache with a real onUpdate callback",
+    "An optimistic update with a verified success and failure path",
+  ]}
+/>
+
 ## The naive version, made concrete
 
 **Before fixing anything — what does the naive version actually do
@@ -102,6 +117,19 @@ node-verified: given a `fetcher` that returns different data on its
 second call, `onUpdate` fires with exactly that changed data, not the
 stale cached version — the UI briefly shows stale data, then self-corrects.
 
+<Checkpoint question="fetchTasksCached returns the cached value synchronously on a cache hit, but still calls fetcher() in the background on every single cache hit, forever. Is that wasted network traffic, or is it load-bearing for what stale-while-revalidate promises?">
+
+It's load-bearing, not waste. The entire guarantee of stale-while-revalidate
+is that the cached value shown immediately gets corrected if it turns out to
+be wrong — and the only way to know it's wrong is to actually ask the server
+again. If the background `fetcher()` call were skipped on a hit, the cache
+would just serve the same value forever after the first fetch, which is a
+plain (and eventually incorrect) cache, not stale-while-revalidate. The
+pattern's whole trade is deliberately paying for a background request on every
+read in exchange for never blocking the UI on that request's response.
+
+</Checkpoint>
+
 ## Optimistic updates with a real rollback
 
 **What does `toggleTaskOptimistic` need to remember before it changes
@@ -185,6 +213,23 @@ The optimistic checkbox appears checked the instant the user clicks
 unchecked and the caller still learns about the failure (the
 `throw` inside `.catch` isn't optional — swallowing it there would
 recreate the exact "UI silently lies" failure mode from L2).
+
+<Checkpoint question="toggleTaskOptimistic never mutates the tasks array it was given — it builds optimisticTasks as a fresh mapped array, and onRollback is handed the original tasks reference untouched. Why does that matter for a caller that might trigger a second toggle before the first one's patchFn has resolved?">
+
+Because if the first call had mutated `tasks` in place, a second call that
+reads `tasks` while the first is still in flight would see the first call's
+half-confirmed optimistic change baked into what it treats as "the original
+state" — and if the first call later fails and rolls back, it would restore a
+snapshot that never actually matched what the UI was showing at that moment.
+Keeping every version immutable (the snapshot, the optimistic array, the
+rolled-back array) means each in-flight call has its own honest before/after
+pair to work with, independent of what any other in-flight call is doing to
+its own copies. That's exactly the gap the extension question below asks
+about: two truly concurrent optimistic changes to the same task still need
+more care than immutability alone provides, but immutability is the
+precondition that makes reasoning about it possible at all.
+
+</Checkpoint>
 
 ## What generalizes and what doesn't
 

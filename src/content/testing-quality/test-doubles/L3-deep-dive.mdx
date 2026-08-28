@@ -2,6 +2,22 @@
 title: "L3 — Adding seams, then testing the same function three different ways"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 established that a seam is what makes a dependency testable, and that
+stub, fake, and mock each answer a different question about it. L3 takes
+the trial-expiry function from L1, actually adds the seams it was missing,
+and runs it through all three kinds of double against real code.
+
+<LevelIntro
+  items={[
+    "Turning a direct Date.now() call into an injectable clock seam",
+    "Using a fake payment gateway to test the function's result",
+    "Using a mock payment gateway to test the interaction itself",
+  ]}
+/>
+
 ## Adding a seam for time
 
 The original, untestable version calls `Date.now()` directly:
@@ -42,6 +58,21 @@ Verified: with the stub clock fixed at June 15th, a trial ending June
 is now permanent. It will never flip based on what day the test suite
 actually runs, because the seam removed the dependency on the real
 clock entirely during the test.
+
+<Checkpoint question="The refundExpiredTrials function below will call isTrialExpired(user, clock) internally for each user. Why does the clock parameter need to keep flowing through as an explicit argument instead of refundExpiredTrials just calling isTrialExpired(user) and letting the default clock kick in?">
+
+Because if `refundExpiredTrials` called `isTrialExpired(user)` with no
+second argument, it would silently fall back to the real system clock
+inside a function that's supposed to be deterministic under test — the
+seam would exist on `isTrialExpired` but be unreachable from anything
+that calls it internally without also accepting and forwarding a clock.
+A seam only removes a dependency on the real clock for the _whole_ call
+chain if every caller in that chain threads it through rather than
+re-defaulting partway down. This is exactly why the stub clock from this
+section needs to reappear as an argument to `refundExpiredTrials` next,
+not just to `isTrialExpired` directly.
+
+</Checkpoint>
 
 ## Adding a seam for an external service, then using a fake
 
@@ -146,6 +177,22 @@ claim about the _interaction_, not just the final list of refunded
 user IDs. A stub or a fake could show the same final result, but
 neither is built to make an assertion about the call itself this
 direct.
+
+<Checkpoint question="Both fakeGateway.getRefunds() and mockGateway.calls end up showing 'ch_1' was refunded. If both doubles can show that, what would actually be lost by only ever using the fake and never reaching for the mock?">
+
+The ability to assert directly on the _shape and count_ of the call
+itself, independent of whatever the function's own return value or the
+fake's derived state happens to show. `fakeGateway.getRefunds()` proves
+the refund was recorded as far as the fake's own simplified storage is
+concerned — it's still one step removed from the call. `mockGateway.calls`
+proves the exact call that was made: one call, one argument, no more and
+no fewer. That distinction only matters for tests where the interaction
+itself — not just an end result reachable through it — is the thing under
+test, which is why the earlier failure-mode warning about mocking out of
+habit cuts both ways: skipping the mock when the interaction really is
+the point loses a real guarantee, not just a stylistic preference.
+
+</Checkpoint>
 
 ## What this rewrite does and doesn't prove
 

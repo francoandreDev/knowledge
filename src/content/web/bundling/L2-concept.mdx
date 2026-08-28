@@ -2,6 +2,23 @@
 title: "L2 — How a bundler actually resolves the dependency graph"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 named the failure — a hand-ordered `<script>` tag breaking the moment
+a new dependency gets added — without yet showing what actually replaces
+manual ordering. L2 works through how a module system turns "figure out
+the right order" into something a tool can compute, and what a bundler
+does with that graph beyond just reordering files.
+
+<LevelIntro
+  items={[
+    "How import/export becomes a dependency graph",
+    "Why a shared module appears only once in the output",
+    "What transpilation and tree-shaking each add on top",
+  ]}
+/>
+
 ## From explicit imports to a graph
 
 **If a script tag's order is the problem, why not just fix the order
@@ -45,6 +62,20 @@ not a fresh one. This is exactly what a hand-maintained set of script
 tags can't do on its own: nothing stops the same file from being
 included twice, or omitted entirely, except careful manual bookkeeping.
 
+<Checkpoint question="A codebase has four modules: main.js imports both auth.js and cart.js, and both auth.js and cart.js import shared.js. Once the bundler finishes walking this graph, how many times does shared.js's code appear in the final output, and what mechanism inside the bundler guarantees that?">
+
+Once. The bundler keeps a set of modules it has already visited while
+walking the graph outward from the entry point. The first time it reaches
+`shared.js` — whichever of `auth.js` or `cart.js` gets walked first — it adds
+`shared.js` to the output and marks it visited. When the other module's
+import of `shared.js` is processed, the bundler checks that set, sees
+`shared.js` is already included, and skips adding it again. Nothing about
+`main.js`, `auth.js`, or `cart.js` needs to know the other imported the same
+file — the visited-tracking is what makes deduplication automatic instead of
+something a developer has to notice and prevent by hand.
+
+</Checkpoint>
+
 ## Transpilation: a separate problem bundling gets bundled with
 
 **Is transpilation the same thing as bundling?** No — they solve
@@ -84,6 +115,20 @@ This is called tree-shaking, and it depends entirely on having an
 explicit graph to walk in the first place — without knowing precisely
 what's used and by whom, a build tool has no safe way to tell an unused
 export apart from one some other, unseen part of the page still needs.
+
+<Checkpoint question="A shared file exports formatDate, formatCurrency, debounce, and throttle. Across the entire dependency graph, only formatDate and debounce are ever imported anywhere. Why is it safe for the bundler to remove formatCurrency and throttle from the output, rather than keeping them 'just in case'?">
+
+It's safe specifically because the graph is exhaustive: the bundler doesn't
+guess which exports are unused, it derives the answer from having already
+walked every `import` statement in the entire codebase. If nothing anywhere
+in that fully-walked graph imports `formatCurrency` or `throttle`, there is
+no code path left that could reach them — removing them can't break
+anything the bundler hasn't already accounted for. This only holds because
+the graph is complete; a tool that only looked at some files, or that
+couldn't see dynamic access, would have no such guarantee and would have to
+keep the export "just in case" instead.
+
+</Checkpoint>
 
 ## The generalizable lesson
 

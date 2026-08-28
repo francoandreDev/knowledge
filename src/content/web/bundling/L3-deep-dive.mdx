@@ -3,6 +3,8 @@ title: "L3 — A real dependency-graph resolver, and why the shared file appears
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="Same three files, two very different results">
   <Fragment slot="facts">
@@ -18,6 +20,14 @@ import Scenario from "../../../components/Scenario.astro";
 `c.js`'s code actually end up in the final output — once, or twice?**
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "A working topological-sort resolver, traced by hand",
+    "Why a naive script-tag order breaks and the resolved one doesn't",
+    "What circular imports do to the guarantee",
+  ]}
+/>
 
 ## A real dependency-graph resolver
 
@@ -80,6 +90,20 @@ safeguard — nothing stops `c.js` from being pasted in twice, or from
 being left out because whoever added `b.js` assumed someone else had
 already included it.
 
+<Checkpoint question="Given graph2 = { main: ['a', 'b'], a: ['c'], b: ['c'], c: [] }, walk through what happens when visit('b') runs after visit('a') has already fully completed. Does visit('c') run again inside visit('b'), and does 'c' get pushed to order a second time?">
+
+`visit("c")` does run again — the function is still called, because `b`'s
+dependency list still names `c`. But the very first line of `visit` checks
+`visited.has(node)` before doing anything else, and `c` was already added to
+`visited` while resolving `a`. So the call returns immediately: it never
+reaches the loop over `graph[node]`, and it never reaches the
+`order.push(node)` line. `order` only gets a new entry for `c` the first
+time `visit("c")` runs to completion; every later call is a no-op guard
+check. That's the whole mechanism — not a special case for duplicates, just
+the same early-return check running again.
+
+</Checkpoint>
+
 ## What a naive, unresolved order actually breaks
 
 ```js
@@ -126,6 +150,23 @@ in the entire dependency graph asked for them. This is only safe
 because the graph is exhaustive; a build tool with no visibility into
 every importer has no way to be sure an export is really unused
 anywhere.
+
+<Checkpoint question="findUnusedExports only compared allExports against usedImports gathered from the whole graph. If a project used dynamic access like moduleObject['format' + suffix] somewhere instead of a plain 'import { formatCurrency }' statement, would tree-shaking still safely know formatCurrency is used?">
+
+No — and that is exactly why the failure-modes table below flags dynamic
+access as a real risk. Tree-shaking's safety depends on the bundler being
+able to statically read every import statement while walking the graph;
+`"import { formatCurrency }"` is something it can see and record in
+`usedImports` directly from the source text. `moduleObject['format' +
+suffix]` builds the property name at runtime — the bundler has no way to
+evaluate `suffix` while just reading the file, so it cannot know whether
+`formatCurrency` ends up referenced or not. Faced with that uncertainty, a
+safe bundler has to either keep the export anyway or risk removing
+something a live code path still needs — the same graph-completeness
+guarantee that makes tree-shaking safe for static imports simply doesn't
+extend to dynamically-computed ones.
+
+</Checkpoint>
 
 ## Extend it: what if two modules import each other?
 

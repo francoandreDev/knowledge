@@ -3,6 +3,8 @@ title: "L3 — The same checkout feature, tested correctly at three different le
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="Applying a discount code at checkout — three real behaviors, one feature">
   <Fragment slot="facts">
@@ -28,6 +30,14 @@ would you expect to be the fastest to write and run, and which would you
 expect to catch the widest range of bugs? Are those the same test?**
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "The same checkout feature tested at three levels",
+    "How a bug's cost changes by where it's caught",
+    "Common failure modes when levels are misused",
+  ]}
+/>
 
 ## Unit level: the pure calculation
 
@@ -98,6 +108,22 @@ describe("discount code API integration", () => {
 
 This is slower (a real service has to actually start) and tests something a unit test structurally can't: whether the frontend's expectation of the API's response shape (`{ valid, percent }`) actually matches what the real service returns — exactly the class of bug that a mocked-out unit test would never catch, because the mock would just return whatever shape was assumed when the mock was written.
 
+<Checkpoint question="The unit tests for applyDiscount above all pass. Why can't they catch a bug where the real discount-code API starts returning percent as the string '20' instead of the number 20?">
+
+Because applyDiscount's unit tests never touch the real API at all — they
+call the function directly with hand-written numbers, so there's no
+path through them for a response-shape change to travel. That kind of
+bug only exists at the boundary between two real components (the
+service that started returning a string, and the frontend code that
+expected a number), and a unit test by design isolates the function
+from exactly that boundary. Only the integration test above, which
+calls the real validateDiscountCode against a real running service,
+would actually receive the malformed value and fail on it — which is
+the whole reason integration tests exist as a separate level rather
+than treating "well, the unit tests pass" as sufficient.
+
+</Checkpoint>
+
 ## E2E level: the whole flow, sparingly
 
 ```js
@@ -147,6 +173,21 @@ This is the concrete argument for putting each behavior at its correct level rat
 - **Mocking so heavily in an "integration" test that it stops testing any real integration.** A test that mocks out the discount service entirely and just checks that the frontend calls a function with the right arguments is a unit test wearing an integration test's name — it can't catch a real contract mismatch, because nothing real is actually being contacted.
 - **Treating a flaky e2e test as evidence of a real bug without investigating.** Per L2, e2e tests have the highest fragility — a failure needs actual triage (was this a real regression, or a timing/environment flake) before treating it as equivalent in confidence to a failing unit test, which almost never fails for reasons unrelated to the code it's testing.
 - **Skipping integration tests because "we have unit tests and e2e tests, that should cover it."** The middle layer specifically catches contract mismatches between real components that neither extreme catches well — unit tests can't see across a real boundary (they mock it away), and e2e tests catch a broken contract but bury the specific cause under everything else the full flow also exercises.
+
+<Checkpoint question="A team says their 'integration test suite' has 200 passing tests, but a contract mismatch between the discount service and the frontend still slipped into staging last week. Based on the failure modes above, what's the most likely explanation, and how would you check for it?">
+
+The most likely explanation is the mocking failure mode: the "integration"
+tests are probably mocking out the discount service instead of calling a
+real running instance of it, which means they're really unit tests
+wearing an integration test's name — they can pass forever while the
+actual contract silently drifts, because nothing real is ever contacted
+to notice the drift. The way to check is to look at what each test
+actually calls: if `validateDiscountCode` or its equivalent is stubbed
+or mocked rather than pointed at a real (even if local/ephemeral) service
+instance, the suite isn't testing the boundary it claims to, no matter
+how many tests it has or how green they are.
+
+</Checkpoint>
 
 ## Beyond checkout: the same reasoning, a harder case
 

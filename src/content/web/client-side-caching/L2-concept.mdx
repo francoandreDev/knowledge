@@ -2,6 +2,22 @@
 title: "L2 — What the user actually sees, millisecond by millisecond, with and without caching or optimistic updates"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 named the four places that can drift out of sync and split the problem into
+two fixes — caching for reads, optimistic updates for writes. L2 walks the
+actual timeline the user sees in both directions, and what a rollback has to
+do to be honest rather than just quiet.
+
+<LevelIntro
+  items={[
+    "The request timeline with and without optimistic updates",
+    "Caching vs. optimistic updates as opposite data directions",
+    "What a rollback needs to actually be honest",
+  ]}
+/>
+
 ## The timeline the user actually experiences
 
 **If the click handler and the server endpoint are both "working
@@ -97,6 +113,19 @@ flowchart LR
     D --> F["Next read fetches\nfresh data"]
 ```
 
+<Checkpoint question="A team ships client-side caching for the task list but forgets to invalidate or update the tasks cache key after a successful PATCH. The checkbox itself updates fine. What will the user see the next time they revisit the task list from a different screen?">
+
+The old, pre-write task list — the checkbox change was real on the server, but
+the cached `tasks` entry never learned about it, so the next read serves the
+stale cached answer instead of fetching fresh data. This is a caching bug, not
+an optimistic-update bug: the write itself succeeded and even reflected
+correctly in the UI at the moment of the click, but caching and writing are
+two separate mechanisms that have to agree on when data goes stale, and
+nothing here made them agree. The fix isn't to stop caching — it's to make the
+write path update or invalidate the same cache key the read path uses.
+
+</Checkpoint>
+
 ## What has to be true for a rollback to be honest
 
 **If an optimistic update assumes success, what happens the moment it
@@ -114,6 +143,19 @@ correct optimistic update needs three pieces, not just the first one:
    leaving the optimistic (wrong) state in place is worse than the
    original 800ms wait, because now the UI is actively lying about
    what the server actually has stored.
+
+<Checkpoint question="An optimistic update snapshots the prior state, applies the change, and on failure calls onRollback(snapshot) — but the catch block that calls onRollback does not re-throw the error afterward. From the caller's point of view, does this count as a correctly handled failure?">
+
+No. The UI is now visually correct again — the checkbox is back to unchecked
+— but swallowing the error there means whatever called the toggle never
+learns the write actually failed. Nothing surfaces to the user beyond the
+checkbox quietly reverting, and any calling code that wanted to show an error
+message, log the failure, or retry has no way to know one happened. A rollback
+that only fixes the pixels but hides the failure from the rest of the program
+recreates the same "UI is lying" problem in a subtler form — this time about
+whether anything went wrong at all, not about what state the data is in.
+
+</Checkpoint>
 
 ## Failure modes at this level
 
