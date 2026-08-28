@@ -2,6 +2,24 @@
 title: "L3 — Implementing a real chain-of-trust verifier, and proving what it can't catch"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 walked through the two checks a browser performs when it verifies a
+certificate chain: does the domain match, and does every signature
+resolve to a trusted root. L3 implements that verifier for real, with
+actual cryptographic signatures, to prove that both a legitimate site
+and a phishing lookalike can pass it cleanly — and to show exactly what
+it does catch.
+
+<LevelIntro
+  items={[
+    "Building a minimal CA hierarchy with real RSA signatures",
+    "Verifying two chains that both pass legitimately",
+    "What tampering breaks, and what the check structurally can't catch",
+  ]}
+/>
+
 ## Building a minimal CA hierarchy with real signatures
 
 Using Node's built-in `crypto` module for genuine RSA key pairs and
@@ -148,6 +166,25 @@ certificate chain to a trusted root) for both domains truthfully.
 Neither the CA nor the browser's verification logic was ever asked
 "is this the real PayPal" — that was never part of the contract.
 
+<Checkpoint question="verifyChain returned valid: true for both paypal.com and the phishing domain paypa1-secure-login.com, using entirely real RSA signatures and a genuine chain of trust. If a security engineer proposed 'fixing' this by making verifyChain reject any domain that looks similar to a well-known brand, what would that change actually be doing to the function's contract?">
+
+It would be quietly expanding `verifyChain`'s job from "does this domain
+own a certificate signed by a trusted root" to "is this domain a
+legitimate, non-impersonating business" — two very different questions
+that happen to share the same function today. The first is a
+cryptographic fact you can verify offline from the certificate data
+alone; the second requires external knowledge (a list of brands to
+compare against, fuzzy-matching logic, and constant upkeep as new brands
+and new lookalikes appear) that has nothing to do with signatures or
+key pairs. Folding it into `verifyChain` wouldn't just add a feature —
+it would blur the line between "this domain cryptographically owns this
+name" and "this domain is trustworthy," which is the exact conflation
+that let the phishing site succeed in the first place. That's a real
+and worthwhile check to build, but it belongs as a separate, explicit
+step, not smuggled into the chain-of-trust verifier's contract.
+
+</Checkpoint>
+
 ## What tampering actually breaks, to show the check isn't meaningless
 
 ```js
@@ -171,6 +208,21 @@ convincing lookalike — that comparison isn't cryptographic, it's
 lexical, meaning text compared character by character, and it has to
 happen in the human (or a separate anti-phishing system) reading the
 address bar.
+
+<Checkpoint question="verifyCertSignature correctly returned false for a certificate whose subject field was edited after signing, without re-signing it. Why doesn't that same signature check give the phishing domain's certificate away as fraudulent, the way it gave the tampered one away?">
+
+Because the phishing certificate was never tampered with — it was
+legitimately signed, for exactly the subject it claims (`paypa1-secure-login.com`), by an intermediate CA that really did sign it.
+Signature verification only detects a mismatch between a certificate's
+contents and its signature; it says nothing about whether the contents
+themselves describe something deceptive. The tampered certificate fails
+because its stored subject no longer matches what was signed — a
+purely mechanical mismatch. The phishing certificate's subject matches
+its signature perfectly; the "problem" with it is entirely about what
+the domain string means to a human reader, which is outside anything a
+signature can encode.
+
+</Checkpoint>
 
 ## What this proves and doesn't prove
 

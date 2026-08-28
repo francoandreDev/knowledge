@@ -2,6 +2,23 @@
 title: "L2 — Aliasing, pure functions, and keeping side effects in one place"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 named the promo-code bug as a mutation problem, not a logic problem — the
+same shared cart object got changed in place instead of a fresh one being
+returned. L2 works out exactly why sharing a reference causes that, what a
+pure function actually requires beyond "no `var`," and how a real program
+keeps its unavoidable side effects from causing the same kind of surprise.
+
+<LevelIntro
+  items={[
+    "Aliasing and action-at-a-distance",
+    "What purity actually requires",
+    "Functional core, imperative shell",
+  ]}
+/>
+
 ## Why aliasing turns a local change into action at a distance
 
 **The preview button and checkout each call `applyPromoCode`
@@ -41,6 +58,19 @@ preview button gets its own discounted copy to display, while
 `checkoutStep`'s reference to the original cart is completely
 unaffected until — and unless — something explicitly decides to use
 the new, discounted version.
+
+<Checkpoint question="Two variables, previewButton and checkoutStep, both point at the same cart object. If a third variable, adminPanel, is assigned a *new* object built with `{ ...cart }` and then adminPanel's copy is mutated, does checkoutStep see that change?">
+
+No. `{ ...cart }` creates a brand-new object with its own copies of `cart`'s
+top-level properties — `adminPanel` now points at that new object, not at
+the one `previewButton` and `checkoutStep` share. Mutating `adminPanel`'s
+copy only changes that copy; the original object `checkoutStep` still
+points at is untouched. This is the whole mechanism the fix relies on:
+aliasing only causes action-at-a-distance when two names point at the
+_same_ object, and spreading breaks that shared pointer by handing back a
+different object entirely.
+
+</Checkpoint>
 
 ## What "pure function" actually requires
 
@@ -84,6 +114,20 @@ data in and returns data out, which makes it trivial to test (call it
 twice, expect the same result, no mocking required) and impossible
 for it to cause the exact bug in this unit's Scenario, since it never
 holds onto or mutates anything the caller still needs.
+
+<Checkpoint question="A function computeAndSaveTotal(cart, db) both calculates the discounted total and writes it to the database in one step. Using the functional-core/imperative-shell idea above, what's the concrete downside of leaving it that way instead of splitting it into two functions?">
+
+It can't be tested or reused without a database. Every test of the discount
+math now needs a real or mocked `db`, even though the math itself has
+nothing to do with persistence — and if that calculation is ever needed
+somewhere that shouldn't write to the database (a preview, a report), the
+only way to reuse it is to duplicate the math elsewhere or pass in a fake
+`db` just to satisfy the function's shape. Splitting it into a pure
+`computeTotal(cart)` and a thin `saveTotal(db, total)` removes both
+problems at once: the pure function is trivially testable with no setup,
+and the side effect stays isolated to the one place that actually needs it.
+
+</Checkpoint>
 
 ## Failure modes at this level
 

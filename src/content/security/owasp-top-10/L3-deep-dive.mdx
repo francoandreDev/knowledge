@@ -2,6 +2,23 @@
 title: "L3 — Three real vulnerabilities: injection, broken access control, SSRF"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 mapped all ten categories and showed why an attacker goes after
+whichever one has the cheapest gap, not the strongest defense. L3 goes
+deep on the three categories this track hasn't covered elsewhere —
+injection, broken access control, and SSRF — with a vulnerable
+implementation, the exploit, and the fix for each.
+
+<LevelIntro
+  items={[
+    "Injection: SQL built by string concatenation, and why parameterizing fixes it structurally",
+    "Broken access control: the authentication-vs-authorization gap behind IDOR",
+    "SSRF: tricking the server into reaching destinations the attacker can't reach directly",
+  ]}
+/>
+
 ## Injection: a search box that lets an attacker read the whole table
 
 **The product search endpoint builds SQL by concatenating the user's
@@ -48,6 +65,22 @@ change the shape of the query. This isn't "sanitizing" the input
 making the distinction between code and data structural, so there's
 nothing to sanitize.
 
+<Checkpoint question="A customer legitimately searches for 'O'Brien Hardware' — a name that contains an apostrophe. Does the parameterized fixed version break on that input the way a blocklist-based fix might, and why does that gap matter when choosing between the two approaches?">
+
+No, the parameterized version handles it correctly with no special
+casing: the apostrophe travels to the database as a literal character
+inside the `params` value, not as SQL syntax, so `O'Brien Hardware`
+matches exactly as intended. A blocklist approach (stripping or
+escaping characters like `'`) would need to specifically account for
+legitimate apostrophes in names — get that wrong and you either break
+real searches or leave a bypass (attackers routinely defeat blocklists
+with alternate encodings the filter didn't anticipate). This is exactly
+why parameterization is the structural fix and blocklisting isn't: one
+makes the code/data boundary impossible to cross, the other tries to
+enumerate every dangerous case by hand and reliably misses one.
+
+</Checkpoint>
+
 ## Broken access control: an endpoint that checks _who_, not _what they can see_
 
 **The invoice endpoint checks that a request has a valid session.
@@ -86,6 +119,22 @@ One extra comparison: does the record's owner match the requesting
 user? This turns "any valid session can read any invoice" into "a
 valid session can only read invoices it owns" — the missing
 authorization check, not the authentication, was the actual gap.
+
+<Checkpoint question="Suppose the same API also exposes GET /api/invoices (no id) to list a user's own invoices. Does adding the same 'compare ownerId to session.userId' equality check protect this endpoint too, or does listing need something structurally different from getInvoiceFixed's single comparison?">
+
+It needs the same principle applied differently, not the identical
+code. `getInvoiceFixed` works because it already has one specific
+record to compare an owner against. A list endpoint has no single
+record yet — there's nothing to run an equality check against until
+you've already decided which rows to return. The fix there is to filter
+at the query itself (something like `WHERE ownerId = session.userId`)
+rather than fetching everything and checking afterward. The underlying
+rule is identical — never let the request's own claim about identity
+stand in for a check against who actually owns the data — but a list
+endpoint expresses that rule as a filter condition, not a post-fetch
+comparison.
+
+</Checkpoint>
 
 ## Server-side request forgery: a "preview this link" feature that reaches internal infrastructure
 

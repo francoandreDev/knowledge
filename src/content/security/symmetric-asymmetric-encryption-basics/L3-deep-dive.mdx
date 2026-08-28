@@ -3,6 +3,8 @@ title: "L3 — Symmetric, asymmetric, and hybrid encryption, measured"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="Same secret, three different approaches">
   <Fragment slot="facts">
@@ -29,6 +31,14 @@ tamper seal that makes wrong keys or modified ciphertext fail loudly.
 You do not need to memorize RSA's public exponent or modulus here; the
 idea to track is which part stays secret, which part travels, and which
 operation grows when the message grows.
+
+<LevelIntro
+  items={[
+    "AES-256-GCM symmetric encryption, with real code",
+    "RSA-2048 asymmetric encryption, and its measured cost",
+    "Building hybrid encryption end-to-end",
+  ]}
+/>
 
 ## Symmetric encryption with AES-256-GCM
 
@@ -71,6 +81,20 @@ This runs and confirms both halves: the correct key recovers the exact
 original message, and a wrong key doesn't silently produce garbled
 text — GCM's authentication tag makes decryption with the wrong key
 fail loudly instead.
+
+<Checkpoint question="If symmetricDecrypt() were called with the correct key but a tampered authTag (say, one byte of the ciphertext was flipped in transit), what should happen — silently-wrong plaintext, or a thrown error?">
+
+A thrown error. GCM's authentication tag exists precisely to make this
+case fail loudly instead of quietly succeeding on corrupted data. The tag
+is computed from the ciphertext at encryption time, so any change to the
+ciphertext — even a single flipped byte — produces a mismatch when
+`setAuthTag` and `decipher.final()` verify it, and Node throws rather than
+returning altered plaintext as if nothing were wrong. This matters beyond
+correctness: without that check, an attacker who can modify ciphertext in
+transit could manipulate what the recipient decrypts to, even without
+knowing the key — the failure mode named later in this unit's table.
+
+</Checkpoint>
 
 ## Asymmetric encryption with RSA-2048
 
@@ -126,6 +150,19 @@ slow cost once, for a tiny secret, not for every byte of real data.
 If "19.5x slower" feels abstract, read it as a ratio: if the fast path
 took 1 second, the slow path would take almost 20 seconds for the same
 number of operations.
+
+<Checkpoint question="Given that it's specifically the private-key operation that's slow, and that a symmetric key is small (32 bytes) no matter how large the actual message is, what design follows for how asymmetric encryption should be used against a large document?">
+
+Never encrypt the large document directly with asymmetric encryption —
+only ever use the slow asymmetric operation against something small and
+fixed-size, like a 32-byte symmetric key, then let fast symmetric
+encryption carry the actual bulk data of any size. Because the measured
+slowness lives in the private-key operation and that cost doesn't depend
+on how much data is being wrapped, the right move is to pay it exactly
+once per message, on the smallest possible payload — which is precisely
+the hybrid pattern built next.
+
+</Checkpoint>
 
 ## Hybrid encryption: fast bulk data, safely-wrapped key
 
