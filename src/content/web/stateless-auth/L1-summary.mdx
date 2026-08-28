@@ -1,0 +1,123 @@
+---
+title: "L1 — Stateless auth: sessions, cookies, and JWTs"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+
+<Scenario label="The problem">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🖥️</span> <strong>Server A</strong> — handles login, stores session in its own memory</div>
+      <div class="flex items-center gap-1.5"><span>🖥️</span> <strong>Server B</strong> — handles the very next request, has never heard of this user</div>
+    </div>
+    <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
+        <p class="font-semibold text-rose-600 dark:text-rose-400">Request 1 → Server A</p>
+        Login succeeds, session saved in RAM
+      </div>
+      <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
+        <p class="font-semibold text-rose-600 dark:text-rose-400">Request 2 → Server B</p>
+        "Who are you?" — logged out
+      </div>
+    </div>
+
+  </Fragment>
+
+You log into a website. It works — you see your dashboard. You click one
+more link and suddenly you're bounced back to the login page, as if you were
+never signed in at all. Nothing crashed. No one made a mistake typing a
+password. The company just added a second server last week to handle more
+traffic, and a load balancer now spreads requests across both of them.
+
+| Request    | Routed to | What that server knows about you            |
+| ---------- | --------- | ------------------------------------------- |
+| Login      | Server A  | Just created your session, holds it in RAM  |
+| Next click | Server B  | Nothing — this process never saw your login |
+
+**Both servers are running the exact same code. Why does only one of them know who you are?**
+
+</Scenario>
+
+Server A's login handler did something ordinary: it kept a small note in
+memory — "this session ID belongs to this user" — and expected to be asked
+again later. But a load balancer doesn't promise to send your next request
+back to the same machine. The note stayed on Server A; your next request
+went to Server B, which has no such note and no way to get one.
+
+<LevelIntro
+  items={[
+    "Why in-memory sessions break behind multiple servers",
+    "Three fixes: sticky sessions, a shared store, or stateless tokens",
+    "What a JWT is, at a glance",
+  ]}
+/>
+
+## What is a "session," mechanically?
+
+A **session** is server-side memory of a login: a record — usually just a
+user ID plus some metadata — that the server keeps somewhere, indexed by a
+**session ID**. After login, the server hands the browser that session ID
+inside a cookie. Every later request automatically re-sends the cookie (that's
+what cookies are for), and the server looks the ID up to recall who's asking.
+
+```mermaid
+flowchart LR
+    A["Browser sends\nusername + password"] --> B["Server creates a\nsession record"]
+    B --> C["Server replies with\nSet-Cookie: sid=abc123"]
+    C --> D["Browser stores the\ncookie automatically"]
+    D --> E["Every later request\nauto-sends Cookie: sid=abc123"]
+    E --> F["Server looks up abc123\nin its session store"]
+```
+
+The break in the opening scenario happens at the last step: Server B's "session
+store" is its own process memory, and Server A never wrote anything into it.
+The cookie made it to Server B just fine — the lookup is what fails.
+
+## Three ways to fix it
+
+| Fix                        | Idea                                                                                          | Cost                                                       |
+| -------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| **Sticky sessions**        | Load balancer always routes the same user to the same server                                  | Breaks the moment that one server restarts or is removed   |
+| **Shared session store**   | All servers read/write sessions in one place (e.g. Redis)                                     | Every request now needs an extra network hop to look it up |
+| **Stateless tokens (JWT)** | The session data travels _inside_ the request itself — no server-side store to look up at all | The token can't easily be "un-issued" once handed out      |
+
+Sticky sessions and a shared store both keep the old idea — session data
+lives on the server, somewhere. A **JWT (JSON Web Token)** throws that idea
+out: instead of the server remembering you, you carry a signed, tamper-evident
+note that proves who you are on every request, and _any_ server can verify it
+without asking anyone else.
+
+## Anatomy of a JWT
+
+A JWT is three base64url-encoded parts joined by dots:
+`header.payload.signature` — for example:
+
+```
+eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyXzQyIn0.dBjftJeZ4CVP-mB92K
+```
+
+```mermaid
+pie showData
+    title Typical byte share of a small JWT
+    "Header" : 20
+    "Payload (claims)" : 45
+    "Signature" : 35
+```
+
+- The **header** says which algorithm signed it (e.g. `HS256`).
+- The **payload** carries claims — `sub` (subject/user ID), `exp` (expiry
+  time), and whatever else the app needs (roles, tenant ID).
+- The **signature** is a cryptographic proof that the header and payload
+  weren't altered after signing — it's what makes the token trustworthy
+  without a database lookup.
+
+The payload is only _encoded_, not encrypted — anyone can decode and read it
+(try pasting a real JWT into a base64url decoder). The signature is what
+stops it from being _forged_, not from being _read_. That distinction — read
+vs. tamper — is the one thing about JWTs worth internalizing before anything
+else.
+
+- Key terms: session, session ID, session store, sticky sessions (session
+  affinity), shared session store, stateless authentication, JWT, claim,
+  `sub`, `exp`, base64url, signature, cookie, `Set-Cookie`.
