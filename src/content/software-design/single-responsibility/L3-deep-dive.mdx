@@ -2,6 +2,9 @@
 title: "L3 — A real incident caused by a responsibility violation, and the refactor that actually fixes it"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
 ## The scenario: one class, three reasons to change, one real bug
 
 A `MonthlyReportGenerator` class fetches usage data, calculates billing totals, and renders a PDF — three steps that all "belong to generating the report" in a surface reading, but represent three genuinely independent reasons to change: the data source might change (a new usage-tracking system), the billing calculation might change (a new pricing tier), and the PDF layout might change (a rebrand). **Before reading the incident, look at the code below and ask: if a rebrand landed tomorrow, which lines would someone actually have to scroll past to make it?**
@@ -33,11 +36,34 @@ class MonthlyReportGenerator {
 
 Every one of the three reasons above lives inside the same 15-line method, with no boundary between them — the fetch logic, the billing math, and the PDF layout are all just adjacent lines, indistinguishable in risk from one another to whoever is scrolling through to make an edit.
 
+<LevelIntro
+  items={[
+    "A real incident traced back to a bundled responsibility",
+    "How scroll-past risk scales with responsibilities per method",
+    "The three-class split, and how it changes future edits",
+  ]}
+/>
+
 ## The incident this shape actually caused
 
 A designer requests a rebrand: new fonts, new header layout, a logo added to the PDF. An engineer makes the change, editing the `generate` method's PDF-layout lines. While doing so, they accidentally also modify the adjacent billing-calculation line (a stray edit while navigating the same large method) — changing `0.001` to `0.01` for `api_call` events. The rebrand ships. Two weeks later, finance flags that API-call billing is 10x too high for every customer that month.
 
 **The root cause isn't the typo itself — mistakes happen.** The root cause is that a rebrand (a PDF-layout-only change, made by someone focused on layout, likely a frontend-leaning engineer or even a designer pairing with one) required editing a method that also contained unrelated, financially-sensitive billing logic, sitting close enough in the same function to be touched by accident with no test isolating it from layout changes.
+
+<Checkpoint question="The engineer who caused the incident never intended to touch billing at all. Given that, would adding a code-review checklist item ('did you mean to change the billing line?') have reliably prevented this bug — why or why not?">
+
+Not reliably — a checklist depends on the reviewer noticing that an
+unrelated line changed inside a diff that's mostly about layout, which is
+exactly the kind of small, easy-to-miss edit that slips past review when
+it's surrounded by dozens of legitimate layout lines in the same method.
+A checklist adds a chance of catching it; separating the responsibilities
+into different files removes the opportunity for it to happen in the same
+diff at all. That's the real difference between a process fix and a
+structural fix — the incident's actual root cause is that billing logic
+was reachable from a layout-only change, and only a structural boundary
+removes that reachability outright.
+
+</Checkpoint>
 
 ## How the risk scales with how many reasons share one method
 
@@ -111,6 +137,19 @@ flowchart TD
 ```
 
 The rebrand now only touches `ReportPdfRenderer` — `BillingCalculator`'s rate logic isn't in the same file, isn't visually adjacent, and can have its own dedicated, protected test suite (`billing-calculator.test.mjs`, testing rates directly) that a layout-focused PR wouldn't even run against unless it actually changed billing code. The bug that shipped in the "before" version becomes structurally much harder to cause by accident in the "after" version — not impossible, but no longer one stray line away in an unrelated part of a shared method.
+
+<Checkpoint question="In the split version, MonthlyReportGenerator.generate() still calls all three classes in sequence. Does that mean it secretly still has all three responsibilities, just spread across method calls instead of inline code?">
+
+No — `generate()`'s one responsibility is now orchestration: calling the
+three collaborators in the right order. Its reason to change is different
+from any of theirs: it changes only if the _sequence or composition_ of
+steps changes (say, adding a fourth step, or caching the fetch), not if a
+pricing rate or a font size changes. That's a real, single, distinct
+reason to change, which is exactly what makes it a legitimate
+responsibility of its own rather than a disguised bundle of the other
+three — calling into other classes isn't the same as owning their logic.
+
+</Checkpoint>
 
 ## Extend the example: what if the next request isn't a rebrand?
 
