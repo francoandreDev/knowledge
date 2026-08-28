@@ -2,6 +2,23 @@
 title: "L2 — Why position-based diffing rewrites everything, and what reflow/repaint actually cost"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 named the two pieces of the problem — diffing by position instead
+of identity, and the reflow/repaint work that follows a DOM change.
+L2 works through the actual mechanics of why position-based diffing
+turns one deletion into thousands of changes, and what the browser's
+rendering pipeline does with each resulting operation.
+
+<LevelIntro
+  items={[
+    "Why position-based diffing cascades after a deletion",
+    "How a stable key restores identity-based matching",
+    "What reflow, repaint, and composite each actually cost",
+  ]}
+/>
+
 ## Why comparing by position turns one deletion into thousands of changes
 
 **If contact #2500 is deleted from a list of 5,000, and every other
@@ -33,6 +50,22 @@ row with key 2500. Every other row is recognized as the same row it
 already was, just possibly shifted, which most frameworks can handle
 far more cheaply than recreating content.
 
+<Checkpoint question="A teammate 'fixes' the contact list by adding key={index} to each row, where index is the row's position in the array. Does this restore identity-based matching the way a key={contact.id} would?">
+
+No. The array index is just the position again, wearing a different
+name — it still shifts by one for every row after the deleted contact,
+exactly the way the un-keyed position comparison did. The diffing
+algorithm still can't tell "this row's content actually changed" apart
+from "this row is a different item that happens to now sit in the same
+slot," because the value it's matching on (the index) changes for
+almost every row on every update, same as before. A key only restores
+identity-based matching when it's a value that stays attached to the
+same logical item regardless of where that item sits — something like
+the contact's own id, which never changes just because a sibling above
+it was deleted.
+
+</Checkpoint>
+
 ## What actually costs time once the DOM changes
 
 **If the diff is small, does that guarantee the visible update is
@@ -60,6 +93,21 @@ affects a more limited, predictable scope. This is why removing one
 row from a 5,000-row list (an unavoidable reflow, but ideally scoped
 to just that row) is much cheaper than an unkeyed diff that touches
 thousands of rows' content, forcing reflow work across all of them.
+
+<Checkpoint question="Two updates each change one row's text in a 5,000-row list: update A uses a stable key and only touches the one changed row; update B is unkeyed and, per the section above, produces update operations for every row after the changed one. Both eventually trigger reflow. Which one costs more, and why?">
+
+Update B costs far more, even though both trigger reflow in principle.
+Reflow's cost scales with how many elements the browser has to
+recalculate, not with how many elements logically changed in the data.
+Update A's reflow is scoped to one row, so the browser only has to
+re-measure that row (and whatever depends on it). Update B's unkeyed
+diff hands the browser thousands of "this row changed" operations, so
+it has to re-measure and repaint across that entire shifted range —
+the same underlying data change, but a dramatically larger amount of
+actual rendering work, because the diff itself failed to recognize
+that most of those rows didn't really change at all.
+
+</Checkpoint>
 
 ## Failure modes at this level
 

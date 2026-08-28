@@ -3,6 +3,8 @@ title: "L3 — Reproducing the icon-click bug with a real closest() implementati
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="Same button, two different event.target values">
   <Fragment slot="facts">
@@ -18,6 +20,14 @@ text/background, but fail only when it lands on the icon — or does it
 fail in both cases?**
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "A minimal closest() implementation, modeled from scratch",
+    "Reproducing the naive-check bug and the fixed handler side by side",
+    "stopPropagation() and when it legitimately breaks delegation",
+  ]}
+/>
 
 ## Modeling the DOM tree and the closest() logic
 
@@ -116,6 +126,20 @@ always walks up via `closest()`, so whether the click lands on the
 button itself or three levels of nested icon/span inside it, the same
 button is correctly identified as the match.
 
+<Checkpoint question="If a designer nests the icon inside an extra wrapper span, so the structure becomes button.delete-btn > span.icon-wrapper > span.icon, does createDelegatedClickHandler still work without any code changes?">
+
+Yes. `closest()` doesn't stop after one parent step — it walks upward
+through however many ancestors exist, checking each one against the
+target class, until it finds a match or runs out of parents. Adding an
+extra wrapper level just means one more iteration of the `while (current)`
+loop before it reaches `button.delete-btn`; the handler itself never
+assumed a fixed nesting depth. This is exactly why modeling `closest()`
+as a generic upward walk, rather than "check the immediate parent," is
+the right fix — a naive one-level-up check would have broken again the
+moment the DOM structure grew one level deeper.
+
+</Checkpoint>
+
 ## Why closest() correctly returns null for an unrelated click
 
 ```js
@@ -128,6 +152,20 @@ attached to a large container (like the whole page, or a list containing
 many different kinds of controls) needs `closest()` to correctly say "no
 match" for clicks on unrelated elements, not just correctly say "match"
 for clicks on the intended ones.
+
+<Checkpoint question="A single delegated listener is attached to document and checks event.target.closest('.delete-btn') on every click across the whole page — including clicks on a search box that has nothing to do with the todo list. Does that search-box click cause any problem for the delegated handler?">
+
+No. `closest()` walks up from the search box through its own ancestors,
+and none of them carry the `delete-btn` class, so it returns `null` just
+like the sidebar example above. The delegated handler's `if (match)`
+check simply doesn't fire `onMatch` in that case, and nothing happens.
+This is what makes attaching one listener very high up — even at
+`document` — safe in practice: the cost of a delegated listener isn't
+"it reacts to everything," it's a `closest()` walk on every click, and a
+correct implementation resolves to nothing for clicks that were never
+meant to match.
+
+</Checkpoint>
 
 ## Extend the incident: what if the icon itself has its own click handler?
 

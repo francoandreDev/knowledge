@@ -3,6 +3,8 @@ title: "L3 — Simulating the exact CORS block, then fixing the fetch() error-ha
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="Same request, misconfigured server vs. fixed server">
   <Fragment slot="facts">
@@ -21,6 +23,14 @@ origins, at which point does the browser actually stop the request —
 before it reaches the server, or after?**
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "Deciding programmatically whether a request needs a preflight",
+    "Simulating the exact preflight-block and simple-request-block failures",
+    "Fixing the fetch() gap that swallows HTTP error statuses",
+  ]}
+/>
 
 This L3 uses the **non-simple** version of the L1 problem: the request includes
 an `Authorization` header, so the browser must ask permission with a preflight
@@ -147,6 +157,21 @@ case below.
 Adding the correct origin to `allowedOrigins` is the entire fix; the
 check now passes and the real request proceeds.
 
+<Checkpoint question="In simulateCorsCheck above, the buggyConfig failure happens inside the 'if (needsPreflight(...))' branch. If a teammate insists CORS problems mean 'the server rejected the request', is that consistent with where this failure is actually detected in the function?">
+
+No. The failure is detected and returned entirely inside the preflight branch
+of `simulateCorsCheck`, before any code path that would represent the real
+`GET /users` being sent — the function never reaches the "preflight passed"
+return. That models what actually happens in a browser: the `OPTIONS`
+preflight is rejected by the _browser's_ evaluation of the server's response,
+and the real request is never sent at all. The server didn't "reject" a
+request it never received during the preflight step; the browser stopped
+things before that request existed. A teammate's "the server rejected it"
+framing only fits the separate simple-request case below, where the request
+really does reach the server first.
+
+</Checkpoint>
+
 ## Even a "simple" request gets blocked — just one step later
 
 ```js
@@ -219,6 +244,20 @@ turning the 404 into a caught error — while a genuine network failure
 (`networkFailure: true`) was already being caught correctly in _both_
 versions, because that's the one case where `fetch()` actually
 rejects.
+
+<Checkpoint question="getUserBuggy and getUserFixed both call the exact same mockFetch and both have a try/catch around it. Why does only getUserFixed catch the 404, if the try/catch block itself is identical in both?">
+
+Because a `try/catch` only catches what actually throws inside it, and
+`mockFetch` resolving with `{ ok: false, status: 404 }` doesn't throw —
+resolving is not the same as throwing. `getUserBuggy` reads `response.status`
+and returns it as if the call succeeded, so nothing in that function's body
+ever raises an error for `catch` to intercept. `getUserFixed` adds one line —
+`if (!response.ok) throw new Error(...)` — which manufactures the throw that
+`mockFetch` itself never produced. The `try/catch` wrapper was never the
+missing piece; the missing piece was code inside the `try` block that turns
+'resolved with a bad status' into an actual thrown error in the first place.
+
+</Checkpoint>
 
 ## Extend it: what if the API returns a 401 instead of a 404?
 

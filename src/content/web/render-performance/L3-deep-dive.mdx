@@ -2,6 +2,24 @@
 title: "L3 — Measuring the diff-op gap between unkeyed and keyed lists"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 established why position-based diffing cascades and why keyed
+diffing avoids it, in principle. L3 makes that concrete: two small,
+runnable diff functions, measured against the exact 5,000-contact
+deletion from this unit's Scenario, followed by how to tell which
+render-performance category you're actually looking at before
+reaching for keys as the fix.
+
+<LevelIntro
+  items={[
+    "A runnable unkeyed vs. keyed diff, measured directly",
+    "Why the operation-count gap grows with list size",
+    "How to diagnose which performance category a slow page falls into",
+  ]}
+/>
+
 ## Building a real diff function to measure the Scenario's bug directly
 
 **Here's a simplified unkeyed diff — comparing old and new lists
@@ -82,6 +100,23 @@ item regardless of where it now sits. The result is exactly one
 operation: remove the item with id 2500. **Same logical change,
 2,501 operations versus 1.**
 
+<Checkpoint question="diffUnkeyed and diffKeyed run on the exact same oldList and newList — same 5,000 contacts, same single deletion. Why do they produce such different operation counts for identical input?">
+
+The lists themselves didn't change between the two calls — what
+changed is the question each function asks. `diffUnkeyed` asks "does
+the item at this position match the item that used to be at this
+position," so once contact 2500 is removed, every later contact now
+sits one position earlier than before and fails that comparison, even
+though the contact itself is unchanged. `diffKeyed` never asks about
+position at all — it asks "which ids are missing" and "which ids are
+new," so a contact that simply moved to an earlier slot is still
+recognized as the same contact and produces no operation. Same data,
+same actual change, but a completely different amount of reported work
+because one function is measuring the wrong thing (slot content) and
+the other is measuring the right thing (item identity).
+
+</Checkpoint>
+
 ## Why this matters more as the list grows
 
 **Does the gap between unkeyed and keyed diffing stay constant as the
@@ -127,6 +162,23 @@ This keeps performance work honest: measure which layer is slow, then
 choose the smallest fix for that layer. Sometimes the fix is stable
 keys; sometimes it is list virtualization, smaller bundles, less shared
 state, or a caching change from another unit.
+
+<Checkpoint question="A teammate reports that a settings page 'feels slow' right after data loads, but there's no list involved at all — just a form with a dozen fields. Based on the diagnosis table above, is a missing/unstable key the first thing worth checking here?">
+
+No. The key-identity problem this unit worked through is specific to
+rendering _lists_ — it's about the diffing algorithm matching items
+across renders, which only comes up when there's a collection of
+similar items to match. A dozen-field form with no list has nothing
+for a key to identify. Per the table, "clicking feels slow after data
+arrives" with no list in sight points toward too much JavaScript
+running during the update — validation logic, formatting, re-renders
+triggered by unrelated state — not toward diffing at all. The lesson
+generalizes: keys fix one specific, common cause of wasted render
+work, but jumping straight to "add a key" without first identifying
+which row of this table actually matches the symptom risks fixing a
+problem the page doesn't have.
+
+</Checkpoint>
 
 ## What generalizes and what doesn't
 

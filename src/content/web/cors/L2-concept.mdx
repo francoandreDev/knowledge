@@ -2,6 +2,22 @@
 title: "L2 — When a preflight actually happens, and why fetch() doesn't throw on a 404"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 established that CORS is a browser-side decision, separate from whether
+the server actually handled the request. L2 works out exactly when that
+decision involves an extra round-trip first, and untangles the separate
+`fetch()` gotcha that hides behind the same symptom.
+
+<LevelIntro
+  items={[
+    "What makes a request 'simple' vs. preflighted",
+    "The preflight round-trip, step by step",
+    "Why fetch() rejects for CORS but resolves for a 404",
+  ]}
+/>
+
 ## What makes a request "simple" versus one that needs a preflight
 
 **If every cross-origin request triggered an extra round-trip before
@@ -20,6 +36,19 @@ A plain `GET` with no custom headers is simple — it goes straight to
 the server. A `GET` with an `Authorization` header is _not_ simple,
 even though `GET` itself is a simple method, because the header alone
 is enough to require a preflight.
+
+<Checkpoint question="A page sends a GET request to a different origin with no custom headers at all, and separately a PUT request to that same origin also with no custom headers. Do both require a preflight, given neither request has an 'unusual' header?">
+
+No — only the `PUT` does. The method itself is one of the three axes that
+decides "simple" independently of headers: `GET`, `HEAD`, and `POST` are the
+only simple methods, so `PUT` triggers a preflight purely by virtue of being
+`PUT`, even with zero custom headers. The `GET`, having a simple method and no
+non-simple headers, stays simple and skips the preflight entirely. The three
+conditions in the table — method, headers, and content type — are each
+independently sufficient to force a preflight; a request only stays simple if
+it clears all three at once.
+
+</Checkpoint>
 
 ## Same symptom, different causes
 
@@ -82,3 +111,17 @@ rows. An HTTP error status resolves the promise just like a
 successful response does — checking `response.ok` (or `response.status`)
 explicitly is the only way to detect it, which is exactly the gap L3's
 code demonstrates directly.
+
+<Checkpoint question="A frontend wraps its fetch() call in try/catch, deploys, and the console shows no thrown errors at all — yet the page displays no data for a request that actually returned a 500. Does 'no thrown error' mean the request succeeded?">
+
+No. The absence of a caught exception only tells you `fetch()`'s promise
+resolved — it says nothing about whether the response itself was successful.
+A `500` response resolves the promise exactly like a `200` does; the only
+difference is `response.ok` being `false` and `response.status` being `500`.
+Because the code never checks either of those, the failure is silent: the
+promise resolved, `try/catch` had nothing to catch, and the missing data is
+the only visible symptom. This is precisely the gap the table above shows —
+`try/catch` alone only guards against network failures and CORS blocks, not
+against HTTP error statuses.
+
+</Checkpoint>

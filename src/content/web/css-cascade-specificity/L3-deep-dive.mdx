@@ -3,6 +3,8 @@ title: "L3 — A design-system rollout that silently failed, and the linter that
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="The rollout that looked done but wasn't">
   <Fragment slot="facts">
@@ -41,6 +43,14 @@ of the older pages, since the migration only touched class names on the button i
 the ancestor markup the legacy selector was keyed to.
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "Writing a real specificity-calculator function",
+    "`:where()` vs. `@layer` as concrete fixes for the incident",
+    "Escalating the same failure to third-party CSS and `!important`",
+  ]}
+/>
 
 ## A specificity calculator worth actually having
 
@@ -113,6 +123,12 @@ browser did — `legacy` wins because its id column (1) beats `designSystem`'s i
 spirit) that CSS-in-JS tooling and specificity linters run automatically on every PR to
 flag exactly this kind of silent regression before it ships.
 
+<Checkpoint question="calculateSpecificity() strips out everything inside :where(...) before counting ids, classes, and elements. If the legacy selector had instead been written as :where(#app .toolbar) .btn, what would the function return, and would that match what actually renders in the browser?">
+
+It would return `{ ids: 0, classes: 1, elements: 0 }` — the `#app .toolbar` part disappears entirely once `:where(...)` is stripped out, leaving only `.btn` outside the parentheses to count. This does match what actually renders: `:where()` is defined by spec to contribute zero specificity for whatever selector is written inside it, even though that inner selector still has to match normally for the rule to apply at all. That's the whole reason `:where()` is useful as a fix — it keeps the legacy selector's structural matching intact while erasing the very id-and-class weight that let it beat the design system rule in the incident.
+
+</Checkpoint>
+
 ## The fix, and why it works
 
 ```css
@@ -149,6 +165,12 @@ dependency entirely: as long as `design-system` is declared as a later layer tha
 even if someone adds more ids to the legacy CSS later. This is why teams migrating a large
 legacy codebase onto a new design system increasingly reach for `@layer` specifically —
 it turns "hope the new selector is specific enough" into a structural guarantee.
+
+<Checkpoint question="Suppose a future engineer, unaware of the @layer setup, adds another nested class to the legacy selector — say #app .toolbar .btn.is-active — making its specificity even higher than before. Under Option B (the @layer fix), does the design system rule still win?">
+
+Yes, it still wins, and that's the point of choosing `@layer` over `:where()` here. Layer priority is checked before specificity is ever compared, so as long as `legacy` is still declared before `design-system` in the `@layer legacy, design-system;` statement, nothing that happens to the legacy selector's specificity afterward — adding a class, nesting deeper, anything short of `!important` — can pull it back into contention. That's a stronger guarantee than Option A's `:where()` fix, which only neutralizes the specificity of what's explicitly wrapped in `:where(...)`; a future edit that adds a new selector outside that wrapper would need to be caught and wrapped by hand each time.
+
+</Checkpoint>
 
 ## Extend the incident: what if it isn't a design system migration?
 

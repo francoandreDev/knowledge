@@ -2,6 +2,22 @@
 title: "L3 — The Scenario's stored XSS, the sanitization fix, and a CSP as a second layer"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 established why sanitization and CSP work as independent, stacked
+layers rather than substitutes for each other. L3 implements the
+Scenario's vulnerable comment renderer, the actual exploit, the
+sanitization fix, and a CSP policy as a second layer of defense.
+
+<LevelIntro
+  items={[
+    "The vulnerable renderer and its exploit",
+    "escapeHtml as the actual fix",
+    "CSP as a second, independent layer",
+  ]}
+/>
+
 ## The vulnerable renderer, and what the injected comment actually produces
 
 **Here's the Scenario's comment renderer. What does it do when given
@@ -46,6 +62,22 @@ other injected markup, such as event-handler attributes, can still be
 dangerous when user input is inserted as HTML instead of text.
 
 ![Top: the vulnerable renderer's output loaded as a page — the injected script ran immediately and appended a visible "script executed" banner. Bottom: the fixed renderer's output — the same malicious text rendered as inert, visible text instead of running.](./images/vulnerable-vs-escaped.png)
+
+<Checkpoint question="Before reading the fix below: renderCommentVulnerable inserts comment.text into a template literal that becomes the page's actual HTML. Why does that make the injected script tag execute, when the exact same characters sitting in a plain text file, or printed to a console log, would do nothing at all?">
+
+A string is only ever "code" because of the context it lands in, not
+because of anything inherent in the characters themselves. A text file
+or a console log just displays characters — nothing ever interprets
+them as instructions. But once that same string becomes part of an
+HTML document's markup, the browser's HTML parser treats `<` and `>`
+as structural signals that open and close tags, not as ordinary
+symbols to display. `renderCommentVulnerable` hands the browser a
+string where the comment's own text supplies those structural
+characters, so the parser builds a real `<script>` element out of it —
+the danger isn't the word "script," it's inserting untrusted text into
+a position where the parser expects markup.
+
+</Checkpoint>
 
 ## The fix: escape, don't insert
 
@@ -119,6 +151,21 @@ page's HTML. This is precisely the "second layer" from L2: CSP
 doesn't need to know anything about comments or sanitization — it's
 a blanket browser-enforced rule that limits what any script,
 injected or not, is allowed to do.
+
+<Checkpoint question="Suppose an attacker's injected markup were an image tag with a broken source and an onerror handler, like the text: img src=x onerror='document.location=evil.com', instead of a script tag. Would the CSP policy shown above (script-src limited to 'self' and the CDN) still block it?">
+
+Yes. An inline event-handler attribute like `onerror` runs as inline
+JavaScript exactly the same way an inline `<script>` block does, from
+CSP's point of view — both are "script content embedded directly in
+the page's HTML rather than loaded from an external source." A
+`script-src` policy that only allows `'self'` and the named CDN, with
+no `'unsafe-inline'`, blocks both forms equally: the browser refuses
+to execute either one, regardless of which specific tag or attribute
+the attacker used to smuggle the script in. That's the point of CSP
+being a blanket, syntax-agnostic rule rather than a check against any
+particular attack pattern.
+
+</Checkpoint>
 
 ## What generalizes and what doesn't
 
