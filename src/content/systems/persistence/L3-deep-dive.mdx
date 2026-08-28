@@ -2,6 +2,23 @@
 title: "L3 — A real fsync call, a working write-ahead log, and the trade-offs that follow"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 walked through the write path and the write-ahead-log mechanism at the
+level of a flowchart and pseudocode. This level makes every piece of that
+runnable: a real `fsync` call you can diff against a non-durable write, a
+working WAL that survives an interrupted crash, and the group-commit and
+corruption-detection code real databases actually ship.
+
+<LevelIntro
+  items={[
+    "A real fsync vs. no-fsync diff in Node.js",
+    "A working, replayable write-ahead log",
+    "Group commit and torn-write detection as real code",
+  ]}
+/>
+
 ## How do you prove, in code, that write() alone isn't durable?
 
 You can't script an actual power loss safely, but you can make the code
@@ -100,6 +117,20 @@ data file, the log already has the entry — `#replayLog()` reconstructs
 `{ balance: 500 }` on the next startup even though `data.json` never got
 updated before the crash. The log, not the data file, is what actually backs
 the durability promise.
+
+<Checkpoint question="Suppose commit('balance', 500) crashes after fs.fsyncSync(fd) on the log but before fs.writeFileSync(this.dataPath, ...) runs. On the next new WriteAheadLog(...), what value does this.state.balance end up holding?">
+
+500 — the constructor calls `#replayLog()` before anything else, and by
+the time the crash happened, the log entry `{"key":"balance","value":500}`
+had already been fsynced to `wal.log`. Replay reads every line in that
+file and reconstructs `state` from it, with no dependency on whether
+`data.json` was ever touched. The data file lagging behind isn't a bug to
+work around here — it's the exact mechanism the log exists to make safe:
+the log is durable and complete, so replaying it produces the same state
+the client was already told was committed, regardless of what the slower,
+deferred data-file write did or didn't get to finish.
+
+</Checkpoint>
 
 ## fsyncing every commit works, but how do you get the throughput back?
 
@@ -220,6 +251,24 @@ silently skipped by an overly permissive parser. With the checksum, recovery
 treats a torn tail entry as exactly what it is — an uncommitted write that
 never finished — and simply stops there, keeping everything durably written
 before it.
+
+<Checkpoint question="replayChecksummedLog breaks out of the loop the moment one entry's checksum doesn't match, instead of skipping that bad entry and continuing to check the rest of the file. Why stop instead of skipping and moving on?">
+
+Because a torn write only ever lands at the **tail** of the log, never in
+the middle. Every entry before it was fully written and fsynced by an
+earlier, already-completed `commit()` call — those entries are durable and
+trustworthy by construction. A torn entry means the process was
+interrupted mid-`write()` for that specific append, which can only be the
+very last thing being written when the crash hit. Continuing to scan past
+it and treating any later bytes as more entries would mean parsing
+whatever leftover or unrelated data happens to follow — there's no
+guarantee it's even valid JSON, let alone a real committed entry — so
+"skip and keep going" would risk fabricating state that was never actually
+committed. Stopping at the first mismatch keeps the recovered state to
+exactly what was truly durable: everything up to, and not including, the
+interrupted write.
+
+</Checkpoint>
 
 ## What about the directory entry, not just the file?
 

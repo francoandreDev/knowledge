@@ -3,6 +3,8 @@ title: "L3 — Proving the growth rate with a real benchmark, and where the same
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="The nightly import that stopped finishing">
   <Fragment slot="facts">
@@ -31,6 +33,14 @@ addresses why the function needs 250 billion comparisons for half a million rows
 first place.**
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "Benchmarking the array vs. Set versions for real",
+    "Applying the same fix to a two-list intersection",
+    "Where the fix stops working (memory, streaming data)",
+  ]}
+/>
 
 ## Reproducing the incident with real, runnable code
 
@@ -106,6 +116,21 @@ Set version, meanwhile, stays under 5ms across the entire 16x range in n — the
 empirical meaning of "O(n²) vs. O(n)": not a one-time gap, but a ratio that keeps
 compounding every time the input grows.
 
+<Checkpoint question="The 2,000→8,000 step overshot the O(n²) prediction (~86x instead of ~16x), but the 8,000→32,000 step landed close to it (~14x vs. predicted 16x). Does the first measurement disprove the O(n²) claim?">
+
+No — it just means the first measurement wasn't a clean read of the underlying growth rate
+yet. At n=2,000 the array version still finishes in a couple of milliseconds, which is fast
+enough for things unrelated to algorithmic complexity — JIT warm-up, timer resolution,
+background noise on the machine running the benchmark — to distort the ratio between two
+already-small numbers. Big-O describes what happens as `n` grows asymptotically large, not
+what a single small-`n` timing looks like, so one noisy data point at the smallest input
+size doesn't outweigh a later step landing close to the predicted 16x once the runtime is
+large enough for those distortions to become negligible by comparison. The right way to
+confirm a growth-rate claim is to look at the trend across several increasing sizes, not to
+accept or reject it based on whichever single measurement happens to be easiest to run.
+
+</Checkpoint>
+
 ## Extend the example: the same mistake, two different disguises
 
 The dedup function is one case, not the whole territory. **What if the task isn't "remove
@@ -130,6 +155,21 @@ inside the earlier loop — a scan nested inside a scan. The fix is the same ide
 build a Set from one side once (`O(m)`), then every lookup against it during the pass over
 the other side is `O(1)` instead of `O(m)`, bringing the total down from `O(n × m)` to
 `O(n + m)`.
+
+<Checkpoint question="intersectionFast builds the Set from listB, not listA, then filters listA. Would it still be correct — and equally fast — to build the Set from listA and filter listB instead?">
+
+It would still be correct, and the complexity would still work out to O(n + m) either way —
+the choice of which list becomes the Set is arbitrary for correctness and for the growth
+rate's shape. What it isn't arbitrary for is the constant-factor cost if the two lists are
+very different sizes: building the Set costs one full pass over whichever list becomes the
+Set (O(m) if it's listB, O(n) if it's listA), so building it from the _smaller_ of the two
+lists keeps that one-time setup cost as low as possible, even though both choices still
+collapse to the same O(n + m) once written in Big-O terms. This is exactly the kind of
+detail Big-O intentionally discards (rule: drop constant factors) but that still matters for
+an actual production choice — the growth-rate shape and the real-world cost aren't quite the
+same question.
+
+</Checkpoint>
 
 **A second question worth sitting with: what if the input can't fit in memory at all —
 say, streaming 50 million records instead of holding 500,000 in an array?** A `Set` doesn't

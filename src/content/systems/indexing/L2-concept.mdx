@@ -2,6 +2,24 @@
 title: "L2 — Linear vs. logarithmic lookup, and when a hash index beats a B-tree (or can't be used at all)"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 named the shape of the problem — a full scan's cost grows with row
+count, an index lets the database skip most of the table — without yet
+showing _how much_ difference that makes or what an index actually costs
+to maintain. L2 works out the linear-vs-logarithmic math behind that gap,
+compares the two most common index structures, and shows the cases where
+an index exists but quietly doesn't get used.
+
+<LevelIntro
+  items={[
+    "Why a full scan is O(n) and a B-tree lookup is O(log n)",
+    "B-tree vs. hash index: which trade-off fits which query",
+    "Common ways an existing index still doesn't get used",
+  ]}
+/>
+
 ## Why "4,000x more rows" became "200x slower," not 4,000x slower
 
 **If a full scan's cost grows in direct proportion to row count, why
@@ -60,6 +78,20 @@ to 2,000,000. Read them side by side: the full scan's bars grow in
 a straight line with the row count; the B-tree's bars barely move at
 all across the same four-thousand-x growth in data.
 
+<Checkpoint question="A table grows from 1,000,000 to 2,000,000 rows — a 2x increase. Roughly how much slower does a full table scan get, and roughly how much slower does a B-tree lookup on an indexed column get?">
+
+The full scan gets roughly 2x slower — its cost is directly
+proportional to row count, so doubling the rows doubles the work.
+The B-tree lookup barely changes at all: going from 1,000,000 to
+2,000,000 rows only adds one more comparison (from 20 to 21 in the
+chart above), because log2(2,000,000) is only one step past
+log2(1,000,000). This is the whole reason an indexed query can stay
+fast for years of growth while an unindexed one degrades in lockstep
+with the table — the two costs scale by fundamentally different
+rules, not just different constants.
+
+</Checkpoint>
+
 ## B-tree vs. hash index: two different trades
 
 **If a B-tree already turns O(n) into O(log n), why does a second
@@ -113,6 +145,22 @@ therefore not a command. It is an option the planner may choose when
 the option looks cheaper than scanning the table. If the indexed value
 matches almost every row, scanning can be the honest cheaper route.
 The `query-planning` unit goes deeper into this route-choosing idea.
+
+<Checkpoint question="A `sessions` table has an index on `token`, and a query filters with `WHERE token LIKE '%abc'`. Does this query benefit from the index, and why or why not — using the wildcard rule above?">
+
+No. A leading wildcard (`%abc`) means a match could start anywhere in
+the string, so there's no fixed prefix the sorted index can use to
+narrow the search from the front — the database still has to check
+every entry's ending, which is exactly the full-scan cost the index
+was supposed to remove. If the query instead filtered on `token LIKE
+'abc%'` (the wildcard trailing, not leading), the sorted order would
+still let the database jump straight to the entries starting with
+`abc` and stop as soon as they end — that's the difference the rule
+above is pointing at: it's not wildcards in general that break an
+index, only a wildcard that removes the fixed starting point the
+sort order depends on.
+
+</Checkpoint>
 
 ## Failure modes at this level
 

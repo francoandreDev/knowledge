@@ -2,6 +2,23 @@
 title: "L2 — What the event loop actually does between turns"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 showed a 0ms timer waiting 200ms behind a synchronous calculation and
+named the two key terms — concurrency and blocking — without yet explaining
+the mechanism underneath. L2 works out what the event loop actually does
+between turns, and why non-blocking I/O lets a single thread serve many
+concurrent requests without ever running more than one at a time.
+
+<LevelIntro
+  items={[
+    "How non-blocking I/O frees the thread while waiting",
+    "Why CPU-bound work breaks the illusion of concurrency",
+    "Picking the right concurrency tool for a given situation",
+  ]}
+/>
+
 ## Why non-blocking I/O lets one thread serve many requests
 
 **If JavaScript really only runs one thing at a time, how does a
@@ -34,6 +51,18 @@ turns between callbacks that each became ready at a different moment,
 and because the waiting itself happens off-thread, this can scale to
 thousands of concurrent in-flight requests.
 
+<Checkpoint question="Two requests both call out to a database at nearly the same moment. Does the single thread ever actually run both queries at the same literal instant?">
+
+No. The thread hands each query off to non-blocking I/O and becomes free
+again immediately — the actual waiting happens off-thread, delegated to
+the runtime and the OS. When each query's result comes back, the event
+loop queues a callback and runs it on the one thread, one at a time. What
+looks like "handling two requests at once" is really rapid turn-taking
+between callbacks that each became ready at different moments — concurrency
+without parallelism, exactly as the diagram above shows.
+
+</Checkpoint>
+
 ## What breaks the illusion
 
 **Given that model, why did the opening scenario's 200ms calculation
@@ -65,6 +94,20 @@ More concurrency is not automatically more capacity. Each tool moves
 pressure somewhere: async I/O reduces wasted waiting, chunking improves
 fairness, workers/processes consume extra CPU and memory, and shared
 state requires coordination.
+
+<Checkpoint question="A server endpoint spends most of its time waiting on three chained database queries, with almost no computation of its own. Which row of the table above applies, and would switching that endpoint to worker threads help?">
+
+The first row applies — this is I/O-bound work, not CPU-bound. Async/
+non-blocking I/O is already the right tool, because the thread is free
+during each query's wait regardless of how many queries are chained.
+Worker threads solve a different problem — freeing the main thread from
+work that occupies it continuously — and this endpoint's thread was
+never occupied in the first place; it was waiting, not calculating.
+Adding worker threads here would add memory and coordination overhead
+for no benefit, since there's no CPU-bound work to move off the main
+thread.
+
+</Checkpoint>
 
 ## Threads and processes as an alternative model
 

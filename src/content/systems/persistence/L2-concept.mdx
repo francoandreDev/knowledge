@@ -3,6 +3,8 @@ title: "L2 — The write path, and where the durability gap actually is"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="The problem">
   <Fragment slot="facts">
@@ -30,6 +32,14 @@ reboots?** This unit is about the exact mechanical answer to that question,
 not a hand-wave about "the data might be gone."
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "The real path from write() to physically durable",
+    "Where fsync sits, and why it's slow on purpose",
+    "How a WAL and group commit turn 'committed' into a real promise",
+  ]}
+/>
 
 ## What does write() actually guarantee?
 
@@ -70,6 +80,19 @@ function save_important_data(file, data):
 
 The last row is why real systems don't just add `fsync` and call it solved — a crash mid-write can leave a file in a **partially written**, internally inconsistent state, which is a distinct and often worse failure than simply losing the whole update. This is exactly the problem write-ahead logging exists to solve.
 
+<Checkpoint question="A crash happens after write() returns but before fsync() is called. Is the data definitely gone, or could it still be there depending on luck?">
+
+It's gone in the sense that matters: it was never durable. The table above
+draws the line precisely — "after `write()`, before `fsync()`" is a row
+of its own, and its recoverability is "No," not "maybe." The data was
+sitting in the OS page cache, which is RAM, and a crash removes RAM's
+contents unconditionally. There's no partial credit for having called
+`write()` first — the whole point of `fsync` being a distinct, separate,
+slower call is that nothing before it counts as durable yet, no matter how
+confident the caller feels because `write()` returned without error.
+
+</Checkpoint>
+
 ## How do databases make "committed" actually mean something?
 
 ```python
@@ -91,6 +114,21 @@ receipt book that is locked in a safe; then update the big ledger later.
 If the lights go out between those two steps, the safe receipt is enough
 to replay the change and repair the big ledger. WAL is that safe receipt
 book for a database.
+
+<Checkpoint question="If the database crashes right after the log entry's fsync() returns, but before apply_to_data_files() has run, is the transaction still considered committed on restart?">
+
+Yes — and that's the entire design working as intended, not a near-miss.
+The commit point was defined as "the log entry's `fsync` returned
+successfully," not "the data file got updated." On restart, the database
+replays the log, finds that entry, and reapplies it to the data files —
+recovering exactly the state the client was already told was safe. This is
+why the log gets to be the cheap, sequential, frequently-fsynced piece and
+the data file gets to be the slower, deferred one: the promise to the
+client was never backed by the data file in the first place, so the data
+file being stale at the moment of a crash isn't a broken promise, it's an
+expected, recoverable intermediate state.
+
+</Checkpoint>
 
 ## What if fsyncing every single commit is too slow?
 

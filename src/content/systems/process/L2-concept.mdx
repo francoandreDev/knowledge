@@ -3,6 +3,18 @@ title: "L2 — What actually happens when you run a program?"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 named the parts of a process — memory regions, PIDs, system calls. This level goes one layer deeper: how a process actually gets created, and why its isolation is structurally guaranteed rather than just conventional.
+
+<LevelIntro
+  items={[
+    "The stack/heap/data/text layout, and why it can overflow",
+    "How fork + exec split process creation into two steps",
+    "Why virtual addresses can't leak across processes",
+  ]}
+/>
 
 ## What has to be true for a program to become a process?
 
@@ -29,6 +41,12 @@ low addresses
 ```
 
 The stack and heap deliberately grow _toward_ each other from opposite ends of the free space between them. That gap is why a program can run for a long time without either one being sized up front — but it's also exactly what makes a **stack overflow** possible: enough nested function calls (usually unbounded recursion) and the stack pointer eventually collides with the heap, or simply runs past the space the OS reserved for it.
+
+<Checkpoint question="A function recurses without a base case. Based on the memory layout above, which region actually runs out first, and what does that predict about the kind of error you'd see compared to, say, a bug that allocates too many objects with `new`?">
+
+The stack runs out, not the heap — each recursive call pushes a new frame (return address, arguments, locals) and nothing ever pops until a call returns, so the stack pointer keeps growing toward the free space until it either collides with the heap or runs past the region the OS reserved. That's a structurally different failure from over-allocating with `new`: excess heap allocation grows a bounded-but-large region and typically shows up as out-of-memory or GC pressure, while runaway recursion is a stack-specific exhaustion — the classic symptom is a "stack overflow" or "maximum call stack size exceeded" error rather than a generic out-of-memory failure, because the two regions are tracked and limited separately.
+
+</Checkpoint>
 
 ## How does a shell turn `node app.js` into a running process without becoming that process itself?
 
@@ -103,6 +121,12 @@ function run_program(path, args):
 | ------------ | ------------------------------------------ | ------------------- | ---------------------------------------------- |
 | `fork()`     | Copies the calling process (COW)           | Child's PID         | `0`                                            |
 | `exec(path)` | Replaces the _child's_ entire memory image | (parent unaffected) | Never returns on success — child IS `path` now |
+
+<Checkpoint question="If a shell only ever had one combined 'launch this program' call instead of separate fork() and exec() steps, could it still redirect just the child's stdout to a file without touching its own? Why or why not?">
+
+No — it couldn't, at least not without a completely different mechanism. The redirect only works because it happens in the narrow window after `fork()` has already produced a second, independent process (with its own file descriptor table) but before `exec()` has replaced that process's identity. A single combined call would have no such window: there'd be no separately-addressable child process yet to modify before the new program starts running, so any change to "the process's" stdout would apply to whichever process the call was made from. This is exactly why Unix keeps the two steps separate rather than offering one atomic "run this program" primitive.
+
+</Checkpoint>
 
 ## Why does isolation hold even when two processes use the identical pointer value?
 

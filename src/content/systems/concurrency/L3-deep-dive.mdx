@@ -3,6 +3,8 @@ title: "L3 — Measuring the block, then measuring the fix"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="Same 200ms of work, two very different outcomes for everyone else">
   <Fragment slot="facts">
@@ -19,6 +21,14 @@ late will the concurrent 0ms timer fire — still close to 200ms, or
 something closer to 20ms?**
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "Measuring the block with real timestamps",
+    "Fixing it by yielding control between chunks",
+    "When chunking isn't possible, and what to do instead",
+  ]}
+/>
 
 ## The block, measured directly
 
@@ -113,6 +123,18 @@ Request A still takes the same total ~200ms to finish overall; what
 changed is that it no longer monopolizes the thread continuously to get
 there.
 
+<Checkpoint question="The chunked version still takes ~200ms total to finish Request A — the same as the unchunked version. So what did chunking actually buy, if the total work and total time didn't change?">
+
+Chunking didn't reduce the total CPU work or speed up Request A itself —
+it changed how that work is scheduled relative to everything else waiting
+on the same thread. By yielding control back to the event loop after each
+20ms piece, chunking gives other pending callbacks (like Request B's
+timer) repeated chances to run in between, instead of forcing them to wait
+behind one uninterrupted 200ms block. The win is fairness across
+concurrent work, not raw speed for the chunked task itself.
+
+</Checkpoint>
+
 ## What actually changed, concretely
 
 |                                               | Unchunked               | Chunked                                        |
@@ -144,6 +166,21 @@ thread or child process frees the main event loop, but it consumes
 another execution slot, memory, startup/communication overhead, and
 possibly another CPU core. Under load, the question becomes how many
 workers the machine can sustain before their own queue starts growing.
+
+<Checkpoint question="A team is about to hash a large file with one uninterruptible library call, and their first instinct is to split it into chunks the way Request A's work was split above. Why won't that instinct work here, and what should they reach for instead?">
+
+Chunking only works when the underlying work can actually be paused and
+resumed at defined boundaries — Request A's calculation was a loop the
+author controlled, so inserting a `setImmediate` between iterations was
+possible. A single library call computing a hash has no such boundary
+from the caller's side; it either runs to completion or it doesn't run at
+all, so there's nothing to yield between. The fix in that case is moving
+the whole call off the main thread — a worker thread or a separate
+process — so the main event loop stays free while that uninterruptible
+work happens elsewhere, at the cost of the extra memory and communication
+overhead that comes with a second execution unit.
+
+</Checkpoint>
 
 ## Failure modes
 

@@ -2,7 +2,18 @@
 title: "L3 — What actually happens when you run a program?"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
 L1 and L2 covered the shape of a process and the fork+exec launch sequence conceptually. **This level proves each concept by actually observing it** — every example here was run and its real output captured, not hand-waved. Three languages appear on purpose: JS/Bun for the everyday fork+exec and memory-growth demos (they're what most of this project's examples already use), Python for `os.fork()` itself (JS has no direct syscall access, and `fork()`'s copy-on-write behavior is the whole point of this section), and C for a real segmentation fault (a managed runtime catches its own stack overflow before the OS has to — proving an actual kernel-level fault needs a language with raw pointers).
+
+<LevelIntro
+  items={[
+    "Proving process isolation and copy-on-write with real output",
+    "Proving the stack and heap are real, finite regions",
+    "Reading a live process's memory map from the kernel",
+  ]}
+/>
 
 ## Proving process isolation: separate PIDs, separate memory
 
@@ -55,6 +66,12 @@ parent pid=84210 counter=0
 ```
 
 This is L1's two-tabs scenario, reproduced on purpose: `counter` starts as `0` in one process, `fork()` duplicates that process, the child sets its own copy to `999`, and the parent's copy is completely unaffected — because after `fork()` returns, the two processes are backed by different physical pages the instant either one writes (this is the "copy-on-write" L2 mentioned: the pages start out _shared_ for efficiency, and only get physically copied the moment one side writes to them). There is no shared `counter` anywhere for the two processes to race over — the isolation isn't a lock or a convention, it's a structural fact about how `fork()` sets up memory.
+
+<Checkpoint question="fork_isolation.py's child sets counter = 999 and the parent's counter stays 0. If copy-on-write means the pages start out shared, why doesn't the parent see 999 too, at least briefly, before any copying happens?">
+
+Because "shared" here means shared physical pages, not a shared variable — the two processes still have separate page tables and separate virtual-to-physical mappings from the instant `fork()` returns; they just happen to point at the same physical page as a memory-saving optimization, since most forked processes don't immediately write to most of their memory. The moment the child executes `counter = 999`, the kernel intercepts that write (the shared page is marked read-only specifically to trigger this), copies the page so the child gets its own physical copy, and only then lets the write proceed — entirely inside the child's private mapping. The parent's page table was never touched, so its `counter` was never anything but `0`. Sharing physical pages is purely an implementation detail for efficiency; it never implies a shared variable that either side could observe the other writing to.
+
+</Checkpoint>
 
 ## Proving the stack exists: overflowing it on purpose
 
@@ -114,6 +131,12 @@ $ echo $?
 ```
 
 `139` is `128 + 11` — signal 11 is `SIGSEGV`. No `RangeError`, no catchable exception, no message about "maximum call stack size": the process's stack pointer walked past the last page the kernel had mapped for this process's stack region, the CPU's MMU raised a page fault on that access, the kernel looked up the faulting address in this process's page table, found no valid mapping, and delivered `SIGSEGV` — whose default action is to kill the process outright. This is exactly the segfault mechanism L1 described in the abstract ("the OS refusing an access to a virtual address that has no valid mapping") and L2's `NULL`-dereference note, just triggered by the stack running out instead of a bad pointer. JS's `RangeError` in the previous section is the runtime doing this same accounting itself, in software, specifically so it can hand back a catchable error instead of letting the process actually reach this point.
+
+<Checkpoint question="stack.mjs throws a catchable RangeError; segfault.c gets killed by SIGSEGV with no chance to catch anything. Both are the same underlying limit being hit. What is actually different between the two, mechanically?">
+
+What differs is who is enforcing the limit and when. In `stack.mjs`, the JavaScript runtime tracks its own call-stack depth in software and throws a normal, catchable exception once it crosses a threshold set comfortably below the process's real stack region — the process itself never actually runs out of stack memory. In `segfault.c`, there is no such software accounting; the C program keeps pushing real stack frames until the stack pointer moves past the last page the kernel mapped for that region, and only then does the hardware MMU fault and the kernel step in with `SIGSEGV`. So the JS case is a voluntary, early, graceful stop chosen by the runtime; the C case is the actual hardware/kernel boundary being hit for real, with no opportunity for the program to intervene. Same physical limit, but one is a runtime's polite simulation of it and the other is the limit itself.
+
+</Checkpoint>
 
 ## Proving the heap grows: watching it happen
 
