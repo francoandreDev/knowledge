@@ -2,6 +2,22 @@
 title: "L2 — The four guarantees, and what a transaction's lifecycle actually looks like"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 named the failure (a partial write) and the fix's label
+(transaction, ACID) without yet unpacking what each of the four
+letters actually guarantees or what happens between "begin" and
+"commit." L2 works through both, using the same stock/order scenario.
+
+<LevelIntro
+  items={[
+    "What each ACID letter actually stops",
+    "A transaction's begin-to-commit-or-rollback lifecycle",
+    "What changes with vs. without a transaction",
+  ]}
+/>
+
 ## The four letters, and what each one actually stops from happening
 
 **If "transaction" just meant "a group of operations," what's actually
@@ -27,6 +43,20 @@ cannot become negative, an order must point to a real customer, a bank
 balance cannot break its allowed limits. Isolation is about overlap:
 what happens when two requests touch the same data at the same time.
 Both matter, but they protect against different shapes of failure.
+
+<Checkpoint question="A single order request removes 3 widgets from stock and never touches another customer's request at all — no concurrency involved. If that single request's own logic tried to let stock go negative, which ACID property is responsible for catching that, and why isn't it Isolation?">
+
+Consistency, not Isolation — because nothing about this failure
+involves two requests overlapping. Isolation only has something to say
+when two transactions are in flight at the same time and might see or
+interfere with each other's unfinished work; here there's exactly one
+transaction, acting alone, and it's trying to leave the data in a
+state that violates a rule that must hold regardless of concurrency
+(stock can't go negative). That's Consistency's job: enforcing
+data-level invariants before letting a transaction commit, whether or
+not anyone else is even running at the same moment.
+
+</Checkpoint>
 
 ## A transaction's lifecycle: begin, operate, then commit or rollback
 
@@ -57,6 +87,22 @@ The important timeline is simple:
 | During work    | The transaction's private, not-yet-final changes       |
 | After commit   | The completed changes, now permanent and visible       |
 | After rollback | The original state, as if the failed attempt never ran |
+
+<Checkpoint question="The diagram shows operation 2 (insert order) failing, and the flow going straight to Rollback. At that point, has operation 1's stock decrement already been undone somewhere upstream, or is undoing it exactly what the rollback step itself does?">
+
+Undoing it is exactly what the rollback step does — nothing upstream
+has already reversed operation 1. Up until the rollback step runs,
+operation 1's effect still exists, but only inside the transaction's
+own not-yet-committed workspace, never visible to anyone outside it.
+Rollback is the moment the system discards that entire workspace
+(operation 1's decrement included) and leaves the real, externally
+visible data exactly as it was before "begin." This is precisely what
+was missing from L1's naive two-step version: there was no private
+workspace and no rollback step, so operation 1's effect had already
+been applied directly to the real data by the time operation 2 failed,
+with nothing left to discard it from.
+
+</Checkpoint>
 
 ## Without transactions vs. with transactions
 

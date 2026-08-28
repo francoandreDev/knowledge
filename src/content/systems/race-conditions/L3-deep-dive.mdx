@@ -3,6 +3,8 @@ title: "L3 — Reproducing the oversold-item bug, then fixing it two ways"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="Same bug, measured instead of described">
   <Fragment slot="facts">
@@ -19,6 +21,14 @@ that, how can two concurrent requests possibly both read `stock = 1`
 before either one writes the update?**
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "Reproducing the race with real async code",
+    "Fixing it by making the section synchronous",
+    "Fixing it with a mutex, for when that's not possible",
+  ]}
+/>
 
 ## The racy version
 
@@ -80,6 +90,21 @@ database-like operation returns, and let other ready work run meanwhile."
 That pause is useful for concurrency, but it also creates the exact gap
 where a race can enter.
 
+<Checkpoint question="If purchaseRacy() were rewritten to call store.getStock() and store.setStock() with no await between them at all — but each of those methods still internally awaits a simulated delay — would the race still happen?">
+
+Yes, because the yield point lives inside `getStock()`/`setStock()`
+themselves, not just in how `purchaseRacy` calls them. The moment
+`purchaseRacy` does `await store.getStock()`, control returns to the
+event loop before that call even resolves, and the _other_ call to
+`purchaseRacy` can start running — including its own `await
+store.getStock()` — before the first one's `setStock` has run. What
+matters isn't which line in `purchaseRacy` has the word `await` next
+to it; it's whether any `await` sits anywhere between the read and the
+write of the shared value. That's exactly the gap Fix 1 closes next by
+removing every `await` from that span.
+
+</Checkpoint>
+
 ## Fix 1: make the critical section synchronous (atomic)
 
 If the check and the update never hit an `await` between them, there's
@@ -115,6 +140,22 @@ pushing the check into the write itself — a single conditional update
 like `UPDATE inventory SET stock = stock - 1 WHERE id = ? AND stock > 0`
 — so the database, not your application code, performs the check and
 the write as one atomic operation.
+
+<Checkpoint question="Fix 1 works by removing every await between the check and the write. Why can't the same trick be used for a critical section that needs to call a payment API in the middle, before committing the stock change?">
+
+Because a real network call to a payment API can't be made
+synchronous — there's no way to avoid an `await` (or equivalent yield
+point) while waiting for a response that genuinely takes time and
+happens on another system. Fix 1 only works when the whole critical
+section can run as one uninterrupted stretch of local computation; the
+moment a genuine external wait is unavoidable inside that section, the
+event loop _will_ get a chance to run other code during it, and
+removing `await` isn't an option without also removing the real
+work it's waiting on. That's precisely the case Fix 2's lock is for —
+it doesn't remove the wait, it just stops other callers from entering
+the critical section while the wait is happening.
+
+</Checkpoint>
 
 ## Fix 2: a lock, for when the critical section can't be made synchronous
 

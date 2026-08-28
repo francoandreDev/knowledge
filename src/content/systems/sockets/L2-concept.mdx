@@ -2,6 +2,22 @@
 title: "L2 — Ports, the TCP handshake, and framing a byte stream into messages"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 established that a socket is an IP-plus-port endpoint and that TCP
+delivers a raw byte stream with no built-in message boundaries. L2 works
+out how a connection actually gets established between two ports, and
+exactly how an application recovers discrete messages from that stream.
+
+<LevelIntro
+  items={[
+    "How a port routes bytes to the right program",
+    "The three-way handshake that opens a TCP connection",
+    "How framing schemes recover messages from a byte stream",
+  ]}
+/>
+
 ## Addresses and ports: reaching the right program on the right machine
 
 **If an IP address identifies a machine, how does a message reach the
@@ -56,6 +72,19 @@ when speed matters more than reliability (live video, some game
 networking), but the wrong choice when a chat message absolutely must
 arrive intact and in order.
 
+<Checkpoint question="A server calls accept() and gets back a connected socket. Has any application data been exchanged with the client yet at that point?">
+
+No. `accept()` returning a connected socket only means the three-way
+handshake (SYN, SYN-ACK, ACK) has completed — both sides have agreed the
+connection exists and are ready to exchange bytes. Nothing about the
+handshake carries application data; it's purely TCP negotiating that a
+reliable, ordered channel now exists. The first `read`/`data` event
+carrying anything the application actually sent (a request, a chat
+message, whatever the protocol on top defines) always happens strictly
+after the handshake, never during or before it.
+
+</Checkpoint>
+
 ## Streams don't preserve message boundaries — framing has to
 
 **Given that TCP only guarantees an ordered byte stream, how does an
@@ -87,6 +116,20 @@ protocol also defines:
 | Order     | Which message is allowed to come first, second, third?      |
 | Meaning   | What does each field or command actually mean?              |
 | Errors    | How does the receiver say "I could not understand that"?    |
+
+<Checkpoint question="Two 'data' events arrive: the text {a:1 (no closing brace yet), then the rest of the bytes completing two full JSON objects separated by newlines. Using newline-delimited framing with a buffer, how many complete messages can be extracted, and after which event?">
+
+Zero after the first event, then two after the second. The receiver
+appends each chunk to its buffer and only extracts a message once a `\n`
+actually appears in the accumulated buffer. After the first chunk, the
+buffer holds `'{"a":1'` — no newline yet, so nothing is delivered even
+though it looks like a complete-ish fragment. After the second chunk,
+the buffer holds `'{"a":1}\n{"b":2}\n'`, which contains two newlines, so
+the framer extracts both `{"a":1}` and `{"b":2}` as separate messages
+from that single event. This is exactly why framing has to buffer across
+events rather than inspect each event in isolation.
+
+</Checkpoint>
 
 ## Why the localhost test never caught this
 

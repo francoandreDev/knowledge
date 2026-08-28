@@ -2,6 +2,22 @@
 title: "L2 — What each technique actually solves, and the states a circuit breaker moves through"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 named four techniques and the resource-exhaustion problem they all
+respond to. This level works through what each one actually solves on
+its own, why having a timeout isn't enough by itself, and the specific
+states a circuit breaker moves through.
+
+<LevelIntro
+  items={[
+    "What each of the four techniques solves, and what it doesn't",
+    "Why a timeout alone doesn't fully prevent the Scenario's outage",
+    "The three states a circuit breaker moves through, and why",
+  ]}
+/>
+
 ## Four techniques, four different parts of the same problem
 
 **If a timeout already stops a call from hanging forever, why are
@@ -33,6 +49,21 @@ bad pattern for a while. Backpressure is what the overloaded service
 does before collapse: reject new work, return `429` or `503`, shrink a
 queue, pause producers, or serve a cheaper degraded path.
 
+<Checkpoint question="A teammate says: 'we already added a 100ms timeout on the call to inventory, so we're covered.' Are they right?">
+
+Not fully. A timeout caps how long any single call can hold a
+resource, so it does stop a request from waiting forever — that's real
+progress over the Scenario's original no-timeout setup. But it doesn't
+reduce how many calls are made. If inventory stays slow, the order
+service keeps sending new requests to it, and each one still occupies
+a connection for up to 100ms. If requests arrive faster than they time
+out, the pool can still fill up — just more slowly, and bounded
+instead of unbounded. Being "covered" against unbounded hangs is not
+the same as being covered against exhaustion under sustained load;
+that second part is what a circuit breaker adds.
+
+</Checkpoint>
+
 ## The states a circuit breaker actually moves through
 
 **Does a circuit breaker just permanently stop calling a failing
@@ -63,6 +94,21 @@ Because retrying forever against a dependency that's still down keeps
 consuming the caller's own resources on calls very likely to fail —
 the same resource-exhaustion problem from the Scenario, just caused
 by the caller's own retry logic instead of a single hanging call.
+
+<Checkpoint question="Once a circuit breaker has moved to Open, does the next incoming request to the dependency still consume a connection or wait on the timeout?">
+
+No — and that's the whole point of the Open state. While Open, the
+breaker refuses the call before any network attempt is made, so the
+request fails immediately, in well under a millisecond, instead of
+occupying a connection for up to the timeout's full duration. This is
+what a timeout alone can't provide: a timeout bounds how long one
+wasted call takes, but it still lets that call happen. The Open state
+skips the call entirely, which is exactly why the order service's
+connection pool can stop draining even while inventory stays down —
+the breaker only allows a single trial request back through once the
+cooldown elapses and it moves to Half-Open.
+
+</Checkpoint>
 
 ## Failure modes at this level
 

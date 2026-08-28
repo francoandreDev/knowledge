@@ -3,6 +3,8 @@ title: "L3 — Reproducing the split-message bug, and fixing it with a real fram
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="One message, split into two chunks">
   <Fragment slot="facts">
@@ -17,6 +19,14 @@ chunk alone throw an error, or does it silently return something
 incorrect without throwing?**
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "Reproducing a split-message bug from real chunks",
+    "Buffering bytes until a full message boundary appears",
+    "Newline-delimited vs. length-prefixed framing trade-offs",
+  ]}
+/>
 
 ## The buggy handler, reproducing the incident exactly
 
@@ -95,6 +105,21 @@ Nothing about how the network delivered the bytes changed between the
 buggy and fixed runs — the exact same two chunks, in the exact same
 order. The only difference is that the framer buffers incomplete data
 instead of assuming each `data` event is already a complete message.
+
+<Checkpoint question="In createLineFramer, why does the buffer get reassigned with buffer.slice(newlineIndex + 1) instead of being cleared to an empty string after each extracted line?">
+
+Because the buffer can hold more than just the line that was just
+extracted — bytes belonging to the next message, or a partial fragment
+of it, may already be sitting right after the newline in the same chunk.
+Clearing the buffer to `""` would silently discard those bytes, which is
+exactly the "use `if` instead of `while`" bug this unit later calls out:
+it would lose any message beyond the first one found in a chunk.
+`slice(newlineIndex + 1)` keeps everything after the newline intact so
+the `while` loop can keep pulling complete lines out of it, and whatever
+remains once no newline is left is genuinely partial data that has to
+wait for the next `data` event to complete it.
+
+</Checkpoint>
 
 ## Handling the opposite case: multiple messages in one chunk
 

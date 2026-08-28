@@ -2,6 +2,21 @@
 title: "L2 — Where the gap opens, and the two ways to close it"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 named the shape of the bug — two requests both reading "available"
+before either write lands — without yet showing exactly where in the
+code that gap opens, or how to close it. L2 works through both.
+
+<LevelIntro
+  items={[
+    "Time-of-check to time-of-use (TOCTOU)",
+    "Making an operation atomic vs. locking it",
+    "Why adding more checks doesn't fix a race",
+  ]}
+/>
+
 ## Time-of-check to time-of-use
 
 **If "check stock, then decrement it" is correct on its own, where
@@ -42,6 +57,19 @@ Both requests made a decision from the same old fact. The final stock
 number alone hides the damage: it says `0`, but two success promises
 were already made.
 
+<Checkpoint question="Request A and request B both read stock as 1 before either writes. If B's read had instead landed just one step later — after A's write of 0 had already completed — would the race still happen?">
+
+No. If B's read happens after A's write lands, B reads `0`, its check
+`stock > 0` fails, and B correctly reports "out of stock." The race
+only exists in the window where a read can land _before_ the other
+request's write — once that window closes for a given pair of
+operations, there's nothing left to interleave into. This is exactly
+why the fix isn't about the check's logic (`stock > 0` was always
+correct) but about eliminating the window itself, which is what the
+next section does.
+
+</Checkpoint>
+
 ## Closing the gap: two different strategies
 
 **Once you see the gap, there are two structurally different ways to
@@ -73,6 +101,20 @@ write doesn't close the gap; it just changes its size. The only fixes
 that actually work are the two in the table: remove the gap by making
 the operation atomic, or make everything else wait outside the gap
 with a lock.
+
+<Checkpoint question="A teammate suggests fixing the oversold-item bug by adding a second check right before the write: read stock, check it, then re-read and re-check stock immediately before decrementing. Using the two strategies above, does this actually close the TOCTOU gap?">
+
+No — it just moves the gap, it doesn't remove it. The second check has
+the exact same problem as the first: between that re-read and the
+write that follows it, another request can still land its own read.
+Adding checks narrows the window slightly (less code runs inside the
+gap) but never eliminates it, because a gap of any size between a read
+and a write is still a gap something else can interleave into. Only
+collapsing the read-and-write into one atomic step, or locking the
+whole span so nothing else can read during it, actually removes the
+window rather than shrinking it.
+
+</Checkpoint>
 
 ## The generalizable lesson
 

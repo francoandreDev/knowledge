@@ -3,6 +3,8 @@ title: "L3 — Reproducing the partial-write bug, then fixing it with rollback a
 ---
 
 import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
 
 <Scenario label="Same failing order, three different levels of protection">
   <Fragment slot="facts">
@@ -19,6 +21,14 @@ transactional version, will the stock count end up different between
 the two — or will both versions fail in the same way?**
 
 </Scenario>
+
+<LevelIntro
+  items={[
+    "Reproducing L1's bug in real code",
+    "A transaction wrapper with rollback and invariant checks",
+    "A write-ahead log surviving a simulated crash",
+  ]}
+/>
 
 ## Reproducing the bug: two separate writes, no transaction
 
@@ -110,6 +120,23 @@ side effects instead of a silent partial write. All operations run
 against `working`, a clone; the real `store` is only ever touched by
 the commit step, which never runs if anything throws.
 
+<Checkpoint question="In runTransaction, the operation function mutates 'working', not 'store' directly. If operation() threw partway through — after already changing working.stock but before pushing to working.orders — would store.stock end up partially changed too?">
+
+No — `store` would be completely untouched, not partially changed.
+The mutation happened on `working`, a deep clone made at the top of
+`runTransaction`, and `store` is only ever written to in the success
+path: `Object.assign(store.stock, working.stock)` and the two lines
+after it, which run only after `operation` and the invariant check
+have both completed without throwing. If `operation` throws at any
+point — whether on its first line or its last — control jumps straight
+to the `catch` block, and the lines that copy `working` back onto
+`store` simply never execute. That's the whole point of doing the work
+on a clone first: partial progress inside `operation` has nowhere to
+leak into the real `store` unless the commit lines are actually
+reached.
+
+</Checkpoint>
+
 ## Consistency: rejecting a commit that would break an invariant
 
 ```js
@@ -191,6 +218,24 @@ the exact same state — stock at **5**, both orders present. This is
 what durability actually buys: the guarantee isn't "the process never
 crashes," it's "a crash can't erase a result that was already reported
 as successful."
+
+<Checkpoint question="durableCommit pushes to the log and returns { acknowledged: true } before recoverFromLog is ever called. If a crash happened between durableCommit returning and the in-memory store object being updated to match, would the recovered state after restart still include that order?">
+
+Yes — because durability was already satisfied the moment the log
+write completed, not when the in-memory `store` object caught up to
+it. `durableCommit` acknowledges success as soon as the entry is in
+the durable log (the comment even notes this stands in for an
+`fsync`'d disk write in a real database); everything after that,
+including ever updating an in-memory `store`, is optional bookkeeping
+that a crash is allowed to lose. `recoverFromLog` doesn't need the
+old in-memory `store` at all — it rebuilds state entirely from the log
+itself, `state.stock[entry.productId] -= entry.qty` for every entry.
+So a crash at exactly that moment changes nothing about the outcome:
+the order is in the log, the log is what recovery replays, and the
+recovered state includes it regardless of what did or didn't happen to
+any in-memory object in between.
+
+</Checkpoint>
 
 ## Extend it: what if two orders for the same product arrive at once?
 

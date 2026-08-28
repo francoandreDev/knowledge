@@ -2,6 +2,22 @@
 title: "L2 — Why query count explains the slowdown, and what normalization actually trades off"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 named the N+1 pattern and the normalization/denormalization vocabulary
+without yet showing why query count, specifically, is what explains this
+unit's Scenario. L2 works out that mechanism and the real trade-off behind
+the two schema shapes.
+
+<LevelIntro
+  items={[
+    "Why query count, not raw database speed, explains the slowdown",
+    "What normalization and denormalization each optimize for",
+    "Failure modes that hide or worsen this pattern",
+  ]}
+/>
+
 ## Why "the database is slow" is the wrong diagnosis
 
 **If the schema and the code didn't change, and the database itself
@@ -33,6 +49,18 @@ partially — it would reduce the cost of each individual query, but
 the total delay still scales linearly with the number of orders
 either way. The structural problem (query count proportional to list
 size) doesn't go away just because each query gets a little cheaper.
+
+<Checkpoint question="A teammate proposes upgrading the production database to faster hardware to fix the Scenario's 50-second endpoint. Based on the diagram above, will that fix the underlying problem?">
+
+No — it will make each of the 50,001 queries a little cheaper, but the
+count itself is still 50,001 and still grows one-for-one with the number
+of orders. The delay would shrink somewhat at today's data size, but the
+same endpoint would slow down again the next time the order count grows,
+because the structural cause — one query per row instead of one query
+total — was never touched. Faster hardware treats a symptom of a pattern
+that scales badly; it doesn't change the pattern.
+
+</Checkpoint>
 
 ## What normalization and denormalization actually trade off
 
@@ -66,6 +94,19 @@ almost never benefits from denormalizing that one field; a system
 that updates customer records frequently and rarely needs the name on
 the order directly is better off staying normalized and paying the
 join cost on the rare read.
+
+<Checkpoint question="A social app shows a user's display name next to every one of their posts, reads happen constantly, and users rename themselves only a few times a year. Using the table above, does denormalizing the display name onto each post fit this access pattern?">
+
+Yes. Reads (showing posts with the author's name) are the dominant, constant
+operation, while writes to the thing being duplicated (renaming) are rare —
+exactly the profile where denormalization's cost (a slightly more complex
+rename that has to update every duplicated copy) is paid rarely, while its
+benefit (no per-post join or lookup) is collected on almost every request.
+The same reasoning that made joining orders-to-customers efficient in the
+"joined" fix doesn't disappear here — denormalization is a separate, further
+trade, not a replacement for fixing an N+1 pattern first.
+
+</Checkpoint>
 
 ## Failure modes at this level
 

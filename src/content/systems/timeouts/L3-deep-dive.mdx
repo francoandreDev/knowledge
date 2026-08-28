@@ -2,6 +2,22 @@
 title: "L3 — Implementing the timeout and circuit breaker that would have caught the Scenario's cascade"
 ---
 
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 covered what each technique solves and the states a circuit
+breaker moves through. This level implements a timeout wrapper and a
+circuit breaker directly, verifies their behavior, and combines both
+against the Scenario's cascading outage.
+
+<LevelIntro
+  items={[
+    "A working timeout wrapper built on Promise.race",
+    "A circuit breaker class with closed/open/half-open state",
+    "Combining timeout, circuit breaker, and bounded retries together",
+  ]}
+/>
+
 ## Capping how long a call can hold a resource
 
 **Here's a timeout wrapper using `Promise.race` — the call and a
@@ -116,6 +132,19 @@ provide: the timeout bounds how long a _single_ wasted call takes,
 while the circuit breaker prevents making the wasted call at all
 once there's clear evidence the dependency is down.
 
+<Checkpoint question="If canAttempt() were checked after starting the network call instead of before it, would the CircuitBreaker class above still protect the connection pool the way it's meant to?">
+
+No. The whole benefit of the Open state is that it lets the caller
+skip the call entirely — refusing in well under a millisecond instead
+of occupying a connection for up to the timeout's duration. If
+`canAttempt()` were checked after the call had already started, the
+connection would already be spent by the time the breaker's answer
+came back, which is exactly the resource-exhaustion pattern from the
+Scenario, just moved one layer later. Order matters here: the breaker
+has to gate the attempt, not audit it afterward.
+
+</Checkpoint>
+
 ## Combining both to address the Scenario directly
 
 **How would the order service actually use both together for a call
@@ -145,6 +174,20 @@ of tying up a connection for up to 100ms each. The order service's
 own connection pool stops draining, and it stays available for
 requests that don't depend on inventory at all — directly preventing
 the Scenario's cascading outage.
+
+<Checkpoint question="During the window before the failure threshold is crossed — while the breaker is still closed — is the connection pool already protected, or only partially?">
+
+Only partially, and it's worth being precise about why. While closed,
+every call to inventory still goes through `withTimeout`, so each one
+is capped at 100ms rather than hanging forever — real protection
+compared to the Scenario's original no-timeout setup. But nothing
+stops new calls from arriving and each one still occupies a connection
+for up to that 100ms while inventory stays slow. Full protection only
+kicks in once enough failures accumulate and the breaker actually
+opens — before that point, the timeout is bounding the damage, not
+preventing it.
+
+</Checkpoint>
 
 ## Adding retries without multiplying the outage
 
