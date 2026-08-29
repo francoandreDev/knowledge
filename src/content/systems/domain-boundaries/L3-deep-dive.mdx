@@ -1,0 +1,302 @@
+---
+title: "L3 — Building a coupling/cohesion calculator and defending a split"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="The problem">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📋</span> Review asks: <strong>"Why Shipping+Fulfillment first, not Orders?"</strong></div>
+      <div class="flex items-center gap-1.5"><span>📊</span> "It feels right" is not an answer a staff review accepts</div>
+      <div class="flex items-center gap-1.5"><span>🧮</span> The answer has to be a number computed from the actual call graph</div>
+    </div>
+    <div class="not-prose mt-3 rounded border border-sky-300 bg-sky-50 p-2 text-xs dark:border-sky-800 dark:bg-sky-950">
+      A design review that can't be re-derived from data by someone who wasn't in the room isn't a decision — it's a guess with confidence attached.
+    </div>
+
+  </Fragment>
+
+L2 gave the method by hand, on one small graph. A real monolith has
+dozens of modules and hundreds of edges — nobody is eyeballing that.
+This level builds the two tools that make the method run on real
+data: a coupling/cohesion calculator over a call graph, and a
+heuristic for classifying an ambiguous class that seems to belong to
+two contexts at once. Both are the kind of code you'd actually
+attach to a design-review doc, not a toy.
+
+**Before reading on: if you had to defend "Shipping+Fulfillment first" in a review with one sentence and one number, what would the sentence be — and could you say it without saying "it feels right"?**
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "Modeling the monolith's call graph as real data structures",
+    "Computing internal call ratio and external shared tables for any candidate group",
+    "A heuristic for placing an ambiguous class in the right bounded context",
+  ]}
+/>
+
+## The call graph as data
+
+The graph from L2, as data a script can actually run against. Each
+edge carries a call weight and, optionally, the tables both modules
+touch — that's the field the calculator treats as the strongest
+coupling signal.
+
+```js
+// call-graph.js
+const monolith = {
+  modules: [
+    "Catalog",
+    "Orders",
+    "Inventory",
+    "Shipping",
+    "Fulfillment",
+    "Billing",
+    "Users",
+  ],
+  edges: [
+    { from: "Catalog", to: "Orders", callsPerDay: 20000, sharedTables: [] },
+    {
+      from: "Orders",
+      to: "Inventory",
+      callsPerDay: 12000,
+      sharedTables: ["inventory_reservations"],
+    },
+    {
+      from: "Orders",
+      to: "Shipping",
+      callsPerDay: 3000,
+      sharedTables: ["order_items"],
+    },
+    {
+      from: "Shipping",
+      to: "Orders",
+      callsPerDay: 1500,
+      sharedTables: ["order_items"],
+    },
+    { from: "Orders", to: "Billing", callsPerDay: 5000, sharedTables: [] },
+    {
+      from: "Shipping",
+      to: "Fulfillment",
+      callsPerDay: 9000,
+      sharedTables: [],
+    },
+    {
+      from: "Fulfillment",
+      to: "Shipping",
+      callsPerDay: 6000,
+      sharedTables: [],
+    },
+    { from: "Users", to: "Orders", callsPerDay: 2000, sharedTables: [] },
+  ],
+};
+```
+
+## Scoring a candidate boundary
+
+Two functions, matching the two numbers from L2 exactly: internal
+call ratio, and external shared tables. Both take the graph and a
+proposed group of module names.
+
+```js
+// boundary-score.js
+
+/** Every edge whose call weight touches at least one module in `group`. */
+function edgesTouchingGroup(graph, group) {
+  const inGroup = new Set(group);
+  return graph.edges.filter((e) => inGroup.has(e.from) || inGroup.has(e.to));
+}
+
+/**
+ * Fraction of call volume touching the group that stays *inside* the
+ * group. 1.0 = fully self-contained; 0.0 = every call crosses the
+ * boundary.
+ */
+function internalCallRatio(graph, group) {
+  const inGroup = new Set(group);
+  const touching = edgesTouchingGroup(graph, group);
+  if (touching.length === 0) return 1; // no calls at all — vacuously self-contained
+
+  let internal = 0;
+  let total = 0;
+  for (const edge of touching) {
+    total += edge.callsPerDay;
+    if (inGroup.has(edge.from) && inGroup.has(edge.to)) {
+      internal += edge.callsPerDay;
+    }
+  }
+  return internal / total;
+}
+
+/**
+ * Tables shared between a module inside `group` and a module outside
+ * it. Non-empty means: this boundary can't be cut cleanly today.
+ */
+function externalSharedTables(graph, group) {
+  const inGroup = new Set(group);
+  const shared = new Set();
+  for (const edge of graph.edges) {
+    const fromIn = inGroup.has(edge.from);
+    const toIn = inGroup.has(edge.to);
+    if (fromIn !== toIn) {
+      // exactly one endpoint is inside the group — this edge crosses
+      // the proposed boundary
+      for (const table of edge.sharedTables) shared.add(table);
+    }
+  }
+  return [...shared];
+}
+
+function scoreBoundary(graph, group) {
+  const ratio = internalCallRatio(graph, group);
+  const sharedTables = externalSharedTables(graph, group);
+  return {
+    group,
+    internalCallRatio: Math.round(ratio * 100) / 100,
+    externalSharedTables: sharedTables,
+    verdict:
+      sharedTables.length === 0
+        ? "clean"
+        : "blocked — shared data crosses the line",
+  };
+}
+
+module.exports = { internalCallRatio, externalSharedTables, scoreBoundary };
+```
+
+Running it against the two candidates from L2's scenario:
+
+```js
+scoreBoundary(monolith, ["Orders"]);
+// { internalCallRatio: 0, externalSharedTables: ["order_items", "inventory_reservations"], verdict: "blocked — ..." }
+
+scoreBoundary(monolith, ["Shipping", "Fulfillment"]);
+// { internalCallRatio: 0.76, externalSharedTables: [], verdict: "clean" }
+```
+
+That's the sentence for the review, with the number attached: "Orders
+alone shares two tables across the line it would cut along; Shipping
+plus Fulfillment shares zero and keeps 76% of its call volume
+internal — that's why it goes first."
+
+<Checkpoint question="externalSharedTables only counts an edge when `fromIn !== toIn` — exactly one endpoint is inside the group. Why not also count an edge where BOTH endpoints are inside the group but the shared table is also touched by a third module outside it entirely?">
+
+Because that case is real and the function above doesn't claim to
+catch it — it only inspects the two modules on each edge, not every
+module that touches a given table across the whole graph. A table
+touched by three modules, two of which land inside the proposed
+group and one outside, needs a table-centric pass (group every edge
+by `sharedTables`, not by `from`/`to`) rather than an edge-centric
+one. That's a real extension worth building before trusting this
+function on a graph with more than two modules sharing one table —
+the version here is correct for the common case (a table shared by
+exactly two modules) but not the general one.
+
+</Checkpoint>
+
+## Classifying an ambiguous class
+
+Not every class in the monolith obviously belongs to one module. A
+`ShippingLabel` class might have started in Shipping but grown a
+method that writes to `order_items` directly, because it was
+convenient at the time. Which bounded context should own it if the
+split goes ahead?
+
+The heuristic: weigh where the class's data lives against where its
+callers live, and let the larger signal win — a class isn't "half
+Orders, half Shipping" in practice, it's usually mostly one and
+accidentally touching the other.
+
+```js
+// classify-class.js
+
+/**
+ * usage = {
+ *   tableAccess: { [table]: accessCount },
+ *   callsFrom:   { [module]: callCount },
+ * }
+ * moduleOwnership = { [table]: ownerModule } — which module's data model
+ * each table canonically belongs to, from the schema itself.
+ */
+function suggestBoundary(usage, moduleOwnership) {
+  const scores = {};
+  const bump = (module, amount) => {
+    scores[module] = (scores[module] || 0) + amount;
+  };
+
+  for (const [table, count] of Object.entries(usage.tableAccess)) {
+    const owner = moduleOwnership[table];
+    if (owner) bump(owner, count);
+  }
+  for (const [module, count] of Object.entries(usage.callsFrom)) {
+    // caller volume counts too, but data ownership is the stronger
+    // signal — a class belongs where its data lives more than where
+    // its callers happen to be
+    bump(module, count * 0.5);
+  }
+
+  const ranked = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  if (ranked.length === 0) {
+    return { module: null, confidence: 0 };
+  }
+  const [topModule, topScore] = ranked[0];
+  const total = ranked.reduce((sum, [, score]) => sum + score, 0);
+  return {
+    module: topModule,
+    confidence: Math.round((topScore / total) * 100) / 100,
+  };
+}
+
+module.exports = { suggestBoundary };
+```
+
+Applied to `ShippingLabel`:
+
+```js
+const moduleOwnership = { order_items: "Orders", shipping_labels: "Shipping" };
+const shippingLabelUsage = {
+  tableAccess: { order_items: 5, shipping_labels: 40 },
+  callsFrom: { Orders: 2, Shipping: 30 },
+};
+
+suggestBoundary(shippingLabelUsage, moduleOwnership);
+// { module: "Shipping", confidence: 0.93 }
+```
+
+93% confidence Shipping owns it — the five `order_items` touches are
+real and worth a follow-up ticket to remove, but they're not enough
+to override forty `shipping_labels` accesses and thirty Shipping
+callers. This is exactly the kind of ambiguous case a review needs an
+answer for before extraction, not after.
+
+<Checkpoint question="Why does the heuristic weight table access at full value but caller counts at 0.5x, instead of treating both signals equally?">
+
+Because the two signals answer different questions with different
+reliability. Table access reflects what data the class actually
+depends on to do its job — a structural fact that doesn't change
+based on who happens to be calling it this quarter. Caller counts
+reflect current traffic patterns, which drift: a class could get
+called mostly by Orders today simply because of how a feature was
+wired, without that meaning the class's data or purpose belongs to
+Orders. Weighting data ownership higher biases the heuristic toward
+the more stable, structural signal — the same reasoning L2 used to
+rank shared tables above call frequency when scoring a boundary.
+
+</Checkpoint>
+
+## What this doesn't decide
+
+Neither calculator makes the final call — they turn "where should we
+cut?" into numbers a review can argue about concretely instead of by
+gut feel. A group can score perfectly clean today and still be the
+wrong first target if, say, it has no product urgency behind it, or
+a team boundary doesn't match it. What changes if the org has three
+teams instead of one, and the "cleanest" boundary by these numbers
+cuts across two of them instead of aligning with either? That's a
+real constraint these functions don't see — coupling analysis narrows
+the candidates; it doesn't replace judgment about team ownership,
+urgency, or how a boundary was going to get staffed either way.

@@ -1,0 +1,188 @@
+---
+title: "L3 — Scoring candidates without pretending it's purely objective"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="Three candidates, one Trial slot">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📨</span> <strong>Problem</strong> — the team's message queue needs replacing this quarter</div>
+      <div class="flex items-center gap-1.5"><span>🗳️</span> <strong>Candidates</strong> — Kafka, NATS, and a hosted SQS-based approach</div>
+      <div class="flex items-center gap-1.5"><span>⚖️</span> <strong>Tension</strong> — each engineer on the team is confident a different one is "obviously right"</div>
+    </div>
+  </Fragment>
+
+Three engineers each did their own research and each came back convinced:
+one wants Kafka ("it's what every serious company runs"), one wants NATS
+("it's simpler and we don't need Kafka's scale"), one wants the hosted
+SQS-based approach ("we're not an infra company, let AWS run it"). All
+three are defensible. None of them are wrong on the facts they picked.
+**With three confident, contradictory recommendations and one Trial slot
+to fill this quarter, how do you turn "everyone has an opinion" into an
+actual decision the team can defend later?**
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "A weighted scoring function, built from the team's real criteria",
+    "Why the score doesn't replace judgment, only structures it",
+    "Running the scenario's three candidates through it",
+  ]}
+/>
+
+## Turning "everyone has an opinion" into shared criteria
+
+**Before scoring anything — what makes one engineer's "obviously right"
+different from another's, if they're all looking at the same three
+options?** They're not weighing the same things. The Kafka advocate is
+weighting long-term scale; the NATS advocate is weighting operational
+simplicity; the SQS advocate is weighting "who's on call for this at 3am."
+None of them are wrong to care about their criterion — the disagreement is
+about **weight**, not fact. A scoring function doesn't remove judgment; it
+forces the judgment about weight into the open, where it can be argued
+about explicitly instead of hiding inside three separate "obviously"s.
+
+A reasonable starting set of criteria for a Trial-ring decision:
+
+| Criterion          | What it's really asking                                                        |
+| ------------------ | ------------------------------------------------------------------------------ |
+| Team familiarity   | How much operational pain will the learning curve cost, right now?             |
+| Ecosystem maturity | How many of our real problems has someone else already solved and documented?  |
+| Migration cost     | How much existing code/infra has to change to try this at all?                 |
+| Strategic fit      | Does this match where the team's architecture is actually headed, or fight it? |
+
+```javascript
+function scoreCandidate(candidate, weights) {
+  // candidate: { name, familiarity, maturity, migrationCost, strategicFit }
+  // each sub-score is 0-10, migrationCost is inverted (10 = cheap to adopt)
+  // weights: { familiarity, maturity, migrationCost, strategicFit }, sums to 1
+  return (
+    candidate.familiarity * weights.familiarity +
+    candidate.maturity * weights.maturity +
+    candidate.migrationCost * weights.migrationCost +
+    candidate.strategicFit * weights.strategicFit
+  );
+}
+```
+
+<Checkpoint question="Two engineers run the exact same scoreCandidate function over the exact same three candidates, but disagree on the outcome. If the sub-scores (familiarity, maturity, etc.) are identical between them, what's the only thing that could be different, and what does that tell you about what the function is actually for?">
+
+The only thing that can differ, given identical sub-scores, is the
+`weights` object — one engineer is weighting migration cost heavier
+(favoring the cheap-to-adopt option), the other is weighting strategic fit
+heavier (favoring the option that matches where the architecture is
+headed). That's the point of building the function this way: it doesn't
+manufacture agreement, it isolates the actual disagreement down to "how
+much do we weight each criterion," which is a conversation the team can
+actually have out loud, instead of three unfalsifiable "obviously"s
+talking past each other.
+
+</Checkpoint>
+
+## Running the scenario's three candidates
+
+Scoring the scenario's three options, using weights this particular team
+agreed matter most this quarter (a small team, no dedicated infra staff,
+moderate but not extreme throughput needs):
+
+| Candidate  | Familiarity | Maturity | Migration cost (inverted) | Strategic fit |
+| ---------- | ----------- | -------- | ------------------------- | ------------- |
+| Kafka      | 3           | 9        | 2                         | 5             |
+| NATS       | 5           | 6        | 6                         | 7             |
+| Hosted SQS | 8           | 8        | 8                         | 6             |
+
+```javascript
+const weights = {
+  familiarity: 0.3,
+  maturity: 0.2,
+  migrationCost: 0.3,
+  strategicFit: 0.2,
+};
+
+const candidates = [
+  {
+    name: "Kafka",
+    familiarity: 3,
+    maturity: 9,
+    migrationCost: 2,
+    strategicFit: 5,
+  },
+  {
+    name: "NATS",
+    familiarity: 5,
+    maturity: 6,
+    migrationCost: 6,
+    strategicFit: 7,
+  },
+  {
+    name: "Hosted SQS",
+    familiarity: 8,
+    maturity: 8,
+    migrationCost: 8,
+    strategicFit: 6,
+  },
+];
+
+for (const c of candidates) {
+  console.log(c.name, scoreCandidate(c, weights).toFixed(2));
+}
+// Kafka:      3*0.3 + 9*0.2 + 2*0.3 + 5*0.2 = 4.3
+// NATS:       5*0.3 + 6*0.2 + 6*0.3 + 7*0.2 = 5.9
+// Hosted SQS: 8*0.3 + 8*0.2 + 8*0.3 + 6*0.2 = 7.6
+```
+
+For this team, with this quarter's weights, Hosted SQS scores highest —
+not because Kafka is a worse technology in any absolute sense (its
+maturity score is the highest of the three), but because a small team with
+no dedicated infra staff pays disproportionately for Kafka's operational
+complexity, and this scoring made that cost visible in the final number
+instead of leaving it implicit in "everyone knows Kafka is heavier."
+
+<Checkpoint question="If this same scoring ran at a company with a dedicated 6-person platform team and throughput needs 50x higher, would you expect the same candidate to win, using the same scoring function but different sub-scores?">
+
+Not necessarily, and that's the function working correctly rather than a
+flaw. A dedicated platform team raises Kafka's `familiarity` score (the
+operational cost is now amortized across specialists, not a tax on the
+whole team), and much higher throughput likely raises Kafka's
+`strategicFit` score, since it's the option actually built for that scale.
+The same weights and the same formula, applied to different, honestly
+re-scored inputs, can and should produce a different winner — the function
+isn't claiming one universal right answer, it's making explicit what
+already changed about the situation.
+
+</Checkpoint>
+
+## Where the score doesn't replace judgment
+
+The score is a starting point for a conversation, not a verdict to defer
+to blindly:
+
+- **Garbage in, garbage out.** If the sub-scores are guessed rather than
+  based on a real spike (recall L2's Assess-ring evidence bar), the score
+  is just three people's opinions laundered through arithmetic — it looks
+  more objective than it is. Score after an Assess-ring spike, not before
+  one.
+- **A close score is not a decisive score.** Kafka at 4.3 and NATS at 5.9
+  is a real gap; 5.6 versus 5.9 is close enough that the qualitative
+  factors the formula can't capture (team morale, a candidate's community
+  responsiveness, a looming deprecation) should probably decide it instead.
+- **The weights themselves are the real decision.** Two teams scoring the
+  identical three candidates with different weights can legitimately reach
+  different, equally defensible answers — the value isn't a single
+  "correct" score, it's that the team had to agree on weights out loud
+  before the number existed, which is the argument L1's ungoverned
+  scenario never had.
+
+**Extend it:** the scenario above assumed a moderate-traffic product team.
+What would the weights (not the scores — the weights) look like for a
+team building a financial ledger where every message must be durable and
+auditable, and does that change which candidate wins even with the exact
+same sub-scores? And what would change about this whole exercise if the
+decision being scored weren't a Trial-ring pick like a message queue, but
+whether to move an existing Adopt-ring technology to Hold — is a weighted
+score even the right tool for that different kind of decision, or does
+that call for something else entirely?
