@@ -1,0 +1,238 @@
+---
+title: "L3 — Building a quorum store: writes, reads, and conflict resolution"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="The problem">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🧑‍💻</span> <strong>Client A</strong> writes <code>cart.qty = 2</code> at t=100</div>
+      <div class="flex items-center gap-1.5"><span>🧑‍💻</span> <strong>Client B</strong> writes <code>cart.qty = 3</code> at t=101, to a different replica</div>
+      <div class="flex items-center gap-1.5"><span>🔀</span> Both writes reach only <strong>part</strong> of the cluster before a partition hits</div>
+    </div>
+    <div class="not-prose mt-3 rounded border border-amber-300 bg-amber-50 p-2 text-xs dark:border-amber-800 dark:bg-amber-950">
+      When the partition heals, two replicas disagree about <code>cart.qty</code> — and neither is "corrupted." They just each recorded a real write that really happened.
+    </div>
+
+  </Fragment>
+
+L2 gave the quorum formula as a guarantee about **overlap**: a read
+is guaranteed to see the newest acknowledged write. It said nothing
+about what happens when two writes race each other and land on
+different replicas before either fully propagates — that's a real gap
+the formula alone doesn't close. This level builds the missing piece
+in actual code: a small quorum-based key-value store, and a
+conflict-resolution rule for exactly this situation.
+
+**Before reading on: does raising W (say, to N, so every write must
+reach every replica) make this race impossible — or does it just make
+it slower to trigger?**
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "A quorum store's write and read paths, in real code",
+    "Last-write-wins conflict resolution, and its real failure mode",
+    "Simulating a partition and watching availability vs. consistency play out",
+  ]}
+/>
+
+## The replica set and a naive write
+
+The store below models `N` replicas as plain JS objects. Each holds
+its own copy of every key, plus a `reachable` flag a test can flip to
+simulate a partition — no real networking, but the same coordination
+logic a production quorum store runs.
+
+```ts
+interface VersionedValue {
+  value: unknown;
+  timestamp: number; // logical write time, used for conflict resolution
+}
+
+interface Replica {
+  id: string;
+  reachable: boolean;
+  data: Map<string, VersionedValue>;
+}
+
+function createReplica(id: string): Replica {
+  return { id, reachable: true, data: new Map() };
+}
+
+function createCluster(n: number): Replica[] {
+  return Array.from({ length: n }, (_, i) => createReplica(`replica-${i}`));
+}
+```
+
+**Why store a `timestamp` alongside every value, instead of just the
+value?** Because resolving the race in this level's Scenario requires
+comparing two writes to the same key — without a timestamp, there is
+no principled way to decide which one is "newer" once they disagree.
+
+## Quorum write: succeed once W replicas ack
+
+```ts
+interface WriteResult {
+  acked: number;
+  succeeded: boolean;
+  ackedReplicas: string[];
+}
+
+function quorumWrite(
+  cluster: Replica[],
+  key: string,
+  value: unknown,
+  timestamp: number,
+  w: number,
+): WriteResult {
+  const ackedReplicas: string[] = [];
+
+  for (const replica of cluster) {
+    if (!replica.reachable) continue;
+    replica.data.set(key, { value, timestamp });
+    ackedReplicas.push(replica.id);
+  }
+
+  return {
+    acked: ackedReplicas.length,
+    succeeded: ackedReplicas.length >= w,
+    ackedReplicas,
+  };
+}
+```
+
+This write is deliberately "optimistic": it writes to every
+_reachable_ replica (cheap, and matches how real quorum stores
+fan out writes in parallel), but only reports `succeeded: true` once
+at least `w` of them actually confirmed. A caller that ignores
+`succeeded` and treats every call as successful is exactly the bug
+class L1's bank example was built around — the write can report
+failure while some replicas were still updated.
+
+## Quorum read: query R replicas, resolve conflicts
+
+```ts
+function quorumRead(
+  cluster: Replica[],
+  key: string,
+  r: number,
+): VersionedValue | undefined {
+  const responses: VersionedValue[] = [];
+
+  for (const replica of cluster) {
+    if (!replica.reachable) continue;
+    const entry = replica.data.get(key);
+    if (entry) responses.push(entry);
+    if (responses.length >= r) break;
+  }
+
+  if (responses.length === 0) return undefined;
+
+  // Last-write-wins: the response with the highest timestamp is
+  // treated as authoritative. This is the resolution rule for the
+  // Scenario's race — see the Checkpoint below for its real cost.
+  return responses.reduce((latest, current) =>
+    current.timestamp > latest.timestamp ? current : latest,
+  );
+}
+```
+
+`quorumRead` doesn't just return "a" value — it queries `r` replicas
+and picks the one with the highest timestamp, because with `W + R > N`
+(L2's formula) at least one of those `r` responses is guaranteed to be
+the most recent acknowledged write. Without that guarantee, last-write-wins
+would just be guessing among equally-plausible answers instead of
+provably finding the newest one.
+
+<Checkpoint question="In the Scenario, Client A wrote qty=2 at t=100 and Client B wrote qty=3 at t=101 to different replicas during a partition. Once quorumRead resolves this with last-write-wins, is Client A's write 'lost' in the sense of being silently corrupted data, or in some weaker sense?">
+
+It's lost in a weaker, specific sense: A's write is overwritten and
+will never be returned by a future read, but it was a real, valid
+write at the time it happened — nothing was corrupted, the system
+just had to pick one of two legitimate updates. This is last-write-wins'
+actual failure mode: it silently discards a real user action whenever
+two writes to the same key race, based purely on which timestamp is
+larger, with no awareness of which one the business actually wanted to
+win (e.g. "qty=3" might have been an intentional correction of "qty=2",
+or the two writes might be unrelated and both wrong to silently merge
+this way). That's exactly why some systems use vector clocks or CRDTs
+instead of a bare timestamp — to detect that A and B's writes were
+concurrent and either keep both as siblings or merge them with
+domain-specific logic, rather than picking a winner and quietly
+discarding the loser.
+
+</Checkpoint>
+
+## Simulating a partition
+
+```ts
+function partition(cluster: Replica[], unreachableIds: string[]): void {
+  for (const replica of cluster) {
+    if (unreachableIds.includes(replica.id)) replica.reachable = false;
+  }
+}
+
+function healPartition(cluster: Replica[]): void {
+  for (const replica of cluster) replica.reachable = true;
+}
+```
+
+## Worked example: watching CP vs. AP happen in code
+
+```ts
+const cluster = createCluster(3); // replica-0, replica-1, replica-2
+
+// Healthy cluster: W=2, R=2, N=3 → W + R > N, overlap guaranteed.
+quorumWrite(cluster, "cart:42:qty", 2, 100, 2);
+console.log(quorumRead(cluster, "cart:42:qty", 2)); // { value: 2, timestamp: 100 }
+
+// Partition: replica-2 goes unreachable. Only 2 of 3 replicas remain.
+partition(cluster, ["replica-2"]);
+
+// CP behavior: require w=3 (all replicas). This can no longer succeed.
+const cpAttempt = quorumWrite(cluster, "cart:42:qty", 3, 101, 3);
+console.log(cpAttempt.succeeded); // false — refuses to report success
+
+// AP behavior: require w=2 (majority of the ORIGINAL N=3). Still reachable.
+const apAttempt = quorumWrite(cluster, "cart:42:qty", 3, 102, 2);
+console.log(apAttempt.succeeded); // true — the majority side keeps serving
+
+healPartition(cluster);
+console.log(quorumRead(cluster, "cart:42:qty", 2)); // sees timestamp 102, the AP write
+```
+
+The same code, same partition, two different `w` values — and the
+outcome flips between refusing to serve (CP) and staying available
+(AP). This is the concrete version of L1's abstract "pick one during
+a partition": it isn't a property of the software in the abstract,
+it's a parameter chosen per write.
+
+**What would change if this were a global read counter instead of a
+shopping cart quantity — would last-write-wins still be the wrong
+default, or would it actually be fine here?** For a counter where
+losing one increment briefly is harmless and eventual convergence is
+all that's promised, last-write-wins (or an even simpler
+increment-based CRDT) is a reasonable default; the cart-quantity case
+is where silently discarding a concurrent write is the actual bug,
+because a quantity is a value someone specifically intended, not a
+value where "close enough, eventually" is an acceptable answer.
+
+## Failure modes this model still doesn't cover
+
+- **Clock skew**: `timestamp` here is a trusted logical value. Real
+  systems either use synchronized clocks with bounded uncertainty
+  (e.g. Spanner's TrueTime) or logical clocks (Lamport timestamps,
+  vector clocks) specifically because two replicas' wall clocks can
+  disagree enough to make last-write-wins pick the _wrong_ winner.
+- **Sloppy quorums**: some stores let a write "succeed" against
+  temporary stand-in replicas during a partition, then reconciles
+  later — trading a stricter guarantee for even higher availability
+  than a strict quorum allows.
+- **Read-repair**: this model doesn't write the resolved value back
+  to the stale replica it read past. Production quorum stores usually
+  do, so the cluster converges faster than waiting for the next write.
