@@ -1,0 +1,120 @@
+---
+title: "L1 — How do we know something broke before the user tells us? (logging, metrics, tracing, observability)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+
+<Scenario label="Checkout is failing. The only clue in production is a single line that says 'here'.">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📟</span> <strong>What's in production</strong> — a handful of scattered <code>console.log("here")</code> and <code>console.log("done")</code> calls, no request context</div>
+      <div class="flex items-center gap-1.5"><span>⏱️</span> <strong>Time to first alert</strong> — 23 minutes, and only because a customer tweeted about it</div>
+      <div class="flex items-center gap-1.5"><span>🔁</span> <strong>What it took to find the bug</strong> — 4 redeploys, each one adding a few more print statements and waiting to reproduce</div>
+    </div>
+  </Fragment>
+
+An on-call engineer gets paged: checkout is failing for some
+customers. They open the production logs and find a scattering of
+`console.log("here")` and `console.log("done")` calls left over from
+past debugging sessions — no timestamps that line up across services,
+no way to tell which customer's request they belong to, no severity,
+no structure to search on. There's no dashboard showing whether this
+is 1% of checkouts or 90% of them, and no way to see which of the
+four services a failing checkout request actually passed through
+before it broke. The engineer ends up doing what the logs should have
+made unnecessary: adding more print statements, redeploying, and
+waiting to reproduce the bug live, four times over, while checkout
+stays broken. **The bug gets fixed eventually. What would have to
+exist in production _before_ the incident for it to take four minutes
+instead of four redeploys?**
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "The three signals — logs, metrics, traces — and what each one answers",
+    "Structured logging and log levels",
+    "Why 'add more console.log' doesn't scale past one service",
+  ]}
+/>
+
+## Before the technical names
+
+Observability is the property of a system that lets you answer
+questions you didn't know you'd need to ask, using only the data it
+already produces — without attaching a debugger or shipping new code
+to add a print statement. A system with good observability lets an
+engineer go from "checkout is failing" to "here's the exact request,
+the exact service, and the exact line" using only what was already
+being recorded. A system without it forces exactly the loop in the
+Scenario: guess, instrument, redeploy, wait, repeat.
+
+Three signals do the work, and each answers a different question:
+
+| Signal      | Answers                                                          | Looks like                                                        |
+| ----------- | ---------------------------------------------------------------- | ----------------------------------------------------------------- |
+| **Logs**    | What exactly happened, for this one event or request?            | `{"level":"error","msg":"gateway timeout","orderId":"8841"}`      |
+| **Metrics** | How is the system doing in aggregate, right now?                 | p99 checkout latency: 340ms · error rate: 2.1%                    |
+| **Traces**  | Where, across services, did the time go — or the failure happen? | one checkout request: 40ms gateway → 900ms payment → 260ms notify |
+
+None of the three replaces the others. A metric tells you _that_
+checkout latency spiked at 14:02; it can't tell you which request, or
+why. A log for one failing request tells you exactly what happened to
+it; it can't tell you whether that's 1 request or 10,000. A trace
+shows you where one request's time went across services; it doesn't
+summarize the whole fleet. The Scenario's engineer was missing all
+three, not just one — no metric to say "how much," no log to say
+"which request, why," no trace to say "which service in the chain."
+
+## Structured logging vs. print statements
+
+A `console.log("here")` is a **string**. It's fine to read once,
+scrolling past it live in a terminal. It is nearly useless to _search_
+later, across millions of lines, across multiple services, days after
+the fact — there's nothing to filter on except the literal text.
+
+**Structured logging** means every log line is a machine-parseable
+record (almost always JSON) with consistent fields, not a free-text
+sentence:
+
+```json
+{
+  "timestamp": "2026-08-28T14:02:11.403Z",
+  "level": "error",
+  "service": "payment-service",
+  "requestId": "req_8841",
+  "msg": "gateway timeout on retry",
+  "attempt": 3,
+  "gateway": "stripe"
+}
+```
+
+The same information as a sentence — "payment service failed to
+reach the gateway on the third retry for this order" — but every
+field is now something you can filter, aggregate, or graph: "show me
+every `error`-level log from `payment-service` where `attempt >= 3`."
+That query is impossible against free-text lines; it's one line of a
+log-query tool against structured ones.
+
+## Log levels
+
+Not every event deserves the same attention, and logging everything
+at the same level makes the important lines impossible to find among
+the routine ones:
+
+- **debug** — fine-grained detail, useful while developing, usually
+  off in production because of volume.
+- **info** — routine events worth a permanent record: a request
+  completed, a job started.
+- **warn** — something unexpected happened but the system recovered
+  on its own — a retry succeeded, a fallback was used.
+- **error** — an operation failed and something (a user, a caller)
+  is affected.
+- **fatal** — the process itself can't continue and is about to
+  crash or exit.
+
+A production system typically logs `info` and above, with `debug`
+enabled temporarily and narrowly (one service, one request, a short
+time window) rather than everywhere all the time — the next unit's
+`debug`-level firehose is the next incident's haystack.

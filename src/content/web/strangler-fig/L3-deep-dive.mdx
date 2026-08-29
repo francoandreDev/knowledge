@@ -1,0 +1,302 @@
+---
+title: "L3 — Strangler fig migration"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="The problem">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🧵</span> <strong>Sticky routing</strong> — same user must not flip mid-session</div>
+      <div class="flex items-center gap-1.5"><span>👥</span> <strong>Percentage rollout</strong> — 5% of catalog traffic on "new" this week</div>
+      <div class="flex items-center gap-1.5"><span>🔁</span> <strong>Shadow diff</strong> — legacy answer returned, new answer only logged</div>
+    </div>
+  </Fragment>
+
+A PR lands implementing "the facade" as a single `if (Math.random() < percentage)` check per request. It technically routes some traffic to the new system. In code review, someone asks what happens when the same logged-in user hits `GET /cart` twice in the same page load — once during checkout, once refreshing the page a second later. With pure `Math.random()`, that user can get the legacy cart on one request and the new (still-being-verified) cart on the next, inside a single session, and see their own cart look different depending on which coin flip fired.
+
+**Is a random percentage check actually a correct strangler fig facade, or does it silently break the one property (a client shouldn't be able to tell, or be affected by, which system answered) the pattern depends on?**
+
+</Scenario>
+
+It's not correct as written — not because percentage-based rollout is
+wrong, but because _unstable_ percentage-based rollout is. The fix isn't
+routing on a fresh random number every request; it's routing on something
+stable per identity (a user id, a session id) so the same actor always
+lands on the same system for the duration of a rollout stage. This level
+builds a real facade that gets that right, plus a shadow-diff harness that
+proves a migrated route agrees with the system it's replacing.
+
+<LevelIntro
+  items={[
+    "A real routing facade with stable, per-identity rollout",
+    "A shadow-diff harness for proving equivalence",
+    "Failure modes: split state, sticky sessions, and rollback drills",
+  ]}
+/>
+
+## Building the facade
+
+The facade's job, precisely: given a route and a caller identity, decide
+`"legacy"` or `"new"`, and do it the same way for the same identity every
+time a given rollout percentage is in effect. The building block for that
+is a deterministic hash of the identity into a stable bucket, not a fresh
+random draw per call.
+
+```ts
+// facade.ts
+export type RouteTarget = "legacy" | "new";
+
+export interface RouteConfig {
+  target: RouteTarget;
+  /** Only used when target === "new" but the route isn't fully cut over.
+   *  0 = always legacy, 100 = always new, stable per-identity in between. */
+  rolloutPercent?: number;
+}
+
+export interface Backend {
+  handle(path: string, identity: string): Promise<unknown>;
+}
+
+// Deterministic 0-99 bucket for a string, so the same identity always maps
+// to the same bucket for a given rollout stage — no per-request coin flip.
+export function stableBucket(identity: string): number {
+  let hash = 0;
+  for (let i = 0; i < identity.length; i++) {
+    hash = (hash * 31 + identity.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash) % 100;
+}
+
+export class Facade {
+  private routes = new Map<string, RouteConfig>();
+
+  constructor(
+    private legacy: Backend,
+    private next: Backend,
+  ) {}
+
+  setRoute(path: string, config: RouteConfig): void {
+    this.routes.set(path, config);
+  }
+
+  resolveTarget(path: string, identity: string): RouteTarget {
+    const config = this.routes.get(path);
+    if (!config || config.target === "legacy") return "legacy";
+    if (config.rolloutPercent === undefined || config.rolloutPercent >= 100) {
+      return "new";
+    }
+    if (config.rolloutPercent <= 0) return "legacy";
+    return stableBucket(`${path}:${identity}`) < config.rolloutPercent
+      ? "new"
+      : "legacy";
+  }
+
+  async handle(path: string, identity: string): Promise<unknown> {
+    const target = this.resolveTarget(path, identity);
+    return target === "new"
+      ? this.next.handle(path, identity)
+      : this.legacy.handle(path, identity);
+  }
+}
+```
+
+Two design choices are worth defending in a review. First, the bucket is
+keyed by `path:identity`, not just `identity` — a user can be in the "new"
+bucket for `GET /products` while still in the "legacy" bucket for `POST
+/orders`, because each route earns its own rollout independently and one
+route's bucket assignment shouldn't leak into another's. Second,
+`resolveTarget` is a pure function separated from `handle` — that's what
+makes it possible to unit-test routing decisions without standing up either
+backend, and it's what the shadow harness below reuses directly.
+
+<Checkpoint question="Why hash on path + identity with a deterministic function instead of storing 'this user is on the new system' as a boolean flag per user in a database?">
+
+Both give stability, but the hash approach needs no storage, no migration
+of its own, and no extra network call on the hot path — the routing
+decision is a pure computation available instantly for any identity,
+including one the facade has never seen before. A per-user flag in a
+database would need to be provisioned for every user ahead of time (or
+default somewhere, which just reintroduces the same problem one level
+down), adds a read on every request, and becomes another piece of state
+that can drift out of sync with the rollout percentage a team actually
+intends. The hash trades a small amount of precision — you can't hand-pick
+exactly which individual users are in the 5%, only that some stable-but-
+effectively-random 5% are — for zero operational overhead, which is the
+right trade for a mechanism meant to be flipped often and rolled back fast.
+
+</Checkpoint>
+
+## Proving equivalence before flipping the switch
+
+L2 introduced shadowing conceptually. Here's the actual harness: call both
+backends, return the legacy answer to the caller, and record whether the
+new system's answer matched.
+
+```ts
+// shadow.ts
+import type { Backend } from "./facade";
+
+export interface ShadowResult {
+  path: string;
+  identity: string;
+  matched: boolean;
+  legacyValue: unknown;
+  newValue: unknown;
+  newError?: string;
+}
+
+export class ShadowRunner {
+  private log: ShadowResult[] = [];
+
+  constructor(
+    private legacy: Backend,
+    private next: Backend,
+  ) {}
+
+  async run(path: string, identity: string): Promise<unknown> {
+    const legacyValue = await this.legacy.handle(path, identity);
+
+    // The new system's outcome is never allowed to affect the response or
+    // throw out of this method — a bug in unproven code must stay inert.
+    let newValue: unknown;
+    let newError: string | undefined;
+    try {
+      newValue = await this.next.handle(path, identity);
+    } catch (err) {
+      newError = err instanceof Error ? err.message : String(err);
+    }
+
+    this.log.push({
+      path,
+      identity,
+      matched:
+        newError === undefined &&
+        JSON.stringify(newValue) === JSON.stringify(legacyValue),
+      legacyValue,
+      newValue,
+      newError,
+    });
+
+    return legacyValue;
+  }
+
+  matchRate(path?: string): number {
+    const relevant = path ? this.log.filter((r) => r.path === path) : this.log;
+    if (relevant.length === 0) return 1;
+    const matches = relevant.filter((r) => r.matched).length;
+    return matches / relevant.length;
+  }
+
+  mismatches(path?: string): ShadowResult[] {
+    return this.log.filter((r) => !r.matched && (!path || r.path === path));
+  }
+}
+```
+
+`matchRate` is the number a team actually watches on a dashboard before
+flipping a route's `rolloutPercent` above 0 — not "does it pass our test
+suite," but "does it agree with production on production's own traffic
+shape," which is a strictly harder and more honest bar. `mismatches`
+matters just as much: every disagreement is a concrete, replayable bug
+report against the new system, generated for free by traffic that would
+have happened anyway.
+
+## Worked example: shadowing `GET /products/:id`
+
+```ts
+// example.ts
+import { Facade, type Backend } from "./facade";
+import { ShadowRunner } from "./shadow";
+
+const legacyCatalog: Backend = {
+  async handle(path) {
+    // Legacy quirk: prices are stored as strings with trailing whitespace.
+    if (path === "GET /products/42") return { id: 42, price: "19.99 " };
+    throw new Error("not found");
+  },
+};
+
+const newCatalog: Backend = {
+  async handle(path) {
+    // New system normalizes price to a trimmed string — looks "more
+    // correct" but doesn't match legacy byte-for-byte yet.
+    if (path === "GET /products/42") return { id: 42, price: "19.99" };
+    throw new Error("not found");
+  },
+};
+
+const shadow = new ShadowRunner(legacyCatalog, newCatalog);
+await shadow.run("GET /products/42", "user-1");
+await shadow.run("GET /products/42", "user-2");
+
+console.log(shadow.matchRate("GET /products/42")); // 0 — every call mismatched
+console.log(shadow.mismatches("GET /products/42")[0]);
+// { legacyValue: { price: "19.99 " }, newValue: { price: "19.99" }, matched: false }
+```
+
+This is a deliberately realistic mismatch, not a contrived one: the new
+system is arguably _more_ correct (no stray whitespace), but "more correct"
+still fails a strangler fig migration if any downstream caller does an
+exact string comparison against the legacy format. The shadow log surfaces
+that disagreement before it ships, giving the team a choice — fix the
+legacy-compatible serialization in the new system, or confirm no caller
+actually depends on the trailing space and accept the diff — instead of
+finding out from a support ticket after the route is flipped to `"new"`.
+
+<Checkpoint question="The match rate for GET /products/:id sits at 100% for two straight weeks. Is that alone enough to flip rolloutPercent to 100?">
+
+Not by itself — a 100% match rate only proves the new system agrees with
+the old one _on the traffic that actually occurred_ during those two weeks.
+It says nothing about paths that traffic hasn't exercised yet: a
+low-frequency query parameter, a product with unusual data (null price, a
+non-ASCII name), or a load spike the shadow period never saw. A high match
+rate over a long enough window with genuinely representative traffic is
+strong evidence, but "flip to 100%" is still a judgment call weighing that
+evidence against how catastrophic an undiscovered gap would be for this
+particular route — which loops back to L2's point about migrating
+low-blast-radius routes first, so the routes with the least forgiving
+failure modes are the ones with the most accumulated evidence behind them.
+
+</Checkpoint>
+
+## Failure modes worth defending against in review
+
+**Split state across systems.** If `POST /orders` writes to a new
+database while `GET /orders/:id` still reads from the legacy one (because
+they were migrated on different days), an order placed through the new
+system can be invisible to a read immediately afterward. The fix is never
+"migrate faster" — it's sequencing: a write path and every read path that
+depends on its data move together, or the new write path also
+dual-writes to the legacy store until every dependent read is migrated
+too.
+
+**Non-idempotent rollback.** Flipping a route back to `"legacy"` is safe
+for `GET` requests by construction. It is not automatically safe for a
+`POST /orders` that already charged a card on the new system before the
+flip — rolling back the route doesn't roll back the charge. Any mutating
+route needs a compensating action defined _before_ it's migrated, not
+improvised during an incident.
+
+**Facade as a new single point of failure.** The facade sits in front of
+both systems, so a bug in `resolveTarget` itself (not either backend) can
+take down 100% of traffic on a route that was otherwise perfectly healthy
+on both sides. This is why `resolveTarget` above is kept pure, trivially
+unit-testable, and free of any I/O — the facade's own logic should be the
+most boring, most tested code in the entire migration, precisely because
+every route's traffic passes through it.
+
+## Extend the example yourself
+
+The worked example above shadows a single read-only route with two
+identities. Two natural extensions worth working through: what changes if
+`shadow.run` needs to shadow a _mutating_ route like `POST /orders`,
+where you can't simply call the new system's write path "for free"
+without it having a real side effect — would you shadow against a sandbox
+copy of the new system, or skip shadowing for writes and rely on a smaller
+rollout percentage plus fast rollback instead? And what changes if
+`stableBucket`'s hash collides in a way that clusters an unusually large
+customer's traffic entirely into one bucket — how would you detect that
+before it biases a rollout's results?

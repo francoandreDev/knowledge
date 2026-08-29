@@ -1,0 +1,198 @@
+---
+title: "L3 — Building a structured logger, span tree, and sampler that would have caught the Scenario"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="Even with structured logs and trace IDs, one payment endpoint is drowning the log storage bill.">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📈</span> <strong>Volume</strong> — payment-service alone logs 40M lines/day once structured logging + tracing shipped</div>
+      <div class="flex items-center gap-1.5"><span>💸</span> <strong>Cost</strong> — log storage bill triples in a month, mostly from routine successful requests</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Actual need</strong> — every failed request in full detail, but only a small, representative slice of the successful ones</div>
+    </div>
+  </Fragment>
+
+Structured logging and trace propagation solve the Scenario from L1
+and L2 — an engineer can now find one request's full story instantly.
+But logging _everything_, for _every_ request, at full detail turns
+into its own problem once volume is real: payment-service alone
+produces 40 million structured log lines a day, and the storage bill
+triples in a month, mostly from routine successful requests nobody
+ever queries. **The team still needs every failing request captured
+in full. What has to change so 40M lines/day doesn't mean 40M lines
+stored?**
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "A structured logger with real level filtering",
+    "Correlation-ID propagation and a real parent/child span tree",
+    "Sampling logic that keeps every failure but thins out the rest",
+  ]}
+/>
+
+## A structured logger with level filtering
+
+**What does "log level filtering" actually look like in code, not
+just as a concept?** A numeric rank per level, and a logger that
+drops anything below its configured threshold before it ever gets
+formatted or written — the whole point is to avoid paying the cost of
+serializing a `debug` line that's about to be discarded anyway:
+
+```js
+const LEVELS = { debug: 10, info: 20, warn: 30, error: 40, fatal: 50 };
+
+function createLogger({ service, minLevel = "info" }) {
+  const threshold = LEVELS[minLevel];
+
+  function log(level, msg, fields = {}) {
+    if (LEVELS[level] < threshold) return null; // dropped, never formatted
+
+    const record = {
+      timestamp: new Date().toISOString(),
+      level,
+      service,
+      msg,
+      ...fields,
+    };
+    return JSON.stringify(record);
+  }
+
+  return {
+    debug: (msg, fields) => log("debug", msg, fields),
+    info: (msg, fields) => log("info", msg, fields),
+    warn: (msg, fields) => log("warn", msg, fields),
+    error: (msg, fields) => log("error", msg, fields),
+    fatal: (msg, fields) => log("fatal", msg, fields),
+  };
+}
+```
+
+```js
+const logger = createLogger({ service: "payment-service", minLevel: "info" });
+
+logger.debug("checking idempotency cache", { orderId: "8841" }); // null — dropped
+logger.error("gateway timeout on retry", { orderId: "8841", attempt: 3 });
+// '{"timestamp":"...","level":"error","service":"payment-service",
+//   "msg":"gateway timeout on retry","orderId":"8841","attempt":3}'
+```
+
+Returning `null` for a dropped line (instead of formatting it and
+then discarding the string) matters at scale — `JSON.stringify` on
+millions of would-be-debug lines that get thrown away immediately is
+wasted CPU that shows up as real, measurable overhead under load.
+
+## Correlation IDs and a real span tree
+
+L2 described trace IDs and spans conceptually. Here's what a minimal
+version actually is: not a special object type, just an ID plus a
+reference to whichever span called it, tracked explicitly and passed
+as a normal function argument (there's no framework magic making this
+implicit — something has to carry the ID across every call boundary,
+whether that's an explicit parameter, an HTTP header, or a language
+feature like Node's `AsyncLocalStorage` doing the passing for you
+behind the scenes):
+
+```js
+let spanCounter = 0;
+
+function startSpan({ traceId, parentSpanId = null, name }) {
+  return {
+    traceId,
+    spanId: `span_${++spanCounter}`,
+    parentSpanId,
+    name,
+    startedAt: Date.now(),
+    endedAt: null,
+  };
+}
+
+function endSpan(span) {
+  span.endedAt = Date.now();
+  return span;
+}
+
+function spanDuration(span) {
+  if (span.endedAt === null) return null;
+  return span.endedAt - span.startedAt;
+}
+```
+
+```js
+const traceId = "trace_8841";
+const gatewaySpan = startSpan({ traceId, name: "gateway.handle" });
+const paymentSpan = startSpan({
+  traceId,
+  parentSpanId: gatewaySpan.spanId,
+  name: "payment.charge",
+});
+endSpan(paymentSpan);
+endSpan(gatewaySpan);
+
+// paymentSpan.parentSpanId === gatewaySpan.spanId — this is the whole
+// mechanism a trace viewer uses to draw the nested timeline from L2.
+```
+
+A **span tree** is just this: every span but the first carries its
+parent's `spanId`, and a trace viewer reconstructs the nesting by
+following those references — the same relationship a call stack has,
+made explicit and durable instead of disappearing when the function
+returns.
+
+<Checkpoint question="Two services, A and B, both call a shared database helper for the same request, each producing their own span. If both spans are given the same parentSpanId by mistake, what does the resulting trace look like — and is it wrong in a way that would mislead someone debugging?">
+
+It looks like both database calls happened as direct children of the
+same parent, siblings of each other, when in reality one happened
+inside service A's own span and the other inside service B's. The
+timeline would still show two database calls and roughly correct
+durations, so it's not obviously broken — but it would misrepresent
+_which service_ made which call, which matters exactly when the
+debugging question is "which service is slow" or "which service made
+a redundant duplicate call." A span tree is only as trustworthy as
+its parent references are accurate; a wrong parent doesn't crash
+anything, it just quietly tells the wrong story.
+
+</Checkpoint>
+
+## Sampling: keeping every failure, thinning the rest
+
+**How do you cut 40M lines/day without losing the failures that
+actually matter?** Sample: log every failed request in full, but only
+a fraction of the successful ones — the "keep everything that's
+interesting, thin out everything that's routine" idea directly:
+
+```js
+function shouldSample({ isError, sampleRate, randomValue }) {
+  if (isError) return true; // never drop a failure
+  return randomValue < sampleRate;
+}
+```
+
+```js
+// randomValue would normally come from Math.random(); passed in here
+// so the decision is deterministic and testable.
+shouldSample({ isError: true, sampleRate: 0.01, randomValue: 0.999 }); // true — always keep errors
+shouldSample({ isError: false, sampleRate: 0.01, randomValue: 0.5 }); // false — thinned out
+shouldSample({ isError: false, sampleRate: 0.01, randomValue: 0.001 }); // true — the rare kept sample
+```
+
+This is **head sampling** — the decision is made at the start of a
+request, before its outcome is even known for certain, based on a
+fixed rate. A more advanced approach, **tail sampling**, waits until
+a request finishes and can look at the actual outcome (was it slow?
+did it error?) before deciding whether to keep the full trace — more
+accurate, at the cost of buffering every in-flight trace until it
+completes. The `shouldSample` function above is really a hybrid: it
+samples on rate for the routine case, but always keeps the case that
+tail sampling exists to catch — a failure — without needing to buffer
+anything, because failure is already known by the time it's logged.
+
+| Strategy      | Decides when                       | Keeps failures? | Cost                                              |
+| ------------- | ---------------------------------- | --------------- | ------------------------------------------------- |
+| No sampling   | n/a — logs everything              | Always          | Highest storage, simplest code                    |
+| Head sampling | At request start, by fixed rate    | Only by luck    | Cheap, but a rate too low can lose real failures  |
+| Tail sampling | After request finishes, by outcome | Always          | Accurate, but must buffer every in-flight request |

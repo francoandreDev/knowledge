@@ -8,25 +8,25 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 
 ## web/
 
-| #   | Slug                          | Problem                                                                                                                 | Tags                                               | Status  |
-| --- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------- |
-| 01  | http-request-response-basics  | How does a browser turn a URL into a rendered page? (HTTP request/response basics)                                      | frontend, networking, mental-models                | done    |
-| 02  | need-html-semantics-just-divs | Why do we need HTML semantics instead of just divs?                                                                     | frontend, code-quality                             | done    |
-| 03  | css-cascade-specificity       | How do we style once and reuse everywhere? (CSS cascade & specificity)                                                  | frontend, mental-models                            | done    |
-| 04  | dom-event-model               | How does a page react to user input without reloading? (the DOM event model)                                            | frontend, mental-models                            | done    |
-| 05  | bundling                      | Why do we need a build step at all? (bundling, transpilation, module systems)                                           | frontend, infra, performance                       | done    |
-| 06  | component-state               | How do we manage state across a page without global chaos? (component state, unidirectional data flow)                  | frontend, architecture, design-patterns            | done    |
-| 07  | cors                          | Why does calling an API from the browser fail unpredictably? (CORS, async/await, error handling)                        | frontend, networking, security, debugging          | done    |
-| 08  | client-side-caching           | How do we keep the UI in sync with the server? (client-side caching, optimistic updates)                                | frontend, caching, reliability                     | done    |
-| 09  | render-performance            | Why does the app get slow as it grows? (render performance, virtual DOM diffing, reflow/repaint)                        | frontend, performance, debugging                   | done    |
-| 10  | xss                           | How do we protect users from malicious input? (XSS, CSRF, sanitization, CSP)                                            | frontend, security                                 | done    |
-| 11  | cdn                           | How do we serve the same app to millions without falling over? (CDN, cache layers, edge)                                | infra, caching, performance, networking            | done    |
-| 12  | stateless-auth                | Why do sessions break across multiple servers? (stateless auth, JWT, cookies, sessions)                                 | backend, authentication, architecture              | done    |
-| 13  | rest-graphql                  | How do we design an API contract that won't break clients as it evolves? (REST/GraphQL, versioning)                     | backend, api-design, architecture                  | done    |
-| 14  | bff                           | How do we keep frontend and backend teams moving independently? (BFF, API gateways, contract testing)                   | backend, architecture, api-design, team-management | done    |
-| 15  | service-boundaries            | How do we serve web, mobile, and partners from one backend without it collapsing? (service boundaries, micro-frontends) | architecture, backend, frontend                    | planned |
-| 16  | ssr                           | How do we make render-heavy apps fast on slow networks/devices? (SSR, streaming, hydration, edge rendering)             | frontend, performance, infra                       | planned |
-| 17  | strangler-fig                 | How do we evolve a legacy web architecture without a rewrite? (strangler fig, incremental migration)                    | architecture, risk-management, decision-making     | planned |
+| #   | Slug                          | Problem                                                                                                                 | Tags                                               | Status |
+| --- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------ |
+| 01  | http-request-response-basics  | How does a browser turn a URL into a rendered page? (HTTP request/response basics)                                      | frontend, networking, mental-models                | done   |
+| 02  | need-html-semantics-just-divs | Why do we need HTML semantics instead of just divs?                                                                     | frontend, code-quality                             | done   |
+| 03  | css-cascade-specificity       | How do we style once and reuse everywhere? (CSS cascade & specificity)                                                  | frontend, mental-models                            | done   |
+| 04  | dom-event-model               | How does a page react to user input without reloading? (the DOM event model)                                            | frontend, mental-models                            | done   |
+| 05  | bundling                      | Why do we need a build step at all? (bundling, transpilation, module systems)                                           | frontend, infra, performance                       | done   |
+| 06  | component-state               | How do we manage state across a page without global chaos? (component state, unidirectional data flow)                  | frontend, architecture, design-patterns            | done   |
+| 07  | cors                          | Why does calling an API from the browser fail unpredictably? (CORS, async/await, error handling)                        | frontend, networking, security, debugging          | done   |
+| 08  | client-side-caching           | How do we keep the UI in sync with the server? (client-side caching, optimistic updates)                                | frontend, caching, reliability                     | done   |
+| 09  | render-performance            | Why does the app get slow as it grows? (render performance, virtual DOM diffing, reflow/repaint)                        | frontend, performance, debugging                   | done   |
+| 10  | xss                           | How do we protect users from malicious input? (XSS, CSRF, sanitization, CSP)                                            | frontend, security                                 | done   |
+| 11  | cdn                           | How do we serve the same app to millions without falling over? (CDN, cache layers, edge)                                | infra, caching, performance, networking            | done   |
+| 12  | stateless-auth                | Why do sessions break across multiple servers? (stateless auth, JWT, cookies, sessions)                                 | backend, authentication, architecture              | done   |
+| 13  | rest-graphql                  | How do we design an API contract that won't break clients as it evolves? (REST/GraphQL, versioning)                     | backend, api-design, architecture                  | done   |
+| 14  | bff                           | How do we keep frontend and backend teams moving independently? (BFF, API gateways, contract testing)                   | backend, architecture, api-design, team-management | done   |
+| 15  | service-boundaries            | How do we serve web, mobile, and partners from one backend without it collapsing? (service boundaries, micro-frontends) | architecture, backend, frontend                    | done   |
+| 16  | ssr                           | How do we make render-heavy apps fast on slow networks/devices? (SSR, streaming, hydration, edge rendering)             | frontend, performance, infra                       | done   |
+| 17  | strangler-fig                 | How do we evolve a legacy web architecture without a rewrite? (strangler fig, incremental migration)                    | architecture, risk-management, decision-making     | done   |
 
 ## systems/
 
@@ -42,7 +42,7 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 | 08  | indexing                | How do we store data so it's fast to find later? (indexing, B-trees, hashing)                                                | databases, algorithms, performance                 | done    |
 | 09  | query-planning          | Why does the database get slow as data grows? (query planning, normalization vs. denormalization)                            | databases, performance, architecture               | done    |
 | 10  | timeouts                | How do we keep a service running when a dependency dies? (timeouts, retries, circuit breakers, backpressure)                 | reliability, backend, incident-response            | done    |
-| 11  | logging                 | How do we know something broke before the user tells us? (logging, metrics, tracing, observability)                          | observability, debugging, reliability              | planned |
+| 11  | logging                 | How do we know something broke before the user tells us? (logging, metrics, tracing, observability)                          | observability, debugging, reliability              | done    |
 | 12  | horizontal-scaling      | How do we scale beyond one machine? (horizontal scaling, load balancing, statelessness)                                      | architecture, backend, performance, infra          | planned |
 | 13  | cap-theorem             | How do two datacenters agree on the truth? (CAP theorem, consistency models)                                                 | databases, architecture, mental-models             | planned |
 | 14  | queues                  | How do we move data between systems without losing or duplicating it? (queues, delivery guarantees)                          | architecture, backend, reliability                 | planned |

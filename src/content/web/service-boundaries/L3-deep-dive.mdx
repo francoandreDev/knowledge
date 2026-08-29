@@ -1,0 +1,303 @@
+---
+title: "L3 — Service boundaries"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="The problem">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🔀</span> A PR renames <code>promoBadge</code> → <code>badge</code> directly on the shared endpoint</div>
+      <div class="flex items-center gap-1.5"><span>✅</span> Web's own tests pass — it reads the new field name</div>
+      <div class="flex items-center gap-1.5"><span>💥</span> Mobile and the partner both read the old field name — both silently get <code>undefined</code></div>
+    </div>
+    <div class="not-prose mt-3 rounded border border-rose-300 bg-rose-50 p-1.5 text-xs dark:border-rose-800 dark:bg-rose-950">
+      <p class="font-semibold text-rose-600 dark:text-rose-400">Green CI, red production — the tests that ran couldn't see the consumers that broke</p>
+    </div>
+  </Fragment>
+
+You're reviewing the PR that would have caused this. It renames a field
+directly on the shared `/products/:id` handler, and every test in the
+repository — all of them written by the web team, against the web team's own
+usage — passes. Nothing in this PR's test suite can fail, because nothing in
+it knows mobile or the partner exist.
+
+**If the tests that ran are green, what evidence would actually tell you this PR is unsafe to merge?**
+
+</Scenario>
+
+L1 and L2 established the shape of the problem and the boundary patterns
+that address it. L3 builds the actual pieces: a working BFF layer over a
+shared core service, an explicit versioned contract, and consumer-driven
+contract tests — the kind of evidence that would have caught the PR above
+before it merged.
+
+<LevelIntro
+  items={[
+    "A working BFF layer, in real TypeScript",
+    "Explicit contract versioning that survives a rename",
+    "Consumer-driven contract tests as the actual safety net",
+  ]}
+/>
+
+## Step 1: a shared core service with no consumer opinions
+
+The core service should describe a product the way the business actually
+thinks about it — no web-only, mobile-only, or partner-only concerns baked
+in. This is the single source of truth the BFFs will each shape differently.
+
+```ts
+// core/product-service.ts
+
+export interface CoreProduct {
+  id: string;
+  name: string;
+  priceCents: number;
+  description: string;
+  reviewCount: number;
+  averageRating: number;
+  relatedProductIds: string[];
+  promotion: { label: string; expiresAt: string } | null;
+}
+
+const CATALOG: Record<string, CoreProduct> = {
+  "sku-42": {
+    id: "sku-42",
+    name: "Ceramic Pour-Over Kettle",
+    priceCents: 4599,
+    description:
+      "A gooseneck kettle designed for slow, controlled pours over coffee grounds.",
+    reviewCount: 812,
+    averageRating: 4.6,
+    relatedProductIds: ["sku-43", "sku-58"],
+    promotion: { label: "Weekend sale", expiresAt: "2026-09-01T00:00:00Z" },
+  },
+};
+
+export function getCoreProduct(id: string): CoreProduct | undefined {
+  return CATALOG[id];
+}
+```
+
+## Step 2: a BFF per consumer, each shaping the core independently
+
+Each BFF calls `getCoreProduct` and returns _its own_ shape. Renaming a
+field inside one BFF's response type cannot touch another BFF's response
+type — that's the isolation the pattern buys.
+
+```ts
+// bffs/web-bff.ts
+import { getCoreProduct, type CoreProduct } from "../core/product-service";
+
+export interface WebProductResponse {
+  id: string;
+  name: string;
+  priceCents: number;
+  description: string;
+  rating: { average: number; count: number };
+  relatedProductIds: string[];
+  promoBadge: string | null; // web-only: rendered on the homepage banner
+}
+
+export function getWebProduct(id: string): WebProductResponse | undefined {
+  const core = getCoreProduct(id);
+  if (!core) return undefined;
+  return {
+    id: core.id,
+    name: core.name,
+    priceCents: core.priceCents,
+    description: core.description,
+    rating: { average: core.averageRating, count: core.reviewCount },
+    relatedProductIds: core.relatedProductIds,
+    promoBadge: core.promotion?.label ?? null,
+  };
+}
+```
+
+```ts
+// bffs/mobile-bff.ts
+import { getCoreProduct } from "../core/product-service";
+
+// Deliberately lean: mobile pays for every byte on cellular networks, and
+// the app can't be force-updated the moment the backend changes.
+export interface MobileProductResponse {
+  id: string;
+  name: string;
+  priceCents: number;
+  rating: number; // rounded to 1 decimal, no separate count field
+}
+
+export function getMobileProduct(
+  id: string,
+): MobileProductResponse | undefined {
+  const core = getCoreProduct(id);
+  if (!core) return undefined;
+  return {
+    id: core.id,
+    name: core.name,
+    priceCents: core.priceCents,
+    rating: Math.round(core.averageRating * 10) / 10,
+  };
+}
+```
+
+Web's `promoBadge` field only exists inside `web-bff.ts`. Renaming it now
+means editing one file, owned by one team, with zero ability to affect
+`mobile-bff.ts` — because `mobile-bff.ts` never imported it in the first
+place.
+
+<Checkpoint question="Both web-bff.ts and mobile-bff.ts call the exact same getCoreProduct(id). If a future change to CoreProduct removes the description field entirely, does the BFF layer protect mobile-bff.ts from that change the same way it protected it from the promoBadge rename?">
+
+No — and this is the boundary's real limit, not a flaw in the pattern. The
+BFF layer isolates consumers from _each other's_ consumer-specific fields
+(like `promoBadge`, which only ever lived inside `web-bff.ts`), but every
+BFF still depends directly on `CoreProduct`'s actual shape. Removing
+`description` from `CoreProduct` would break `web-bff.ts` at compile time
+(TypeScript would flag the missing field) even though `mobile-bff.ts` never
+used it — because both files import from the same core type. The BFF
+pattern draws a boundary around _consumer-specific_ shaping; it does not, by
+itself, version or protect the _core_ contract underneath it. That's exactly
+why Step 3 below adds explicit versioning to the layer that consumers
+outside your own deploy pipeline — like the partner — actually depend on.
+
+</Checkpoint>
+
+## Step 3: an explicit, versioned contract for the partner
+
+Internal consumers (web, mobile) redeploy on your schedule, so a compiler
+error in a BFF is an acceptable safety net. The partner does not redeploy on
+your schedule — their contract needs to be versioned explicitly, and old
+versions kept alive until they migrate.
+
+```ts
+// bffs/partner-api.ts
+import { getCoreProduct } from "../core/product-service";
+
+export interface PartnerProductV1 {
+  productId: string;
+  displayName: string;
+  priceUsd: number; // dollars, not cents — the partner's original contract
+}
+
+export interface PartnerProductV2 {
+  productId: string;
+  displayName: string;
+  priceCents: number; // v2 switched to cents to match internal precision
+  onSale: boolean;
+}
+
+export function getPartnerProduct(
+  id: string,
+  version: "v1" | "v2",
+): PartnerProductV1 | PartnerProductV2 | undefined {
+  const core = getCoreProduct(id);
+  if (!core) return undefined;
+
+  if (version === "v1") {
+    return {
+      productId: core.id,
+      displayName: core.name,
+      priceUsd: core.priceCents / 100,
+    };
+  }
+
+  return {
+    productId: core.id,
+    displayName: core.name,
+    priceCents: core.priceCents,
+    onSale: core.promotion !== null,
+  };
+}
+```
+
+```ts
+// router.ts (sketch)
+import { getPartnerProduct } from "./bffs/partner-api";
+
+// GET /partner/v1/products/:id  and  GET /partner/v2/products/:id
+// both stay live simultaneously — v1 is never silently changed underneath
+// a partner who hasn't migrated to v2 yet.
+export function handlePartnerRequest(version: "v1" | "v2", productId: string) {
+  const product = getPartnerProduct(productId, version);
+  if (!product) return { status: 404 };
+  return { status: 200, body: product };
+}
+```
+
+The rule that makes this work: **`priceUsd` in `PartnerProductV1` never
+changes meaning once published.** If the pricing model needs to change,
+that's what `v2` is for — not an edit to `v1`'s existing field.
+
+## Step 4: consumer-driven contract tests — the evidence the PR needed
+
+A BFF and a version number reduce _where_ a breaking change can happen, but
+nothing so far actually stops someone from editing `PartnerProductV1` by
+mistake. A consumer-driven contract test encodes what a real consumer
+depends on, so that editing the contract without updating the test fails CI
+— the missing evidence from the scenario at the top of this level.
+
+```ts
+// tests/partner-contract.test.ts
+import { getPartnerProduct } from "../bffs/partner-api";
+
+// This test represents the partner's actual, published expectations —
+// not an implementation detail of our own code. It should be treated as
+// close to immutable as the partner's v1 contract itself.
+function expect(actual: unknown) {
+  return {
+    toBe(expected: unknown) {
+      if (actual !== expected) {
+        throw new Error(`expected ${expected}, got ${actual}`);
+      }
+    },
+    toHaveProperty(key: string) {
+      if (typeof actual !== "object" || actual === null || !(key in actual)) {
+        throw new Error(`expected object to have property "${key}"`);
+      }
+    },
+  };
+}
+
+function testPartnerV1ContractShape() {
+  const product = getPartnerProduct("sku-42", "v1");
+  if (!product) throw new Error("expected a product for sku-42");
+
+  // The partner's parser only ever asked for these three fields, in this
+  // shape. Renaming or removing any of them is a breaking change to v1.
+  expect(product).toHaveProperty("productId");
+  expect(product).toHaveProperty("displayName");
+  expect(product).toHaveProperty("priceUsd");
+  expect(typeof (product as { priceUsd: unknown }).priceUsd).toBe("number");
+}
+
+testPartnerV1ContractShape();
+```
+
+If the PR from the scenario had renamed a field directly on a shared
+endpoint with no BFF and no contract test, nothing would have caught it —
+web's tests exercise web's own usage, and there was no test standing in for
+what the partner actually depends on. With the boundary in place, the
+rename either (a) happens safely inside `web-bff.ts`, invisible to this
+test entirely, or (b) if someone tried it on `PartnerProductV1` directly,
+`testPartnerV1ContractShape` fails immediately, because it encodes the
+partner's real expectations instead of the web team's.
+
+## When _not_ to add a boundary
+
+Every pattern in this unit has the same cost: another service to build,
+deploy, version, and keep someone on call for. A single internal admin tool
+with one consumer and no external partners does not need a BFF, a gateway,
+or a micro-frontend split — it needs exactly the shared endpoint Bramble
+started with, because there is no second consumer to isolate from the
+first. The decision map from L1 still applies: add a boundary when
+consumers' needs genuinely diverge or need independent deploys, not as a
+default architecture. A boundary added where there is only one real
+consumer is pure coordination cost with nothing bought in return.
+
+**Try extending it yourself:** the partner contract above only versions the
+response shape. What would change if the partner's rate limits, not their
+payload shape, were the thing that needed independent control per version —
+would that live inside `partner-api.ts`, or does it point toward the API
+gateway pattern from L2 instead?
