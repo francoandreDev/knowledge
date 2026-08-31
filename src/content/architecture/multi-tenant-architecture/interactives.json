@@ -1,0 +1,85 @@
+{
+  "items": [
+    {
+      "id": "isolation-level-cost-per-tenant",
+      "level": 2,
+      "title": "Does more isolation always cost more per tenant?",
+      "description": "L2's table showed silo, bridge, and pool trading isolation strength for cost — but that trade only pays off at scale. A shared ($3,000/mo) portion of infra splits across every tenant on it, so pooling gets cheaper per tenant as more tenants join. A dedicated ($120/tenant) portion, the kind a siloed tenant needs, doesn't shrink no matter how many tenants exist. Drag the isolation level toward silo and watch the cost curve flatten instead of falling as tenant count grows.",
+      "params": [
+        {
+          "name": "tenantCount",
+          "label": "Number of tenants sharing this infra",
+          "min": 5,
+          "max": 500,
+          "step": 5,
+          "default": 50,
+          "unit": ""
+        },
+        {
+          "name": "isolationLevel",
+          "label": "Isolation level (0 = full pool, 10 = full silo)",
+          "min": 0,
+          "max": 10,
+          "step": 1,
+          "default": 3,
+          "unit": ""
+        }
+      ],
+      "compute": "const sharedInfraCost = 3000; const dedicatedCostPerTenant = 120; const poolWeight = 1 - params.isolationLevel / 10; const siloWeight = params.isolationLevel / 10; const costPerTenant = (sharedInfraCost * poolWeight) / params.tenantCount + dedicatedCostPerTenant * siloWeight; return { costPerTenant };",
+      "outputs": [
+        {
+          "key": "costPerTenant",
+          "label": "Infra cost per tenant / month",
+          "unit": "$",
+          "color": "#3b82f6"
+        }
+      ],
+      "chartParam": "tenantCount"
+    },
+    {
+      "id": "token-bucket-rejection-rate",
+      "level": 3,
+      "title": "How much of a noisy tenant's traffic does the token bucket actually reject?",
+      "description": "L3's TenantRateLimiter defaults to capacity 10 (burst) and a refill rate of 2 requests/sec — every other tenant's bucket is untouched no matter what this one does. Drag how hard one tenant hammers the API and watch what fraction of its own requests get rejected once its burst is spent, over a 10-second window. The point isn't the exact percentage — it's that raising capacity or refill rate only buys that tenant more room; it never borrows capacity from anyone else's bucket.",
+      "params": [
+        {
+          "name": "attemptedRequestsPerSecond",
+          "label": "Requests/sec this tenant attempts",
+          "min": 1,
+          "max": 50,
+          "step": 1,
+          "default": 20,
+          "unit": "/s"
+        },
+        {
+          "name": "capacity",
+          "label": "Bucket capacity (burst size)",
+          "min": 1,
+          "max": 50,
+          "step": 1,
+          "default": 10,
+          "unit": ""
+        },
+        {
+          "name": "refillPerSecond",
+          "label": "Refill rate",
+          "min": 1,
+          "max": 20,
+          "step": 1,
+          "default": 2,
+          "unit": "/s"
+        }
+      ],
+      "compute": "const windowSeconds = 10; const totalAttempted = params.attemptedRequestsPerSecond * windowSeconds; const totalAllowed = Math.min(totalAttempted, params.capacity + params.refillPerSecond * windowSeconds); const rejectedPercent = totalAttempted > 0 ? Math.round(((totalAttempted - totalAllowed) / totalAttempted) * 100) : 0; return { rejectedPercent };",
+      "outputs": [
+        {
+          "key": "rejectedPercent",
+          "label": "This tenant's requests rejected",
+          "unit": "%",
+          "color": "#ef4444"
+        }
+      ],
+      "chartParam": "attemptedRequestsPerSecond"
+    }
+  ]
+}

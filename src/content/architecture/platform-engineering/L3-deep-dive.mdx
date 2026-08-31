@@ -1,0 +1,363 @@
+---
+title: "L3 — How do I build a platform other teams build on top of, not just a product? (platform engineering, internal developer platforms, paved roads)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="What actually breaks in production">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🧾</span> Golden-path template has no machine-checkable definition of "compliant"</div>
+      <div class="flex items-center gap-1.5"><span>🕰️</span> Template v1 → v2 has no migration path; 20 services silently stay on v1</div>
+      <div class="flex items-center gap-1.5"><span>👻</span> Service catalog says a team owns a service; that team disbanded 4 months ago</div>
+    </div>
+  </Fragment>
+
+L2's five-step loop (observe → extract → guard → publish → iterate) tells
+you _when_ to build a golden path. It doesn't tell you how to make one
+actually enforceable, versionable, and measurable once dozens of teams
+depend on it. Three real failure modes show up right after that: nobody
+can check whether a service is actually on the paved road without asking
+a human, upgrading the template breaks services still on the old version,
+and the catalog's ownership data quietly rots.
+
+**If "is this service compliant with the paved road" can only be
+answered by a person reading the code, does the paved road actually scale
+past the handful of teams the platform team can personally review?**
+
+</Scenario>
+
+This deep dive builds the four pieces that turn a template into an actual
+platform, in TypeScript: a service **manifest** (the paved-road contract,
+as data), a **scaffolding function** that generates a new service from
+it, a **golden-path CI config generator**, and a **catalog validator**
+plus **adoption metrics** — the machine-checkable version of the metrics
+table from L2. TypeScript is used the same way as elsewhere in this
+track: as precise, runnable pseudocode. None of it needs a real cloud
+account to run — every function here is pure, so you can paste it into a
+`.ts` file (or a plain `.js` file, dropping the type annotations) and run
+it with `node` or `ts-node`.
+
+<LevelIntro
+  items={[
+    "A service manifest — the paved-road contract expressed as data",
+    "A scaffolding function and a golden-path CI generator built from it",
+    "A catalog validator and adoption metrics that make coverage measurable",
+  ]}
+/>
+
+## Part 1 — the manifest: the paved-road contract as data
+
+```typescript
+// manifest.ts
+type ServiceTier = "internal" | "customer-facing" | "critical";
+
+interface ServiceManifest {
+  name: string; // e.g. "checkout-api"
+  owner: string; // team name, must match the org's team registry
+  tier: ServiceTier;
+  goldenPathVersion: string; // semver, e.g. "2.1.0"
+  language: "node" | "go" | "python";
+  needsDatabase: boolean;
+  escapeHatches: string[]; // documented deviations, e.g. ["custom-ci"]
+}
+
+// A manifest is the entire input to everything below it — the
+// scaffolder, the CI generator, the validator, and the catalog entry
+// are all pure functions of this one object. That's what makes the
+// paved road machine-checkable instead of "ask the platform team."
+```
+
+- The manifest is deliberately small and flat — every field is something
+  a _human_ fills in once, not something derived. Anything derivable
+  (which CI steps to run, which IAM policy to attach) belongs in the
+  functions below, not duplicated into the manifest itself.
+- `escapeHatches` makes deviation an explicit, listed field rather than
+  an undocumented fork — a team that needs a custom CI step declares it
+  here, and the validator below treats a declared escape hatch
+  differently from an undeclared one.
+
+## Part 2 — scaffolding: generating a service from the manifest
+
+```typescript
+// scaffold.ts
+interface GeneratedFile {
+  path: string;
+  content: string;
+}
+
+const TEMPLATES: Record<ServiceManifest["language"], string> = {
+  node: `# {{name}}\n\nOwned by {{owner}}. Golden path v{{goldenPathVersion}}.\n`,
+  go: `// {{name}}\n// Owned by {{owner}}. Golden path v{{goldenPathVersion}}.\n`,
+  python: `"""{{name}} — owned by {{owner}}. Golden path v{{goldenPathVersion}}."""\n`,
+};
+
+// Minimal {{var}} substitution — a real scaffolder would use a proper
+// template engine, but the mechanism is the same: fill placeholders
+// from the manifest, never hand-type per-team values into a copy.
+function renderTemplate(
+  template: string,
+  vars: Record<string, string>,
+): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (match, key) =>
+    key in vars ? vars[key] : match,
+  );
+}
+
+function generateServiceFiles(manifest: ServiceManifest): GeneratedFile[] {
+  const vars = {
+    name: manifest.name,
+    owner: manifest.owner,
+    goldenPathVersion: manifest.goldenPathVersion,
+  };
+
+  const readme = renderTemplate(TEMPLATES[manifest.language], vars);
+
+  const catalogEntry = JSON.stringify(
+    {
+      name: manifest.name,
+      owner: manifest.owner,
+      tier: manifest.tier,
+      goldenPathVersion: manifest.goldenPathVersion,
+      hasDatabase: manifest.needsDatabase,
+    },
+    null,
+    2,
+  );
+
+  return [
+    { path: "README.md", content: readme },
+    { path: "catalog-info.json", content: catalogEntry },
+  ];
+}
+```
+
+`generateServiceFiles` is what Team #15 from L2's scenario actually ran —
+"fill in a service name" expands into a README, a catalog entry, and (in
+a real scaffolder) a full CI config and IaC module, all derived from the
+one manifest instead of hand-copied from whichever team's setup happened
+to be nearby.
+
+<Checkpoint question="renderTemplate leaves {{key}} untouched in the output if key isn't in vars, instead of throwing. Is that the safer default for a scaffolding tool, or does it hide a bug?">
+
+It hides a bug, for this use case specifically. A scaffolding tool's whole job is producing a correct, ready-to-commit file — a silently-unsubstituted `{{ownerTeam}}` typo (versus the manifest's actual `owner` field) would ship straight into a new service's README with nobody noticing until someone reads it by chance. A template engine used for something more forgiving (e.g. a chat message where a missing variable is just a cosmetic gap) might reasonably leave it as-is; a paved-road generator should fail loudly — throw or collect unresolved keys and refuse to write the file — precisely because the entire point of the golden path is that nobody has to manually proofread its output.
+
+</Checkpoint>
+
+## Part 3 — golden-path CI: generating config from the manifest, by tier
+
+```typescript
+// ci-generator.ts
+function buildGoldenPathWorkflow(manifest: ServiceManifest): string {
+  const steps = ["checkout", `install-${manifest.language}`, "lint", "test"];
+
+  // Tier drives what's required, not what's available — every service
+  // gets the same steps offered; "critical" just can't skip any of them.
+  if (manifest.tier === "critical" || manifest.tier === "customer-facing") {
+    steps.push("security-scan", "require-2-approvals");
+  }
+  if (manifest.needsDatabase) {
+    steps.push("run-migration-check");
+  }
+  if (manifest.tier === "critical") {
+    steps.push("canary-deploy", "auto-rollback-on-error-rate");
+  } else {
+    steps.push("deploy");
+  }
+
+  return [
+    `name: golden-path-${manifest.goldenPathVersion}`,
+    `service: ${manifest.name}`,
+    "steps:",
+    ...steps.map((s) => `  - ${s}`),
+  ].join("\n");
+}
+```
+
+- The generator reads like a decision table because it _is_ one — every
+  branch maps a manifest field to required steps, so "what does a
+  `critical` service's pipeline look like" has one authoritative answer
+  instead of a wiki page that drifts out of sync with what teams
+  actually run.
+- Notice `deploy` only appears for non-critical tiers — `critical`
+  services get `canary-deploy` plus `auto-rollback-on-error-rate`
+  instead, not in addition. The golden path isn't one fixed pipeline; it's
+  a family of pipelines chosen by manifest fields, which is what lets
+  "critical services must canary" be enforced by the generator itself
+  rather than a review checklist someone can forget.
+
+## Part 4 — catalog validator: making "compliant" machine-checkable
+
+```typescript
+// validator.ts
+interface ValidationResult {
+  ok: boolean;
+  errors: string[];
+}
+
+const SUPPORTED_GOLDEN_PATH_MAJOR = 2; // current major; v1.x is deprecated
+
+function validateManifest(manifest: ServiceManifest): ValidationResult {
+  const errors: string[] = [];
+
+  if (!manifest.owner || manifest.owner.trim() === "") {
+    errors.push("owner is required");
+  }
+  if (!/^\d+\.\d+\.\d+$/.test(manifest.goldenPathVersion)) {
+    errors.push(
+      `goldenPathVersion "${manifest.goldenPathVersion}" is not valid semver`,
+    );
+  } else {
+    const major = Number(manifest.goldenPathVersion.split(".")[0]);
+    if (major < SUPPORTED_GOLDEN_PATH_MAJOR) {
+      errors.push(
+        `goldenPathVersion major ${major} is deprecated; migrate to v${SUPPORTED_GOLDEN_PATH_MAJOR}.x`,
+      );
+    }
+  }
+  if (manifest.tier === "critical" && manifest.escapeHatches.length > 0) {
+    errors.push(
+      "critical-tier services cannot carry undocumented escape hatches from CI/security requirements",
+    );
+  }
+
+  return { ok: errors.length === 0, errors };
+}
+```
+
+This is the direct fix for the opening scenario's first failure mode:
+"is this service compliant" stops being a question a person answers by
+reading code, and becomes a function anyone (a CI gate, a nightly audit
+job, the developer portal itself) can call against the catalog. The
+second failure mode — 20 services silently stuck on golden-path v1 — is
+exactly what the `major < SUPPORTED_GOLDEN_PATH_MAJOR` check surfaces
+instead of hiding: it turns silent version drift into a listed,
+actionable error the moment the catalog is next validated.
+
+## Part 5 — adoption metrics: the L2 table, made computable
+
+```typescript
+// metrics.ts
+interface TeamStatus {
+  teamName: string;
+  onGoldenPath: boolean;
+  manualTicketsThisMonth: number;
+}
+
+function goldenPathCoverage(teams: TeamStatus[]): number {
+  if (teams.length === 0) return 0;
+  const onPath = teams.filter((t) => t.onGoldenPath).length;
+  return Math.round((onPath / teams.length) * 1000) / 10; // one decimal
+}
+
+function ticketsDeflected(
+  teams: TeamStatus[],
+  avgTicketsIfManual: number,
+): number {
+  const onPath = teams.filter((t) => t.onGoldenPath);
+  // Each team on the golden path would have generated roughly
+  // avgTicketsIfManual tickets/month on the old bespoke path; the
+  // difference between that baseline and what they actually filed
+  // is what the golden path deflected.
+  return onPath.reduce(
+    (sum, t) =>
+      sum + Math.max(0, avgTicketsIfManual - t.manualTicketsThisMonth),
+    0,
+  );
+}
+```
+
+`goldenPathCoverage` and `ticketsDeflected` are L2's "golden-path
+coverage %" and "tickets deflected per month" rows, written as functions
+instead of asserted in a table — the same shift Part 4 made for
+"compliant."
+
+## Worked example end-to-end
+
+```typescript
+// main.ts
+const manifest: ServiceManifest = {
+  name: "checkout-api",
+  owner: "payments-team",
+  tier: "critical",
+  goldenPathVersion: "2.1.0",
+  language: "node",
+  needsDatabase: true,
+  escapeHatches: [],
+};
+
+const validation = validateManifest(manifest);
+console.log("Valid:", validation.ok, validation.errors);
+
+const files = generateServiceFiles(manifest);
+console.log(
+  "Generated files:",
+  files.map((f) => f.path),
+);
+
+const workflow = buildGoldenPathWorkflow(manifest);
+console.log(workflow);
+
+const teams: TeamStatus[] = [
+  { teamName: "payments-team", onGoldenPath: true, manualTicketsThisMonth: 0 },
+  { teamName: "search-team", onGoldenPath: true, manualTicketsThisMonth: 1 },
+  {
+    teamName: "legacy-billing",
+    onGoldenPath: false,
+    manualTicketsThisMonth: 4,
+  },
+];
+console.log("Coverage:", goldenPathCoverage(teams), "%");
+console.log("Tickets deflected:", ticketsDeflected(teams, 4));
+```
+
+Running this validates a real manifest, scaffolds its files, generates
+its tier-appropriate CI pipeline (canary + rollback, since it's
+`critical`), and reports coverage and deflection across three teams —
+the same four pieces (contract, scaffolder, CI generator, metrics) a real
+platform team wires into a CLI, a CI gate, and a portal dashboard
+respectively.
+
+## Trade-offs
+
+| Choice                                            | What you gain                           | What it costs                                                  |
+| ------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------- |
+| Build your own scaffolder/catalog (as above)      | Exact fit to your org's conventions     | Ongoing maintenance the platform team now owns forever         |
+| Adopt an existing platform (e.g. Backstage-style) | Faster start, community-maintained core | Less control over the manifest shape; plugin ecosystem lock-in |
+| Mandatory golden path, no escape hatch            | Maximum short-term consistency          | Undocumented forks the moment a real edge case shows up (L2)   |
+| Golden path with declared `escapeHatches`         | Visible exceptions, real adoption data  | Someone has to actually review and revisit declared exceptions |
+
+## Edge cases and failure modes
+
+- **Version drift with no migration path.** `validateManifest` catches a
+  service still on a deprecated major version, but catching it isn't
+  fixing it — without a scripted migration (a codemod, or a scaffolder
+  re-run that diffs and merges instead of overwriting), "20 services on
+  v1" turns into a backlog nobody schedules time for, and the check
+  becomes noise everyone ignores.
+- **Stale ownership.** The catalog's `owner` field is only as accurate as
+  the last time someone updated it — a disbanded team's services quietly
+  become unowned. A periodic reconciliation job (cross-check `owner`
+  against a live team registry, flag mismatches) is what keeps `owner`
+  trustworthy instead of aspirational.
+- **Escape hatches that never get revisited.** A declared escape hatch
+  is better than a silent fork, but "declared" isn't "resolved" — without
+  a periodic review of the `escapeHatches` list, exceptions accumulate
+  the same way undocumented forks would, just with better paperwork.
+- **The generator becoming the new single point of failure.** Once every
+  team's CI is produced by `buildGoldenPathWorkflow`, a bug in it breaks
+  every service's pipeline at once, not just one team's — the platform
+  team needs the same testing discipline for this code that it expects
+  from the teams building on top of it.
+
+**Extend the example yourself: what would `validateManifest` need to
+check differently for a `tier: "internal"` service with no customer
+traffic at all — should it require the same `security-scan` step as
+`customer-facing`, or is that guardrail solving a problem this tier
+doesn't have?** And separately: if a fourth team wants to adopt the
+golden path but their language isn't in `TEMPLATES` yet, does that mean
+they're stuck waiting on the platform team — or is there a way the
+manifest and generator above could make "add a new language" itself a
+self-service contribution rather than a platform-team ticket?

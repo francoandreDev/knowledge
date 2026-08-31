@@ -1,0 +1,279 @@
+---
+title: "L3 — Building the enforcement: a tenant-scoped query wrapper and a per-tenant rate limiter"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+This deep dive uses **TypeScript**, run against a plain in-memory array
+standing in for a database table — the point is the enforcement pattern, not
+a specific driver. The same shapes translate directly to a real ORM
+(Prisma's `$extends`, TypeORM's query builder) or to Postgres row-level
+security as shown in L2; TypeScript just keeps the whole example runnable
+without a real database connection.
+
+## Building the code that closes both incidents from L1
+
+<Scenario label="What we're building">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🔒</span> A query wrapper that makes an unscoped query <strong>impossible to write</strong>, not just discouraged</div>
+      <div class="flex items-center gap-1.5"><span>🚦</span> A per-tenant rate limiter that caps one tenant's request rate independent of the others</div>
+      <div class="flex items-center gap-1.5"><span>🧪</span> Both proven with a test that simulates the exact failure from each L1 incident</div>
+    </div>
+  </Fragment>
+
+L1's two incidents map to two different failures: a missing filter (data),
+and no cap on shared usage (load). **If both fixes have to work even when a
+future developer forgets everything they read in L1/L2, what does the code
+itself have to make impossible — not just documented?**
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "A query wrapper that can't be called without a tenant",
+    "A token-bucket rate limiter, per tenant",
+    "Trade-offs: where each mechanism still leaves a gap",
+  ]}
+/>
+
+## Closing Incident 1: a query layer that cannot forget the tenant filter
+
+The core idea from L2's Option A was "always filter by `tenant_id`." The
+weakness was that nothing stopped a developer from writing a query that
+skips it. The fix here doesn't rely on remembering — it removes the
+unscoped path from the API entirely, so there is no method to call that
+returns rows without a tenant.
+
+```typescript
+// tenant-scoped-store.ts
+interface Row {
+  id: string;
+  tenantId: string;
+  [key: string]: unknown;
+}
+
+// A tiny in-memory stand-in for a database table.
+class Table<T extends Row> {
+  private rows: T[] = [];
+
+  insert(row: T): void {
+    this.rows.push(row);
+  }
+
+  // Deliberately private — nothing outside this file can query
+  // the raw table without going through a tenant scope.
+  private all(): T[] {
+    return this.rows;
+  }
+
+  scopeTo(tenantId: string): TenantScopedQuery<T> {
+    return new TenantScopedQuery(this.all(), tenantId);
+  }
+}
+
+// The only way to read rows: every method here filters by tenantId
+// first, unconditionally, before anything else runs.
+class TenantScopedQuery<T extends Row> {
+  private readonly tenantRows: T[];
+
+  constructor(
+    rows: T[],
+    private readonly tenantId: string,
+  ) {
+    if (!tenantId) {
+      throw new Error("TenantScopedQuery requires a non-empty tenantId");
+    }
+    this.tenantRows = rows.filter((row) => row.tenantId === tenantId);
+  }
+
+  find(predicate: (row: T) => boolean = () => true): T[] {
+    return this.tenantRows.filter(predicate);
+  }
+
+  findById(id: string): T | undefined {
+    return this.tenantRows.find((row) => row.id === id);
+  }
+
+  count(): number {
+    return this.tenantRows.length;
+  }
+}
+
+export { Table, TenantScopedQuery };
+export type { Row };
+```
+
+Because `Table.all()` is `private`, and `TenantScopedQuery` filters in its
+constructor before any query method can run, there is no code path in this
+file — and therefore no call site anywhere else in the codebase — that can
+return a row without a `tenantId` already applied. A future developer adding
+a new query has to call `table.scopeTo(tenantId).find(...)`; there is no
+`table.find(...)` to accidentally call instead.
+
+```typescript
+// Usage
+interface Invoice extends Row {
+  amountCents: number;
+}
+
+const invoices = new Table<Invoice>();
+invoices.insert({ id: "inv-1", tenantId: "acme", amountCents: 4200 });
+invoices.insert({ id: "inv-2", tenantId: "globex", amountCents: 9900 });
+
+const acmeInvoices = invoices.scopeTo("acme").find();
+// [{ id: "inv-1", tenantId: "acme", amountCents: 4200 }]
+// globex's invoice is structurally unreachable from this call —
+// not filtered out after the fact, never fetched in the first place.
+```
+
+<Checkpoint question="Incident 1 in L1 was a query that forgot 'WHERE tenant_id = ?'. In this design, what would the equivalent mistake look like, and would it compile?">
+
+The equivalent mistake would be trying to read rows without going through
+`scopeTo(tenantId)` first — but there's no method on `Table` that does that;
+`all()` is private, so it isn't even visible outside the class. The mistake
+that was previously a silent runtime bug (a missing `WHERE` clause that
+still executes and returns wrong rows) becomes, in this design, simply code
+that doesn't exist to write — `table.find(...)` isn't a valid call, only
+`table.scopeTo(tenantId).find(...)` is. That's the difference L2 drew
+between a convention and an enforced boundary, expressed in the type system
+instead of a database policy.
+
+</Checkpoint>
+
+## Closing Incident 2: a per-tenant rate limiter (token bucket)
+
+L2 established that row-level isolation says nothing about shared-resource
+consumption. A **token bucket** per tenant caps how many requests a tenant
+can make in a given window, independent of every other tenant's usage —
+directly addressing Incident 2's runaway export.
+
+```typescript
+// tenant-rate-limiter.ts
+interface BucketState {
+  tokens: number;
+  lastRefillMs: number;
+}
+
+class TenantRateLimiter {
+  private buckets = new Map<string, BucketState>();
+
+  constructor(
+    private readonly capacity: number, // max burst size per tenant
+    private readonly refillPerSecond: number, // steady-state rate per tenant
+  ) {}
+
+  // Returns true if the request is allowed (and consumes one token),
+  // false if this tenant is over its own limit right now.
+  tryConsume(tenantId: string, nowMs: number): boolean {
+    const bucket = this.buckets.get(tenantId) ?? {
+      tokens: this.capacity,
+      lastRefillMs: nowMs,
+    };
+
+    const elapsedSeconds = Math.max(0, (nowMs - bucket.lastRefillMs) / 1000);
+    const refilled = Math.min(
+      this.capacity,
+      bucket.tokens + elapsedSeconds * this.refillPerSecond,
+    );
+
+    if (refilled < 1) {
+      this.buckets.set(tenantId, { tokens: refilled, lastRefillMs: nowMs });
+      return false;
+    }
+
+    this.buckets.set(tenantId, {
+      tokens: refilled - 1,
+      lastRefillMs: nowMs,
+    });
+    return true;
+  }
+}
+
+export { TenantRateLimiter };
+```
+
+Each tenant gets its own bucket, keyed by `tenantId` — one tenant emptying
+their bucket has zero effect on any other tenant's tokens. This is the
+mechanism-level answer to Incident 2: the noisy tenant's requests beyond
+their own limit get rejected (or queued/retried by the caller), while every
+other tenant's bucket keeps refilling on schedule, untouched.
+
+```typescript
+// Usage: a tenant bursting past their limit gets throttled,
+// everyone else is unaffected.
+const limiter = new TenantRateLimiter(/* capacity */ 10, /* perSecond */ 2);
+
+let t = 0;
+for (let i = 0; i < 15; i++) {
+  const allowed = limiter.tryConsume("noisy-tenant", t);
+  // First 10 succeed (burst capacity), the rest are rejected until
+  // tokens refill at 2/sec.
+}
+
+// Unaffected: a different tenant's bucket is untouched by the above loop.
+limiter.tryConsume("quiet-tenant", t); // true — full capacity still available
+```
+
+<Checkpoint question="If TenantRateLimiter used one shared bucket for all tenants instead of a Map keyed by tenantId, would it still solve Incident 2?">
+
+No — a single shared bucket is exactly the noisy-neighbor problem restated
+in code. One tenant consuming tokens from a shared bucket would deplete the
+capacity available to every other tenant, which is precisely the failure
+mode from L1's Incident 2. The fix depends specifically on each tenant
+having its own independent bucket, so one tenant's consumption can never
+reduce what another tenant has available — the same "independent unit per
+tenant" idea `TenantScopedQuery` used for data, applied here to rate.
+
+</Checkpoint>
+
+## Where each mechanism still leaves a gap
+
+Neither fix is complete on its own, and layering both still doesn't cover
+everything:
+
+| Mechanism           | Closes                                    | Does NOT close                                                                                            |
+| ------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `TenantScopedQuery` | Missing-filter data leaks                 | A shared table's storage/IO being consumed unevenly                                                       |
+| `TenantRateLimiter` | One tenant's request rate starving others | A single very expensive query staying under the rate limit while still being slow                         |
+| Both together       | Most pooled-model failure modes           | Physical isolation guarantees (e.g. regulatory requirement for a separate DB) — that needs silo, not code |
+
+That last row is why the isolation model choice from L1/L2 still matters —
+code-level enforcement makes the pool model safe to operate, but it doesn't
+turn pool into silo. A tenant with a genuine regulatory requirement for
+physical data separation still needs the silo (or at minimum bridge) model;
+no amount of query scoping changes which physical disk their data sits on.
+
+**Extend the example**: what would `TenantRateLimiter` need to change if,
+instead of one flat limit for every tenant, larger paying tenants were
+entitled to a higher `capacity` and `refillPerSecond` than smaller ones? And
+separately — if `TenantScopedQuery` needs to support an admin role that
+_can_ legitimately query across all tenants (for support tooling), how would
+you add that without reopening the same unscoped-query risk this design was
+built to remove?
+
+## A full request, both mechanisms together
+
+```typescript
+async function handleListInvoices(
+  tenantId: string,
+  table: Table<Invoice>,
+  limiter: TenantRateLimiter,
+  nowMs: number,
+): Promise<{ status: number; body: Invoice[] | { error: string } }> {
+  if (!limiter.tryConsume(tenantId, nowMs)) {
+    return { status: 429, body: { error: "Too many requests" } };
+  }
+
+  const invoices = table.scopeTo(tenantId).find();
+  return { status: 200, body: invoices };
+}
+```
+
+Rate limiting runs first — a tenant over their limit never even reaches the
+query layer, so an expensive query from a throttled tenant can't run at all,
+not just "run but return nothing." Isolation and rate limiting are ordered
+checks, not independent options; the order matters for how much protection
+the combination actually gives the rest of the system.
