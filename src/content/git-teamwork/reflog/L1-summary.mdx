@@ -1,0 +1,97 @@
+---
+title: "L1 — Your teammate just ran git reset --hard and lost two days of work. Is it actually gone?"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+
+<Scenario label="Reset --hard, then panic">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>💻</span> <strong>The command</strong> — `git reset --hard origin/main`, meant to "clean up" a messy branch</div>
+      <div class="flex items-center gap-1.5"><span>📉</span> <strong>What it did</strong> — moved the branch pointer back, dropping 3 commits, 2 days of unpushed work</div>
+      <div class="flex items-center gap-1.5"><span>😰</span> <strong>The assumption</strong> — "reset --hard" sounds permanent, so the work must be gone</div>
+    </div>
+  </Fragment>
+
+A teammate wanted to discard a few messy local commits and start clean,
+so they ran `git reset --hard origin/main`. It worked — a little too
+well. Three commits and two days of unpushed work vanished from
+`git log` instantly. They assume it's gone for good and start
+rewriting from memory. **Is "reset --hard" actually as permanent as it
+sounds, or is there something git kept around that `git log` just
+isn't showing anymore?**
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "What git reflog actually records",
+    "Why 'lost' commits aren't deleted immediately",
+    "What git bisect is for (a different problem)",
+  ]}
+/>
+
+## The minimum map
+
+- **HEAD** — the commit your current branch is pointing at right now.
+- **A ref** — any named pointer to a commit: a branch, a tag, or `HEAD`
+  itself.
+- **`git log`** — shows the history you can reach by walking backward
+  from where a ref points _right now_. If a ref moves, `git log` only
+  ever shows what's reachable from its new position.
+- **`git reflog`** — a separate, local record of every position a ref
+  has ever pointed to, most recent first. It doesn't care what's
+  currently reachable — it remembers where you _were_.
+- **A dangling commit** — a commit that still physically exists in
+  git's object store but that no branch or tag currently points to.
+
+The distinction that resolves the scenario above: `git log` describes
+the graph as it looks _now_. `git reflog` describes how you _got_
+here — every move, including the one that just orphaned three commits.
+
+## The shape of the problem
+
+- `git reset --hard` doesn't delete commit objects — it only moves the
+  branch pointer (and updates the working tree to match). The three
+  "lost" commits are still sitting in `.git/objects`, just no longer
+  reachable from any branch.
+- Git only actually deletes unreachable objects during garbage
+  collection (`git gc`, which also runs automatically sometimes), and
+  even then, only after they've aged past a retention window —
+  by default, weeks, not seconds.
+- `git reflog` is what makes those still-present-but-unreachable
+  commits findable again: every command that moves a ref (`reset`,
+  `checkout`, `commit`, `merge`, `rebase`, `pull`) leaves an entry.
+
+| Command that "loses" history            | Does it delete commit objects right away?   | Recoverable via reflog?               |
+| --------------------------------------- | ------------------------------------------- | ------------------------------------- |
+| `git reset --hard <ref>`                | No — only moves the branch pointer          | Yes, until reflog/gc expiry           |
+| `git checkout <other-branch>`           | No — nothing was removed at all             | Not needed; original branch untouched |
+| `git branch -D <branch>`                | No — only deletes the branch label          | Yes, via `HEAD`/branch reflog entries |
+| `git push --force` (overwriting remote) | No, locally — but rewrites the remote ref   | Yes, on your machine; not on remote   |
+| `git gc` running after objects expired  | Yes — this is the step that actually prunes | No — this is the point of no return   |
+
+## Key terms
+
+- **Reflog** — per-ref, local-only log of where that ref has pointed
+  over time, entries named `HEAD@{0}`, `HEAD@{1}`, `HEAD@{2}`, ... with
+  `{0}` always the most recent position.
+- **`ORIG_HEAD`** — a special ref git updates automatically before
+  operations that move `HEAD` in a big way (`reset`, `merge`, `rebase`)
+  — a one-step "undo" pointer, distinct from the full reflog.
+- **Dangling commit** — a commit object with no ref pointing to it;
+  still on disk, still recoverable, until garbage collection prunes it.
+- **`git bisect`** — a completely different tool from reflog, for a
+  completely different problem: not "recover something I lost," but
+  "find which of many past commits first introduced a bug," using
+  binary search over the commit history.
+
+## What this unit covers
+
+L2 works through exactly what a reflog entry means, why the dropped
+commits survive long enough to matter, and how bisect's binary search
+converges on a bad commit in a handful of steps instead of a linear
+scan. L3 walks a real recovery from an actual `reset --hard` accident
+and a real bisect session end to end, plus the parsing and search logic
+underneath both, as runnable code.

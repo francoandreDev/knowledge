@@ -1,0 +1,243 @@
+---
+title: "L3 — A real reflog recovery, a real bisect session, and the logic underneath both"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="Two real investigations, back to back">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>1️⃣</span> <strong>Recovery</strong> — the reset --hard from L1, resolved with the actual reflog output and commands</div>
+      <div class="flex items-center gap-1.5"><span>2️⃣</span> <strong>Regression hunt</strong> — a rate-limiter bug reported today, ~500 commits since the last known-good release</div>
+      <div class="flex items-center gap-1.5"><span>🧩</span> <strong>Same discipline</strong> — both are read-the-evidence-before-acting, just on different evidence</div>
+    </div>
+  </Fragment>
+
+L1 and L2 built the concepts. **Before reading the transcripts below,
+predict: for the reset --hard accident, will the recovery command need
+to know the exact commit hash of the lost work, or can it be found
+without ever typing a hash by hand?**
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "A real reflog recovery, command by command",
+    "A real bisect session, command by command",
+    "The parsing and search logic underneath both",
+  ]}
+/>
+
+## Recovering from the reset --hard, for real
+
+Here is the teammate's actual terminal, right after the accident:
+
+```bash
+$ git log --oneline -1
+b3f2a91 Merge branch 'main' into feature/rate-limiter
+
+$ git reflog
+b3f2a91 (HEAD -> feature/rate-limiter) HEAD@{0}: reset: moving to origin/main
+e7c9d14 HEAD@{1}: commit: add rate limiter integration tests
+a48f0c2 HEAD@{2}: commit: fix off-by-one in token bucket refill
+5d1b6e9 HEAD@{3}: commit: add rate limiter skeleton
+b3f2a91 HEAD@{4}: pull: Fast-forward
+```
+
+`HEAD@{0}` is the reset itself — the operation that caused the damage.
+`HEAD@{1}` is exactly where HEAD sat one move before that: the tip of
+the three "lost" commits, `e7c9d14`. Nothing here required guessing a
+hash; the reflog handed it over directly, with a human-readable reason
+attached to each line.
+
+```bash
+# Safer than resetting again: create a branch pointing at the old tip first,
+# so there's a permanent, named ref to it before touching anything else.
+$ git branch recovery HEAD@{1}
+$ git log --oneline recovery -3
+e7c9d14 add rate limiter integration tests
+a48f0c2 fix off-by-one in token bucket refill
+5d1b6e9 add rate limiter skeleton
+
+# Confirmed it's the right work. Now actually restore the branch:
+$ git reset --hard recovery
+HEAD is now at e7c9d14 add rate limiter integration tests
+```
+
+Two days of work, back — using nothing but information git already
+had, never deleted, and was showing the whole time via `git reflog`.
+
+<Checkpoint question="Why create a temporary `recovery` branch pointing at HEAD@{1} instead of just running `git reset --hard HEAD@{1}` directly?">
+
+Both get the commits back, but `git branch recovery HEAD@{1}` is strictly safer: it gives the old tip a permanent, named ref _before_ touching the current branch, so even if the next command is typo'd or the wrong reflog index gets used, the work is now anchored by a real branch name instead of only a relative, moving `HEAD@{n}` index. `HEAD@{1}` refers to a different commit after every subsequent operation — anchoring it to a branch first removes that moving-target risk before doing anything destructive.
+
+</Checkpoint>
+
+## Finding the culprit with bisect, for real
+
+A different day, a different problem: the rate limiter started
+rejecting valid requests, and nobody knows which of the ~500 commits
+since the last tagged release introduced it.
+
+```bash
+$ git bisect start
+$ git bisect bad                       # current commit is broken
+$ git bisect good v2.3.0               # this old release was known-good
+Bisecting: 249 revisions left to test after this (roughly 8 steps)
+[7a1c3d0] refactor: extract token bucket into its own module
+
+$ npm test -- rateLimiter.spec.js      # test the checked-out commit manually
+# ... tests pass, this commit is fine
+$ git bisect good
+Bisecting: 124 revisions left to test after this (roughly 7 steps)
+[9e4f21b] perf: switch token bucket storage to a Map
+
+$ npm test -- rateLimiter.spec.js
+# ... tests fail here
+$ git bisect bad
+Bisecting: 61 revisions left to test after this (roughly 6 steps)
+...
+# a handful of steps later:
+Bisecting: 0 revisions left to test after this (roughly 0 steps)
+[c8d0a77] fix: default token bucket capacity to 0 when unset
+$ git bisect bad
+c8d0a77 is the first bad commit
+$ git bisect reset
+```
+
+Roughly 9 tests, out of 500 commits, because each answer discards half
+the remaining range instead of ruling out one commit at a time. The
+same session can be automated with a script instead of testing by
+hand:
+
+```bash
+$ git bisect start HEAD v2.3.0
+$ git bisect run npm test -- rateLimiter.spec.js
+# git checks out each candidate, runs the test command, reads its exit
+# code (0 = good, nonzero = bad), and repeats until it converges —
+# printing the same "first bad commit" result with zero manual steps
+```
+
+## The parsing logic underneath reflog
+
+Real tooling (scripts, editor integrations) doesn't scrape `git
+reflog`'s human-formatted output character by character — but it's
+useful to see the shape of the parsing problem, since it's the same
+shape as reading any git plumbing output:
+
+```js
+// parseReflog.mjs — turn `git reflog` text output into structured entries
+function parseReflog(reflogText) {
+  return reflogText
+    .trim()
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const match = line.match(/^(\S+)\s+HEAD@\{(\d+)\}:\s*(\w+):\s*(.+)$/);
+      if (!match) return null;
+      const [, sha, index, reason, detail] = match;
+      return { sha, index: Number(index), reason, detail };
+    })
+    .filter((entry) => entry !== null);
+}
+
+const sample = `b3f2a91 HEAD@{0}: reset: moving to origin/main
+e7c9d14 HEAD@{1}: commit: add rate limiter integration tests`;
+
+console.log(parseReflog(sample));
+// [
+//   { sha: "b3f2a91", index: 0, reason: "reset", detail: "moving to origin/main" },
+//   { sha: "e7c9d14", index: 1, reason: "commit", detail: "add rate limiter integration tests" },
+// ]
+```
+
+`index` is exactly the `n` in `HEAD@{n}` — `parseReflog(...)[k].index`
+tells you which `HEAD@{...}` argument would check that commit back
+out, the same value used by hand in the recovery transcript above.
+
+## The search logic underneath bisect
+
+```js
+// bisectSearch.mjs — binary search for the first commit where isBad(commit) is true.
+// Assumes the classic bisect precondition: everything before the culprit is
+// good, everything from the culprit onward is bad (a single "flip point").
+function bisectSearch(commits, isBad) {
+  let lo = 0;
+  let hi = commits.length - 1;
+  let steps = 0;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    steps++;
+    if (isBad(commits[mid])) {
+      hi = mid; // culprit is at mid or earlier
+    } else {
+      lo = mid + 1; // culprit is strictly after mid
+    }
+  }
+  return { culprit: commits[lo], steps };
+}
+
+const commits = ["v2.3.0", "7a1c3d0", "9e4f21b", "c8d0a77", "HEAD"];
+const isBad = (c) => ["9e4f21b", "c8d0a77", "HEAD"].includes(c);
+
+console.log(bisectSearch(commits, isBad));
+// { culprit: "9e4f21b", steps: 2 } — on this tiny 5-commit example
+```
+
+This is precisely what `git bisect` automates against real commit
+history: `commits` is the good-to-bad range, `isBad` is "did the test
+command exit nonzero on this commit," and the loop is the same
+halve-the-range logic as the mermaid diagram in L2, just made explicit.
+
+<Checkpoint question="bisectSearch requires that once a commit is bad, every commit after it is also bad — no flipping back to good later. What would happen to the search if that assumption were false (say, the bug was fixed and then reintroduced by a later, unrelated commit)?">
+
+The search would still run and still return _a_ result, but it wouldn't reliably return the _first_ bad commit — it could land on either flip point depending on which half the midpoints happened to fall in, because the halving logic assumes exactly one good→bad transition to find. This is a real, known bisect failure mode: a history with more than one independent regression (or a regression that got fixed and reintroduced) needs to be bisected in separate ranges, one transition at a time, not as one pass over the whole span.
+
+</Checkpoint>
+
+## Checking recoverability against the expiry window from L2
+
+```js
+// recoverableEntries.mjs — which reflog entries are still inside their
+// expiry window, given L2's default retention numbers.
+function recoverableEntries(entries, nowMs, reflogExpireDays = 90) {
+  const windowMs = reflogExpireDays * 24 * 60 * 60 * 1000;
+  return entries.filter((entry) => nowMs - entry.timestampMs <= windowMs);
+}
+
+const twoDaysAgo = Date.now() - 2 * 24 * 60 * 60 * 1000;
+console.log(
+  recoverableEntries([{ sha: "e7c9d14", timestampMs: twoDaysAgo }], Date.now()),
+);
+// [ { sha: "e7c9d14", timestampMs: ... } ] — well inside the 90-day window
+```
+
+Two days against a 90-day window is nowhere close to expiring — this
+is the code-level version of L2's "the urgency is about not running
+more history-rewriting commands, not a ticking clock."
+
+## Extend it: what changes with a flaky test?
+
+Both transcripts above assumed a clean yes/no answer at each bisect
+step. **What would you need to change if the test suite were flaky —
+sometimes reporting "bad" on a commit that's actually fine?** A single
+`git bisect bad`/`good` marking, or a single `isBad(commits[mid])`
+call, would risk sending the search down the wrong half on a false
+signal. In practice this means running the test multiple times per
+candidate (or using `git bisect skip` for a commit that can't be
+tested cleanly at all) rather than trusting one run — the algorithm's
+correctness depends on `isBad` being a reliable oracle, and a flaky
+suite breaks that precondition just as much as a genuine second
+regression does.
+
+## Failure modes
+
+| Failure mode                                                             | What it gets wrong                                                                                      |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| Assuming `reset --hard` deletes commit objects immediately               | It only moves the branch pointer; objects survive until they're both unreachable and past gc expiry     |
+| Resetting again instead of anchoring the recovered tip to a branch first | Leaves the recovery riding on a moving `HEAD@{n}` index instead of a stable name                        |
+| Bisecting a range with more than one good→bad flip in one pass           | The binary search assumes a single transition; multiple regressions need separate bisect ranges         |
+| Trusting a single flaky test result as a bisect "bad" marking            | One bad reading on a flaky suite can send the whole search down the wrong half                          |
+| Treating reflog as shared history                                        | Reflog is local-only — it can't recover a coworker's mistake on their machine, or survive a fresh clone |
