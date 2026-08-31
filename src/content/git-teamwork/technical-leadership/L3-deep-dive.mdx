@@ -1,0 +1,253 @@
+---
+title: "L3 — Dana's six weeks, end to end, including the pushback"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+
+<Scenario label="Week 4: search-indexing's lead says no">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📄</span> <strong>Week 1</strong> — Dana ships the fix in payments, then writes the RFC</div>
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Week 2</strong> — Notifications adopts it in one PR, no resistance</div>
+      <div class="flex items-center gap-1.5"><span>🚫</span> <strong>Week 4</strong> — Search-indexing's lead, Owen, declines: "our retries are idempotency-sensitive, your library doesn't handle that"</div>
+      <div class="flex items-center gap-1.5"><span>🔧</span> <strong>Week 6</strong> — Owen's actual concern gets built into the library; search-indexing adopts a slightly different version than notifications did</div>
+    </div>
+  </Fragment>
+
+By week 2, notifications had adopted Dana's retry library in a single
+PR with almost no discussion — the RFC and the working code did most of
+the persuading on their own. Week 4 went differently. Owen, search-
+indexing's lead, read the RFC and pushed back in a comment: **"This
+looks solid for payments, but our indexing job re-runs on the exact same
+batch of documents on retry — if two retries race, we could double-index
+a document. Your library doesn't say anything about that."** Owen wasn't
+wrong, and he wasn't just being difficult. **What does Dana do next —
+and does anything from the payments RFC actually transfer to a team
+whose retry problem has a genuinely different failure mode?**
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "The real fix, and what its tests actually check",
+    "Handling real pushback without losing the win",
+    "When to invert the order: gathering input before building",
+  ]}
+/>
+
+## The code Dana actually shipped
+
+Here's `withRetry()` as it landed in payments in week 1 — small, tested,
+and doing exactly one job: don't retry a request that's guaranteed to
+fail again.
+
+```python
+import time
+import random
+from dataclasses import dataclass, field
+
+RETRYABLE_STATUSES = {429, 502, 503, 504}
+
+
+@dataclass
+class RetryConfig:
+    max_attempts: int = 3
+    base_delay_seconds: float = 0.5
+    retryable_statuses: set[int] = field(
+        default_factory=lambda: set(RETRYABLE_STATUSES)
+    )
+
+
+class NonRetryableError(Exception):
+    """Raised when a response's status means retrying can't help."""
+
+
+def with_retry(make_request, config: RetryConfig | None = None):
+    """Calls make_request() up to config.max_attempts times.
+
+    make_request must return an object with a `.status_code` attribute
+    (or raise). A response whose status isn't in
+    config.retryable_statuses is returned immediately on the first
+    attempt — it is never retried, because retrying it can't change
+    the outcome.
+    """
+    config = config or RetryConfig()
+    last_response = None
+
+    for attempt in range(1, config.max_attempts + 1):
+        response = make_request()
+        if response.status_code < 400:
+            return response
+        if response.status_code not in config.retryable_statuses:
+            # A 400, 401, 403, 404 ... will fail again with identical
+            # input. Retrying wastes time and load on the downstream
+            # service for zero chance of success.
+            return response
+
+        last_response = response
+        if attempt < config.max_attempts:
+            # Exponential backoff with jitter, so a burst of callers
+            # retrying at once doesn't re-synchronize into another spike.
+            delay = config.base_delay_seconds * (2 ** (attempt - 1))
+            delay += random.uniform(0, delay * 0.25)
+            time.sleep(delay)
+
+    return last_response
+```
+
+```python
+class FakeResponse:
+    def __init__(self, status_code):
+        self.status_code = status_code
+
+
+def test_non_retryable_status_returns_on_first_attempt():
+    calls = []
+
+    def make_request():
+        calls.append(1)
+        return FakeResponse(400)
+
+    result = with_retry(make_request)
+    assert len(calls) == 1
+    assert result.status_code == 400
+
+
+def test_retryable_status_retries_up_to_max_attempts():
+    calls = []
+
+    def make_request():
+        calls.append(1)
+        return FakeResponse(503)
+
+    result = with_retry(make_request, RetryConfig(base_delay_seconds=0))
+    assert len(calls) == 3
+    assert result.status_code == 503
+
+
+def test_success_stops_retrying_early():
+    calls = []
+
+    def make_request():
+        calls.append(1)
+        return FakeResponse(200) if len(calls) == 2 else FakeResponse(503)
+
+    result = with_retry(make_request, RetryConfig(base_delay_seconds=0))
+    assert len(calls) == 2
+    assert result.status_code == 200
+```
+
+The whole point of `test_non_retryable_status_returns_on_first_attempt`
+is the bug this unit opened with: without it, this exact test would have
+caught both buggy implementations at notifications and search-indexing
+before they ever shipped. That single test is doing more persuasive work
+in the RFC than a paragraph of prose describing the bug would — it's a
+runnable, falsifiable claim, not an assertion.
+
+<Checkpoint question="Notifications adopted it in week 2 with almost no discussion. Why did the exact same RFC, code, and pitch land so differently for search-indexing?">
+
+The RFC and code weren't the variable — the underlying problem was.
+Notifications' retry logic had the same shape of bug as payments' (retry
+everything, including non-retryable errors), so the fix mapped over
+directly with nothing left to argue about. Search-indexing's retry logic
+has a different failure mode layered on top — a retried request can
+re-run side effects (re-indexing a document) rather than just repeating
+a safe read, so `with_retry()` alone doesn't fully solve their problem
+even though it's still correct as far as it goes. This is the general
+shape of real cross-team adoption: a fix that's a complete solution for
+one team can be a partial, still-useful solution for another, and
+treating every "no" as resistance rather than checking whether it's a
+genuine gap in the proposal is exactly the mistake that turns a real
+technical objection into an unnecessary fight.
+
+</Checkpoint>
+
+## What Dana does with Owen's objection
+
+Owen's objection is specific and technically correct: `with_retry()`
+guards against retrying a request that can't succeed, but says nothing
+about a request that succeeds twice with a side effect that isn't safe
+to repeat (indexing the same document twice). Dana's options at this
+point, and what each one actually costs:
+
+| Response                                                       | What it costs                                                          |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Argue the point away, insist the library is "close enough"     | Burns the trust that made notifications' fast adoption possible        |
+| Quietly drop search-indexing from the rollout                  | Leaves a real, known bug pattern unfixed in one more codebase          |
+| Treat the objection as a real design input, extend the library | Costs a week of extra work; produces a genuinely better shared library |
+
+Dana takes the third option: she pairs with Owen for half a day, and
+they add an optional `idempotency_key` parameter to `RetryConfig` — when
+set, `with_retry()` passes the same key on every attempt so the
+downstream indexing service (which Owen's team already had the hooks
+for) can detect and skip a duplicate. This is not a compromise that
+waters down the original fix; the non-retryable-status check payments
+needed is untouched, and search-indexing gets an additional guarantee
+layered on top of it.
+
+```mermaid
+sequenceDiagram
+    participant Owen as Owen (search-indexing lead)
+    participant Dana
+    Owen->>Dana: "Your library doesn't handle idempotency"
+    Dana->>Owen: Pairs for half a day, reads the actual failure mode
+    Dana->>Dana: Adds idempotency_key param, keeps existing behavior intact
+    Dana->>Owen: Opens PR against shared library, tags Owen as reviewer
+    Owen->>Dana: Approves; search-indexing adopts week 6
+```
+
+**Why does pairing do something a written reply to Owen's comment
+couldn't?** Owen's objection was correct but incomplete from Dana's side
+— she didn't yet know exactly how search-indexing's indexing pipeline
+detected duplicates, and a written back-and-forth would have taken
+several slow async rounds to extract that detail (the same round-trip
+cost L2's leverage-point discussion flagged). Half a day of pairing let
+Dana ask follow-up questions in real time and see the actual downstream
+service's duplicate-detection hook, which is what made the real fix
+possible instead of a fix based on a guess at what Owen meant.
+
+## When the order inverts: gather input before building
+
+L2 established code-first as the default because Dana already had high
+confidence the non-retryable-status bug was worth fixing and knew
+roughly what the fix looked like. That default doesn't hold everywhere —
+**what property of a decision would make gathering input first the
+better order, even for someone with Dana's credibility?**
+
+Code-first assumes the proposer already has enough conviction and
+context to build something worth reacting to. When the actual design
+space is genuinely open — multiple defensible directions exist and the
+person best positioned to build isn't the person who knows the most
+about the trade-offs — writing a short options memo and getting input
+_before_ anyone builds anything avoids sinking real implementation time
+into a direction that a five-minute conversation would have redirected.
+Search-indexing's idempotency handling is closer to this case in
+miniature: rather than Dana guessing at a design and presenting it as
+another finished PR, pairing with Owen first (gathering his team's
+actual constraint) before writing the `idempotency_key` code produced a
+better result faster than build-then-pitch would have for that specific
+piece.
+
+| Decision property                                      | Better order           |
+| ------------------------------------------------------ | ---------------------- |
+| Proposer already has strong evidence and a working fix | Code first, then RFC   |
+| Multiple genuinely open directions, unclear which wins | Input first, then code |
+| The people affected have context the proposer lacks    | Input first, then code |
+
+## Extending past Dana's example
+
+Every step of this walkthrough assumed a proposer with a full year of
+built-up credibility already in the bank, three teams, and a purely
+technical objection (idempotency) from the one team that pushed back.
+Consider two different versions of this same situation and how the
+technique would need to change: **first, what would Dana need to do
+differently in week 1 if she were new to the org — six months in, no
+track record yet — trying to drive the same fix? Second, suppose Owen's
+actual objection in week 4 wasn't idempotency at all, but "my team
+already spent two sprints building our own retry logic and adopting
+yours makes that work look wasted" — a status objection dressed as a
+technical one. Does the code-review-and-pairing playbook from this unit
+still work on that version of the objection, or does it call for a
+different channel entirely?**
