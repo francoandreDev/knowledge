@@ -1,0 +1,153 @@
+---
+title: "L3 — Reviewing a real design doc: the notification-service migration"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="The notification-service migration doc">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📄</span> <strong>Proposal</strong> — replace a synchronous REST call from the order service to the notification service with a Kafka topic (<code>order.events</code>)</div>
+      <div class="flex items-center gap-1.5"><span>🧑‍💻</span> <strong>Author</strong> — two years on the team, first design doc written solo</div>
+      <div class="flex items-center gap-1.5"><span>📈</span> <strong>Stated motivation</strong> — the order service currently blocks on notification delivery, adding ~180ms to checkout latency</div>
+    </div>
+  </Fragment>
+
+The doc's opening paragraph: _"Today, `OrderService.completeOrder()` calls
+`NotificationService.send()` synchronously and waits for a response, adding
+~180ms to every checkout. This proposal moves order completion to publish
+an event to a Kafka topic, `order.events`, which the notification service
+consumes asynchronously. This removes the latency from the checkout path
+entirely."_ The design is real, the motivation is real, and the 180ms
+number is real. **Reading only that paragraph, is there anything here
+worth asking a question about yet — or is it too early to tell?**
+
+</Scenario>
+
+It's early, but not too early — that one paragraph already contains a
+claim worth testing: "removes the latency entirely" is true for the order
+service's request path, but it says nothing about what happens to a
+notification once it's published. That's not a flaw yet. It's the doc's
+first load-bearing claim, and L2's flow says to read the whole thing before
+reacting — so hold it, and keep reading.
+
+<LevelIntro
+  items={[
+    "Testing a real doc's claims against the 5 question categories",
+    "Sorting the resulting comments by severity, not by how they were noticed",
+    "Two comments that ask the same question with different tone, and why it matters",
+  ]}
+/>
+
+## Reading the rest of the doc
+
+Three more paragraphs from the same doc, each stating a claim worth
+testing:
+
+> _"The notification service will consume `order.events` and send each
+> customer their confirmation email and SMS. Each event is processed
+> independently."_
+
+> _"If the notification service is down, Kafka retains events on the topic
+> for 7 days, so no orders are lost — the consumer will catch up once it's
+> back."_
+
+> _"This is a drop-in replacement for the current call. Rollout is a single
+> deploy: ship the producer and consumer together, cut over, done."_
+
+**Reading these three claims together with the five categories from L1 in
+mind — which categories does each one actually touch, and which does the
+doc seem to have skipped entirely?**
+
+| Doc claim                                               | Category it invites testing           | What the doc doesn't say                                                                                                                                                                                                 |
+| ------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| "Each event is processed independently"                 | Failure modes & blast radius          | What happens if one event repeatedly fails to process — does it block the ones behind it, or get skipped, or retried forever?                                                                                            |
+| "Kafka retains events for 7 days... no orders are lost" | Reversibility & cost of being wrong   | "No orders lost" describes durability, not delivery — does the consumer guarantee at-least-once processing, and if a message is processed twice, is sending two confirmation emails to a customer an acceptable outcome? |
+| "Drop-in replacement... single deploy, cut over, done"  | Operability & ownership; Scale & load | No mention of running both paths in parallel first, a rollback plan if the consumer has a bug, or what "cut over" means for orders already in flight mid-deploy                                                          |
+
+<Checkpoint question="The doc's claim 'no orders are lost' technically refers to Kafka's message retention, not the consumer's processing behavior. Why is that distinction worth a review comment rather than being close enough to let pass?">
+
+Because durability and correct processing are different guarantees, and
+conflating them is exactly the kind of claim that sounds reassuring while
+leaving the real risk unaddressed. Kafka retaining a message for 7 days
+means the _bytes_ aren't lost — it says nothing about whether the consumer
+processes each message exactly once, at least once, or could crash
+mid-processing and silently skip one. If the actual behavior is
+at-least-once (the common default), a customer could get a duplicate
+confirmation email, which is a real (if minor) bug the doc's phrasing
+currently hides behind a technically-true but incomplete claim. This is
+the kind of gap nitpicking never catches, because it requires reading the
+claim critically rather than reacting to its wording.
+
+</Checkpoint>
+
+## Sorting the findings
+
+Following L2's flow — read fully, then sort — the doc above produces six
+real comments. Sorted by severity rather than by the order they were
+noticed in:
+
+| Severity   | Category                            | Comment                                                                                                                                                                                                                                             |
+| ---------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Blocking   | Failure modes & blast radius        | No poison-pill handling described — what happens to an event that fails processing repeatedly? Without a dead-letter topic or retry cap, one bad event could block or infinitely retry, silently stalling all order confirmations behind it.        |
+| Blocking   | Reversibility & cost of being wrong | "No orders lost" should specify the delivery guarantee (at-least-once vs. exactly-once) and whether the notification-send is idempotent, since duplicate sends are a real customer-facing outcome under at-least-once delivery.                     |
+| Should-fix | Operability & ownership             | "Single deploy, cut over" has no rollback plan if the consumer has a bug post-cutover. Recommend running the new path alongside the old one behind a flag before fully cutting over.                                                                |
+| Should-fix | Scale & load                        | Doc doesn't state expected event volume or Kafka partition count — worth a sentence on whether today's checkout volume, and 10x it, both fit the proposed topic configuration.                                                                      |
+| Question   | Trade-offs & alternatives           | Was a simpler async approach (e.g., a background job queue) considered before Kafka specifically, or is Kafka already the team's standard for this kind of thing? Not objecting either way — just want the reasoning in the doc for future readers. |
+| Nit        | —                                   | "OrderService" and "Order Service" are both used in the doc; pick one. Optional, doesn't block anything.                                                                                                                                            |
+
+Two blocking, two should-fix, one open question, one nit clearly labeled
+as such — nothing here is dressed up as more urgent than it is, and
+nothing substantive got lost in a pile of formatting comments.
+
+## The same finding, two different comments
+
+Both blocking items above are correct findings — but _how_ they get
+written to the author changes whether the review actually works, per L2's
+rigor/tone matrix. Two ways to write the poison-pill comment:
+
+**High rigor, adversarial tone:** _"There's no error handling here at all.
+This would fall over immediately in production."_
+
+**High rigor, collaborative tone:** _"What happens if a specific event
+fails to process — say, the SMS provider rejects one customer's number?
+Does it retry forever, get skipped, or block the events behind it? I think
+this needs a dead-letter topic or a retry cap before this ships, but happy
+to talk through options if there's a reason it's not in scope yet."_
+
+Both identify the same real, blocking gap. The first states a verdict
+about the design and, implicitly, about the author's thoroughness. The
+second asks a specific, answerable question, states the reviewer's
+position clearly (this needs a fix before shipping) without personalizing
+it, and leaves room for context the reviewer might not have. A design
+author who receives the first comment is likely to respond to the tone
+before the content; the second gives them nowhere to go but the actual
+design question.
+
+<Checkpoint question="Someone might argue the first phrasing is more efficient — it's shorter and gets straight to the point. Using what L2's rigor/tone matrix predicts about outcomes, why is that efficiency likely to be false economy here?">
+
+Because the phrasing's length isn't the variable that determines whether
+the design actually gets fixed — the author's ability to engage with the
+feedback is. The matrix's prediction for high-rigor/adversarial-tone
+comments is that the author gets defensive, which tends to produce
+_slower_ resolution overall: a defensive response, a clarifying back-and-
+forth about tone rather than substance, or the author fixing only the
+literal words of the complaint rather than the underlying gap. A slightly
+longer comment that the author can act on immediately, without first
+managing how it made them feel, is faster in the way that actually
+matters — time to a fixed design, not characters typed in the comment box.
+
+</Checkpoint>
+
+**Extend it:** the review above worked through a first-time author's doc
+for a notification service — low stakes if something's missed, since a
+duplicate email is an annoyance, not an incident. What would change about
+which findings are blocking versus should-fix if this were the exact same
+design pattern (Kafka, at-least-once delivery, no stated idempotency)
+proposed for a _payment-confirmation_ event instead of order notifications
+— where a duplicate delivery risks a customer being charged twice? And
+what would change about how you'd phrase the same comments if the author
+were not two years in but the most senior architect on the team, presenting
+this design to a room instead of a written doc?
