@@ -144,21 +144,21 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 
 ## career-craft/
 
-| #   | Slug                          | Problem                                                                                                                   | Tags                                          | Status  |
-| --- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- | ------- |
-| 01  | leveling-expectations         | What does "good" actually look like at each stage of an engineering career? (leveling expectations, scope vs. title)      | career-growth, mental-models                  | done    |
-| 02  | asking-feedback               | How do I get useful feedback instead of vague praise? (asking for feedback, calibration)                                  | feedback, career-growth, communication        | done    |
-| 03  | mentoring-fundamentals        | How do I help a junior teammate grow without doing their job for them? (mentoring fundamentals)                           | mentoring, career-growth, feedback            | done    |
-| 04  | structured-interviewing       | How do I know if someone should get the job? (structured interviewing, avoiding bias)                                     | hiring, decision-making                       | done    |
-| 05  | goal-setting                  | How do I build a growth plan that isn't just "work harder"? (goal-setting, skill gap analysis)                            | career-growth, learning                       | done    |
-| 06  | impact-scope-over-correctness | Why doesn't being technically right guarantee being seen as senior? (impact and scope over correctness)                   | career-growth, mental-models                  | done    |
-| 07  | documentation-career-tool     | How do I make my work visible without it feeling like bragging? (documentation as a career tool, brag docs)               | writing, career-growth, communication         | done    |
-| 08  | calibration-processes         | How do performance calibrations actually work? (calibration processes, promotion packets)                                 | career-growth, decision-making                | done    |
-| 09  | ic-em-tracks                  | How do I decide between staying an IC or moving into management? (IC vs. EM tracks, self-assessment)                      | career-growth, decision-making, mental-models | done    |
-| 10  | peer-mentoring                | How do I mentor someone who is more senior than me in a different way? (peer mentoring, skip-level relationships)         | mentoring, collaboration, career-growth       | done    |
-| 11  | staff-scope                   | What does a staff engineer actually own that a senior doesn't? (staff scope: technical direction, org-level leverage)     | career-growth, leadership, architecture       | done    |
-| 12  | market-research               | How do I evaluate whether an offer or raise is actually fair? (market research, total comp literacy)                      | career-growth, negotiation                    | done    |
-| 13  | negotiation-tactics           | How do I negotiate compensation without damaging the relationship? (negotiation tactics, anchoring, knowing when to walk) | negotiation, career-growth, communication     | planned |
+| #   | Slug                          | Problem                                                                                                                   | Tags                                          | Status |
+| --- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- | ------ |
+| 01  | leveling-expectations         | What does "good" actually look like at each stage of an engineering career? (leveling expectations, scope vs. title)      | career-growth, mental-models                  | done   |
+| 02  | asking-feedback               | How do I get useful feedback instead of vague praise? (asking for feedback, calibration)                                  | feedback, career-growth, communication        | done   |
+| 03  | mentoring-fundamentals        | How do I help a junior teammate grow without doing their job for them? (mentoring fundamentals)                           | mentoring, career-growth, feedback            | done   |
+| 04  | structured-interviewing       | How do I know if someone should get the job? (structured interviewing, avoiding bias)                                     | hiring, decision-making                       | done   |
+| 05  | goal-setting                  | How do I build a growth plan that isn't just "work harder"? (goal-setting, skill gap analysis)                            | career-growth, learning                       | done   |
+| 06  | impact-scope-over-correctness | Why doesn't being technically right guarantee being seen as senior? (impact and scope over correctness)                   | career-growth, mental-models                  | done   |
+| 07  | documentation-career-tool     | How do I make my work visible without it feeling like bragging? (documentation as a career tool, brag docs)               | writing, career-growth, communication         | done   |
+| 08  | calibration-processes         | How do performance calibrations actually work? (calibration processes, promotion packets)                                 | career-growth, decision-making                | done   |
+| 09  | ic-em-tracks                  | How do I decide between staying an IC or moving into management? (IC vs. EM tracks, self-assessment)                      | career-growth, decision-making, mental-models | done   |
+| 10  | peer-mentoring                | How do I mentor someone who is more senior than me in a different way? (peer mentoring, skip-level relationships)         | mentoring, collaboration, career-growth       | done   |
+| 11  | staff-scope                   | What does a staff engineer actually own that a senior doesn't? (staff scope: technical direction, org-level leverage)     | career-growth, leadership, architecture       | done   |
+| 12  | market-research               | How do I evaluate whether an offer or raise is actually fair? (market research, total comp literacy)                      | career-growth, negotiation                    | done   |
+| 13  | negotiation-tactics           | How do I negotiate compensation without damaging the relationship? (negotiation tactics, anchoring, knowing when to walk) | negotiation, career-growth, communication     | done   |
 
 ## product-domain/
 
