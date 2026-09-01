@@ -311,16 +311,16 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 
 ## sustainable-performance/
 
-| #   | Slug                                | Problem                                                                                                                                              | Tags                                  | Status  |
-| --- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ------- |
-| 01  | myth-linear-output                  | Why does working more hours eventually produce less, not more? (the myth of linear output, diminishing returns)                                      | burnout, mental-models, deep-work     | done    |
-| 02  | early-warning-signs                 | How do I recognize burnout before it takes me out completely? (early warning signs, tired vs. burned out)                                            | burnout, mental-models                | done    |
-| 03  | attention-management                | How do I protect focus time in a job full of interruptions? (attention management, deep work vs. shallow work)                                       | deep-work, mental-models              | done    |
-| 04  | energy-management-across-day-week   | How do I manage energy, not just time? (energy management across a day/week, matching task type to energy state)                                     | deep-work, burnout, mental-models     | done    |
-| 05  | sustainable-boundary-setting        | How do I say no to more work without it looking like I can't handle my job? (sustainable boundary-setting)                                           | burnout, communication, career-growth | done    |
-| 06  | recovery-practices-crunch           | How do I recover from a genuinely brutal period without carrying it forward? (recovery practices after crunch, incidents, layoffs)                   | burnout, incident-response            | planned |
-| 07  | sustainable-long-term-learning-pace | How do I keep growing technically without it consuming my whole identity? (sustainable long-term learning pace)                                      | burnout, learning, career-growth      | planned |
-| 08  | long-horizon-sustainability         | How does a staff engineer sustain high output over a decade, not just a good quarter? (long-horizon sustainability, pacing a career like a marathon) | burnout, leadership, career-growth    | planned |
+| #   | Slug                                | Problem                                                                                                                                              | Tags                                  | Status |
+| --- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ------ |
+| 01  | myth-linear-output                  | Why does working more hours eventually produce less, not more? (the myth of linear output, diminishing returns)                                      | burnout, mental-models, deep-work     | done   |
+| 02  | early-warning-signs                 | How do I recognize burnout before it takes me out completely? (early warning signs, tired vs. burned out)                                            | burnout, mental-models                | done   |
+| 03  | attention-management                | How do I protect focus time in a job full of interruptions? (attention management, deep work vs. shallow work)                                       | deep-work, mental-models              | done   |
+| 04  | energy-management-across-day-week   | How do I manage energy, not just time? (energy management across a day/week, matching task type to energy state)                                     | deep-work, burnout, mental-models     | done   |
+| 05  | sustainable-boundary-setting        | How do I say no to more work without it looking like I can't handle my job? (sustainable boundary-setting)                                           | burnout, communication, career-growth | done   |
+| 06  | recovery-practices-crunch           | How do I recover from a genuinely brutal period without carrying it forward? (recovery practices after crunch, incidents, layoffs)                   | burnout, incident-response            | done   |
+| 07  | sustainable-long-term-learning-pace | How do I keep growing technically without it consuming my whole identity? (sustainable long-term learning pace)                                      | burnout, learning, career-growth      | done   |
+| 08  | long-horizon-sustainability         | How does a staff engineer sustain high output over a decade, not just a good quarter? (long-horizon sustainability, pacing a career like a marathon) | burnout, leadership, career-growth    | done   |
 
 ## people-management/
 
