@@ -68,6 +68,29 @@ const trackSequences = Object.fromEntries(
 // is all the client needs.
 const writtenUnitHrefs = writtenUnits.map((u) => `/${u.track}/${u.unitSlug}/`);
 
+// "Try a real question" pool — one representative level-1 quiz item per
+// written unit (favoring L1 since it's the most accessible without having
+// read the unit first), tagged with that unit's roadmap tags so the
+// client-side script can prefer questions matching the active profile's
+// interests. Picked randomly client-side on every load instead of always
+// showing the same hardcoded HTTP-429 question.
+const previewPool = writtenUnits
+  .map((u) => {
+    const quizL1 = u.exercises.find((e) => e.type === "quiz" && e.level === 1);
+    if (!quizL1 || quizL1.type !== "quiz") return null;
+    const roadmapUnit = getUnit(u.track, u.unitSlug);
+    return {
+      track: u.track,
+      slug: u.unitSlug,
+      problem: roadmapUnit?.problem ?? "",
+      prompt: quizL1.prompt,
+      choices: quizL1.choices,
+      correctIndex: quizL1.correctIndex,
+      tags: roadmapUnit?.tags ?? [],
+    };
+  })
+  .filter((x): x is NonNullable<typeof x> => x !== null);
+
 // Fixed pick for brand-new readers with no progress yet: the most
 // foundational problem on the site, one most other web/ units assume you
 // already feel. Shown in place of "continue learning" only when there's
@@ -159,10 +182,13 @@ const gaugeTracks = roadmap.tracks.filter(
       >
         Try a real question
       </p>
-      <p class="mt-1.5 text-sm font-medium text-slate-900 dark:text-slate-100">
+      <p
+        data-preview-prompt
+        class="mt-1.5 text-sm font-medium text-slate-900 dark:text-slate-100"
+      >
         What does an HTTP 429 response mean?
       </p>
-      <div class="mt-3 grid gap-2">
+      <div data-preview-choices class="mt-3 grid gap-2">
         <button
           type="button"
           data-preview-choice
@@ -192,8 +218,9 @@ const gaugeTracks = roadmap.tracks.filter(
         class="mt-3 hidden items-center gap-1 text-sm font-medium hover:underline"
         style="color: var(--accent-text)"
       >
-        See the full breakdown of status codes in
-        web/http-request-response-basics
+        <span data-preview-followup-text
+          >See the full breakdown in web/http-request-response-basics</span
+        >
         <ArrowRight class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
       </a>
     </div>
@@ -483,6 +510,11 @@ const gaugeTracks = roadmap.tracks.filter(
     id="written-unit-hrefs"
     set:html={JSON.stringify(writtenUnitHrefs)}
   />
+  <script
+    type="application/json"
+    id="preview-questions-pool"
+    set:html={JSON.stringify(previewPool)}
+  />
 
   <script>
     import { pStorage, getActiveProfile } from "../lib/profile";
@@ -732,20 +764,20 @@ const gaugeTracks = roadmap.tracks.filter(
     initInterestPersonalization();
     document.addEventListener("astro:page-load", initInterestPersonalization);
 
-    function initContentPreview() {
-      const root = document.querySelector<HTMLElement>(
-        "[data-content-preview]",
-      );
-      if (!root || root.dataset.wired === "true") return;
-      root.dataset.wired = "true";
+    interface PreviewQuestion {
+      track: string;
+      slug: string;
+      problem: string;
+      prompt: string;
+      choices: string[];
+      correctIndex: number;
+      tags: string[];
+    }
 
-      const choices = Array.from(
-        root.querySelectorAll<HTMLButtonElement>("[data-preview-choice]"),
-      );
-      const followup = root.querySelector<HTMLElement>(
-        "[data-preview-followup]",
-      );
-
+    function wireChoiceButtons(
+      choices: HTMLButtonElement[],
+      followup: HTMLElement | null,
+    ) {
       for (const btn of choices) {
         btn.addEventListener("click", () => {
           const pickedCorrect = btn.dataset.correct === "true";
@@ -778,8 +810,93 @@ const gaugeTracks = roadmap.tracks.filter(
         });
       }
     }
+
+    function initContentPreview() {
+      const root = document.querySelector<HTMLElement>(
+        "[data-content-preview]",
+      );
+      if (!root || root.dataset.wired === "true") return;
+      root.dataset.wired = "true";
+
+      const poolEl = document.getElementById("preview-questions-pool");
+      let pool: PreviewQuestion[] = [];
+      try {
+        pool = JSON.parse(poolEl?.textContent || "[]");
+      } catch {
+        // pool stays []
+      }
+
+      // Prefer questions from tracks matching the active profile's stated
+      // interests (same tag vocabulary as the track-card personalization
+      // above); fall back to the full pool for a fresh/interest-less
+      // profile, or if no match happens to exist.
+      const interests = new Set(getActiveProfile()?.interests ?? []);
+      let candidates = pool;
+      if (interests.size > 0) {
+        const matching = pool.filter((q) =>
+          q.tags.some((tag) => interests.has(tag)),
+        );
+        if (matching.length > 0) candidates = matching;
+      }
+
+      const promptEl = root.querySelector<HTMLElement>("[data-preview-prompt]");
+      const choicesContainer = root.querySelector<HTMLElement>(
+        "[data-preview-choices]",
+      );
+      const followup = root.querySelector<HTMLAnchorElement>(
+        "[data-preview-followup]",
+      );
+      if (!promptEl || !choicesContainer || !followup) return;
+
+      if (candidates.length === 0) {
+        // No pool available (e.g. a build with no written units yet) — keep
+        // whatever static fallback question is already in the markup.
+        const choices = Array.from(
+          choicesContainer.querySelectorAll<HTMLButtonElement>(
+            "[data-preview-choice]",
+          ),
+        );
+        wireChoiceButtons(choices, followup);
+        return;
+      }
+
+      const picked = candidates[Math.floor(Math.random() * candidates.length)];
+      promptEl.textContent = picked.prompt;
+      choicesContainer.innerHTML = "";
+      const newChoices: HTMLButtonElement[] = [];
+      picked.choices.forEach((choiceText, i) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.dataset.previewChoice = "true";
+        if (i === picked.correctIndex) btn.dataset.correct = "true";
+        btn.className =
+          "rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition hover:border-slate-400 disabled:cursor-default dark:border-slate-800 dark:hover:border-slate-600";
+        btn.textContent = choiceText;
+        choicesContainer.appendChild(btn);
+        newChoices.push(btn);
+      });
+      followup.href = `/${picked.track}/${picked.slug}/`;
+      const followupText = followup.querySelector<HTMLElement>(
+        "[data-preview-followup-text]",
+      );
+      if (followupText) {
+        followupText.textContent = `See the full breakdown in ${picked.track}/${picked.slug}`;
+      }
+      followup.classList.add("hidden");
+      followup.classList.remove("flex", "animate-fade-slide-in");
+
+      wireChoiceButtons(newChoices, followup);
+    }
     initContentPreview();
-    document.addEventListener("astro:page-load", initContentPreview);
+    document.addEventListener("astro:page-load", () => {
+      // A fresh question on every navigation back to "/" — undo the
+      // wired/hidden state left over from the previous render.
+      const root = document.querySelector<HTMLElement>(
+        "[data-content-preview]",
+      );
+      if (root) root.dataset.wired = "false";
+      initContentPreview();
+    });
 
     function initSurpriseMe() {
       const btn =
