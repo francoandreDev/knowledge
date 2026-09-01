@@ -1880,3 +1880,19 @@ Wrote `career-craft/staff-scope` end-to-end: "What does a staff engineer actuall
 - `ROADMAP.md` flipped `staff-scope` from `in-progress` → `done`, `generate:roadmap` re-run.
 - Noted, not addressed this session: the working tree still carries the same unrelated pre-existing changes flagged in prior entries (`docs/GAME-PROGRESS.md`, `src/lib/game/engine.ts`, `src/lib/game/icons.ts`, `src/pages/game/index.astro`; untracked `applied-math/capacity-planning-math`, `applied-math/expected-value`, `applied-math/linear-algebra-basics-vectors-matrices-where`, `applied-math/unit-economics`) — left as-is, not touched or committed by this session.
 - Suggested next: `career-craft/`'s remaining planned units — `market-research` (career-growth, negotiation) and `negotiation-tactics` (negotiation, career-growth, communication) — or the user's choice of any other track's next planned unit.
+
+## 2026-09-01 — career-craft/market-research, full L1-L3/exercises/interactives
+
+Wrote `career-craft/market-research` end-to-end: "How do I evaluate whether an offer or raise is actually fair? (market research, total comp literacy)."
+
+- **Scenario throughline**: Dana Okafor, senior backend engineer at Fernbank Robotics (private Series C), gets a raise letter offering $142,000 → $150,000 base (+5.6%) framed by her manager as generous — with no mention that her 4-year RSU grant is one tranche from a cliff to $0, while a competing Anchorline Systems offer looms. L1 poses the base-only-vs-total-comp trap; L2 gives the framework (total comp = base + bonus + equity; market bands and percentile-within-band; vesting schedules/refreshers/cliffs; current vs. grant equity valuation; multi-year trend over single-year snapshot); L3 walks Dana's actual research and negotiation — pulling real band data, building a multi-year total-comp table, and asking for a refresher grant instead of just a bigger base number.
+- `LevelIntro`×3, `Checkpoint`s in L2/L3, `Scenario`×2 with distinct `facts` slots (L1: an icon list plus a progress bar showing Dana's total comp against the market band's P50; L3: a compact facts recap of the negotiation's key numbers).
+- Non-technical/soft-skill track per rule 9: L3 is fully worked prose/tables/numbered-steps, no fake pseudocode-as-code.
+- Visual elements: a `pie` chart of Dana's total comp breakdown (L1) plus additional mermaid diagrams/tables across L2/L3 illustrating the comp-evaluation framework and band/percentile concepts.
+- `interactives.json`: one slider demo (`refresher-exit-value`) — refresher grant size and exit-value multiple vs. today's 409A price, producing Dana's next-year total comp, grounded in her actual $150k base/$15k bonus/$14-per-share numbers.
+- `exercises.json`: 40 items (13/13/14 across L1/L2/L3), 18 pools, all `quiz` type per rule 9, verified via node script: 0 missing explanations, 0 non-quiz items, all pools' `reference`/`learnMore` identical across variants.
+- Ran `bun run check` — verified independently by the orchestrating session (not just the authoring agent's self-report): lint/format/typecheck/validate/test all clean, `astro build` completed with exit code 0.
+- No leftover scaffold `.md` files confirmed absent.
+- `ROADMAP.md` flipped `market-research` from `in-progress` → `done`, `generate:roadmap` re-run.
+- Noted, not addressed this session: the working tree still carries the same unrelated pre-existing changes flagged in prior entries (`docs/GAME-PROGRESS.md`, `src/lib/game/engine.ts`, `src/lib/game/icons.ts`, `src/pages/game/index.astro`; untracked `applied-math/` units) — left as-is.
+- Suggested next: `career-craft/negotiation-tactics` — the last planned unit in the track — or any other track's next planned unit.

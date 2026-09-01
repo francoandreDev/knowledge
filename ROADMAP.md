@@ -157,7 +157,7 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 | 09  | ic-em-tracks                  | How do I decide between staying an IC or moving into management? (IC vs. EM tracks, self-assessment)                      | career-growth, decision-making, mental-models | done    |
 | 10  | peer-mentoring                | How do I mentor someone who is more senior than me in a different way? (peer mentoring, skip-level relationships)         | mentoring, collaboration, career-growth       | done    |
 | 11  | staff-scope                   | What does a staff engineer actually own that a senior doesn't? (staff scope: technical direction, org-level leverage)     | career-growth, leadership, architecture       | done    |
-| 12  | market-research               | How do I evaluate whether an offer or raise is actually fair? (market research, total comp literacy)                      | career-growth, negotiation                    | planned |
+| 12  | market-research               | How do I evaluate whether an offer or raise is actually fair? (market research, total comp literacy)                      | career-growth, negotiation                    | done    |
 | 13  | negotiation-tactics           | How do I negotiate compensation without damaging the relationship? (negotiation tactics, anchoring, knowing when to walk) | negotiation, career-growth, communication     | planned |
 
 ## product-domain/
