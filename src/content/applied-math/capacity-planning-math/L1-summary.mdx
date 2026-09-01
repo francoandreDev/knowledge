@@ -1,0 +1,130 @@
+---
+title: "L1 — How do I size a system for traffic that hasn't happened yet? (capacity planning math: throughput budgets, latency budgets, back-of-envelope sizing)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+
+<Scenario label="Provisioned for 600 msgs/sec on paper. Fell over at 420 — before the peak even arrived.">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📊</span> <strong>Average load</strong> — 500 messages/sec, every normal day</div>
+      <div class="flex items-center gap-1.5"><span>🖥️</span> <strong>Provisioned "paper" capacity</strong> — 6 servers × a guessed 100 msgs/sec each = 600 msgs/sec</div>
+      <div class="flex items-center gap-1.5"><span>🎫</span> <strong>Actual live-event peak</strong> — 3,800 msgs/sec, measured only after the fact</div>
+      <div class="flex items-center gap-1.5"><span>💥</span> <strong>Where it actually broke</strong> — ~420 msgs/sec, below its own paper number</div>
+    </div>
+  </Fragment>
+
+StreamCast's live-chat backend hums along fine on a normal day at 500
+messages/sec. Six servers sit behind a load balancer, each guessed
+to handle "about 100 msgs/sec," so on paper the fleet can absorb
+600 msgs/sec — comfortable headroom over the daily average. Then a
+major creator goes live. Chat volume climbs. The service doesn't
+fail gracefully at 600, and it doesn't even make it that far — it
+starts timing out and dropping messages around 420 msgs/sec, while
+the actual peak the event would have produced was measured afterward
+at 3,800 msgs/sec. **Nobody changed the code. The servers didn't
+crash from a bug. What number was the team actually planning
+around, and why was it the wrong one?**
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "Throughput budget: the traffic number a system must actually sustain",
+    "Latency budget: splitting a total time limit across the hops a request takes",
+    "Why capacity on paper isn't the same as safe capacity",
+  ]}
+/>
+
+## Throughput budget: what number are you actually planning for?
+
+**"600 msgs/sec" sounds like a plan. Is it the right number to have planned for?** A throughput budget names the traffic rate a system has to survive — and there are at least three different numbers that answer to that description, only one of which matters for sizing:
+
+| Number                   | StreamCast's value | What it actually tells you                                                                       |
+| ------------------------ | ------------------ | ------------------------------------------------------------------------------------------------ |
+| **Average traffic**      | 500 msgs/sec       | What a typical day costs to run — says nothing about a busy day                                  |
+| **Peak traffic**         | 3,800 msgs/sec     | What the system must survive without falling over — the real budget target                       |
+| **Provisioned capacity** | 600 msgs/sec       | What someone guessed the fleet could handle — untested, and not derived from either number above |
+
+StreamCast's fleet was sized against a number that was neither its
+average nor its measured peak — it was a guess about per-server
+capacity, multiplied by a server count nobody had stress-tested. The
+gap between "600 on paper" and "3,800 in reality" is the entire
+story: a throughput budget has to come from the **peak** a system
+needs to survive, not from the average traffic that happens to be
+easy to remember, and not from an untested guess at per-server
+capacity.
+
+## Latency budget: where does your time limit actually go?
+
+A throughput number alone doesn't catch everything that can go
+wrong. **If a request has a 50ms time limit end to end, and it
+passes through five different hops on the way to a response, how
+much time does any single hop actually get?** Without an explicit
+answer, every hop's owner tends to assume "plenty" — and those
+assumptions don't have to add up to anything sane:
+
+| Hop                           | Time it actually costs      |
+| ----------------------------- | --------------------------- |
+| Network + TLS                 | 5ms                         |
+| Load balancer routing         | 3ms                         |
+| Auth check                    | 10ms                        |
+| Session lookup / fan-out work | up to 18ms                  |
+| Response serialization        | 4ms                         |
+| **Total (sequential parts)**  | **22ms fixed + up to 18ms** |
+
+A **latency budget** is the discipline of explicitly dividing a
+total time limit across every hop a request takes, so each owner
+knows their real margin instead of assuming an unlimited one. L2
+works through exactly how that division works — including the part
+that trips people up: not every hop happens one after another.
+
+## Why "capacity" on paper isn't the same as safe capacity
+
+**If the fleet's paper capacity was 600 msgs/sec and it broke at
+420, what ate the missing 180?** Two things a throughput number
+alone doesn't capture: the real **peak-to-average ratio** (StreamCast
+assumed something mild; the actual event traffic was 7.6× the daily
+average, not the roughly 1.5× the team had implicitly planned for),
+and **headroom** — running a server near 100% of its raw capacity
+doesn't fail gracefully, it fails suddenly, because request latency
+doesn't grow at the same rate load does. As servers got busier, each
+message took longer to process, clients started retrying messages
+that seemed stuck, and those retries added _more_ load on top of an
+already-struggling fleet — a small feedback loop that turned "getting
+slow" into "falling over," well before the fleet's own paper number
+was reached.
+
+## Key terms
+
+- **Throughput budget** — the traffic rate (usually requests or
+  messages per second) a system must be provisioned to survive,
+  derived from measured or forecast **peak** traffic, not average
+  traffic.
+- **Peak-to-average ratio** — how many times higher peak traffic runs
+  compared to the average; assuming a low ratio when the real one is
+  much higher is one of the most common capacity-planning mistakes.
+- **Latency budget** — a total time limit (often a p99 SLA) divided
+  explicitly across every hop a request passes through, so each
+  hop's owner knows their real margin.
+- **Headroom** — the gap between a system's actual traffic and its
+  raw maximum capacity; the smaller that gap gets, the more each
+  additional unit of load costs in latency, not just in throughput
+  consumed.
+- **Back-of-envelope estimate** — a quick, defensible calculation
+  built from known unit costs (capacity per server, bytes per
+  request, time per hop) used to size a system before it's built or
+  load-tested, not a substitute for eventually load-testing it for
+  real.
+
+## What this unit covers
+
+L2 works through the actual formulas: sizing a fleet from a peak
+throughput number and a target utilization, and allocating a latency
+budget across hops that run one after another versus hops that run
+at the same time. L3 implements all of it as real, runnable code —
+a throughput budget calculator, a latency budget allocator that
+handles both sequential and parallel hops, and a worked end-to-end
+capacity plan that reconstructs what StreamCast should have done
+before the event, not after it.

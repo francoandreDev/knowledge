@@ -1,0 +1,282 @@
+---
+title: "L3 — Building an expected-value calculator, a decision-tree evaluator, and a Monte Carlo check"
+---
+
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 evaluated the migration decision by hand, one chance node at a
+time. This level writes that arithmetic as real, reusable code — a
+generic expected-value function, a decision-tree evaluator that
+handles trees deeper than one level, and a Monte Carlo simulation
+that "replays" the decision thousands of times to confirm the
+closed-form math wasn't a fluke.
+
+<LevelIntro
+  items={[
+    "A general expectedValue() function over any list of outcomes",
+    "A recursive decision-tree evaluator for multi-step decisions",
+    "A Monte Carlo simulation confirming the analytic EV empirically",
+  ]}
+/>
+
+## A general expected-value function
+
+Before building anything decision-tree-specific, the core operation
+from L1 and L2 — "multiply each outcome's probability by its value,
+then add" — deserves its own small, reusable function:
+
+```js
+function expectedValue(outcomes) {
+  const totalProbability = outcomes.reduce((sum, o) => sum + o.probability, 0);
+  if (Math.abs(totalProbability - 1) > 1e-9) {
+    throw new Error(
+      `Outcome probabilities must sum to 1, got ${totalProbability}`,
+    );
+  }
+  return outcomes.reduce((sum, o) => sum + o.probability * o.value, 0);
+}
+
+const migrateNow = [
+  { label: "outage", probability: 0.15, value: -50000 },
+  { label: "success", probability: 0.85, value: 8000 },
+];
+const waitForWindow = [
+  { label: "outage", probability: 0.02, value: -50000 },
+  { label: "success", probability: 0.98, value: 5000 },
+];
+
+console.log(expectedValue(migrateNow)); // -700
+console.log(expectedValue(waitForWindow)); // 3900
+```
+
+The probability-sums-to-1 check isn't decoration — it's the same
+failure mode flagged in L2's failure-modes table, caught as a real
+runtime error instead of a silently wrong number. Any outcome list
+that doesn't sum to 1 has already lost the ability to mean "average,"
+so raising immediately beats returning a number that looks plausible
+but isn't.
+
+## A decision-tree evaluator that handles deeper trees
+
+L2's tree was one decision, one level of chance nodes. Real decisions
+often chain — "migrate now, and _if_ it succeeds, decide separately
+whether to also flip on a risky new index." A recursive evaluator
+handles any depth using the same rule from L2: solve a node's
+children first, then combine.
+
+```js
+// A "chance" node has `type: "chance"` and a list of branches, each
+// with a probability and either a numeric `value` (a leaf) or a
+// nested `node` (another decision/chance node to solve first).
+// A "decision" node has `type: "decision"` and a list of options,
+// each with a `label` and a `node` — the evaluator picks whichever
+// option's EV is highest.
+
+function evaluateNode(node) {
+  if (node.type === "leaf") {
+    return { ev: node.value };
+  }
+
+  if (node.type === "chance") {
+    const totalProbability = node.branches.reduce(
+      (sum, b) => sum + b.probability,
+      0,
+    );
+    if (Math.abs(totalProbability - 1) > 1e-9) {
+      throw new Error(
+        `Chance node branch probabilities must sum to 1, got ${totalProbability}`,
+      );
+    }
+    const ev = node.branches.reduce((sum, b) => {
+      const branchValue = "value" in b ? b.value : evaluateNode(b.node).ev;
+      return sum + b.probability * branchValue;
+    }, 0);
+    return { ev };
+  }
+
+  if (node.type === "decision") {
+    const evaluated = node.options.map((option) => ({
+      label: option.label,
+      ev: evaluateNode(option.node).ev,
+    }));
+    const best = evaluated.reduce((a, b) => (b.ev > a.ev ? b : a));
+    return { ev: best.ev, bestOption: best.label, options: evaluated };
+  }
+
+  throw new Error(`Unknown node type: ${node.type}`);
+}
+```
+
+Applied to L2's tree, this should reproduce the exact same two
+numbers, plus tell you which option wins:
+
+```js
+const migrationDecision = {
+  type: "decision",
+  options: [
+    {
+      label: "migrate now",
+      node: {
+        type: "chance",
+        branches: [
+          { probability: 0.15, value: -50000 },
+          { probability: 0.85, value: 8000 },
+        ],
+      },
+    },
+    {
+      label: "wait for window",
+      node: {
+        type: "chance",
+        branches: [
+          { probability: 0.02, value: -50000 },
+          { probability: 0.98, value: 5000 },
+        ],
+      },
+    },
+  ],
+};
+
+console.log(evaluateNode(migrationDecision));
+// { ev: 3900, bestOption: 'wait for window', options: [
+//   { label: 'migrate now', ev: -700 },
+//   { label: 'wait for window', ev: 3900 } ] }
+```
+
+<Checkpoint question="Using evaluateNode, how would you represent 'migrate now, and if it succeeds, separately decide whether to also flip on the risky new index (60% chance of +$2,000, 40% chance of −$4,000)' — as a chance node, a decision node, or a leaf, nested where?">
+
+As a nested `decision` node in place of the `success` branch's
+`value`. The "migrate now" chance node's 85%-probability branch would
+carry `node: { ... }` instead of `value: 8000` — that nested node
+would itself be a `decision` between "flip on the index" (a `chance`
+node: 60% → `8000 + 2000`, 40% → `8000 - 4000`) and "don't" (a `leaf`
+worth `8000`). `evaluateNode` handles this without any new code,
+because a chance-node branch already resolves nested nodes
+recursively (`"value" in b ? b.value : evaluateNode(b.node).ev`) —
+this is exactly why the evaluator was written recursively instead of
+handling only one level deep.
+
+</Checkpoint>
+
+## Monte Carlo: confirming the math by actually replaying the bet
+
+**Does the closed-form arithmetic (`0.15 × −50000 + 0.85 × 8000`)
+actually match what would happen if this decision were repeated
+thousands of times?** A Monte Carlo simulation answers this
+empirically instead of trusting the formula on faith: draw a random
+number for each simulated attempt, check which branch it falls into,
+record the outcome, and average across every attempt.
+
+```js
+function mulberry32(seed) {
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function sampleOutcome(outcomes, rand) {
+  const roll = rand();
+  let cumulative = 0;
+  for (const outcome of outcomes) {
+    cumulative += outcome.probability;
+    if (roll < cumulative) return outcome.value;
+  }
+  // Floating-point safety net: rounding can leave `roll` a hair above
+  // the last cumulative boundary, so fall back to the final outcome.
+  return outcomes[outcomes.length - 1].value;
+}
+
+function monteCarloEV(outcomes, trials, seed) {
+  const rand = mulberry32(seed);
+  let total = 0;
+  for (let i = 0; i < trials; i++) {
+    total += sampleOutcome(outcomes, rand);
+  }
+  return total / trials;
+}
+```
+
+`sampleOutcome` walks the outcome list accumulating probability mass
+until the random roll lands inside one outcome's slice — this is the
+same idea as a spinner divided into unequal wedges, one wedge per
+outcome, sized by its probability.
+
+```js
+console.log(monteCarloEV(migrateNow, 100000, 1)); // ≈ -700 (analytic: -700)
+console.log(monteCarloEV(waitForWindow, 100000, 1)); // ≈ 3900 (analytic: 3900)
+```
+
+Verified output at increasing trial counts (seed fixed at `1`, so
+results are reproducible):
+
+| Trials  | Migrate now (simulated) | Migrate now (analytic) | Wait (simulated) | Wait (analytic) |
+| ------- | ----------------------- | ---------------------- | ---------------- | --------------- |
+| 100     | -700                    | -700                   | 4450             | 3900            |
+| 1,000   | -1338                   | -700                   | 3790             | 3900            |
+| 10,000  | -874                    | -700                   | 3922             | 3900            |
+| 100,000 | -756.84                 | -700                   | 3941.25          | 3900            |
+
+Notice this isn't a perfectly smooth march toward the analytic
+value — the 1,000-trial run (−1338) is actually further off than the
+100-trial run (−700, an exact match by luck of the draw). Small
+samples are simply noisy in both directions; what the law of large
+numbers actually promises is that the _typical size_ of the gap
+shrinks as trials grow, not that every larger run beats every smaller
+one. By 100,000 trials the gap has narrowed to about $57 on "migrate
+now" and about $41 on "wait" — this is the same "long-run average"
+language from L1, now visible directly as a shrinking (if not
+perfectly monotonic) gap.
+
+<Checkpoint question="At 1,000 trials, the simulated EV for 'migrate now' was −1338 versus an analytic −700 — a bigger gap than the 100-trial run showed. Does that mean expectedValue() or evaluateNode() has a bug, or something else?">
+
+Something else — it means 1,000 trials still isn't enough for the
+sample average to have reliably converged, not that the formula is
+wrong, and definitely not that "more trials" guarantees "closer to
+correct" on every single run. With only a 15% chance of hitting the
+outage branch, a run of 1,000 trials draws roughly 150 outages on
+average, but the _actual_ count on any one seeded run can land higher
+or lower than that by chance, dragging the average with it — that's
+exactly what happened here, by coincidence in the other direction
+from the 100-trial run's lucky exact match. The convergence table's
+100,000-trial row is the real evidence: it lands at −756.84, much
+closer to the analytic −700 — the formula was right the whole time,
+the smaller samples were just noisy in both directions. This is
+exactly why L3 checks a simulation's convergence _across_ several
+trial counts rather than trusting any single run, however large it
+looks.
+
+</Checkpoint>
+
+## What this simulation does and doesn't prove
+
+**Does matching the analytic EV mean the decision is definitely
+correct?** No — the simulation confirms the arithmetic is right
+given the probabilities and payoffs as stated. It says nothing about
+whether 15%, 2%, $50,000, $8,000, and $5,000 are themselves accurate
+estimates of the real world. Garbage probabilities in, confidently
+wrong EV out — Monte Carlo only ever checks that the math correctly
+follows from the inputs, not that the inputs are true.
+
+**Try extending it yourself:** the migration scenario assumed the
+$50,000 outage cost was the same regardless of which option failed.
+Suppose migrating now, if it fails, tends to cause a _worse_ outage
+(more traffic in flight during business hours) costing $70,000
+instead of $50,000, while waiting's failure stays at $50,000. Would
+that change which option wins, and by how much? Try modifying
+`migrateNow`'s outage `value` and re-running `expectedValue()` before
+reading further — does a $20,000 worse failure cost flip the
+decision, or does waiting's advantage just grow?
+
+## Failure modes
+
+| Failure mode                                                                                                  | What it gets wrong                                                                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Skipping the probabilities-sum-to-1 check                                                                     | A typo'd probability list (e.g. 0.15 and 0.80 instead of 0.85) silently produces a confidently wrong EV instead of an error — `expectedValue()` and `evaluateNode()` both guard against this on purpose                                                     |
+| Trusting a Monte Carlo run at a small trial count without checking convergence                                | Small samples are noisy in both directions; a single small run (like the 1,000-trial row landing further from the analytic value than the 100-trial row did) can look like it disagrees with the closed-form math when it's actually just sampling variance |
+| Treating a decision-tree evaluator's "best option" as final without checking the tail-risk correction from L2 | `evaluateNode()` only ever optimizes for the highest average — it has no concept of "this branch would bankrupt the company," which is exactly the judgment L2 said still has to happen separately                                                          |
+| Reusing the same random seed to "prove" a result is trustworthy                                               | A fixed seed makes results reproducible for demonstration and debugging, not more statistically valid — real confidence comes from running many different seeds and checking they agree, not from one lucky one                                             |

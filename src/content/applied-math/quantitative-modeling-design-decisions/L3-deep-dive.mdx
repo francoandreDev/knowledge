@@ -1,0 +1,248 @@
+---
+title: "L3 — Building the model: cost functions, expected outage cost, and a year-one recommendation"
+---
+
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 walked the model by hand for a single month. This level writes it
+as real, runnable code — a cost function per option, an
+expected-outage-cost function reusing `expected-value`'s formula, and
+a full year-one comparison that produces the exact number promised in
+L1's opening callout: Option B costs about $36,900 less over the
+first year, despite its $18,000 build cost.
+
+<LevelIntro
+  items={[
+    "optionAInfraCost() and optionBInfraCost() — real cost functions, not hand arithmetic",
+    "expectedOutageCost() — the same EV formula from expected-value, reused as-is",
+    "A year-one comparison over NotifyCo's actual growth trajectory, producing one defensible number",
+  ]}
+/>
+
+## The cost functions
+
+Both cost functions take a monthly notification volume and return a
+dollar amount. Option A's carries a **diseconomy-of-scale multiplier**
+that grows with volume — the coded version of L2's "peak-to-average
+ratio worsens as the service scales" argument. Option B's stays
+close to flat, plus a fixed queue-overhead cost and, for its first 12
+months, an amortized share of its one-time build cost.
+
+```js
+// -- Shared rounding helper -------------------------------------------
+// Every dollar figure in this model gets rounded to the cent before
+// it's used in a comparison — real design-doc numbers are never shown
+// with 6 decimal places of floating-point noise, and rounding early
+// keeps every downstream sum reproducible.
+function round2(value) {
+  return Math.round(value * 100) / 100;
+}
+
+// -- Option A: sync, "just add servers" --------------------------------
+const A_BASE_UNIT_COST = 0.00035; // $ per notification, at low volume
+const A_DISECONOMY_SCALE = 80_000_000; // reference volume for the multiplier
+const A_COST_PER_OUTAGE_INCIDENT = 3000; // reconciliation + support cost
+
+function optionAInfraCost(monthlyVolume) {
+  const diseconomyMultiplier = 1 + monthlyVolume / A_DISECONOMY_SCALE;
+  return round2(A_BASE_UNIT_COST * diseconomyMultiplier * monthlyVolume);
+}
+
+// -- Option B: queue-buffered -------------------------------------------
+const B_BASE_UNIT_COST = 0.00035; // $ per notification, roughly flat
+const B_FIXED_MONTHLY_OVERHEAD = 200; // queue infra, every month
+const B_BUILD_COST = 18000; // one-time engineering cost
+const B_AMORTIZATION_MONTHS = 12;
+const B_COST_PER_OUTAGE_INCIDENT = 300; // monitoring + minor delay cost
+
+function optionBInfraCost(monthlyVolume, monthsSinceLaunch) {
+  const amortizedBuildCost =
+    monthsSinceLaunch <= B_AMORTIZATION_MONTHS
+      ? B_BUILD_COST / B_AMORTIZATION_MONTHS
+      : 0;
+  return round2(
+    B_BASE_UNIT_COST * monthlyVolume +
+      B_FIXED_MONTHLY_OVERHEAD +
+      amortizedBuildCost,
+  );
+}
+
+console.log(optionAInfraCost(15_000_000)); // 6234.38
+console.log(optionBInfraCost(15_000_000, 1)); // 6950
+```
+
+Notice `optionAInfraCost` never mentions outages at all — it's purely
+the cost of running the fleet. Risk is a separate, addable piece,
+which is exactly what makes it reusable from `expected-value` without
+rewriting it.
+
+## Expected outage cost, reused directly
+
+```js
+// Identical shape to expected-value's EV formula: probability (here,
+// frequency per year) times payoff (here, cost per incident) — just
+// converted to a monthly figure to match the infra cost functions.
+function expectedOutageCost(outagesPerYear, costPerIncident) {
+  return round2((outagesPerYear * costPerIncident) / 12);
+}
+
+const A_RISK_MONTHLY = expectedOutageCost(2, A_COST_PER_OUTAGE_INCIDENT); // 500
+const B_RISK_MONTHLY = expectedOutageCost(2, B_COST_PER_OUTAGE_INCIDENT); // 50
+```
+
+$500/month sounds small next to a $6,000+ infra bill — but it isn't
+free, and skipping it entirely (treating outages as "someone else's
+problem, not this model's") is exactly the failure mode L2's table
+warned about: an unstated assumption that outages cost nothing is
+still an assumption, just an invisible one.
+
+<Checkpoint question="expectedOutageCost() takes outagesPerYear and costPerIncident but never touches monthlyVolume at all. Is that a bug — shouldn't a bigger, busier service have a bigger expected outage cost?">
+
+Not a bug in this version of the model — it's a stated simplification,
+the same kind L2's assumptions table flagged. As written,
+`A_COST_PER_OUTAGE_INCIDENT` and `B_COST_PER_OUTAGE_INCIDENT` are
+flat dollar figures that don't scale with how much traffic was
+flowing during the outage, so `expectedOutageCost()` correctly has no
+reason to take volume as an input — it's just reusing
+`expected-value`'s `frequency × payoff` shape exactly. Whether that
+simplification is _good enough_ for the design doc is a separate,
+legitimate question — and it's exactly what this level's
+"try extending it yourself" prompt below asks you to test.
+
+</Checkpoint>
+
+## Total cost per option, and the year-one comparison
+
+```js
+function optionATotalMonthlyCost(monthlyVolume) {
+  return round2(optionAInfraCost(monthlyVolume) + A_RISK_MONTHLY);
+}
+
+function optionBTotalMonthlyCost(monthlyVolume, monthsSinceLaunch) {
+  return round2(
+    optionBInfraCost(monthlyVolume, monthsSinceLaunch) + B_RISK_MONTHLY,
+  );
+}
+
+function cheaperOption(monthlyVolume, monthsSinceLaunch) {
+  const costA = optionATotalMonthlyCost(monthlyVolume);
+  const costB = optionBTotalMonthlyCost(monthlyVolume, monthsSinceLaunch);
+  return costA < costB ? "A" : "B";
+}
+
+// NotifyCo's actual projected growth: 15M/mo ramping linearly to
+// 45M/mo over 12 months.
+function buildGrowthSchedule() {
+  const startVolume = 15_000_000;
+  const endVolume = 45_000_000;
+  const months = 12;
+  const schedule = [];
+  for (let i = 0; i < months; i++) {
+    const month = i + 1;
+    const volume = Math.round(
+      startVolume + ((endVolume - startVolume) * i) / (months - 1),
+    );
+    schedule.push({ month, volume });
+  }
+  return schedule;
+}
+
+function recommendForYear(schedule) {
+  let cumulativeA = 0;
+  let cumulativeB = 0;
+  const monthly = schedule.map(({ month, volume }) => {
+    const costA = optionATotalMonthlyCost(volume);
+    const costB = optionBTotalMonthlyCost(volume, month);
+    cumulativeA = round2(cumulativeA + costA);
+    cumulativeB = round2(cumulativeB + costB);
+    return { month, volume, costA, costB, cheaper: costA < costB ? "A" : "B" };
+  });
+  return {
+    monthly,
+    cumulativeA,
+    cumulativeB,
+    savingsChoosingB: round2(cumulativeA - cumulativeB),
+    recommendation: cumulativeA < cumulativeB ? "A" : "B",
+  };
+}
+
+const result = recommendForYear(buildGrowthSchedule());
+console.log(result.recommendation); // "B"
+console.log(result.cumulativeA); // 183903.42
+console.log(result.cumulativeB); // 147000
+console.log(result.savingsChoosingB); // 36903.42
+```
+
+Verified month-by-month output (this is the table L2's chart was
+drawn from):
+
+| Month          | Volume     | Option A total  | Option B total  | Cheaper              |
+| -------------- | ---------- | --------------- | --------------- | -------------------- |
+| 1              | 15,000,000 | $6,734.38       | $7,000.00       | A                    |
+| 2              | 17,727,273 | $8,079.42       | $7,954.55       | B                    |
+| 4              | 23,181,818 | $10,964.75      | $9,863.64       | B                    |
+| 7              | 31,363,636 | $15,780.86      | $12,727.27      | B                    |
+| 12             | 45,000,000 | $25,109.37      | $17,500.00      | B                    |
+| **Year total** | —          | **$183,903.42** | **$147,000.00** | **B, by $36,903.42** |
+
+Option A wins exactly one month out of twelve — the first one — and
+loses by a widening margin every month after. That's the number that
+goes in the design doc: not "Priya's design is more resilient" (true,
+but not a number), and not "Marcus's design ships faster" (also
+true, also not a number) — **Option B costs $36,903.42 less over the
+first year, after its own $18,000 build cost is already accounted
+for.**
+
+<Checkpoint question="The `recommendForYear` result is 'B, by $36,903.42' — cumulative over 12 months. Does that number mean Option A was a bad idea to consider, given it's cheaper in month 1?">
+
+No — it means Option A was the right call to _check_, and the model
+confirms it's genuinely cheaper for exactly the window where that's
+true (month 1, and part of month 2). The $36,903.42 figure isn't
+evidence that Marcus's instinct was wrong from the start; it's
+evidence that the instinct stops being true almost immediately once
+growth is factored in, which is precisely the kind of finding a
+point-in-time comparison would have missed. A model that only ever
+confirmed one side would be suspicious — the fact that it validates
+Option A's cheaper-today claim, and then shows exactly where and why
+that stops holding, is what makes this a genuine analysis instead of
+a foregone conclusion dressed up in code.
+
+</Checkpoint>
+
+## What this model does and doesn't prove
+
+**Does a $36,903.42 year-one advantage settle the architecture
+debate for good?** It settles it for the assumptions actually fed
+into the model — 2 outages/year, a $3,000/$300 incident cost split,
+an 80M diseconomy-of-scale reference, linear growth to 45M/month.
+Change any one of those and the number changes, sometimes enough to
+flip the recommendation. That isn't a weakness unique to this model —
+it's true of every quantitative model in this project, from
+`expected-value`'s migration EV to `capacity-planning-math`'s
+throughput budget. The discipline isn't "trust the number blindly";
+it's "state the assumptions next to the number, so a reviewer can
+argue with the assumptions instead of the vibe."
+
+**Try extending it yourself:** this model charges Option A a flat
+$3,000 per outage incident, regardless of how much traffic was
+flowing when the gateway went down. A more realistic model would
+scale that cost with the volume affected — a 45-minute outage during
+NotifyCo's 45M/month peak drops far more in-flight notifications
+than the same outage at today's 15M/month. Try rewriting
+`A_COST_PER_OUTAGE_INCIDENT` as a function of `monthlyVolume` instead
+of a constant (something like a fixed incident-response cost plus a
+small per-notification reconciliation cost for messages affected
+during the outage window) and re-run `recommendForYear`. Does Option
+B's advantage grow, shrink, or stay about the same once the risk
+cost itself scales with traffic — and does that change which month
+the crossover happens in?
+
+## Failure modes
+
+| Failure mode                                                                                                            | What it gets wrong                                                                                                                                                                                           |
+| ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Computing `optionAInfraCost` and `optionBInfraCost` without the shared `round2` rounding                                | Tiny floating-point differences compound across a 12-month sum, producing a cumulative total that looks precise to the cent but isn't reproducible between two runs of the "same" model                      |
+| Treating the month-1 snapshot as the whole answer                                                                       | Option A is genuinely cheaper in month 1 — a model (or a design doc) that stops there hands back a technically true number that's wrong within weeks, given the actual growth trajectory                     |
+| Hardcoding `A_COST_PER_OUTAGE_INCIDENT` and `B_COST_PER_OUTAGE_INCIDENT` without stating them as assumptions in the doc | A reviewer who disagrees with $3,000-per-incident has no way to challenge the model's conclusion without first reverse-engineering where that number came from                                               |
+| Reusing `expectedOutageCost` with mismatched units (e.g. passing a monthly frequency where the function expects yearly) | Silently produces a risk cost 12× too large or too small — the same "garbage in, confidently wrong EV out" trap `expected-value`'s L3 flagged for Monte Carlo, here with no simulation to catch the mismatch |

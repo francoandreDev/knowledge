@@ -1,0 +1,285 @@
+---
+title: "L3 — Implementing throughput budgets, latency budget allocation, and StreamCast's actual fix as real code"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="The postmortem numbers">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📈</span> <strong>Revised average</strong> — 650 msgs/sec, after the platform's recent growth</div>
+      <div class="flex items-center gap-1.5"><span>🎫</span> <strong>Real peak-to-average ratio</strong> — 7.6×, measured from the failed event</div>
+      <div class="flex items-center gap-1.5"><span>🧪</span> <strong>Load-tested per-server capacity</strong> — 700 msgs/sec (not the guessed 100)</div>
+      <div class="flex items-center gap-1.5"><span>⏱️</span> <strong>SLA</strong> — 50ms p99 end to end, never written down before this</div>
+    </div>
+  </Fragment>
+
+The postmortem gave StreamCast's team real numbers for the first
+time: the platform's average load has grown to 650 msgs/sec, the
+actual peak-to-average ratio for a big event is 7.6×, and a proper
+load test puts honest per-server capacity at 700 msgs/sec — nothing
+like the original guess of 100. **Given those three real numbers,
+plus a 50ms p99 latency budget that had never actually been written
+down, what should the fleet have looked like — and would it have
+survived the event that just took it down?**
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "A throughput budget calculator, from real numbers, not guesses",
+    "A latency budget allocator that handles sequential and parallel hops",
+    "Why the fix has to combine both, not size each in isolation",
+  ]}
+/>
+
+## Turning a peak and a target utilization into a server count
+
+**L2's formula, `peak ÷ (per-server capacity × target utilization)`, rounded up — is that actually the whole function, or does it need to guard against bad inputs too?** A version worth putting in front of a reviewer validates its own assumptions, not just the happy path:
+
+```js
+function computeThroughputBudget({
+  peakRequestsPerSecond,
+  perServerCapacity,
+  targetUtilization,
+}) {
+  if (peakRequestsPerSecond <= 0 || perServerCapacity <= 0) {
+    throw new RangeError(
+      "peakRequestsPerSecond and perServerCapacity must be positive",
+    );
+  }
+  if (targetUtilization <= 0 || targetUtilization > 1) {
+    throw new RangeError("targetUtilization must be in (0, 1]");
+  }
+
+  const safeCapacityPerServer = perServerCapacity * targetUtilization;
+  const serversNeeded = Math.ceil(
+    peakRequestsPerSecond / safeCapacityPerServer,
+  );
+
+  return {
+    serversNeeded,
+    safeCapacityPerServer,
+    totalPaperCapacity: serversNeeded * perServerCapacity,
+    totalSafeCapacity: serversNeeded * safeCapacityPerServer,
+  };
+}
+```
+
+Applied to StreamCast's real numbers — a forecast peak of
+`650 × 7.6 ≈ 4,940`, rounded up to a clean 5,000 msgs/sec for
+planning — at a 70% target utilization:
+
+```js
+computeThroughputBudget({
+  peakRequestsPerSecond: 5000,
+  perServerCapacity: 700,
+  targetUtilization: 0.7,
+});
+// => {
+//   serversNeeded: 11,
+//   safeCapacityPerServer: 490,
+//   totalPaperCapacity: 7700,   // 11 × 700 — the number a status page might show
+//   totalSafeCapacity: 5390,    // 11 × 490 — the number that's actually safe to hit
+// }
+```
+
+Eleven servers, not six — and the function returns _both_ the paper
+number and the safe number on purpose: the gap between them
+(`7700 - 5390 = 2,310` msgs/sec of "capacity" nobody should actually
+plan to use) is exactly the kind of number StreamCast's original plan
+never surfaced at all.
+
+## A latency budget allocator that knows sequential from parallel
+
+L2 drew the sequential-vs-parallel distinction; here it becomes a
+function that walks an actual request plan. A plan step is either a
+plain number (a single hop's cost in ms), a `{ sequential: [...] }`
+node (costs add), or a `{ parallel: [...] }` node (cost is the
+slowest branch) — nesting is allowed, since a real request plan is
+rarely flat:
+
+```js
+function estimateLatency(step) {
+  if (typeof step === "number") return step;
+  if (Array.isArray(step.sequential)) {
+    return step.sequential.reduce((total, s) => total + estimateLatency(s), 0);
+  }
+  if (Array.isArray(step.parallel)) {
+    return Math.max(...step.parallel.map(estimateLatency));
+  }
+  throw new TypeError("invalid latency plan step");
+}
+
+function checkLatencyBudget(plan, budgetMs) {
+  const estimatedMs = estimateLatency(plan);
+  return {
+    estimatedMs,
+    budgetMs,
+    marginMs: budgetMs - estimatedMs,
+    withinBudget: estimatedMs <= budgetMs,
+  };
+}
+```
+
+StreamCast's actual request path — network, load balancer, an auth
+check, then a fan-out to a push notification and an analytics log
+write, then serialization — encoded as one plan:
+
+```js
+const requestPlan = {
+  sequential: [
+    5, // network + TLS
+    3, // load balancer routing
+    10, // auth check
+    { parallel: [18, 6] }, // push notification vs. analytics log write
+    4, // response serialization
+  ],
+};
+
+checkLatencyBudget(requestPlan, 50);
+// => { estimatedMs: 40, budgetMs: 50, marginMs: 10, withinBudget: true }
+```
+
+At rest, with every hop running at its nominal cost, the plan clears
+its 50ms budget with 10ms to spare. That's the number a
+capacity plan built purely from a spreadsheet would show — and it's
+exactly the number that turned out to be misleading, because it
+assumes every hop runs at its nominal cost, which is only true when
+the servers behind those hops aren't under real load.
+
+<Checkpoint question="The plan above nests a parallel fan-out inside a sequential chain and comes out to 40ms. If an engineer instead added every leaf value together (5 + 3 + 10 + 18 + 6 + 4 = 46ms), would that estimate be safer to plan around, or actively wrong?">
+
+Actively wrong, in the misleading direction — it's not just
+imprecise, it understates the real margin. The true 40ms total has
+10ms of margin against the 50ms budget; the flattened 46ms estimate
+implies only 4ms of margin, which would push a reasonable engineer
+toward buying latency headroom (caching, parallelizing something
+else) that the system doesn't actually need, while leaving the
+_real_ risk — what happens to each hop's cost under load, not at
+rest — completely unexamined. Getting the sequential/parallel
+structure right isn't pedantry; the wrong structure produces a wrong
+number in a specific, predictable direction.
+
+</Checkpoint>
+
+## Why the plan still failed: nominal cost isn't cost under load
+
+**The 40ms estimate above assumes every hop runs at its listed cost.
+StreamCast's original fleet was running close to 100% of its raw
+(untested, guessed) capacity during the event. Does "40ms nominal"
+still hold at that utilization?** No — and this is the piece that
+connects L2's fleet-sizing formula back to the latency budget. As a
+server's utilization climbs, each unit of work spends more time
+waiting behind other in-flight work before it even starts running,
+not just more time actually executing. A simplified way to model
+that inflation, reusing the same `ρ/(1−ρ)` shape from queueing
+theory (illustrative here, not a precise model of every hop type —
+a network round-trip doesn't queue on your own server the way a CPU-
+or lock-bound hop does):
+
+```js
+function inflateForUtilization(nominalMs, utilization) {
+  const safeUtilization = Math.min(Math.max(utilization, 0), 0.99);
+  const queueingMultiplier = 1 + safeUtilization / (1 - safeUtilization);
+  return nominalMs * queueingMultiplier;
+}
+
+function estimateLatencyUnderLoad(step, utilization) {
+  if (typeof step === "number") return inflateForUtilization(step, utilization);
+  if (Array.isArray(step.sequential)) {
+    return step.sequential.reduce(
+      (total, s) => total + estimateLatencyUnderLoad(s, utilization),
+      0,
+    );
+  }
+  if (Array.isArray(step.parallel)) {
+    return Math.max(
+      ...step.parallel.map((s) => estimateLatencyUnderLoad(s, utilization)),
+    );
+  }
+  throw new TypeError("invalid latency plan step");
+}
+```
+
+At the roughly 92% utilization StreamCast's original six-server
+fleet was actually running at during the event (far higher than the
+70% target from L2, because six servers at guessed capacity was
+never enough for a 5,000 msgs/sec peak):
+
+```js
+estimateLatencyUnderLoad(requestPlan, 0.92);
+// => 500  (ms) — a plan that estimated 40ms at rest
+```
+
+A 40ms plan becomes a ~500ms plan once the fleet is actually running
+that hot — twelve times over a 50ms budget. That's the real
+mechanism behind L1's "broke at 420, not 600": it was never really a
+throughput ceiling being hit exactly at some clean number; it was
+latency ballooning past the point where clients gave up and retried,
+and every retry added more load on top of a fleet that was already
+short on capacity, well before its own paper number.
+
+<Checkpoint question="Using computeThroughputBudget with StreamCast's real numbers (5,000 msgs/sec peak, 700 msgs/sec per-server capacity) at a 70% target utilization gives 11 servers, running at 70% rather than 92%. Roughly how would that change the estimateLatencyUnderLoad result for the same request plan — and does it matter that the improvement isn't purely about having more servers?">
+
+At 70% utilization, `queueingMultiplier = 1 + 0.7/0.3 ≈ 3.33`,
+against `1 + 0.92/0.08 = 12.5` at 92% — the multiplier drops by
+roughly 3.75×, so the ~500ms estimate falls to somewhere around
+130ms: still over the 50ms budget, but a very different kind of
+over. It matters because the fix isn't "more servers, full stop" —
+it's specifically buying back _headroom_, the gap between actual
+utilization and 100%. Adding servers without changing the target
+utilization they're allowed to run at wouldn't move the multiplier
+nearly as much; the 92%→70% drop is what does the real work here.
+(A production fix would also parallelize or shed the two most
+expensive fixed hops — auth and the push-notification branch — to
+close the remaining gap; the multiplier fix alone isn't the whole
+story, just the piece this unit's formulas cover.)
+
+</Checkpoint>
+
+## What one worked example doesn't cover
+
+Everything above uses one request shape and one traffic pattern.
+**What would change if the audience were different** — say, a
+read-heavy API with a cache in front of the database instead of a
+chat fan-out with no caching at all? A cache hit changes a hop's
+_nominal_ cost dramatically (a cache lookup might cost 1ms against a
+20ms uncached database query), which changes both the sequential sum
+and which branch dominates a parallel fan-out — the same allocator
+function applies unchanged, but the plan fed into it, and therefore
+the answer, would look nothing like StreamCast's. And **what would
+change if the news were worse** — say, the true peak-to-average
+ratio turns out to be 15× instead of 7.6× once next year's growth is
+factored in? `computeThroughputBudget` doesn't get more complicated;
+it just returns a bigger `serversNeeded`, cleanly — but at some
+server count, a flat fleet of identical servers behind one load
+balancer stops being the right shape of solution at all, and the
+real fix becomes sharding, caching, or shedding load rather than
+adding more of the same machine. This unit's formulas answer "how
+much of _this_ shape of system do I need" — they don't tell you when
+the shape itself needs to change, which is a judgment call the
+numbers can inform but not make.
+
+## Failure modes at this level
+
+- **Trusting a nominal (at-rest) latency estimate for a system that
+  will actually run near its capacity limit.** The 40ms → 500ms gap
+  above is the entire reason a latency budget has to be checked
+  _against_ a realistic utilization, not against an empty system.
+- **Fixing a throughput shortfall by adding servers without lowering
+  target utilization.** More servers running at the same high
+  utilization barely moves the queueing multiplier; the fix has to
+  actually buy back headroom, not just raw capacity.
+- **Applying the ρ/(1−ρ) inflation model to every hop uniformly,
+  including ones that don't actually queue on the contended
+  resource** (a pure network round-trip to an unrelated service, for
+  instance). Treat it as an illustrative approximation for hops that
+  genuinely share the bottleneck resource, not a universal law for
+  every line in a latency plan.
+- **Sizing for a peak-to-average ratio measured once and assumed
+  fixed forever.** StreamCast's 7.6× came from one event; a
+  capacity plan built on it should get revisited as the platform
+  grows, not treated as a permanent constant.
