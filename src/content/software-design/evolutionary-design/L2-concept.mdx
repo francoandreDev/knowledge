@@ -1,0 +1,137 @@
+---
+title: "L2 — How do I evolve a design as requirements change without a rewrite? (evolutionary design, the open-closed principle in practice)"
+---
+
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 walked through the pricing engine at a glance: one `if`, then a second
+one that introduced a bug, then a `PricingRule` list that fixed it for
+good. This level builds the actual decision procedure — **when** to
+introduce a seam, **which** axis of change it should protect, and what it
+costs on both sides of that decision.
+
+<LevelIntro
+  items={[
+    "What open-closed actually costs and buys, concretely",
+    "Picking which axis of change has real signal vs. which is speculation",
+    "The just-in-time timing rule for introducing a seam",
+  ]}
+/>
+
+## What does "closed for modification" actually buy you?
+
+**Question: if `calculateTotal` never gets edited again after round 2, what
+exactly was gained — and what was paid for it?**
+
+| Side of the ledger | What it looks like in the pricing engine                                                                                                                                         |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Bought**         | New rules can't reintroduce a round-2-style ordering bug in _existing_ rules — they're already tested and untouched. Each new rule is reviewable and testable in isolation.      |
+| **Paid**           | One extra concept (`PricingRule` interface), one extra list to read to understand "what applies," one extra level of indirection between "read the code" and "see what happens." |
+
+Open-closed is a trade, not a free win. It's worth the price exactly when
+the alternative — editing a function that already has several rules jammed
+into it — is _more_ expensive than reading one extra interface. That
+crossover is the whole judgment call this unit is teaching.
+
+## Which axis of change actually has signal?
+
+**Question: at round 1, the team could have imagined dozens of future
+axes — currencies, tax jurisdictions, subscription billing, coupon
+stacking limits. Why build a seam for none of them yet?**
+
+Because a seam built for the wrong axis is pure cost with no payoff — code
+that's "flexible" in a direction nothing ever actually moves in. The
+distinction that matters:
+
+| Axis of change          | Signal at round 1                                      | Verdict                  |
+| ----------------------- | ------------------------------------------------------ | ------------------------ |
+| More discount/fee rules | One rule exists; a second is plausible but unconfirmed | **Wait** — not yet real  |
+| Multi-currency pricing  | No customer has asked, no sales conversation pending   | **Speculative** — resist |
+| Tax varying by region   | No customer outside one tax jurisdiction yet           | **Speculative** — resist |
+
+At round 2, the "more discount/fee rules" row flips from unconfirmed to
+**confirmed** — a second rule actually arrived, and it collided with the
+first one in a way that produced a real bug. That's the signal that turns a
+hypothetical axis into a real one worth protecting.
+
+<Checkpoint question="A teammate argues the team should have built the PricingRule abstraction back at round 1, 'since we obviously knew more rules were coming eventually.' What's the flaw in that argument, given the YAGNI-vs-signal distinction above?">
+
+"Obviously coming eventually" is exactly the speculative-signal trap — it's
+a guess about the future, not evidence from the present. At round 1 there
+was one rule and no second one yet; building the abstraction then would
+have meant carrying the cost of an interface, a list, and an extra
+indirection layer for months with nothing to justify it, on the strength of
+an intuition that happened to turn out right. The problem isn't that the
+guess was wrong here — it's that the same reasoning, applied to the
+"multi-currency" or "tax-by-region" axes that never materialized on this
+timeline, would have paid the same cost for nothing. Waiting for the second
+real variant is what makes the seam's cost predictable instead of a bet.
+
+</Checkpoint>
+
+## Timing: the just-in-time seam rule
+
+**Question: precisely when — not "eventually," but at which concrete
+moment — does introducing a seam stop being speculation and start being
+the obviously correct call?**
+
+The practical rule: **introduce the seam when the second concrete variant
+of the same kind of thing shows up**, not before, and not indefinitely
+after either. One instance never needs a seam — anything is "extensible"
+if you're willing to just edit it. A second instance is where a plain `if`
+starts costing more to keep reading than an interface would.
+
+```mermaid
+flowchart TD
+    A["Round 1: single rule\n(if-statement is fine)"] --> B{Second rule\narrives?}
+    B -->|No| A
+    B -->|Yes, same axis| C["Introduce the seam now\n(extract PricingRule interface + list)"]
+    C --> D["Round 3+: new rules\nappend, existing code untouched"]
+    B -->|Yes, different axis\n(e.g. tax rate, not a rule)| E["That's a NEW axis —\nit needs its own seam,\nnot a reuse of this one"]
+```
+
+Two failure modes bracket this timing rule, and both show up later in L3:
+
+- **Too early** — building the seam at round 1, for an axis that turns out
+  to never get a second variant. Permanent indirection tax, zero payoff.
+- **Too late** — stacking a third, fourth, fifth `if` onto the same
+  function after the second one already caused a bug, instead of stopping
+  at the second one. Each additional `if` interacts combinatorially with
+  every prior one — that's the superlinear growth in L1's chart.
+
+<Checkpoint question="Round 3 brings a requirement to waive the loyalty discount for VIP customers — clearly the same 'discount/fee rule' axis the PricingRule seam already covers. Round 3 also brings a second, unrelated requirement: EU orders need a different tax rate than the flat 8% baked into calculateTotal. Should both requirements use the existing PricingRule seam?">
+
+No — only the first one should. The VIP waiver is another instance of
+exactly the thing the seam already protects (an adjustment to the running
+total before tax), so it's a clean append to the existing `PricingRule`
+list — no new seam needed. The regional tax rate is a genuinely different
+axis: it doesn't adjust the total before tax, it changes how tax itself is
+computed, which is a piece of logic the `PricingRule` seam was never built
+to touch. Reusing the wrong seam for it — say, faking a tax change as a
+"discount rule" that just happens to multiply by a negative tax-like
+amount — would be forcing an abstraction to cover a shape it doesn't fit,
+which usually produces the same kind of order-of-operations confusion the
+seam was introduced to prevent in the first place. The tax axis gets its
+own small, purpose-built seam, introduced now because _this_ is the moment
+it has real signal — not reused from something that solved a different
+problem.
+
+</Checkpoint>
+
+## The compounding effect across rounds
+
+Put the two postures side by side across the same three rounds:
+
+| Round | Fighting the design (stacked `if`s)                            | Absorbing via seam                                               |
+| ----- | -------------------------------------------------------------- | ---------------------------------------------------------------- |
+| 1     | One `if`. Cheap.                                               | Same — no seam yet, correctly.                                   |
+| 2     | Second `if` collides with the first; ordering bug ships.       | Seam extracted (one-time cost); bug fixed at the same time.      |
+| 3     | Third `if` must account for the interactions of the first two. | New rule appended; existing rules untouched, untested paths = 0. |
+
+The gap between the two columns doesn't stay constant — it widens every
+round, because the "fighting" column's cost is driven by how many _prior_
+rules the new one has to be reasoned about alongside, while the "absorbing"
+column's cost per round stays roughly flat once the seam exists. That
+compounding gap, not any single round in isolation, is why the timing
+question above matters more than it might look.

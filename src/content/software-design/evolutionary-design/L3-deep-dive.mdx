@@ -1,0 +1,437 @@
+---
+title: "L3 — How do I evolve a design as requirements change without a rewrite? (evolutionary design, the open-closed principle in practice)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="Fernbridge's pricing engine, three rounds in">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5">
+        <span>🏗️</span> <strong>Round 0</strong> — subtotal + 8% tax. 6
+        lines.
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span>➕</span> <strong>Round 1</strong> — one discount `if`.
+        Correctly no seam.
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span>💥</span> <strong>Round 2</strong> — coupon rule collides with
+        discount rule; order-of-operations bug ships.
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span>🧩</span> <strong>Round 3</strong> — VIP waiver appends
+        cleanly; regional tax needs its own, separate seam.
+      </div>
+    </div>
+  </Fragment>
+
+**Fernbridge is a small invoicing SaaS. Its pricing engine started as six
+lines: sum the line items, add 8% tax, done. Over four months it took on
+three rounds of real, independently-arriving requirements — and the code
+that resulted depends entirely on whether the team recognized, at each
+round, whether that round's requirement was the first of its kind (skip the
+abstraction) or the second (build it now).** This level rebuilds every
+round in real, runnable TypeScript, including the bug that round 2 actually
+shipped, and the seam that fixed it for the rest of the engine's life.
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "Round-by-round TypeScript: baseline, first special case, the seam",
+    "The real order-of-operations bug and its fix, with tests at each step",
+    "Failure modes: guessing the wrong axis, and a seam nobody ever uses",
+  ]}
+/>
+
+## Round 0 — the honest baseline
+
+**Question: with exactly one rule (tax), is there anything here worth
+abstracting yet?** No — there's nothing to extend, so there's nothing to be
+"closed" about. This is deliberately the simplest possible version:
+
+```typescript
+// pricing-v0.ts
+interface LineItem {
+  description: string;
+  amount: number;
+}
+
+interface Order {
+  items: LineItem[];
+}
+
+const TAX_RATE = 0.08;
+
+function calculateTotal(order: Order): number {
+  const subtotal = order.items.reduce((sum, item) => sum + item.amount, 0);
+  const tax = subtotal * TAX_RATE;
+  return round2(subtotal + tax);
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+```
+
+## Round 1 — one discount rule, correctly no seam
+
+A sales requirement lands: **orders over $500 get a 10% discount**. Exactly
+one rule exists. Building an abstraction for one case is exactly the
+speculative move L2 warned against — so the team doesn't:
+
+```typescript
+// pricing-v1.ts
+function calculateTotal(order: Order): number {
+  const subtotal = order.items.reduce((sum, item) => sum + item.amount, 0);
+  const discount = subtotal > 500 ? subtotal * 0.1 : 0;
+  const discounted = subtotal - discount;
+  const tax = discounted * TAX_RATE;
+  return round2(discounted + tax);
+}
+```
+
+```typescript
+// pricing-v1.test.ts — behavior locked in before touching it again
+import { describe, expect, it } from "vitest";
+
+describe("calculateTotal v1", () => {
+  it("applies no discount under the threshold", () => {
+    const order: Order = { items: [{ description: "widget", amount: 200 }] };
+    expect(calculateTotal(order)).toBe(216); // 200 * 1.08
+  });
+
+  it("applies 10% discount over $500, then taxes the discounted amount", () => {
+    const order: Order = {
+      items: [{ description: "bulk widget", amount: 600 }],
+    };
+    // 600 - 60 = 540, 540 * 1.08 = 583.2
+    expect(calculateTotal(order)).toBe(583.2);
+  });
+});
+```
+
+This version is cheap, correct, and — this is the point — **not wrong to
+have shipped this way**. The mistake isn't building `v1` this simply. The
+mistake would be _still building it this simply two requirements later_.
+
+<Checkpoint question="A reviewer asks Fernbridge's engineer to 'go ahead and build the extensible rules system now, while you're in here, so we don't have to touch this again.' Is that good advice at round 1?">
+
+No, even though it sounds prudent. At round 1 there is exactly one
+rule and zero evidence a second one is imminent — building the abstraction
+now means paying its full cost (an interface, a list, an extra
+indirection layer between "read the function" and "see what it does") for
+a benefit that may never arrive. If the discount requirement genuinely
+stays the only special case for the engine's lifetime, the "extensible"
+version was pure overhead with no round it ever paid for. The honest answer
+is that nobody can tell yet whether this axis will get a second variant —
+which is exactly why the right move is to ship the simple version and let
+the _next_ requirement (if and when it arrives) be the signal that decides.
+
+</Checkpoint>
+
+## Round 2 — the second variant, and the bug it ships with
+
+Two requirements land close together: a **coupon code** (a fixed dollar
+amount off) and a **processing-fee waiver** for orders over $1,000. The
+engineer, still in the "just add an `if`" mode that worked fine at round 1,
+bolts both onto the same function:
+
+```typescript
+// pricing-v2-buggy.ts
+interface OrderV2 extends Order {
+  couponAmount?: number;
+  hasProcessingFee?: boolean;
+}
+
+function calculateTotal(order: OrderV2): number {
+  const subtotal = order.items.reduce((sum, item) => sum + item.amount, 0);
+
+  const volumeDiscount = subtotal > 500 ? subtotal * 0.1 : 0;
+  let running = subtotal - volumeDiscount;
+
+  // New: coupon, applied to the *original* subtotal by whoever wrote this —
+  // not to `running`, which already has the volume discount subtracted.
+  if (order.couponAmount) {
+    running = subtotal - order.couponAmount;
+  }
+
+  const processingFee = order.hasProcessingFee && subtotal <= 1000 ? 15 : 0;
+  const tax = running * TAX_RATE;
+  return round2(running + tax + processingFee);
+}
+```
+
+**Question: what happens to an order over $500 that also has a coupon?**
+Look closely at the coupon branch: `running = subtotal - order.couponAmount`
+overwrites `running` from `subtotal`, not from the already-discounted
+value — silently erasing the volume discount whenever a coupon is present.
+Nobody decided this on purpose; it's what falls out of stacking
+independent `if` blocks that all mutate the same variable without a
+declared order:
+
+```typescript
+// pricing-v2-buggy.test.ts — this test documents the bug's real, live behavior
+import { describe, expect, it } from "vitest";
+
+it("BUG: a coupon silently cancels the volume discount instead of stacking with it", () => {
+  const order: OrderV2 = {
+    items: [{ description: "bulk widget", amount: 600 }],
+    couponAmount: 20,
+  };
+  // Expected by the business: 600 - 60 (volume) - 20 (coupon) = 520, taxed → 561.6
+  // Actual, because the coupon branch overwrites the discount:
+  // 600 - 20 = 580, taxed → 626.4
+  expect(calculateTotal(order)).toBe(626.4); // wrong, but this is what ships
+});
+```
+
+This is the moment L2 named: a **second real variant of the same kind of
+thing** (an adjustment to the total before tax) has now arrived, and the
+lack of a seam didn't just cost extra typing — it shipped an actual bug,
+because two independent-looking `if` blocks were never actually
+independent once they touched the same running total.
+
+## The fix: extract the seam, once
+
+The fix isn't "write the coupon branch more carefully." It's recognizing
+that **discount, coupon, and fee-waiver are all the same kind of thing** —
+an ordered adjustment applied to a running total — and giving that kind of
+thing an explicit shape:
+
+```typescript
+// pricing-v2-fixed.ts
+interface PricingRule {
+  name: string;
+  apply(runningTotal: number, order: OrderV2): number;
+}
+
+const volumeDiscountRule: PricingRule = {
+  name: "volume-discount",
+  apply: (total) => (total > 500 ? total - total * 0.1 : total),
+};
+
+const couponRule: PricingRule = {
+  name: "coupon",
+  apply: (total, order) =>
+    order.couponAmount ? Math.max(0, total - order.couponAmount) : total,
+};
+
+const processingFeeWaiverRule: PricingRule = {
+  name: "processing-fee",
+  // Deliberately checked against the running total *after* prior rules —
+  // the array's order is now an explicit, visible decision instead of the
+  // implicit guesswork that caused round 2's bug.
+  apply: (total, order) =>
+    order.hasProcessingFee && total <= 1000 ? total + 15 : total,
+};
+
+// The order this array is written in *is* the business decision that was
+// previously implicit and undocumented — now it's one visible list.
+const defaultRules: PricingRule[] = [
+  volumeDiscountRule,
+  couponRule,
+  processingFeeWaiverRule,
+];
+
+function calculateTotal(
+  order: OrderV2,
+  rules: PricingRule[] = defaultRules,
+): number {
+  const subtotal = order.items.reduce((sum, item) => sum + item.amount, 0);
+  const afterRules = rules.reduce(
+    (total, rule) => rule.apply(total, order),
+    subtotal,
+  );
+  const tax = afterRules * TAX_RATE;
+  return round2(afterRules + tax);
+}
+```
+
+```typescript
+// pricing-v2-fixed.test.ts
+import { describe, expect, it } from "vitest";
+
+describe("calculateTotal v2 (seam-based)", () => {
+  it("stacks volume discount and coupon in a declared order", () => {
+    const order: OrderV2 = {
+      items: [{ description: "bulk widget", amount: 600 }],
+      couponAmount: 20,
+    };
+    // 600 - 60 (volume) = 540, 540 - 20 (coupon) = 520, 520 * 1.08 = 561.6
+    expect(calculateTotal(order)).toBe(561.6);
+  });
+
+  it("still handles a plain order with no special rules triggered", () => {
+    const order: OrderV2 = { items: [{ description: "widget", amount: 200 }] };
+    expect(calculateTotal(order)).toBe(216);
+  });
+
+  it("round-1 behavior is preserved for orders with no coupon", () => {
+    const order: OrderV2 = {
+      items: [{ description: "bulk widget", amount: 600 }],
+    };
+    expect(calculateTotal(order)).toBe(583.2);
+  });
+});
+```
+
+`calculateTotal` itself is now **closed for modification** — notice it
+contains no rule-specific logic at all anymore, just "reduce over whatever
+rules were passed in." It's **open for extension** — a new rule is a new
+object, appended to the array, and every existing rule stays untouched and
+still covered by its own existing tests.
+
+<Checkpoint question="Compare pricing-v2-buggy.ts and pricing-v2-fixed.ts. The bug wasn't a typo or an off-by-one — what structural property of the buggy version actually caused it, and why does the seam eliminate that specific cause rather than just happening to dodge it this once?">
+
+The buggy version's structural flaw is that every rule shared one mutable
+variable (`running`, and even `subtotal` re-read directly by the coupon
+branch) with no declared contract for what each `if` block was allowed to
+assume about that variable's state when it ran — the coupon branch simply
+guessed wrong about whether `running` already reflected the discount. That
+guess-based coupling is what caused the bug, and it would resurface with
+any two rules, not just this pair — the fix has to change the _shape_, not
+just this one branch's arithmetic. The seam eliminates the cause because
+every `PricingRule.apply` has an explicit, identical contract: take the
+running total as it stands after every prior rule in the array, return the
+new running total. There's no way to accidentally read `subtotal` instead
+of the running value, because a rule only ever receives the running value
+as its argument — the interface itself removes the ambiguity that produced
+the bug, rather than just happening to route around this particular
+instance of it.
+
+</Checkpoint>
+
+## Round 3 — one requirement absorbs cleanly, one needs a new seam
+
+Two more requirements arrive, independently, weeks apart:
+
+**(a) VIP customers get an extra 5% loyalty discount.** This is another
+instance of exactly the thing `PricingRule` already models — an adjustment
+to the running total before tax:
+
+```typescript
+// pricing-v3.ts — nothing above this line changes
+const vipLoyaltyRule: PricingRule = {
+  name: "vip-loyalty",
+  apply: (total, order) =>
+    (order as OrderV3).customerTier === "vip" ? total - total * 0.05 : total,
+};
+
+const defaultRulesV3: PricingRule[] = [
+  ...defaultRules,
+  vipLoyaltyRule, // appended — nothing above was edited
+];
+```
+
+```typescript
+it("VIP loyalty rule appends without touching prior rules or their tests", () => {
+  const order: OrderV3 = {
+    items: [{ description: "bulk widget", amount: 600 }],
+    customerTier: "vip",
+  };
+  // 600 - 60 (volume) = 540, 540 - 27 (5% vip) = 513, 513 * 1.08 = 554.04
+  expect(calculateTotal(order, defaultRulesV3)).toBe(554.04);
+});
+```
+
+Every test written for `volumeDiscountRule`, `couponRule`, and
+`processingFeeWaiverRule` at round 2 still passes, unmodified — that's the
+payoff the seam was built for.
+
+**(b) EU orders are taxed at 20%, not the flat 8% everyone else pays.**
+**Question: is this the same axis as (a)?** No — it doesn't adjust the
+running total before tax, it changes how tax itself gets computed, which
+`PricingRule` was never shaped to touch. Forcing it in as a fake "rule"
+(e.g. a rule that quietly multiplies by a tax-like negative number) would
+reintroduce exactly the kind of implicit, undocumented behavior the round-2
+bug came from. This axis gets its own small, purpose-built seam instead:
+
+```typescript
+type TaxRateResolver = (order: OrderV3) => number;
+
+const flatTaxRate: TaxRateResolver = () => 0.08;
+
+const regionAwareTaxRate: TaxRateResolver = (order) =>
+  order.region === "EU" ? 0.2 : 0.08;
+
+function calculateTotal(
+  order: OrderV3,
+  rules: PricingRule[] = defaultRulesV3,
+  resolveTaxRate: TaxRateResolver = flatTaxRate,
+): number {
+  const subtotal = order.items.reduce((sum, item) => sum + item.amount, 0);
+  const afterRules = rules.reduce(
+    (total, rule) => rule.apply(total, order),
+    subtotal,
+  );
+  const tax = afterRules * resolveTaxRate(order);
+  return round2(afterRules + tax);
+}
+```
+
+```typescript
+it("EU orders use the region-aware tax resolver, without touching PricingRule at all", () => {
+  const order: OrderV3 = {
+    items: [{ description: "widget", amount: 200 }],
+    region: "EU",
+  };
+  expect(calculateTotal(order, defaultRulesV3, regionAwareTaxRate)).toBe(240); // 200 * 1.2
+});
+```
+
+Two genuinely different seams for two genuinely different axes, each
+introduced exactly when its own second variant justified it — the tax
+resolver didn't exist until an actual EU customer requirement showed up,
+just as `PricingRule` didn't exist until the coupon requirement collided
+with the discount.
+
+## Trade-offs and failure modes
+
+| Failure mode                      | What it looks like                                                                                                                       | Why it happens                                                       |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| **Guessing the wrong axis**       | Building a `MultiCurrencyStrategy` seam at round 0 because "surely we'll need it" — and Fernbridge never signs an international customer | Speculative flexibility, paid every day, redeemed never              |
+| **Reusing the wrong seam**        | Forcing the EU tax rate through `PricingRule` because "we already have an extension point"                                               | An axis mismatch masquerading as reuse; recreates round-2's real bug |
+| **A seam nobody ever uses twice** | `PricingRule` stays at exactly one rule for two years after being built "to be safe"                                                     | Permanent indirection tax for a variant that never showed up         |
+| **Too-late extraction**           | A fourth and fifth `if` pile onto `calculateTotal` after the round-2 bug already shipped                                                 | Each new `if` interacts combinatorially with every prior one         |
+
+The two real failure directions are symmetric: build the seam before there's
+a second variant, and you pay indirection forever for nothing; wait past
+the second variant, and every additional special case gets more expensive
+to add and more dangerous to get wrong, because it now has to be reasoned
+about against every prior special case at once — not just against the
+runtime behavior line, but against actual review and debugging time, the
+same compounding curve from L1 and L2.
+
+<Checkpoint question="Suppose, a year later, the PricingRule list has grown to nine rules, and a new engineer proposes splitting it into 'discount rules' and 'fee rules' as two separate seams instead of one shared list. Is that itself an instance of the same timing question this unit has been building toward?">
+
+Yes — it's the identical question, one level up. The original question was
+"has a second variant of this kind of thing shown up yet," applied to
+whether a single `if` needed to become a `PricingRule` at all. The same
+question now applies to whether the _shape of the seam itself_ has grown a
+second real variant worth separating — nine rules genuinely falling into
+two behaviorally distinct groups (say, discounts always run before fees,
+and that ordering constraint is being worked around ad hoc) is the kind of
+concrete signal that would justify splitting the list, the same way the
+coupon bug was concrete signal for creating the list in the first place. If
+the proposal is instead "it'll probably be cleaner to have two lists" with
+no actual ordering conflict or confusion driving it, it's the same
+speculative-axis trap as building `PricingRule` back at round 1 — a
+plausible-sounding restructuring with no requirement behind it yet.
+
+</Checkpoint>
+
+**Extend it yourself:** the walkthrough above assumed every new rule is a
+straightforward before-tax adjustment. What would change if round 4's
+requirement were a **subscription plan** — a recurring monthly charge that
+needs a _different_ total calculation entirely (no line items, no
+one-time discount rules, but the same tax-resolver logic should still
+apply)? Would that fit inside the existing `PricingRule`/`TaxRateResolver`
+seams, need a third seam of its own, or suggest that `calculateTotal`
+itself has reached the point where _it's_ the thing with two real variants
+now (one-time orders vs. subscriptions) and needs to become the extension
+point, rather than staying the one function everything still funnels
+through?

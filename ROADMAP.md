@@ -268,7 +268,7 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 | 09  | refactoring-technique               | How do I change a design safely once it's already tangled? (refactoring technique, safe transformation steps)                                                      | code-quality, testing, risk-management         | done    |
 | 10  | technical-debt-deliberate-trade-off | How do I know how much technical debt is acceptable? (technical debt as a deliberate trade-off, not just a sin)                                                    | code-quality, decision-making, risk-management | done    |
 | 11  | api-design                          | How do I design an interface or API that's hard to misuse? (API design, defensive design, making illegal states unrepresentable)                                   | api-design, design-patterns, code-quality      | done    |
-| 12  | evolutionary-design                 | How do I evolve a design as requirements change without a rewrite? (evolutionary design, the open-closed principle in practice)                                    | architecture, design-patterns, risk-management | planned |
+| 12  | evolutionary-design                 | How do I evolve a design as requirements change without a rewrite? (evolutionary design, the open-closed principle in practice)                                    | architecture, design-patterns, risk-management | done    |
 | 13  | long-term-design-judgment           | How does a staff engineer make a design decision that will outlive their own tenure on the project? (long-term design judgment, designing for whoever inherits it) | architecture, leadership, decision-making      | planned |
 
 ## architecture/
