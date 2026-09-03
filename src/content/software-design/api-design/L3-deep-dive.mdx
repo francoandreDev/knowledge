@@ -1,0 +1,393 @@
+---
+title: "L3 — How do I design an interface or API that's hard to misuse? (API design, defensive design, making illegal states unrepresentable)"
+---
+
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 and L2 named the problem and the mental model. This level rebuilds
+Alertly's `sendAlert()` end to end, in real TypeScript: the permissive
+version that let Maya's page go missing, a full diagnosis of exactly
+which design choices caused that, and a redesigned version where the
+same call — `channel: "sms"` with no phone number — is no longer code
+that compiles. TypeScript is the right tool here specifically because
+its structural type system and discriminated unions can make an
+invalid combination of fields a compile error, not just a runtime
+check with better wording; the same technique works in Rust,
+Kotlin, or Swift, but TypeScript keeps this consistent with the rest
+of the site.
+
+<LevelIntro
+  items={[
+    "The permissive signature, diagnosed field by field",
+    "The redesign: discriminated unions and a parsing boundary",
+    "Trade-offs — ergonomics cost, and the versioning tension of tightening a live API",
+  ]}
+/>
+
+## The permissive version, as it actually shipped
+
+```typescript
+// alert-v1.ts — the version on call the night of the outage
+interface SendAlertOptions {
+  recipientId: string;
+  message: string;
+  channel: "email" | "sms" | "push";
+  isUrgent: boolean;
+  emailAddress?: string;
+  phoneNumber?: string;
+  deviceToken?: string;
+}
+
+function sendAlert(options: SendAlertOptions): void {
+  const { channel, message, emailAddress, phoneNumber, deviceToken } = options;
+
+  try {
+    if (channel === "email") {
+      emailClient.send(emailAddress!, message); // trusts the caller
+    } else if (channel === "sms") {
+      smsClient.send(phoneNumber!, message); // trusts the caller
+    } else if (channel === "push") {
+      pushClient.send(deviceToken!, message); // trusts the caller
+    }
+  } catch (err) {
+    // Written to swallow transient provider errors so one flaky send
+    // doesn't crash the whole alerting pipeline. It also swallows
+    // TypeError: Cannot read properties of undefined (phoneNumber) —
+    // same catch block, same fate, logged at debug level nobody reads
+    // at 3am.
+    logger.debug("sendAlert failed", err);
+  }
+}
+
+// The actual call that failed, reconstructed from the escalation code:
+sendAlert({
+  recipientId: "maya-oncall",
+  message: "Payments service down",
+  channel: "sms",
+  isUrgent: true,
+  deviceToken: "abc123", // copy-pasted from a push call three lines up
+  // phoneNumber was never set — nothing here objects to that
+});
+```
+
+**What, precisely, made this call possible to write wrong?** Three
+separate design choices, each individually reasonable-looking, that
+compound:
+
+1. **Every channel-specific field is optional**, on every call,
+   regardless of which `channel` was chosen — so `channel: "sms"` with
+   `phoneNumber: undefined` is a value `SendAlertOptions` can represent
+   perfectly legally.
+2. **The non-null assertions (`!`) at the call site** are the author
+   telling the type checker "trust me, this is defined" — which is
+   exactly the kind of claim a discriminated union would make the
+   compiler verify instead of trusting.
+3. **The `try/catch` exists for a different, legitimate reason**
+   (network flakiness) and, as an unintended side effect, becomes the
+   place the missing-field bug goes to die silently — this is L2's
+   "the check existed but was powerless" story, now visible as real
+   code you can point to.
+
+<Checkpoint question="Would adding a runtime check — `if (channel === 'sms' && !phoneNumber) throw new Error(...)` — right before the try block have actually fixed this, given the catch block already there?">
+
+No. That check would run _inside_ the same function body the
+`try/catch` wraps, so the thrown error would be caught by the exact
+same broad `catch (err) { logger.debug(...) }` and logged at a level
+nobody reads at 3am — identical outcome to today, just with an extra
+line of code producing the same silent failure. A runtime check only
+helps if it runs somewhere the existing catch-all can't reach it —
+which is precisely why L2 pointed at the _boundary_, not just "add a
+check somewhere in this function," as the fix.
+
+</Checkpoint>
+
+## The redesign: a discriminated union at the boundary
+
+```typescript
+// alert-v2.ts — channel is now a discriminated union: each shape
+// carries exactly the field it needs, and no others.
+type AlertChannel =
+  | { kind: "email"; emailAddress: string }
+  | { kind: "sms"; phoneNumber: string }
+  | { kind: "push"; deviceToken: string };
+
+// Urgency gets the same treatment: "urgent" and "scheduled for later"
+// were two more booleans/optionals (isUrgent, scheduledFor) that could
+// previously both be set at once, which never made sense.
+type Urgency = { kind: "immediate" } | { kind: "scheduled"; sendAt: Date };
+
+interface AlertRequest {
+  recipientId: string;
+  message: string;
+  channel: AlertChannel;
+  urgency: Urgency;
+}
+
+function sendAlert(request: AlertRequest): void {
+  const { channel, message } = request;
+
+  // No `!` anywhere below. TypeScript narrows `channel` inside each
+  // branch, so `channel.phoneNumber` is only accessible where the tag
+  // proves it exists.
+  switch (channel.kind) {
+    case "email":
+      emailClient.send(channel.emailAddress, message);
+      break;
+    case "sms":
+      smsClient.send(channel.phoneNumber, message);
+      break;
+    case "push":
+      pushClient.send(channel.deviceToken, message);
+      break;
+  }
+}
+```
+
+**Does this actually stop Maya's exact bug — not "a similar bug," but
+this one?** Try to write the failing call against the new signature:
+
+```typescript
+// @ts-expect-error — Object literal may only specify known properties,
+// and 'deviceToken' does not exist in type '{ kind: "sms"; phoneNumber: string }'.
+sendAlert({
+  recipientId: "maya-oncall",
+  message: "Payments service down",
+  channel: { kind: "sms", deviceToken: "abc123" }, // no phoneNumber
+  urgency: { kind: "immediate" },
+});
+```
+
+That line is now a compile error — `tsc` refuses to build it, so it
+never reaches a code review, a merge, or a deploy, let alone a 3 a.m.
+escalation path. The correct call is the only one the type checker
+will accept for `kind: "sms"`:
+
+```typescript
+sendAlert({
+  recipientId: "maya-oncall",
+  message: "Payments service down",
+  channel: { kind: "sms", phoneNumber: "+15555550123" },
+  urgency: { kind: "immediate" },
+});
+```
+
+## Parsing untyped input at the real boundary
+
+The type-level fix above protects every caller written in TypeScript
+against the compiler _inside this codebase_ — but Alertly's actual
+boundary is an HTTP request body from an escalation service, which
+arrives as untyped JSON, not a TypeScript object literal. **Where does
+"parse, don't validate" apply here, if the danger is JSON, not another
+engineer's code?**
+
+```typescript
+// alert-parse.ts — the one place untyped JSON becomes an AlertRequest.
+// Nothing downstream of parseAlertRequest ever sees the raw shape again.
+class InvalidAlertRequestError extends Error {}
+
+function parseAlertRequest(raw: unknown): AlertRequest {
+  if (typeof raw !== "object" || raw === null) {
+    throw new InvalidAlertRequestError("request body must be an object");
+  }
+  const body = raw as Record<string, unknown>;
+
+  const channel = parseChannel(body.channel);
+  const urgency = parseUrgency(body.urgency);
+
+  if (
+    typeof body.recipientId !== "string" ||
+    typeof body.message !== "string"
+  ) {
+    throw new InvalidAlertRequestError(
+      "recipientId and message are required strings",
+    );
+  }
+
+  return {
+    recipientId: body.recipientId,
+    message: body.message,
+    channel,
+    urgency,
+  };
+}
+
+function parseChannel(raw: unknown): AlertChannel {
+  const c = raw as Record<string, unknown> | undefined;
+  if (!c || typeof c.kind !== "string") {
+    throw new InvalidAlertRequestError("channel.kind is required");
+  }
+  switch (c.kind) {
+    case "email":
+      if (typeof c.emailAddress !== "string") {
+        throw new InvalidAlertRequestError(
+          "email channel requires emailAddress",
+        );
+      }
+      return { kind: "email", emailAddress: c.emailAddress };
+    case "sms":
+      if (typeof c.phoneNumber !== "string") {
+        throw new InvalidAlertRequestError("sms channel requires phoneNumber");
+      }
+      return { kind: "sms", phoneNumber: c.phoneNumber };
+    case "push":
+      if (typeof c.deviceToken !== "string") {
+        throw new InvalidAlertRequestError("push channel requires deviceToken");
+      }
+      return { kind: "push", deviceToken: c.deviceToken };
+    default:
+      throw new InvalidAlertRequestError(
+        `unknown channel.kind: ${String(c.kind)}`,
+      );
+  }
+}
+
+function parseUrgency(raw: unknown): Urgency {
+  const u = raw as Record<string, unknown> | undefined;
+  if (!u || u.kind === "immediate") return { kind: "immediate" };
+  if (u.kind === "scheduled" && typeof u.sendAt === "string") {
+    return { kind: "scheduled", sendAt: new Date(u.sendAt) };
+  }
+  throw new InvalidAlertRequestError(
+    "urgency must be {kind:'immediate'} or {kind:'scheduled', sendAt}",
+  );
+}
+```
+
+This is the boundary from L2's diagram, made concrete: `parseAlertRequest`
+either returns a fully-valid `AlertRequest` or throws
+`InvalidAlertRequestError` — loudly, at the HTTP layer, before an
+escalation ever reaches `sendAlert`. There is no code path anywhere
+past this function that can receive `channel: "sms"` without a phone
+number, because `parseChannel` is the only place an `AlertChannel`
+value is ever constructed, and every one of its branches requires the
+matching field.
+
+<Checkpoint question="Suppose parseChannel's sms branch had a bug — it checked typeof c.deviceToken instead of typeof c.phoneNumber by mistake. Would the discriminated union type AlertChannel, by itself, catch that bug?">
+
+No — and this is worth being honest about. The union type guarantees
+that _if_ a value of type `AlertChannel` with `kind: "sms"` exists,
+it has a `phoneNumber` field, because `parseChannel`'s `sms` branch is
+the only code that can construct one, and its return statement
+literally writes `{ kind: "sms", phoneNumber: c.phoneNumber }` — but
+that line would need to actually assign the right source field. If the
+branch's _validation_ checked the wrong field but its _return_
+statement still wrote a syntactically valid `AlertChannel`, TypeScript
+has no way to know the parse logic itself was wrong; the type system
+verifies shape, not the correctness of the code that produces the
+shape. Illegal states unrepresentable narrows the space of bugs
+dramatically — it doesn't eliminate the need for tests on the parsing
+function itself, which is exactly why `parseChannel` still deserves
+direct unit tests, shown next.
+
+</Checkpoint>
+
+## Verifying the fix with real tests
+
+```typescript
+// alert-parse.test.ts
+import { describe, it, expect } from "vitest";
+
+describe("parseChannel", () => {
+  it("accepts a valid sms channel", () => {
+    const channel = parseChannel({ kind: "sms", phoneNumber: "+15555550123" });
+    expect(channel).toEqual({ kind: "sms", phoneNumber: "+15555550123" });
+  });
+
+  it("rejects sms with no phoneNumber — Maya's exact bug, now caught at parse time", () => {
+    expect(() => parseChannel({ kind: "sms", deviceToken: "abc123" })).toThrow(
+      InvalidAlertRequestError,
+    );
+  });
+
+  it("rejects an unknown channel kind", () => {
+    expect(() => parseChannel({ kind: "carrier-pigeon" })).toThrow(
+      InvalidAlertRequestError,
+    );
+  });
+});
+
+describe("parseUrgency", () => {
+  it("rejects an urgency that is neither immediate nor a valid scheduled shape", () => {
+    expect(() =>
+      parseUrgency({ kind: "urgent-and-scheduled", sendAt: 123 }),
+    ).toThrow(InvalidAlertRequestError);
+  });
+});
+```
+
+The `sendAlert()` and `parseChannel()` boundary functions above no
+longer need a test for "what if channel and the field mismatch" as a
+_runtime_ scenario at all — that scenario is either rejected by
+`parseChannel` with a clear error, or it's a compile error before the
+test file would even build. The tests that remain are about
+`parseChannel`'s own correctness (L2's Checkpoint point, confirmed in
+code), not about defending `sendAlert` against malformed input it can
+no longer receive.
+
+## Trade-offs, edge cases, and failure modes
+
+| Situation                                                                                                              | What goes wrong                                                                                                                        | What to do about it                                                                                                                                                                                                               |
+| ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A quick internal script, used by 2 people, never touching untrusted input**                                          | The union + parse boundary is real ceremony for a case where a bug would be caught in the next 5 minutes of manual testing anyway      | Match the investment to the blast radius — Alertly's alerting path pages humans during outages; a one-off migration script doesn't carry the same cost of being wrong                                                             |
+| **A public library API, already shipped and widely depended on**                                                       | Tightening `SendAlertOptions` into a required union is a breaking change for every existing caller                                     | Ship the new, safe shape as a new exported function (`sendAlertV2`) or a new major version, and keep the old one only behind a deprecation warning with a real removal date — see below                                           |
+| **A genuinely open-ended set of channels** (a plugin system where third parties register new channel types at runtime) | A closed discriminated union can't represent "a channel kind nobody has thought of yet"                                                | This is a real limit of the technique — a closed union is for a _known, fixed_ set of shapes; an open-ended set needs a different tool (a runtime registry of validated channel handlers), not a bigger union                     |
+| **The union grows to 12 channel kinds over 3 years**                                                                   | Every `switch` over `channel.kind` across the codebase needs a new case each time, or a stale case silently does nothing for new kinds | TypeScript's exhaustiveness checking (a `default: assertNever(channel)` branch) turns "a switch case was never added" back into a compile error too — the same idea, applied to consumers of the union, not just its construction |
+
+**Versioning tension, concretely.** Tightening a _live, already-called_
+API is not free even when it's clearly correct: every existing caller
+of `SendAlertOptions` compiles today and might not compile against
+`AlertRequest` without changes. The realistic path is an **adapter**
+that bridges the old permissive shape into the new safe one at a
+single, temporary seam:
+
+```typescript
+// migration-adapter.ts — lets old call sites keep working while they migrate
+function sendAlertLegacy(options: SendAlertOptions): void {
+  const channel = parseChannel({
+    kind: options.channel,
+    emailAddress: options.emailAddress,
+    phoneNumber: options.phoneNumber,
+    deviceToken: options.deviceToken,
+  }); // throws immediately if the legacy call was itself invalid
+  const urgency: Urgency = options.isUrgent
+    ? { kind: "immediate" }
+    : { kind: "scheduled", sendAt: new Date() };
+  sendAlert({
+    recipientId: options.recipientId,
+    message: options.message,
+    channel,
+    urgency,
+  });
+}
+```
+
+This still fails fast — a legacy caller passing `channel: "sms"` with
+no `phoneNumber` now gets a thrown `InvalidAlertRequestError`
+immediately, instead of a silent no-op — while giving every existing
+call site time to migrate to the real `AlertRequest` shape before
+`sendAlertLegacy` is deleted on a announced date. The type-safety
+benefit doesn't require an instant, all-at-once rewrite; it requires
+the adapter itself to never bypass the new parse step.
+
+**Extend it yourself:** this unit's whole worked example assumed the
+danger was a _missing_ field for the chosen channel. **What changes if
+the actual production incident had instead been someone accidentally
+sending the same alert through all three channels at once because the
+caller didn't realize `channel` was meant to be exclusive — how would
+you shape `AlertChannel` differently if "email and SMS and push,
+simultaneously, on purpose" needed to become a legitimate, well-typed
+option instead of a bug?**
+
+## Key terms
+
+- **Discriminated union** — a closed set of shapes distinguished by a
+  tag field, each carrying only the data valid for that shape.
+- **Parsing boundary** — the single function where untyped external
+  input is converted into a type that proves its own validity.
+- **Exhaustiveness checking** — a compiler's ability to flag a `switch`
+  or conditional that doesn't handle every member of a union, catching
+  a missed case at compile time when the union grows.
+- **Adapter** — a bridging function that lets old, permissive call
+  sites keep working against a newly-tightened API during a migration
+  window.
