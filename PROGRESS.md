@@ -1958,3 +1958,18 @@ Wrote `business-communication/upward-disagreement` end-to-end: "How do I tell so
 - `ROADMAP.md` flipped `upward-disagreement` from `in-progress` → `done`, `generate:roadmap` re-run.
 - Noted, not addressed this session: the working tree still carries the same unrelated pre-existing changes flagged in prior entries (`docs/GAME-PROGRESS.md`, `src/lib/game/engine.ts`, `src/lib/game/icons.ts`, `src/pages/game/index.astro`) — left as-is, not touched or committed by this session.
 - Suggested next: `business-communication/`'s remaining planned units — `change-management`, `translating-technical-risk-business-risk`, `org-level-influence` — or any other track's next planned unit.
+
+## 2026-09-03 — business-communication/change-management, full L1-L3/exercises/interactives
+
+Wrote `business-communication/change-management` end-to-end: "How do I lead a team through a reorg or layoffs? (change management, uncertainty)."
+
+- **Scenario throughline**: Priya Nandakumar, an engineering manager at Fintrail (payments startup), learns in confidence that her 8-person team is merging with another 7-person team, cutting 5 of the 15 combined roles — names not finalized for 10 days. Her engineers have already spotted a suspicious leadership calendar invite and asked, half-joking, if everything's okay. L1 frames the false-choice trap (silence vs. false reassurance); L2 gives four moves (separate known from unknown, never promise what you can't guarantee, give a concrete next check-in date, name the "what does this mean for me" question even without a full answer); L3 walks Priya's actual conversation and the following 10 days.
+- `LevelIntro`×3, `Checkpoint`s in L2/L3, `Scenario` with a distinct `facts` slot (a headcount progress bar plus a compact fact list).
+- Non-technical/soft-skill track per rule 9: L3 is fully worked prose/tables/numbered-steps, no fake pseudocode-as-code.
+- Visual elements: a mermaid flowchart (L1, the four-move mechanism) plus additional diagrams/tables across L2/L3.
+- `interactives.json`: a slider demo grounded in the unit's own numbers.
+- `exercises.json`: 40 items (13/13/14 across L1/L2/L3), 15 pools, all `quiz` type per rule 9, verified via node script: 0 missing explanations, 0 non-quiz items, all pools' `reference`/`learnMore` identical across variants.
+- Verified independently by the orchestrating session (the authoring agent's own dispatch did not append this PROGRESS.md entry, so it was added here after confirming file counts, exercise structure, and L1 content quality directly against the repo): no leftover scaffold `.md` files, exercises.json structurally sound.
+- `ROADMAP.md` flipped `change-management` from `in-progress` → `done`, `generate:roadmap` re-run.
+- Noted, not addressed this session: the working tree still carries the same unrelated pre-existing changes flagged in prior entries — left as-is.
+- Suggested next: `business-communication/`'s remaining planned units — `translating-technical-risk-business-risk`, `org-level-influence` — the last two in the track.
