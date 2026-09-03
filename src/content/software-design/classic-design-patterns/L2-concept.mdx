@@ -1,0 +1,135 @@
+---
+title: "L2 — How do I recognize a design pattern I actually need vs. cargo-culting one? (classic design patterns, when they help vs. hurt)"
+---
+
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L1 named the trap: reaching for a pattern because it looks like best
+practice, not because the problem calls for it. This level builds the
+actual test — a small checklist you can run against real code — and sketches
+what a handful of the most common patterns cost and buy, so "does this
+problem call for a pattern" stops being a gut feeling and becomes something
+you can point to in a review comment.
+
+<LevelIntro
+  items={[
+    "A checklist: does the axis of variation actually earn a pattern?",
+    "What five common patterns solve and what each one costs",
+    "Applying the checklist to Sam's shipping calculator, live",
+  ]}
+/>
+
+## What question is the checklist actually answering?
+
+Before any checklist: what, precisely, makes a pattern "earn its cost"? Not
+"is the logic complex" — plenty of complex logic is still one stable shape
+forever, and stays best as a single well-named function. The real question
+is narrower: **does this specific piece of behavior vary along a real axis,
+independently, more than once, in practice** — not hypothetically, not
+"might need to later"?
+
+That question breaks into four checkable sub-questions:
+
+| #   | Question                                                                                                                                                                                                | Why it matters                                                                                     |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 1   | Do **≥2 real, concrete variants** exist today — not imagined future ones?                                                                                                                               | A pattern built for one hypothetical future case is a bet, not a fix                               |
+| 2   | Does the variation get **added to or swapped independently** of the surrounding code — by a different team, at a different time, or at runtime?                                                         | If it only ever changes alongside everything else, there's no seam to isolate                      |
+| 3   | Is the **direct version (if/else or switch) already causing a real cost** — repeated in multiple places, growing every sprint, or blocking a specific need (e.g. unit-testing one branch in isolation)? | A short, stable if/else has no cost to fix                                                         |
+| 4   | Does the indirection buy something concrete — swap at runtime, add a new case **without editing existing code**, test each case alone?                                                                  | If the answer is "no, it's the same logic just spread across more files," the pattern is pure cost |
+
+**A "yes" to most of these is the signal.** A "no" to most of them — which
+is exactly where Sam's 2-branch, nothing-planned shipping calculator lands
+— means the plain version is the right-sized one, and adding a pattern
+there isn't precision, it's the cargo-culting from L1 wearing a specific
+pattern's name.
+
+<Checkpoint question="Priya's argument was 'it has conditional logic, so it should be a pattern.' Using the four questions above, what's the actual flaw in that argument?">
+
+Having conditional logic at all isn't one of the four questions — it's a
+red herring. Question 1 asks whether real, concrete variants already exist
+(yes, technically — domestic and international), but question 2 asks
+whether they change _independently_ of each other and of the surrounding
+code, and question 3 asks whether the current if/else is _already_ causing
+a measurable cost. Neither holds here: the two branches were added together,
+aren't expected to change independently, and six lines of if/else isn't
+costing anyone anything. "Has conditional logic" describes almost all code
+everywhere — it's not a filter for anything, which is exactly why it's a
+weak justification for adding a pattern.
+
+</Checkpoint>
+
+## A catalog sketch: what a handful of common patterns actually buy
+
+Not all 23 Gang-of-Four patterns — just five that show up constantly in
+real review comments, each with the specific problem it solves and the
+specific cost it charges:
+
+| Pattern            | Solves                                                                                                 | Typical cost                                                              | Good sign to reach for it                                                                                 | Bad sign it's cargo-culted                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| **Strategy**       | Swapping an algorithm/behavior at runtime among interchangeable implementations                        | +1 interface, +1 class per variant                                        | ≥2 variants today, chosen at runtime or by config, growing                                                | 1–2 branches, never expected to grow, decided at compile time                                    |
+| **Factory Method** | Centralizing non-trivial object construction that varies by type                                       | +1 abstraction layer over `new`                                           | Construction logic is genuinely complex and reused in many call sites                                     | A factory that just calls `new Foo()` — one line hidden behind ceremony                          |
+| **Decorator**      | Adding independent, combinable responsibilities to an object without a subclass per combination        | +1 wrapper class per responsibility, extra call-stack depth               | ≥2 cross-cutting behaviors (logging, retry, caching) that combine in different mixes                      | Exactly one behavior, exactly one place it's ever applied                                        |
+| **Observer**       | Notifying a changing set of interested parties about an event, without the source knowing who they are | Indirection in control flow — harder to trace "who runs when this fires"  | Multiple, possibly-changing subscribers; source and listeners genuinely shouldn't know about each other   | Exactly one hardcoded listener — just call it directly                                           |
+| **Singleton**      | Guaranteeing exactly one shared instance (e.g. one connection pool)                                    | Global mutable state, hidden dependencies, hard to unit-test in isolation | A genuine hard constraint (only one instance may safely exist) that the team accepts the testing cost for | "Convenient global access" as the _only_ reason — almost always better as a passed-in dependency |
+
+Every row has the same shape: a real problem on the left, a real, always-
+paid cost on the right. The pattern earns its place only when the problem
+column is actually true for the code in front of you.
+
+<pre class="mermaid">
+  {`flowchart TD
+    A[Does the behavior vary?] -->|No, single stable case| Z[Skip the pattern —\nwrite it directly]
+    A -->|Yes| B{"≥2 real variants\ntoday (Q1)?"}
+    B -->|No, hypothetical only| Z
+    B -->|Yes| C{"Vary independently\nof surrounding code (Q2)?"}
+    C -->|No| Z
+    C -->|Yes| D{"Direct version already\ncausing real cost (Q3)?"}
+    D -->|No, still cheap| Z
+    D -->|Yes| E{"Indirection buys something\nconcrete: runtime swap,\nadd without editing,\ntest in isolation (Q4)?"}
+    E -->|No| Z
+    E -->|Yes| F[Use the pattern]`}
+</pre>
+
+## Running the checklist against Sam's actual code
+
+Applying the table to the two scenarios this unit follows:
+
+| Question                                      | Shipping calculator (2 branches)                                                         | Payment processing (5 processors, L3)                                                  |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Q1: ≥2 real variants today?                   | Yes (2)                                                                                  | Yes (5, and counting)                                                                  |
+| Q2: Vary independently?                       | No — both added in the same PR, no plan to diverge                                       | Yes — different teams add processors on their own schedule                             |
+| Q3: Direct version already costing something? | No — 6 lines, stable                                                                     | Yes — the if/else was already 40+ lines and growing every quarter                      |
+| Q4: Indirection buys something concrete?      | No — nothing to swap at runtime, nothing to test in isolation that isn't already trivial | Yes — new processors plug in without touching existing code, each is unit-tested alone |
+| **Verdict**                                   | **Skip the pattern**                                                                     | **Use Strategy**                                                                       |
+
+Same pattern, same catalog entry, opposite verdict — because the checklist
+is answering a question about the _code in front of you_, not about
+whether Strategy is a "good" pattern in the abstract. That's the whole
+point: a pattern's value isn't fixed, it's conditional on the shape of the
+actual problem.
+
+<Checkpoint question="The payment-processing case has 40+ lines of if/else already. Suppose the shipping calculator also grew — say, to 6 regions, each with genuinely different tax rules added by different regional teams over the next year. Would the verdict for shipping change, and which question flips it?">
+
+Yes — it would likely flip to "use the pattern," and the question that
+flips is Q2 (and, once it grows, Q3). At 2 branches added together in one
+PR, there's no independent variation to isolate. At 6 regions each owned
+and changed by a different regional team on their own schedule, the axis
+of variation becomes real and independent, and a growing if/else block
+edited by multiple teams starts causing the real cost Q3 asks about — merge
+conflicts, one team's change breaking another region's logic, and no way to
+test one region's tax rule without loading the whole function. The
+checklist isn't a one-time verdict on "shipping cost calculation" as a
+concept — it's a read on the code's _current_ shape, and has to be re-run
+if that shape changes.
+
+</Checkpoint>
+
+## What's next
+
+L3 works both scenarios end to end in real code: the over-applied Strategy
+version of the shipping calculator next to its right-sized direct version,
+then the payment-processing case where Strategy is the correct call —
+including what the checklist misses in practice (a pattern that was right
+when adopted but outlives its reason), and a look at Decorator, Factory,
+Observer, and Adapter doing real work in the same codebase.
