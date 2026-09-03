@@ -1,0 +1,525 @@
+---
+title: "L3 — How do I change a design safely once it's already tangled? (refactoring technique, safe transformation steps)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 gave the loop and the catalog. This level runs the loop for real, on
+Boxtree's actual `calculateOrderTotal` function — plain Node.js, no
+framework, no build step, so every step below can be pasted into a file and
+run with nothing but `node`. That's a deliberate choice for this unit
+specifically: the whole point is that each step is independently,
+immediately verifiable, and a zero-dependency script you can run in five
+seconds makes that real instead of theoretical.
+
+<Scenario label="The function Dana has to change, and the tests that already exist">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5">
+        <span>🧾</span> <strong>Inputs</strong> — a customer, a cart of
+        items, a shipping region, a gift-wrap flag
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span>🧮</span> <strong>Responsibilities in one function</strong> —
+        subtotal, member discount, bulk discount, shipping, tax, gift wrap
+        fee (6 things, 1 function)
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span>🧪</span> <strong>Existing tests</strong> — 6 cases, written
+        first, before any structural change
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span>🐛</span> <strong>A quirk hiding in plain sight</strong> — one
+        of the three membership checks doesn't match the other two
+      </div>
+    </div>
+  </Fragment>
+
+The function below is what's actually in Boxtree's codebase today. It works
+— customers are being charged correctly according to it, right now, in
+production. That's exactly why it can't be touched carelessly: "it looks
+messy" is not the same claim as "it's wrong," and refactoring only promises
+to fix the first one.
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "The starting tests, then six small, verified refactoring steps",
+    "The new loyalty-discount feature landing on the cleaned-up structure",
+    "Failure modes: no tests, deadline pressure, and when to stop",
+  ]}
+/>
+
+## Step 0: pin down current behavior with tests, before touching anything
+
+Here's the function as it exists today, `order-pricing.js`:
+
+```js
+// order-pricing.js — BEFORE any refactoring
+function calculateOrderTotal(customer, items, region, giftWrap) {
+  let subtotal = 0;
+  for (let i = 0; i < items.length; i++) {
+    subtotal += items[i].price * items[i].qty;
+  }
+
+  let discount = 0;
+  if (customer.isMember && !customer.membershipSuspended) {
+    discount = subtotal * 0.1;
+  }
+  if (subtotal > 200) {
+    if (customer.isMember && !customer.membershipSuspended) {
+      discount = discount + subtotal * 0.05;
+    } else {
+      discount = subtotal * 0.08;
+    }
+  }
+
+  let shipping = 0;
+  if (region === "US") {
+    if (subtotal > 75) {
+      shipping = 0;
+    } else {
+      shipping = 4.99;
+    }
+  } else if (region === "CA") {
+    if (subtotal > 75) {
+      shipping = 3.99;
+    } else {
+      shipping = 8.99;
+    }
+  } else if (region === "EU") {
+    shipping = 12.99;
+  } else {
+    shipping = 19.99;
+  }
+
+  let taxRate = 0;
+  if (region === "US") {
+    taxRate = 0.07;
+  } else if (region === "CA") {
+    taxRate = 0.05;
+  } else if (region === "EU") {
+    taxRate = 0.2;
+  } else {
+    taxRate = 0;
+  }
+  const tax = (subtotal - discount) * taxRate;
+
+  let giftWrapFee = 0;
+  if (giftWrap) {
+    if (customer.isMember) {
+      giftWrapFee = 1.5;
+    } else {
+      giftWrapFee = 2.99;
+    }
+  }
+
+  return subtotal - discount + shipping + tax + giftWrapFee;
+}
+
+module.exports = { calculateOrderTotal };
+```
+
+Notice the gift-wrap branch checks only `customer.isMember` — not
+`!customer.membershipSuspended` like the other two member checks do. Keep
+that in mind; it matters in Step 3.
+
+The characterization tests, written _before_ any structural change, using
+nothing but Node's built-in `assert` — no test framework to install:
+
+```js
+// test-order-pricing.js — the safety net, written first
+const assert = require("node:assert");
+const { calculateOrderTotal } = require("./order-pricing");
+
+function test(name, fn) {
+  try {
+    fn();
+    console.log(`  PASS  ${name}`);
+  } catch (err) {
+    console.log(`  FAIL  ${name}`);
+    console.log(`        ${err.message}`);
+    process.exitCode = 1;
+  }
+}
+
+const member = { isMember: true, membershipSuspended: false };
+const suspendedMember = { isMember: true, membershipSuspended: true };
+const guest = { isMember: false, membershipSuspended: false };
+const item = (price, qty) => ({ price, qty });
+
+test("guest, small US order: shipping + tax, no discount", () => {
+  const total = calculateOrderTotal(guest, [item(50, 1)], "US", false);
+  // 50 subtotal - 0 discount + 4.99 shipping (under $75) + 3.5 tax (7%)
+  assert.strictEqual(total, 58.49);
+});
+
+test("member, order over $200 in US: member + bulk discount stack", () => {
+  const total = calculateOrderTotal(member, [item(300, 1)], "US", false);
+  // 300 - 45 discount (10% member + 5% bulk) + 0 shipping (over $75) + 17.85 tax
+  assert.strictEqual(Math.round(total * 100) / 100, 272.85);
+});
+
+test("guest, order over $200 in US: guest bulk discount only", () => {
+  const total = calculateOrderTotal(guest, [item(300, 1)], "US", false);
+  // 300 - 24 discount (flat 8% guest bulk rate) + 0 shipping + 19.32 tax
+  assert.strictEqual(Math.round(total * 100) / 100, 295.32);
+});
+
+test("EU region: fixed shipping, 20% tax", () => {
+  const total = calculateOrderTotal(guest, [item(100, 1)], "EU", false);
+  assert.strictEqual(Math.round(total * 100) / 100, 132.99);
+});
+
+test("unknown region falls back to default shipping, 0% tax", () => {
+  const total = calculateOrderTotal(guest, [item(100, 1)], "MX", false);
+  assert.strictEqual(total, 119.99);
+});
+
+test("gift wrap: suspended member is still charged the member gift-wrap rate (today's actual, quirky behavior)", () => {
+  const total = calculateOrderTotal(suspendedMember, [item(50, 1)], "US", true);
+  // 50 subtotal - 0 discount (suspended, no member discount) + 4.99
+  // shipping + 3.5 tax + 1.5 gift wrap (the cheaper member rate, because
+  // that branch never checks membershipSuspended). This is the quirk
+  // from Step 3 — the test documents what the code does today, not what
+  // it should do.
+  assert.strictEqual(total, 59.99);
+});
+
+console.log("done.");
+```
+
+Running `node test-order-pricing.js` prints six `PASS` lines. That last
+test isn't there because suspended members _should_ get the cheaper gift
+wrap fee — it's there because they currently _do_, and Step 0's whole job is
+recording current behavior exactly, quirks included, so any later step has
+something honest to check itself against.
+
+<Checkpoint question="Why does the test suite include a test for the suspended-member gift-wrap case, when that looks like it might be a bug rather than intended behavior?">
+
+Because at Step 0, the job isn't to decide what the code _should_ do — it's
+to record what it _does_ do, so a later refactoring step can be checked
+against that exact behavior. If the characterization tests silently "fixed"
+the quirk by encoding the behavior the author assumed was intended, a
+refactor that preserved the real (quirky) behavior would then fail that
+test — even though the refactor was correct and it was the test that was
+wrong. Whether the quirk is actually a bug worth fixing is a separate
+decision, made later, as its own explicit behavior-changing commit — never
+folded silently into "cleaning up while I'm in here."
+
+</Checkpoint>
+
+## Steps 1–4: small, verified refactors
+
+Each step below is shown as a diff against the previous version. After each
+one, `node test-order-pricing.js` is run and must print six `PASS` lines
+before moving to the next step. None of these steps touch what the function
+returns for any input — only how it's organized internally.
+
+### Step 1 — Extract Variable: name the magic numbers
+
+```diff
++const MEMBER_DISCOUNT_RATE = 0.1;
++const BULK_DISCOUNT_THRESHOLD = 200;
++const BULK_DISCOUNT_RATE_MEMBER = 0.05;
++const BULK_DISCOUNT_RATE_GUEST = 0.08;
++const FREE_SHIPPING_THRESHOLD = 75;
++const GIFT_WRAP_FEE_MEMBER = 1.5;
++const GIFT_WRAP_FEE_STANDARD = 2.99;
++
+ function calculateOrderTotal(customer, items, region, giftWrap) {
+   let subtotal = 0;
+   for (let i = 0; i < items.length; i++) {
+     subtotal += items[i].price * items[i].qty;
+   }
+
+   let discount = 0;
+   if (customer.isMember && !customer.membershipSuspended) {
+-    discount = subtotal * 0.1;
++    discount = subtotal * MEMBER_DISCOUNT_RATE;
+   }
+-  if (subtotal > 200) {
++  if (subtotal > BULK_DISCOUNT_THRESHOLD) {
+     if (customer.isMember && !customer.membershipSuspended) {
+-      discount = discount + subtotal * 0.05;
++      discount = discount + subtotal * BULK_DISCOUNT_RATE_MEMBER;
+     } else {
+-      discount = subtotal * 0.08;
++      discount = subtotal * BULK_DISCOUNT_RATE_GUEST;
+     }
+   }
+   // ... shipping/gift-wrap literals replaced the same way
+```
+
+Run tests: 6 `PASS`. Commit: _"Extract magic numbers in order-pricing.js
+into named constants — no behavior change."_ Nothing about what the
+function computes changed; `0.1` and `MEMBER_DISCOUNT_RATE` are the same
+number, one of them just says what it's for.
+
+### Step 2 — Extract Function: pull out tax calculation
+
+```diff
++function calculateTax(taxableAmount, region) {
++  const rate = TAX_RATES[region] ?? 0;
++  return taxableAmount * rate;
++}
++
++const TAX_RATES = { US: 0.07, CA: 0.05, EU: 0.2 };
++
+ function calculateOrderTotal(customer, items, region, giftWrap) {
+   // ...
+-  let taxRate = 0;
+-  if (region === "US") {
+-    taxRate = 0.07;
+-  } else if (region === "CA") {
+-    taxRate = 0.05;
+-  } else if (region === "EU") {
+-    taxRate = 0.2;
+-  } else {
+-    taxRate = 0;
+-  }
+-  const tax = (subtotal - discount) * taxRate;
++  const tax = calculateTax(subtotal - discount, region);
+```
+
+`TAX_RATES[region] ?? 0` reproduces the old if/else's fallback exactly: any
+region not in the map (like the test's `"MX"`) still gets `0`, same as
+before. Run tests: 6 `PASS`. Commit: _"Extract calculateTax() from
+calculateOrderTotal — no behavior change."_
+
+### Step 3 — Remove duplication: one membership check, used consistently where it was already used
+
+```diff
++function isActiveMember(customer) {
++  return customer.isMember && !customer.membershipSuspended;
++}
++
+ function calculateOrderTotal(customer, items, region, giftWrap) {
+   let discount = 0;
+-  if (customer.isMember && !customer.membershipSuspended) {
++  if (isActiveMember(customer)) {
+     discount = subtotal * MEMBER_DISCOUNT_RATE;
+   }
+   if (subtotal > BULK_DISCOUNT_THRESHOLD) {
+-    if (customer.isMember && !customer.membershipSuspended) {
++    if (isActiveMember(customer)) {
+       discount = discount + subtotal * BULK_DISCOUNT_RATE_MEMBER;
+     } else {
+       discount = subtotal * BULK_DISCOUNT_RATE_GUEST;
+     }
+   }
+   // gift-wrap branch is untouched here — see below
+```
+
+This is the step where the Step 0 quirk earns its keep. The gift-wrap
+branch checks only `customer.isMember`, not the full `isActiveMember`
+condition — swapping it to `isActiveMember(customer)` too would be a
+one-line change that _looks_ like harmless cleanup, but it would change
+what a suspended member pays for gift wrap, which the characterization test
+would catch immediately (it'd go red). That's the refactor/behavior-change
+line from L2, made concrete: fixing the gift-wrap branch to match the other
+two is a real, arguably-correct change — and it belongs in its own commit,
+with its own test update, made as a deliberate decision, not smuggled in as
+part of a duplication cleanup. This step leaves the gift-wrap branch's
+condition exactly as it was.
+
+Run tests: 6 `PASS` (including the suspended-member one, unchanged). Commit:
+_"Extract isActiveMember() and use it at the two sites that already checked
+both isMember and membershipSuspended — no behavior change."_
+
+<Checkpoint question="Step 3's diff deliberately leaves the gift-wrap branch's `if (customer.isMember)` unchanged, even though it looks like the same bug the other two branches had. Why not fix all three while already in this code?">
+
+Because "these three checks are inconsistent" and "the gift-wrap one is
+wrong" are two different claims, and only the first one is something this
+refactor is entitled to act on. Extracting `isActiveMember()` and pointing
+the two sites that already used the full condition at it doesn't change
+what any input returns — the characterization tests prove that. Changing
+the gift-wrap site to also use `isActiveMember()` _would_ change a real
+customer's total for a real input (a suspended member's gift-wrap fee), and
+that's a behavior change no matter how obviously it looks like a fix. It
+gets its own commit, with the test updated to assert the new expected
+behavior on purpose — not folded into a commit whose entire claim is "I
+verified nothing changed."
+
+</Checkpoint>
+
+### Step 4 — Replace Nested Conditional with Guard Clauses (shipping)
+
+Before, the shipping block nests a threshold check inside each region
+branch. After, a small lookup handles the region, and a single early
+adjustment handles the threshold:
+
+```diff
++const BASE_SHIPPING_RATES = { US: 4.99, CA: 8.99, EU: 12.99 };
++const DEFAULT_SHIPPING_RATE = 19.99;
++const DISCOUNTED_SHIPPING_RATES = { US: 0, CA: 3.99 };
++
++function calculateShipping(subtotal, region) {
++  if (subtotal > FREE_SHIPPING_THRESHOLD && region in DISCOUNTED_SHIPPING_RATES) {
++    return DISCOUNTED_SHIPPING_RATES[region];
++  }
++  return BASE_SHIPPING_RATES[region] ?? DEFAULT_SHIPPING_RATE;
++}
++
+ function calculateOrderTotal(customer, items, region, giftWrap) {
+   // ...
+-  let shipping = 0;
+-  if (region === "US") {
+-    if (subtotal > 75) { shipping = 0; } else { shipping = 4.99; }
+-  } else if (region === "CA") {
+-    if (subtotal > 75) { shipping = 3.99; } else { shipping = 8.99; }
+-  } else if (region === "EU") {
+-    shipping = 12.99;
+-  } else {
+-    shipping = 19.99;
+-  }
++  const shipping = calculateShipping(subtotal, region);
+```
+
+Run tests: 6 `PASS`. Commit: _"Replace nested shipping conditional with
+calculateShipping() using guard-clause + lookup structure — no behavior
+change."_ Every case the old nested if/else handled — US/CA above or below
+$75, EU flat, unknown-region fallback — maps to exactly the same output;
+only the number of nesting levels a reader has to track dropped, from three
+deep to one guard clause plus two table lookups.
+
+## Step 5: the feature lands on the now-clean structure
+
+With subtotal, discount, shipping, and tax each isolated, adding the
+loyalty-tier discount is a small, additive, _behavior-changing_ commit — on
+purpose, in its own diff, with new tests:
+
+First, one more small refactor — Extract Function on the discount
+calculation itself, expressed as rates instead of pre-summed amounts. This
+is still behavior-preserving: `memberRate + bulkRate` produces the exact
+same discount the old nested if/else did, for every existing test case.
+
+```diff
++function calculateDiscount(customer, subtotal) {
++  const memberRate = isActiveMember(customer) ? MEMBER_DISCOUNT_RATE : 0;
++  const bulkRate =
++    subtotal > BULK_DISCOUNT_THRESHOLD
++      ? isActiveMember(customer)
++        ? BULK_DISCOUNT_RATE_MEMBER
++        : BULK_DISCOUNT_RATE_GUEST
++      : 0;
++  return subtotal * (memberRate + bulkRate);
++}
++
+ function calculateOrderTotal(customer, items, region, giftWrap) {
+   // ...
+-  let discount = 0;
+-  if (isActiveMember(customer)) {
+-    discount = subtotal * MEMBER_DISCOUNT_RATE;
+-  }
+-  if (subtotal > BULK_DISCOUNT_THRESHOLD) {
+-    if (isActiveMember(customer)) {
+-      discount = discount + subtotal * BULK_DISCOUNT_RATE_MEMBER;
+-    } else {
+-      discount = subtotal * BULK_DISCOUNT_RATE_GUEST;
+-    }
+-  }
++  const discount = calculateDiscount(customer, subtotal);
+```
+
+Run tests: 6 `PASS`, still. Commit: _"Extract calculateDiscount() as a
+rate-based calculation — no behavior change."_ Only now, with discount
+expressed as a rate instead of a pre-summed dollar amount, does adding a
+third rate become a one-line change instead of a rewrite of the branching:
+
+```js
+const LOYALTY_DISCOUNT_RATES = { bronze: 0, silver: 0.05, gold: 0.1 };
+const MAX_COMBINED_DISCOUNT_RATE = 0.2;
+
+function getLoyaltyDiscountRate(customer) {
+  return LOYALTY_DISCOUNT_RATES[customer.loyaltyTier] ?? 0;
+}
+
+function combineDiscountRates(...rates) {
+  const total = rates.reduce((sum, r) => sum + r, 0);
+  return Math.min(total, MAX_COMBINED_DISCOUNT_RATE);
+}
+
+function calculateDiscount(customer, subtotal) {
+  const memberRate = isActiveMember(customer) ? MEMBER_DISCOUNT_RATE : 0;
+  const bulkRate =
+    subtotal > BULK_DISCOUNT_THRESHOLD
+      ? isActiveMember(customer)
+        ? BULK_DISCOUNT_RATE_MEMBER
+        : BULK_DISCOUNT_RATE_GUEST
+      : 0;
+  const loyaltyRate = getLoyaltyDiscountRate(customer);
+  const combinedRate = combineDiscountRates(memberRate, bulkRate, loyaltyRate);
+  return subtotal * combinedRate;
+}
+```
+
+`combineDiscountRates` and its 20% cap are new logic the feature needs — no
+amount of "preserving behavior" phrasing could make that claim about a rule
+that didn't exist a commit ago, so it's honest for it to be its own commit
+rather than folded into the extraction above. The discipline isn't "never
+write new code in the same PR as a refactor" — it's "don't let a step that
+claims to be behavior-preserving also change behavior." A PR can absolutely
+be a sequence of refactor commits followed by one feature commit; what it
+can't be is one commit doing both at once.
+
+```js
+test("gold member with a bulk-size order: member + bulk + loyalty capped at 20%", () => {
+  const goldMember = {
+    isMember: true,
+    membershipSuspended: false,
+    loyaltyTier: "gold",
+  };
+  const total = calculateOrderTotal(goldMember, [item(300, 1)], "US", false);
+  // member(10%) + bulk(5%) + loyalty(10%) = 25%, capped to 20% → discount = 60
+  // 300 - 60 + 0 shipping (over $75) + 16.8 tax (7% of 240) = 256.8
+  assert.strictEqual(Math.round(total * 100) / 100, 256.8);
+});
+```
+
+This test didn't exist before Step 5 — it's new, because the behavior it
+checks is new. That's the tell that you've crossed from refactoring into
+feature work: a test that has to change (or be added) to pass is evidence
+the commit changed behavior, which is exactly what a refactor commit should
+never require.
+
+## The whole sequence, at a glance
+
+| Step | Move                                               | Smell addressed                       | Behavior change?      |
+| ---- | -------------------------------------------------- | ------------------------------------- | --------------------- |
+| 1    | Extract Variable                                   | Magic numbers                         | No                    |
+| 2    | Extract Function (`calculateTax`)                  | Long function, mixed responsibilities | No                    |
+| 3    | Remove Duplication (`isActiveMember`)              | Duplicated logic                      | No                    |
+| 4    | Guard Clauses + Lookup Table (`calculateShipping`) | Deep nesting                          | No                    |
+| 5a   | Extract Function, rate-based (`calculateDiscount`) | Long function, sets up the feature    | No                    |
+| 5b   | Add loyalty tier + combined-rate cap               | — (this is the actual feature)        | **Yes, deliberately** |
+
+Five behavior-preserving commits, each independently verified by the same
+unchanged test suite, followed by exactly one commit that changes behavior
+on purpose and comes with its own new test. That ordering — clean up, then
+change — is cheaper than the reverse, because every one of the first five
+commits made the sixth easier to write correctly, and none of them had to
+be trusted on faith.
+
+## Trade-offs, edge cases, failure modes
+
+| Situation                                | What goes wrong                                                                                                       | What to do instead                                                                                            |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| No tests exist yet                       | Every "refactor" is really an unverified rewrite wearing the name                                                     | Write characterization tests for current behavior first, even a handful, before any structural change         |
+| Deadline with no slack for a false start | A step goes wrong mid-refactor and there's no time to properly finish or cleanly revert                               | Ship the smallest surgical patch instead; schedule the refactor separately, when there's room to do it safely |
+| Refactor + feature in one commit         | A failing test can't tell you whether the _structure_ change or the _behavior_ change is at fault                     | Structural commits first (tests unchanged, still green), feature commit last (new tests, deliberately)        |
+| Code scheduled for deletion              | Time spent cleaning up code with no future doesn't pay back                                                           | Skip it — verify the deletion timeline is real, not just hoped-for, first                                     |
+| "Fixing" a quirk mid-refactor            | A characterization test goes red for the right output, wrong reason — the refactor didn't preserve behavior after all | Treat the fix as its own decision and its own commit, with the test updated on purpose                        |
+
+**One worked example is a case, not the whole territory.** Two questions
+worth sitting with beyond what's shown above: What changes about this
+sequence of steps if `calculateOrderTotal` had _zero_ existing tests when
+Dana inherited it — where would characterization tests come from, and how
+would Dana decide what "current behavior" even means for inputs nobody's
+ever exercised? And separately: if a seventh region (`"UK"`, say) needed
+support next, would you extend `calculateShipping`'s lookup tables the same
+way Step 4 built them, or does a seventh case suggest the lookup itself has
+outgrown its current shape?
