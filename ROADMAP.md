@@ -73,22 +73,22 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 
 ## business-communication/
 
-| #   | Slug                                     | Problem                                                                                                              | Tags                                                | Status  |
-| --- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ------- |
-| 01  | audience-awareness                       | Why does the same message land differently depending on who says it? (audience awareness)                            | communication, mental-models                        | done    |
-| 02  | status-updates-build-trust               | How do I explain a technical delay without sounding like an excuse? (status updates that build trust)                | communication, writing, feedback                    | done    |
-| 03  | reading-stakeholder-incentives           | Why did my "obviously right" proposal get rejected? (reading stakeholder incentives)                                 | communication, decision-making, influence-politics  | done    |
-| 04  | pushback-frameworks                      | How do I say no to a request without burning the relationship? (pushback frameworks)                                 | communication, conflict-resolution, negotiation     | done    |
-| 05  | building-credibility-ahead-ask           | How do I get buy-in before I need it? (building credibility ahead of the ask)                                        | communication, influence-politics, career-growth    | done    |
-| 06  | decision-making-frameworks               | Why do meetings feel like they decide nothing? (decision-making frameworks: DACI/RACI)                               | decision-making, collaboration, communication       | done    |
-| 07  | executive-summaries                      | How do I write a doc that busy executives actually read? (executive summaries, BLUF)                                 | writing, communication                              | done    |
-| 08  | conflict-resolution                      | How do I navigate two teams that both think they own the same thing? (conflict resolution, escalation paths)         | conflict-resolution, communication, team-management | done    |
-| 09  | visibility-self-promotion                | How do I get credit for my work without appearing to seek it? (visibility without self-promotion)                    | career-growth, communication, influence-politics    | done    |
-| 10  | informal-authority                       | How do I influence a decision I don't own? (informal authority, coalition-building)                                  | influence-politics, communication, leadership       | done    |
-| 11  | upward-disagreement                      | How do I tell someone senior "this plan will fail"? (upward disagreement, psychological safety)                      | communication, conflict-resolution, feedback        | done    |
-| 12  | change-management                        | How do I lead a team through a reorg or layoffs? (change management, uncertainty)                                    | leadership, team-management, communication          | done    |
-| 13  | translating-technical-risk-business-risk | How do I represent engineering trade-offs to non-technical leadership? (translating technical risk to business risk) | communication, risk-management, decision-making     | done    |
-| 14  | org-level-influence                      | How does a staff engineer shape company-wide technical direction? (org-level influence, technical strategy)          | leadership, influence-politics, architecture        | planned |
+| #   | Slug                                     | Problem                                                                                                              | Tags                                                | Status |
+| --- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ------ |
+| 01  | audience-awareness                       | Why does the same message land differently depending on who says it? (audience awareness)                            | communication, mental-models                        | done   |
+| 02  | status-updates-build-trust               | How do I explain a technical delay without sounding like an excuse? (status updates that build trust)                | communication, writing, feedback                    | done   |
+| 03  | reading-stakeholder-incentives           | Why did my "obviously right" proposal get rejected? (reading stakeholder incentives)                                 | communication, decision-making, influence-politics  | done   |
+| 04  | pushback-frameworks                      | How do I say no to a request without burning the relationship? (pushback frameworks)                                 | communication, conflict-resolution, negotiation     | done   |
+| 05  | building-credibility-ahead-ask           | How do I get buy-in before I need it? (building credibility ahead of the ask)                                        | communication, influence-politics, career-growth    | done   |
+| 06  | decision-making-frameworks               | Why do meetings feel like they decide nothing? (decision-making frameworks: DACI/RACI)                               | decision-making, collaboration, communication       | done   |
+| 07  | executive-summaries                      | How do I write a doc that busy executives actually read? (executive summaries, BLUF)                                 | writing, communication                              | done   |
+| 08  | conflict-resolution                      | How do I navigate two teams that both think they own the same thing? (conflict resolution, escalation paths)         | conflict-resolution, communication, team-management | done   |
+| 09  | visibility-self-promotion                | How do I get credit for my work without appearing to seek it? (visibility without self-promotion)                    | career-growth, communication, influence-politics    | done   |
+| 10  | informal-authority                       | How do I influence a decision I don't own? (informal authority, coalition-building)                                  | influence-politics, communication, leadership       | done   |
+| 11  | upward-disagreement                      | How do I tell someone senior "this plan will fail"? (upward disagreement, psychological safety)                      | communication, conflict-resolution, feedback        | done   |
+| 12  | change-management                        | How do I lead a team through a reorg or layoffs? (change management, uncertainty)                                    | leadership, team-management, communication          | done   |
+| 13  | translating-technical-risk-business-risk | How do I represent engineering trade-offs to non-technical leadership? (translating technical risk to business risk) | communication, risk-management, decision-making     | done   |
+| 14  | org-level-influence                      | How does a staff engineer shape company-wide technical direction? (org-level influence, technical strategy)          | leadership, influence-politics, architecture        | done   |
 
 ## logic/
 
