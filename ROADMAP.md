@@ -122,7 +122,7 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 | 09  | supply-chain-security                  | Why did a "trusted" open-source dependency compromise production? (supply chain security, SBOM, dependency scanning)                        | security, risk-management, infra           | done    |
 | 10  | defense-depth                          | How do we design a system assuming a component will be breached? (defense in depth, least privilege, zero trust)                            | security, architecture, risk-management    | done    |
 | 11  | security-testing                       | How do we find our own vulnerabilities before attackers do? (security testing: SAST/DAST, pentesting basics)                                | security, testing                          | done    |
-| 12  | incident-response                      | How do we respond when a breach actually happens? (incident response, disclosure, post-mortems)                                             | security, incident-response, communication | planned |
+| 12  | incident-response                      | How do we respond when a breach actually happens? (incident response, disclosure, post-mortems)                                             | security, incident-response, communication | done    |
 | 13  | secure-by-design                       | How does a staff engineer bake security into architecture decisions from day one? (secure-by-design, threat modeling at system-design time) | security, architecture, leadership         | planned |
 
 ## infra-delivery/

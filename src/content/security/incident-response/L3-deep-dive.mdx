@@ -1,0 +1,320 @@
+---
+title: "L3 — How do we respond when a breach actually happens? (incident response, disclosure, post-mortems)"
+---
+
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 gave Dana's 2:14am decision a name (short-term containment) and a
+place in a six-phase lifecycle. This level makes the whole incident real:
+the actual log data that confirmed it, the script that reconstructed the
+attacker's timeline from it, the chain-of-custody step that made that
+reconstruction usable as evidence, and the blameless post-mortem
+Northlake's team wrote afterward — one continuous worked example from
+detection through review.
+
+## The incident, end to end
+
+**Northlake Benefits** runs HR/benefits enrollment software for mid-size
+employers, including EU-based customers — so GDPR applies. An admin
+service account, `svc-enrollment-export`, was over-scoped months earlier
+(it could read every enrollment table, not just the one report job it
+actually ran) — a `defense-depth`/least-privilege gap that made this
+incident far worse than it needed to be, and that's exactly the kind of
+fact a blameless post-mortem has to name plainly without turning it into
+blame of whoever approved that scope originally.
+
+| Time (UTC)                     | Event                                                                                                                                                 |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Day 1, 02:10                   | Attacker obtains valid credentials for `svc-enrollment-export` (exact vector confirmed later: a reused password from an unrelated third-party breach) |
+| Day 1–11, nightly ~02:00–02:30 | Small batch exports (300–400 records) run from an unfamiliar source IP, blending into the account's normal nightly export window                      |
+| Day 11, 02:14                  | Dana's page: read-replica load anomaly, one batch larger than the rest                                                                                |
+| Day 11, 02:19                  | Detection & Analysis begins — auth logs pulled, session correlated                                                                                    |
+| Day 11, 02:41                  | Containment: `svc-enrollment-export` credentials revoked, source IP blocked at the edge                                                               |
+| Day 11, 03:15                  | Scope confirmed: 11 nights, ~3,650 records total, all enrollment PII, some EU-resident                                                                |
+| Day 11, 09:00                  | Internal escalation to legal/exec — first clock starts                                                                                                |
+| Day 13, 06:40                  | Regulatory notification filed — inside the 72-hour window from Day 11 09:00 awareness                                                                 |
+| Day 14                         | Customer notification sent — scope and remediation confirmed first                                                                                    |
+| Day 21                         | Blameless post-mortem published                                                                                                                       |
+
+## Reconstructing the attacker's timeline from real logs
+
+Dana's first real question at 02:19 wasn't "who did this" — it was
+**"how much of this actually happened, and when."** Auth and access
+logs answer that, but only if something actually groups related events
+into a coherent session first. Here's a real, runnable reconstruction
+over Northlake's (redacted, structurally realistic) log lines:
+
+```js
+// reconstruct-timeline.mjs
+// Groups raw auth/access log lines into per-actor sessions and flags the
+// off-hours export pattern that IDs this as the incident, not routine noise.
+
+/**
+ * @typedef {{ ts: string, actor: string, event: string, sourceIp: string, records?: number }} LogEntry
+ */
+
+/** Parse one JSON-lines auth log into structured entries. */
+function parseLogLines(rawLines) {
+  return rawLines
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line));
+}
+
+/** Group entries into sessions keyed by actor + sourceIp (a session boundary
+ * for a service account: same actor, same origin, no gap over 30 minutes). */
+function groupIntoSessions(entries) {
+  const sorted = [...entries].sort((a, b) => a.ts.localeCompare(b.ts));
+  const sessions = [];
+  let current = null;
+
+  for (const entry of sorted) {
+    const key = `${entry.actor}::${entry.sourceIp}`;
+    const gapTooLarge =
+      current && new Date(entry.ts) - new Date(current.lastTs) > 30 * 60 * 1000;
+
+    if (!current || current.key !== key || gapTooLarge) {
+      current = {
+        key,
+        actor: entry.actor,
+        sourceIp: entry.sourceIp,
+        startTs: entry.ts,
+        lastTs: entry.ts,
+        events: [],
+      };
+      sessions.push(current);
+    }
+    current.lastTs = entry.ts;
+    current.events.push(entry);
+  }
+  return sessions;
+}
+
+/** Flag sessions that look like the incident pattern: exports clustered in
+ * a narrow overnight window, from a source IP not seen on prior nights. */
+function flagAnomalousSessions(sessions, knownGoodIps) {
+  return sessions
+    .filter((s) => s.events.some((e) => e.event === "export"))
+    .map((s) => {
+      const totalRecords = s.events.reduce(
+        (sum, e) => sum + (e.records ?? 0),
+        0,
+      );
+      const isKnownIp = knownGoodIps.includes(s.sourceIp);
+      const hour = new Date(s.startTs).getUTCHours();
+      const isOvernight = hour >= 1 && hour <= 4;
+      return {
+        actor: s.actor,
+        sourceIp: s.sourceIp,
+        startTs: s.startTs,
+        totalRecords,
+        anomalous: !isKnownIp && isOvernight,
+      };
+    });
+}
+
+/** Full pipeline: raw lines in, a reconstructed attacker timeline out. */
+function reconstructAttackerTimeline(rawLines, knownGoodIps) {
+  const entries = parseLogLines(rawLines);
+  const sessions = groupIntoSessions(entries);
+  return flagAnomalousSessions(sessions, knownGoodIps).filter(
+    (s) => s.anomalous,
+  );
+}
+
+export {
+  parseLogLines,
+  groupIntoSessions,
+  flagAnomalousSessions,
+  reconstructAttackerTimeline,
+};
+```
+
+Run against Northlake's real (redacted) Day 11 log slice:
+
+```js
+const rawLines = [
+  '{"ts":"2026-08-24T02:03:11Z","actor":"svc-enrollment-export","event":"login","sourceIp":"10.4.2.9"}',
+  '{"ts":"2026-08-24T02:04:02Z","actor":"svc-enrollment-export","event":"export","sourceIp":"10.4.2.9","records":340}',
+  '{"ts":"2026-09-03T02:11:47Z","actor":"svc-enrollment-export","event":"login","sourceIp":"185.220.101.42"}',
+  '{"ts":"2026-09-03T02:12:30Z","actor":"svc-enrollment-export","event":"export","sourceIp":"185.220.101.42","records":410}',
+  '{"ts":"2026-09-03T14:20:00Z","actor":"svc-billing-sync","event":"export","sourceIp":"10.4.2.11","records":58}',
+];
+
+const knownGoodIps = ["10.4.2.9", "10.4.2.11"];
+console.log(reconstructAttackerTimeline(rawLines, knownGoodIps));
+// [{ actor: 'svc-enrollment-export', sourceIp: '185.220.101.42',
+//    startTs: '2026-09-03T02:11:47Z', totalRecords: 410, anomalous: true }]
+```
+
+The known-good nightly export from `10.4.2.9` doesn't flag — same actor,
+familiar origin. The `185.220.101.42` session does, purely from source IP
+and overnight timing, without needing to know anything about the attacker
+in advance. This is exactly what turned Dana's "one batch looked bigger
+than usual" hunch into a defensible scope: eleven of these sessions,
+one per night, ~3,650 records total.
+
+<Checkpoint question="If the attacker had instead used Northlake's own known-good IP address — for example by compromising a machine already inside the trusted network range — would this script's anomaly flag still have caught the pattern?">
+
+No, not with this specific rule. `flagAnomalousSessions` only flags
+sessions that are both overnight-timed _and_ from an unrecognized source
+IP — a session from a trusted IP would pass the `isKnownIp` check and
+never get flagged, no matter how anomalous its timing or volume looked
+otherwise. This is a real, structural limitation, not a bug: a
+detection rule can only catch the specific signal it was built to look
+for. A more robust version would also flag by volume-vs-baseline per
+actor (410 records when this account normally exports under 50) or by
+new access patterns for a known IP, independent of whether the IP itself
+is trusted — source IP alone is a weak signal once an attacker is
+already inside the network, which is precisely the scenario zero trust
+(`defense-depth`) is built to reduce the impact of.
+
+</Checkpoint>
+
+## Chain of custody: making the log defensible, not just informative
+
+The reconstructed timeline above is only useful as _evidence_ — for legal
+disclosure, for a regulator's inquiry, for the post-mortem's factual
+record — if nobody can credibly claim it was altered after the fact.
+That's what chain of custody actually buys, and the mechanism is simple:
+
+```js
+// chain-of-custody.mjs
+import { createHash } from "node:crypto";
+
+/** Hash the raw log file's exact bytes at the moment it's pulled for
+ * investigation, and record who pulled it and when. This is the artifact
+ * that lets Northlake later prove the log used in the post-mortem is the
+ * same one collected at 02:19 on Day 11 — not edited afterward. */
+function sealEvidence(rawLogText, collectedBy, collectedAt) {
+  const sha256 = createHash("sha256").update(rawLogText, "utf8").digest("hex");
+  return { sha256, collectedBy, collectedAt, byteLength: rawLogText.length };
+}
+
+/** Re-hash the same file later and compare — any edit, even one byte,
+ * changes the hash completely, which is what makes this checkable. */
+function verifyEvidenceIntact(rawLogText, sealedRecord) {
+  const current = createHash("sha256").update(rawLogText, "utf8").digest("hex");
+  return current === sealedRecord.sha256;
+}
+
+export { sealEvidence, verifyEvidenceIntact };
+```
+
+```js
+const seal = sealEvidence(
+  rawLogFileText,
+  "dana@northlake",
+  "2026-09-03T02:19:00Z",
+);
+// { sha256: 'a3f9…', collectedBy: 'dana@northlake', collectedAt: '2026-09-03T02:19:00Z', byteLength: 48213 }
+
+// Three weeks later, during the post-mortem write-up:
+verifyEvidenceIntact(rawLogFileText, seal); // true — nothing was altered
+```
+
+This is deliberately unglamorous — a hash and a timestamp — but it's the
+entire difference between "we're confident this is what happened" and "we
+can demonstrate this is what happened," which matters the moment a
+regulator, a customer's lawyer, or Northlake's own legal team asks a
+question the team can't just assert its way out of.
+
+## The containment runbook, as an artifact
+
+L2's decision tree becomes an actual on-call runbook entry — the kind of
+document Dana should have been able to open at 02:19 instead of reasoning
+from scratch:
+
+**Runbook: Suspected compromised service account**
+
+1. **Confirm activity is real** — pull the account's session log for the
+   last 30 days; compare source IPs and export volumes against baseline.
+2. **Classify exfiltration state**:
+   - _Active, high-volume, in progress_ → short-term containment now;
+     evidence loss is an accepted cost.
+   - _Slow/trickle, already durably logged_ → short-term containment now;
+     nothing further is gained by waiting (Northlake's actual case).
+   - _Unclear, and volatile evidence (live memory, active connection)
+     would answer it_ → brief, monitored preservation window before
+     containment, with an explicit time cap (Northlake's runbook caps this
+     at 15 minutes — not indefinite).
+3. **Contain**: revoke credentials, block source IP at the edge, do not
+   yet delete or modify anything the attacker touched (eradication is
+   a separate, later step).
+4. **Seal evidence**: hash and timestamp every log pulled, per the
+   chain-of-custody step above, before anyone starts drawing conclusions
+   from it.
+5. **Escalate internally** — this starts the internal clock; legal
+   determines materiality and the regulatory clock's actual start time.
+6. **Eradicate**: rotate every credential the compromised account could
+   have read (not just its own), audit for any persistence the attacker
+   may have planted, only after scope is reasonably well understood.
+7. **Recover**: restore normal service, with monitoring specifically
+   watching for the same access pattern recurring.
+
+## The blameless post-mortem, filled in
+
+**Incident: Unauthorized data export via `svc-enrollment-export`**
+_Published Day 21 — Northlake Security & Platform teams_
+
+- **Summary**: An externally obtained, reused credential granted access
+  to `svc-enrollment-export`, an internal service account with read
+  access broader than its actual job required. Over 11 nights, small
+  batch exports blended into the account's normal overnight schedule
+  until a size anomaly triggered an on-call page. ~3,650 enrollment PII
+  records were exposed, some belonging to EU residents.
+- **Timeline**: as reconstructed above, sealed under chain of custody at
+  02:19 on Day 11 (`sha256: a3f9…`).
+- **Root cause**: not "an attacker had a working password" — passwords
+  get compromised; systems have to assume that will happen sometimes.
+  The actual root cause is structural: `svc-enrollment-export` had
+  standing read access to every enrollment table when its one recurring
+  job only ever touched one. That scope is what let a single reused
+  credential become 3,650 records instead of a few dozen.
+- **Contributing factors**: the account's broad scope was never revisited
+  after the job it was created for changed; overnight export volume had
+  no per-account baseline alert, only a fleet-wide threshold that took 11
+  nights to trip.
+- **What went well**: retained logs made full reconstruction possible;
+  the on-call runbook's short-term-containment default meant no time was
+  lost debating the trade-off live; the 72-hour regulatory window was met
+  with time to spare.
+- **Action items** (owner, not blame): scope `svc-enrollment-export` down
+  to the single table its job reads (Platform team, this sprint); add
+  per-account export-volume baselines to alerting (Security team, next
+  sprint); add this scenario to the on-call runbook rehearsal rotation
+  (Security team, quarterly).
+
+Nowhere in this document does it say Dana, or whoever originally scoped
+the service account, did something wrong. It says what the system allowed
+and what will change so the same gap can't be used the same way twice —
+which is the entire point of writing it down at all.
+
+<Checkpoint question="A teammate reviewing this post-mortem draft suggests adding a line naming the engineer who originally approved the account's broad scope, 'for accountability.' Does adding that line make the post-mortem more useful, or does it work against what a blameless post-mortem is for?">
+
+It works against it, and not just as a matter of tone. The document's
+whole value is that it turns "what happened" into fixable system facts —
+a scope that was too broad, a missing baseline alert — that anyone reading
+it later can act on regardless of who was involved. Naming the individual
+adds no new fixable information (the action items already say exactly
+what changes and who owns fixing it going forward) while adding a real
+cost: the next person who has to make a judgment call under pressure, or
+who notices something looks slightly off and isn't fully sure, now has a
+concrete reason to hesitate before flagging it — which is exactly the
+delay that turns an 11-day dwell time into a much longer one next time.
+"Accountability" for a system gap is the action item getting done, not a
+name attached to how the gap came to exist.
+
+</Checkpoint>
+
+## Where this could go differently
+
+This worked example is one incident, with one containment answer and one
+regulatory framework — it's a case, not the whole territory. What would
+change if the exfiltration had been a single large dump instead of a
+slow trickle, with no durable request log to fall back on? What would
+change if Northlake's customers were entirely US-based, with no GDPR
+72-hour clock but a patchwork of state-level breach notification laws
+instead — does "no single 72-hour deadline" make the disclosure timing
+easier to get right, or harder? Both are worth reasoning through with the
+same lifecycle and trade-offs used above, not just this one scenario's
+specific numbers.
