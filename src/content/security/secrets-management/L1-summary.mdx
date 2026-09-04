@@ -1,0 +1,119 @@
+---
+title: "L1 — How do we stop leaking secrets into code and logs?"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+
+<Scenario>
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🕐</span> <strong>0 min</strong> — `git push` lands on a public repo (visibility was flipped by accident)</div>
+      <div class="flex items-center gap-1.5"><span>🤖</span> <strong>3 min</strong> — an automated key-scanning bot flags the AWS-key pattern in the diff</div>
+      <div class="flex items-center gap-1.5"><span>🔎</span> <strong>9 min</strong> — the key is used for reconnaissance against the account</div>
+      <div class="flex items-center gap-1.5"><span>📧</span> <strong>47 min</strong> — an engineer finally notices and rotates the key</div>
+    </div>
+    <div class="not-prose mt-3 rounded border border-rose-300 bg-rose-50 p-1.5 text-xs dark:border-rose-800 dark:bg-rose-950">
+      <p class="font-semibold text-rose-600 dark:text-rose-400">Deleting the file at minute 50 changes nothing</p>
+      the key was live and usable for the 44 minutes before anyone acted — a later commit can't un-happen that
+    </div>
+
+  </Fragment>
+
+Mira, a backend engineer at Kelvin Metrics (a small monitoring SaaS), is
+under deadline pressure and hardcodes the production database password
+directly into `config/database.js` — "just for this branch, I'll fix it
+before merging." She pushes the branch. The repo's visibility had been
+flipped from private to public a week earlier during an unrelated GitHub
+migration, and nobody caught it. Three minutes later, an automated bot
+that continuously scans public GitHub commits for key-shaped strings
+flags the password. **Mira "fixes it" 47 minutes later by deleting the
+line and committing the change. Is the incident over?**
+
+</Scenario>
+
+No — and that gap between "the file no longer shows the secret" and "the
+secret is no longer usable" is the entire subject of this unit. The commit
+that deleted the password is still preceded, in git's history, by the
+commit that added it — anyone with a clone of the repo (a scanning bot
+included) already has both.
+
+<LevelIntro
+  items={[
+    "What counts as a secret",
+    "The five places secrets actually leak",
+    "The remediation stack: inject → manage → rotate → scan",
+  ]}
+/>
+
+## What counts as a secret
+
+Not just passwords — anything that, if read by someone outside its
+intended audience, lets them act as your system or read data they
+shouldn't:
+
+| Secret type               | Example                                         | What it grants an attacker                                    |
+| ------------------------- | ----------------------------------------------- | ------------------------------------------------------------- |
+| API key / token           | Stripe secret key, a third-party SDK key        | Billing access, ability to charge cards or pull customer data |
+| Database credential       | `DB_PASSWORD`, a connection string              | Direct read/write on production data                          |
+| Private key               | TLS private key, an SSH deploy key              | Ability to impersonate your server or push code as you        |
+| Webhook signing secret    | Stripe/GitHub webhook secret                    | Ability to forge events your system trusts                    |
+| Cloud provider credential | AWS access key + secret, a service-account JSON | Whatever IAM permissions that credential carries              |
+
+## The five places secrets actually leak
+
+Secrets rarely leak because someone typed them into a public form on
+purpose — they leak because a normal engineering workflow copies data
+somewhere the author never thought to check:
+
+<div class="not-prose my-3 grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-5">
+  <div class="rounded-lg border border-slate-200 p-2 dark:border-slate-700">
+    <div class="text-xl">📜</div>
+    <p class="mt-1 font-medium text-slate-700 dark:text-slate-200">
+      Git history
+    </p>
+  </div>
+  <div class="rounded-lg border border-slate-200 p-2 dark:border-slate-700">
+    <div class="text-xl">🖨️</div>
+    <p class="mt-1 font-medium text-slate-700 dark:text-slate-200">CI logs</p>
+  </div>
+  <div class="rounded-lg border border-slate-200 p-2 dark:border-slate-700">
+    <div class="text-xl">🩹</div>
+    <p class="mt-1 font-medium text-slate-700 dark:text-slate-200">
+      Error trackers
+    </p>
+  </div>
+  <div class="rounded-lg border border-slate-200 p-2 dark:border-slate-700">
+    <div class="text-xl">📦</div>
+    <p class="mt-1 font-medium text-slate-700 dark:text-slate-200">
+      Client bundles
+    </p>
+  </div>
+  <div class="rounded-lg border border-slate-200 p-2 dark:border-slate-700">
+    <div class="text-xl">🐳</div>
+    <p class="mt-1 font-medium text-slate-700 dark:text-slate-200">
+      Docker layers
+    </p>
+  </div>
+</div>
+
+- **Git history** — a secret added in commit A and removed in commit B still exists in commit A, in every clone, fork, and CI cache that ever pulled the repo before B.
+- **CI logs** — a build step that does `echo $DB_PASSWORD` for debugging (or that crashes and dumps its environment) writes the secret straight into a log that's often more widely readable than the source repo itself.
+- **Error trackers** — a crash handler that serializes "everything about this request" for a tool like Sentry can capture environment variables or local state that included a secret in scope.
+- **Client-side bundles** — any value baked into frontend JavaScript at build time ships to every visitor's browser; a "secret" placed there was never actually secret.
+- **Docker image layers** — a file copied in, used, and deleted in a later layer is still sitting in the earlier layer; anyone who can pull the image can inspect every layer.
+
+## The remediation stack
+
+Four ideas, in the order they actually get applied, from writing code to living with a secret in production:
+
+1. **Environment-variable injection** — the secret lives outside the source tree entirely and is supplied at runtime, not written into a file that gets committed.
+2. **A secret manager** (HashiCorp Vault, AWS Secrets Manager, and similar) — a dedicated system that stores, audits access to, and serves secrets on demand, instead of a plaintext `.env` file sitting on a server.
+3. **Rotation** — periodically (or immediately after a suspected leak) replacing a secret's value, so a copy that leaked in the past stops being useful.
+4. **Scanning** — automated tools (gitleaks, trufflehog, and similar) that check every commit or diff for secret-shaped strings before they ever reach a shared branch.
+
+The single fact that ties all four together, and the one Mira's story is
+built around: **rotation is the only step that actually ends an
+exposure.** Deleting a file, tightening a `.gitignore`, or making a repo
+private again are all good hygiene — none of them make a secret that
+already leaked stop working.

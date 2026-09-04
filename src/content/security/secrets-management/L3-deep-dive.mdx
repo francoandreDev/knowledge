@@ -1,0 +1,357 @@
+---
+title: "L3 — Real leak mechanics, a real scanner, and Kelvin Metrics's actual incident response"
+---
+
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 explained _why_ a deleted line doesn't end an exposure and sketched
+the inject → manage → rotate → scan pipeline. L3 makes every piece of
+that real: a genuine env-loading pattern, a shell transcript proving
+git history persistence, a working regex-based secret scanner, real
+secret-manager SDK calls, a CI pipeline with masked injection, and
+Kelvin Metrics's full incident response mapped step by step to the
+timeline from L1.
+
+<LevelIntro
+  items={[
+    "Fail-fast env loading vs. a hardcoded secret",
+    "Proving git history persistence, and scanning for leaks",
+    "Secret-manager integration, CI injection, and the full incident response",
+  ]}
+/>
+
+## The hardcoded version, and what should have shipped instead
+
+This is close to what Mira actually wrote — it compiles, it runs, and
+it's exactly the kind of code this whole unit exists to prevent:
+
+```js
+// config/database.js — DO NOT DO THIS (Mira's original)
+export const dbConfig = {
+  host: "prod-db.kelvinmetrics.internal",
+  user: "app_user",
+  password: "K3lvin_Prod_9x!", // <-- committed straight into source
+  database: "kelvin_prod",
+};
+```
+
+The fix isn't "put the password in a `.env` file and forget it" — a
+`.env` file that's still accidentally committed is exactly the same
+mistake with extra steps. A real fail-fast loader treats a missing
+required secret as a startup error, not a silent `undefined` that only
+surfaces later as a confusing connection failure:
+
+```js
+// config/database.mjs — env-var injection with fail-fast validation
+import { readFileSync } from "node:fs";
+
+// In development, values come from a .env file (never committed — see
+// .gitignore below); in CI/production, the platform injects real
+// environment variables directly, so dotenv is a dev-only convenience.
+function loadDotenvIfPresent(path = ".env") {
+  let contents;
+  try {
+    contents = readFileSync(path, "utf8");
+  } catch {
+    return; // no .env file — fine in CI/production, where the platform sets env vars directly
+  }
+  for (const line of contents.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1).trim();
+    if (!(key in process.env)) process.env[key] = value;
+  }
+}
+
+function requireEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    // Fail fast and loud, at startup — not a mysterious connection
+    // timeout three requests later.
+    throw new Error(
+      `Missing required environment variable: ${name}. ` +
+        `Set it in .env locally or in the deploy platform's secret store.`,
+    );
+  }
+  return value;
+}
+
+loadDotenvIfPresent();
+
+export const dbConfig = {
+  host: requireEnv("DB_HOST"),
+  user: requireEnv("DB_USER"),
+  password: requireEnv("DB_PASSWORD"),
+  database: requireEnv("DB_NAME"),
+};
+```
+
+```bash
+# .gitignore — the specific line that would have stopped Mira's leak
+# at the door, if it had been there before the first commit
+.env
+.env.*
+!.env.example
+```
+
+The `.env.example` exception matters: teammates need to know _which_
+variables exist without ever seeing a real value — `.env.example` ships
+`DB_PASSWORD=` (empty) so setup instructions stay accurate without ever
+containing a secret.
+
+## Proving git history persistence, for real
+
+L2 asserted that deleting a line in a later commit doesn't remove it
+from history. This is that claim, run for real:
+
+```bash
+# leak-demo.sh — a real, runnable transcript (run it yourself)
+mkdir leak-demo && cd leak-demo
+git init -q
+
+echo 'const DB_PASSWORD = "K3lvin_Prod_9x!";' > config.js
+git add config.js
+git commit -q -m "add db config"
+
+# "the fix" — delete the line, commit again
+echo 'const DB_PASSWORD = process.env.DB_PASSWORD;' > config.js
+git add config.js
+git commit -q -m "fix: use env var instead of hardcoded password"
+
+# HEAD looks clean:
+grep -c "K3lvin_Prod_9x" config.js   # 0 — not in the current file
+
+# but the secret is still fully readable in history:
+git log -p --all -- config.js | grep "K3lvin_Prod_9x"
+# -const DB_PASSWORD = "K3lvin_Prod_9x!";
+
+# and anyone who cloned between the two commits has it on disk right now,
+# completely unaffected by anything that happens in the original repo
+# afterward:
+cd .. && git clone -q leak-demo leak-demo-clone
+cd leak-demo-clone && git log -p --all | grep "K3lvin_Prod_9x"
+# -const DB_PASSWORD = "K3lvin_Prod_9x!";
+```
+
+`grep -c` on the live file returns `0` — the working tree genuinely has
+no trace of the password. `git log -p --all`, searching every commit
+`config.js` was ever part of, still finds it immediately. That gap
+between "the file is clean" and "the repository is clean" is the whole
+mechanism from L2's diagram made concrete.
+
+<Checkpoint question="Kelvin Metrics's secret manager rotates the database password automatically every 90 days. Given the transcript above, does that scheduled rotation mean nobody needs to bother scanning git history for old hardcoded secrets?">
+
+No. Scheduled rotation limits how long _any particular_ leaked value
+stays valid, but only counting forward from when it's set — a secret
+that was hardcoded, leaked, and never specifically flagged as
+compromised could sit valid for up to the full rotation period (90 days
+here) with nobody the wiser, and if it was _never_ migrated to the
+secret manager at all (an old service, as in L2's second checkpoint),
+scheduled rotation never touches it in the first place. Scanning git
+history is how you find out a leak happened at all; rotation is what
+you do once you know. Neither one substitutes for the other.
+
+</Checkpoint>
+
+## A real regex-based secret scanner
+
+Tools like gitleaks and trufflehog do this at scale, with far more
+sophisticated detectors (including entropy analysis for secrets that
+don't match a known vendor pattern). This is the mechanism in miniature,
+real and runnable:
+
+```js
+// secret-scanner.mjs — scans text (a diff, a file) for secret-shaped strings
+const DETECTORS = [
+  { name: "AWS Access Key ID", pattern: /AKIA[0-9A-Z]{16}/g },
+  {
+    name: "AWS Secret Access Key (assignment)",
+    pattern: /aws_secret_access_key\s*=\s*['"][A-Za-z0-9/+=]{40}['"]/gi,
+  },
+  {
+    name: "Generic API key assignment",
+    pattern:
+      /(api[_-]?key|secret|token)\s*[:=]\s*['"][A-Za-z0-9_\-]{16,}['"]/gi,
+  },
+  {
+    name: "Private key header",
+    pattern: /-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----/g,
+  },
+  { name: "Slack token", pattern: /xox[baprs]-[0-9A-Za-z-]{10,}/g },
+];
+
+export function scanForSecrets(text) {
+  const findings = [];
+  for (const { name, pattern } of DETECTORS) {
+    for (const match of text.matchAll(pattern)) {
+      findings.push({ detector: name, match: match[0], index: match.index });
+    }
+  }
+  return findings;
+}
+
+// --- usage ---
+const diff = `
++ const DB_PASSWORD = "K3lvin_Prod_9x!";
++ const awsKey = "AKIAABCD1234EFGH5678";
++ function connect() { /* ... */ }
+`;
+
+for (const finding of scanForSecrets(diff)) {
+  console.log(`[BLOCKED] ${finding.detector}: ${finding.match}`);
+}
+// [BLOCKED] AWS Access Key ID: AKIAABCD1234EFGH5678
+// (DB_PASSWORD isn't flagged — it doesn't match any pattern here; see below)
+```
+
+Notice what the scanner _missed_: `K3lvin_Prod_9x!` doesn't match any of
+the five detectors above, because it isn't shaped like a known vendor
+key or an `api_key = "..."` assignment — it's just a plain string
+assigned to a variable named `DB_PASSWORD`. A real tool would add a
+detector for common secret-ish variable names (`password`, `secret`,
+`token`, `_key` as an identifier, not just inside a quoted value) or
+fall back to entropy scoring (a random-looking string has a
+statistically different character distribution than an English word or
+a UUID), but every added detector also raises the false-positive rate —
+this is a real, unavoidable trade-off, not a bug to eventually fix away.
+
+<Checkpoint question="A teammate suggests tightening the scanner to flag *any* string literal longer than 16 characters assigned to a variable, to catch cases like DB_PASSWORD above. What would that change actually cost, and is it obviously worth it?">
+
+It would catch more true positives (including Mira's exact leak) but at
+a steep cost in false positives — ordinary code is full of long string
+literals that aren't secrets at all: URLs, error messages, SQL query
+templates, HTML fragments, test fixtures. A scanner with a high
+false-positive rate trains developers to reflexively bypass or ignore
+its warnings ("it always flags something, just override it"), which
+defeats the entire point of running it in the first place. This is
+exactly why real tools (gitleaks, trufflehog) lean on both known-pattern
+detectors _and_ entropy scoring tuned against real-world corpora, rather
+than a blunt length threshold — the trade-off between catching more
+leaks and staying trustworthy enough that developers don't tune it out
+is the actual engineering problem, not a solved one.
+
+</Checkpoint>
+
+## Fetching secrets from a real secret manager
+
+Once a secret lives in a manager instead of an env file on a server,
+application code asks for it by reference — and rotation becomes a
+config change on the manager's side, not a redeploy:
+
+```ts
+// secrets.ts — AWS Secrets Manager, with a short-lived in-memory cache
+// (the SDK call itself has latency and a request cost — don't call it
+// on every single request if the value rarely changes)
+import {
+  SecretsManagerClient,
+  GetSecretValueCommand,
+} from "@aws-sdk/client-secrets-manager";
+
+const client = new SecretsManagerClient({ region: "us-east-1" });
+
+interface CacheEntry {
+  value: string;
+  fetchedAt: number;
+}
+
+const cache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — bounds how stale a rotated value can be
+
+export async function getSecret(secretId: string): Promise<string> {
+  const cached = cache.get(secretId);
+  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+    return cached.value;
+  }
+
+  const response = await client.send(
+    new GetSecretValueCommand({ SecretId: secretId }),
+  );
+  if (!response.SecretString) {
+    throw new Error(`Secret ${secretId} has no string value`);
+  }
+
+  cache.set(secretId, { value: response.SecretString, fetchedAt: Date.now() });
+  return response.SecretString;
+}
+
+// --- usage: the connecting code never sees a hardcoded value, ever ---
+const dbPassword = await getSecret("kelvin-metrics/prod/db-password");
+```
+
+The 5-minute cache is the concrete trade-off L2 described in the
+abstract: a shorter TTL means a rotated secret propagates to running
+processes faster (smaller exposure window if the _old_ value leaked),
+at the cost of more requests to the secret manager; a longer TTL is
+cheaper but means a freshly-rotated value takes longer to actually take
+effect everywhere.
+
+## CI injection: the secret never touches a file on disk
+
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy
+on: push
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run migrations
+        env:
+          # GitHub Actions masks any value pulled from `secrets.*` in the
+          # log output automatically — even an accidental `echo $DB_PASSWORD`
+          # prints "***", not the real value.
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: npm run migrate
+      - name: Deploy
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: npm run deploy
+```
+
+```yaml
+# .pre-commit-config.yaml — a gitleaks-style hook blocking secrets before commit
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+```
+
+Masking (GitHub Actions' `***` replacement) and the pre-commit scanner
+solve _different_ problems that look similar: masking stops a secret
+from being _printed_ by a step that already has legitimate access to it;
+pre-commit scanning stops a secret from being _committed_ in the first
+place. A masked CI variable can still leak if the job itself is
+compromised or misconfigured to exfiltrate it deliberately — masking is
+a log-hygiene guard, not an access-control boundary.
+
+## Kelvin Metrics's actual incident response
+
+Mapping straight back to L1's timeline — this is the checklist a real
+response follows, not a description of one:
+
+| Time                  | Action                                                                                                                           | Why this order                                                                                   |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Minute 47 (detection) | **Rotate the database password immediately**, via the secret manager, before anything else                                       | Ends the exposure window right now — every other step can happen with the old value already dead |
+| Minute 48             | Revoke/rotate any IAM credentials or tokens that were _derived from_ or stored alongside the same secret                         | A leak rarely travels alone — check what else shared the blast radius                            |
+| Minute 50             | Audit access logs (e.g. AWS CloudTrail, database connection logs) for the exposure window (minute 0–47)                          | Establishes whether the leaked credential was actually used, and for what                        |
+| Minute 55             | Scan the full git history (not just the flagged commit) for other secrets that may have shipped the same way                     | One leak is a strong signal the same habit produced others                                       |
+| Minute 60             | Add a pre-commit scanner to the repo, if one wasn't already running                                                              | Closes the door the incident walked through                                                      |
+| Same day              | Notify anyone whose data may have been exposed, per the incident-response process (`/security/incident-response/`, a later unit) | A separate obligation from the technical fix                                                     |
+
+Rotation is listed first, deliberately — everything else in this table
+is investigation and hardening, valuable but not urgent in the same way,
+because the one thing that actually stops an attacker from using the
+leaked value is changing the value itself.
+
+The table above is one incident, with one secret type (a database
+password) and one platform (GitHub + AWS). **What would change in this
+checklist if the leaked secret were a private SSH deploy key instead —
+does "rotate immediately" mean the same concrete action, and does the
+audit step (minute 50) even have an equivalent log to check?**
