@@ -1,0 +1,360 @@
+---
+title: "L3 — Building the defense stack: integrity checks, SBOMs, and typosquat detection"
+---
+
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 named four defenses — lockfiles, SBOMs, scanning, pinning — as ideas.
+This level makes each one a real, runnable piece of code, using plain
+Node.js (no framework: these are the kind of small, dependency-light
+scripts a platform team actually runs in CI, and framework-free code
+keeps the actual mechanism visible instead of hidden behind an SDK).
+
+<LevelIntro
+  items={[
+    "Detecting an integrity-hash mismatch before install completes",
+    "Walking a dependency tree to flag loose ranges and generate an SBOM",
+    "A typosquat-distance heuristic, and where each detector's blind spot is",
+  ]}
+/>
+
+## Detecting a tampered package: integrity hashes
+
+An `integrity` field in a lockfile is a promise: "the tarball I install
+under this name and version will hash to exactly this." Verifying that
+promise is a handful of lines with Node's built-in `crypto` module — no
+external dependency needed for the check itself, which matters, since a
+package-integrity checker that itself pulls in unreviewed dependencies
+would be a strange thing to trust.
+
+```js
+// integrity-check.mjs
+import { createHash } from "node:crypto";
+
+/**
+ * npm's lockfile integrity strings look like "sha512-<base64hash>==".
+ * Returns true if tarballBuffer actually hashes to the recorded value.
+ */
+function verifyIntegrity(tarballBuffer, integrityField) {
+  const [algorithm, expectedBase64] = integrityField.split("-");
+  const nodeAlgo = algorithm.replace("sha", "sha"); // sha512 -> sha512
+  const actualBase64 = createHash(nodeAlgo)
+    .update(tarballBuffer)
+    .digest("base64");
+  return actualBase64 === expectedBase64;
+}
+
+// Worked example: a lockfile records case-fold@2.3.0's known-good hash.
+// A compromised mirror serves different bytes under the same version.
+const lockedIntegrity =
+  "sha512-9f1cRj3vQm7pXG4t1uYVh8k2sM1cLq0aWn5D3fJ9r0kA0kY7t2b1e9pT4uQ8sVoWx0aYh6nP2wZ1cD3fJ9r0kA==";
+const suspiciousTarball = Buffer.from("totally-different-bytes-than-expected");
+
+console.log(verifyIntegrity(suspiciousTarball, lockedIntegrity)); // false — install should abort
+```
+
+The check itself is simple; the important design point is _where it
+runs_. `npm install` already does this automatically against its own
+lockfile — the value of re-implementing it is understanding exactly what
+it does and doesn't catch: it only fires when the lockfile already has an
+entry to compare against. A fresh `npm install case-fold@latest` with no
+matching lockfile entry has nothing to verify against yet — which is
+exactly why "add a new dependency" and "update the lockfile" are the
+moments that need the _next_ defense: minimal-version-review, applied by
+a human before the diff is merged.
+
+## Walking the dependency tree: flagging loose ranges
+
+`package.json` version ranges (`^2.3.0`, `~2.3.0`, `*`) express how much
+an install is allowed to drift on its own. A tree walker that reports
+every dependency's _declared range_ next to what's _actually pinned_ in
+the lockfile turns "we probably pin our dependencies" into a checkable
+fact.
+
+```js
+// tree-walker.mjs
+
+/**
+ * A simplified dependency tree: each node has a name, a declared range
+ * from package.json, and the exact version the lockfile resolved to.
+ */
+const dependencyTree = {
+  name: "northfield-ledger-app",
+  range: null,
+  resolved: "1.0.0",
+  dependencies: [
+    {
+      name: "ledger-pdf",
+      range: "^3.1.0",
+      resolved: "3.1.4",
+      dependencies: [
+        {
+          name: "case-fold",
+          range: "^2.0.0",
+          resolved: "2.4.1",
+          dependencies: [],
+        },
+        {
+          name: "font-metrics",
+          range: "1.2.0",
+          resolved: "1.2.0",
+          dependencies: [],
+        },
+      ],
+    },
+  ],
+};
+
+const LOOSE_RANGE = /^[\^~]|^\*$|^$/;
+
+/**
+ * Flags every dependency (direct or transitive) whose declared range
+ * allows automatic drift — a caret/tilde range or no pin at all — along
+ * with how deep in the tree it sits.
+ */
+function findLooseRanges(node, depth = 0, results = []) {
+  if (node.range !== null && LOOSE_RANGE.test(node.range)) {
+    results.push({
+      name: node.name,
+      range: node.range,
+      resolved: node.resolved,
+      depth,
+    });
+  }
+  for (const child of node.dependencies) {
+    findLooseRanges(child, depth + 1, results);
+  }
+  return results;
+}
+
+console.log(findLooseRanges(dependencyTree));
+// [
+//   { name: 'ledger-pdf', range: '^3.1.0', resolved: '3.1.4', depth: 1 },
+//   { name: 'case-fold', range: '^2.0.0', resolved: '2.4.1', depth: 2 },
+// ]
+```
+
+`font-metrics` doesn't show up — it's pinned exactly (`1.2.0`, no
+prefix). `case-fold` does, at depth 2: Northfield's team never wrote
+`^2.0.0` themselves, `ledger-pdf`'s own `package.json` did — the looseness
+was inherited, which is exactly the transitive-trust problem from L2's
+diagram made concrete. Depth 2 also tells you _why_ code review never
+caught it: nobody's pull-request diff for "bump ledger-pdf" shows
+`case-fold`'s range at all.
+
+<Checkpoint question="The tree walker flags case-fold's range as loose (^2.0.0) — but the actual compromise was a specific *version* (2.4.1) published by a legitimate maintainer, not a version-range problem. Would pinning case-fold to an exact version have prevented this incident?">
+
+Only partially, and only if Northfield had pinned it _before_ the
+malicious version was published. A loose range (`^2.0.0`) means a fresh
+install can silently pick up 2.4.1 the moment it's published, with no
+diff to review — that's the mechanism that let the compromise reach CI
+automatically. An exact pin (`2.3.0`) closes that specific hole: no
+install would move to 2.4.1 without someone explicitly editing
+`package.json` and committing that change, which creates a reviewable
+diff. But pinning doesn't evaluate whether a version is _safe_ — it only
+removes the "automatic" part. If a developer ran `npm install
+case-fold@latest` themselves post-compromise and committed the bump, an
+exact pin would happily lock in the malicious version just as tightly as
+a clean one. Pinning converts a silent risk into a reviewable one; it
+doesn't replace the review.
+
+</Checkpoint>
+
+## Generating a minimal SBOM
+
+A CycloneDX SBOM is just a JSON document with a `components` array —
+turning the same tree walk into one is mostly a matter of flattening it
+and adding a `purl` (package URL, a standard identifier format):
+
+```js
+// sbom-generator.mjs
+
+/**
+ * Produces a minimal CycloneDX-shaped SBOM from a dependency tree.
+ * Real tooling (cyclonedx-npm, syft) adds licenses, hashes, and more —
+ * this is the structural core: what's actually in the artifact.
+ */
+function generateSBOM(tree) {
+  const components = [];
+
+  function collect(node) {
+    if (node.range !== null) {
+      components.push({
+        type: "library",
+        name: node.name,
+        version: node.resolved,
+        purl: `pkg:npm/${node.name}@${node.resolved}`,
+      });
+    }
+    for (const child of node.dependencies) collect(child);
+  }
+  collect(tree);
+
+  return {
+    bomFormat: "CycloneDX",
+    specVersion: "1.5",
+    metadata: { component: { name: tree.name, version: tree.resolved } },
+    components,
+  };
+}
+
+const sbom = generateSBOM(dependencyTree);
+console.log(JSON.stringify(sbom.components, null, 2));
+// [
+//   { type: 'library', name: 'ledger-pdf', version: '3.1.4', purl: 'pkg:npm/ledger-pdf@3.1.4' },
+//   { type: 'library', name: 'case-fold', version: '2.4.1', purl: 'pkg:npm/case-fold@2.4.1' },
+//   { type: 'library', name: 'font-metrics', version: '1.2.0', purl: 'pkg:npm/font-metrics@1.2.0' }
+// ]
+```
+
+### Worked end-to-end example: scanning the SBOM
+
+With an SBOM in hand, "is a known-bad package version anywhere in our
+artifact" becomes a straight lookup — this is the L2 mermaid pipeline
+made real:
+
+```js
+// scan-sbom.mjs
+
+// A stand-in for a real CVE/advisory feed (e.g. the npm advisory
+// database, OSV.dev) — maps package name to a set of known-bad versions.
+const advisoryDatabase = {
+  "case-fold": ["2.4.1", "2.4.2"], // versions confirmed to carry the postinstall payload
+};
+
+function scanSBOM(sbom, advisories) {
+  return sbom.components
+    .filter((c) => advisories[c.name]?.includes(c.version))
+    .map((c) => ({ ...c, reason: `known-compromised version (${c.version})` }));
+}
+
+const findings = scanSBOM(sbom, advisoryDatabase);
+console.log(findings);
+// [ { type: 'library', name: 'case-fold', version: '2.4.1', purl: '...', reason: 'known-compromised version (2.4.1)' } ]
+```
+
+This is exactly the query Priya's team couldn't run in minutes on day
+one, because no SBOM existed yet — once the advisory database catches up
+(the moment a CVE or advisory _does_ get published for `case-fold
+2.4.1`), every previously-generated SBOM becomes instantly searchable
+against it, including SBOMs for artifacts shipped months before the
+advisory existed.
+
+## Typosquat detection: catching a look-alike name
+
+A different failure mode from `case-fold` (a real, trusted package
+compromised) is a _fake_ package with a deliberately similar name —
+`case-fold-js`, `csae-fold`, `case_fold`. Levenshtein edit distance
+against a list of known-popular packages is a cheap, real heuristic:
+
+```js
+// typosquat-detector.mjs
+
+function levenshtein(a, b) {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) =>
+    Array.from({ length: b.length + 1 }, (_, j) =>
+      i === 0 ? j : j === 0 ? i : 0,
+    ),
+  );
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] =
+        a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+/**
+ * Flags a candidate package name that's suspiciously close (but not
+ * identical) to a well-known package — the classic typosquat shape.
+ */
+function findTyposquatCandidates(
+  candidateName,
+  popularPackages,
+  maxDistance = 2,
+) {
+  return popularPackages
+    .filter((name) => name !== candidateName)
+    .map((name) => ({ name, distance: levenshtein(candidateName, name) }))
+    .filter((entry) => entry.distance > 0 && entry.distance <= maxDistance)
+    .sort((a, b) => a.distance - b.distance);
+}
+
+const popular = ["case-fold", "lodash", "express", "chalk", "axios"];
+console.log(findTyposquatCandidates("csae-fold", popular));
+// [ { name: 'case-fold', distance: 2 } ]  — flagged: two transpositions away from a popular name
+console.log(findTyposquatCandidates("case-fold", popular));
+// [] — the real, correctly-spelled package isn't flagged against itself
+```
+
+<Checkpoint question="The typosquat detector would have flagged 'csae-fold' as suspiciously close to 'case-fold'. Would it have caught Northfield's actual incident?">
+
+No — and that gap is worth sitting with. Northfield's incident wasn't a
+lookalike name; the compromised package _was_ `case-fold`, published
+under its real, correct name by an account that legitimately held
+publish rights (however that access was obtained). Edit-distance
+detection defends against a completely different attack pattern — a
+malicious package impersonating a trusted one by name — and would report
+zero findings here, exactly as the code above shows for the correctly
+spelled name. This is the same lesson as the regex secret-scanner in
+`security/secrets-management`: each detector is real and catches its
+specific pattern reliably, but a detector's silence is not the same as
+"nothing is wrong." Defense in depth means running detectors for several
+_different_ attack shapes side by side, precisely because no single one
+covers every shape.
+
+</Checkpoint>
+
+## Wiring it into CI
+
+None of the above matters if it isn't actually run before code reaches
+production. A minimal CI step: verify integrity, then run the SBOM scan,
+_before_ any install script gets a chance to execute:
+
+```yaml
+# .github/workflows/verify-dependencies.yml
+name: Verify dependencies
+on: [pull_request]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # --ignore-scripts is the key line: it installs packages without
+      # running any postinstall/preinstall scripts (including case-fold's
+      # exfiltration payload) until integrity has been verified.
+      - run: npm ci --ignore-scripts
+
+      - name: Verify lockfile integrity
+        run: npm run verify:integrity # runs integrity-check.mjs against node_modules
+
+      - name: Generate and scan SBOM
+        run: |
+          npm run generate:sbom
+          npm run scan:sbom -- --fail-on-critical
+
+      # Only after both checks pass does anything get permission to run
+      # the scripts a normal `npm install` would have executed blindly.
+      - run: npm rebuild
+```
+
+`--ignore-scripts` is doing real work in that pipeline: it's the
+difference between "verify, then allow code to run" and "run code, then
+hope the verification step catches it in time" — the second ordering is
+what let `case-fold`'s postinstall script execute on every single CI run
+for eleven days before anyone looked.
+
+**Extend it yourself:** the worked example scans one flat SBOM against
+one advisory list. What would change if Northfield ran this across 40
+microservices, each with its own SBOM, and wanted one dashboard showing
+every service touched by a single compromised package — not just
+whether _this_ build is affected? And separately: `--ignore-scripts`
+blocks `case-fold`'s postinstall payload in CI, but what happens the
+first time a developer runs a plain `npm install` on their own laptop,
+outside CI entirely, with no such flag set?
