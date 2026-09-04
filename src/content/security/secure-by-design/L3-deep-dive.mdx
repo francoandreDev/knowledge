@@ -1,0 +1,210 @@
+---
+title: "L3 — What does a real STRIDE pass and a secure-by-default implementation actually look like? (worked threat model, code, design-doc template)"
+---
+
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 gave the method: draw the data-flow diagram, mark trust boundaries,
+ask six STRIDE questions at each one, write the answers into the design
+doc's security section. This level runs that method end to end against
+Meridian's actual file-upload feature — the full threat table, the real
+code difference between permissive-by-default and secure-by-default,
+and the filled-in design-doc section that made it durable rather than
+tribal knowledge.
+
+## The full STRIDE table
+
+Working through every element of the data-flow diagram from L2 — not
+just step 1, the way L2's example did for illustration — produces the
+table Meridian actually attached to their design doc:
+
+| Element / flow                         | STRIDE category        | Threat                                                                 | Likelihood / impact | Mitigation baked into the design                                                                      |
+| -------------------------------------- | ---------------------- | ---------------------------------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------- |
+| Student → Upload API                   | Tampering              | Forged content-type/extension disguises an executable script as a PDF  | High / High         | Deny-by-default extension allowlist; content sniffed server-side, not trusted from headers            |
+| Student → Upload API                   | Denial of service      | Unbounded file size or upload rate exhausts storage or the scan queue  | Medium / Medium     | Per-request size cap; per-account rate limit on the upload endpoint                                   |
+| Upload API → Storage bucket            | Information disclosure | Predictable storage key lets one student guess another's file location | Medium / High       | Random, non-sequential storage keys (UUIDv4, not filename-derived)                                    |
+| Upload API → Storage bucket            | Elevation of privilege | Uploaded file executes with the app's own service-account privileges   | Low / Critical      | Storage bucket has no execute permission; files are never served from an executable path              |
+| Scan queue → Storage bucket            | Tampering              | A file is served before the malware scan completes                     | Medium / High       | Files land in a quarantine prefix; only promoted to servable storage after scan clears                |
+| Instructor → Upload API (request link) | Spoofing               | A non-enrolled user requests a signed URL for another course's file    | Medium / High       | Authorization check (is this instructor assigned to this course) runs before any signed URL is issued |
+| Upload API → CDN → Instructor          | Information disclosure | A leaked signed URL keeps working indefinitely                         | Medium / Medium     | Signed URLs expire in 10 minutes, scoped to one object                                                |
+| Any upload action                      | Repudiation            | No record of which account uploaded a file later found to be malicious | Low / Medium        | Every upload logged with account id, timestamp, source IP, and the resulting storage key              |
+
+Nothing in this table required exotic tooling — it's the same six
+questions from L2, asked patiently against every edge of the diagram,
+with a mitigation written down for each one _before_ a single line of
+the upload handler existed.
+
+## Secure by default, as actual code
+
+L2 described secure-by-default in the abstract. Here's the real
+difference in a Node.js/Express upload handler — first the permissive
+version (the shape Halcyon actually shipped), then the restrictive one
+(what Meridian's threat table above required):
+
+```js
+// halcyon-upload.js — permissive by default. Every one of the STRIDE
+// rows above is left open here, because nothing forces a decision.
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+
+export function handleUpload(req, res, storage) {
+  // Whatever the browser sent is trusted outright — no allowlist, no
+  // server-side content check.
+  const originalName = req.file.originalname;
+  const destinationKey = originalName; // predictable, guessable, collidable
+
+  storage.write(destinationKey, req.file.buffer);
+
+  // Served back immediately, no scan step, no expiry on access.
+  res.json({ url: `https://files.fenwick.example/${destinationKey}` });
+}
+```
+
+```js
+// meridian-upload.js — restrictive by default. Every branch below
+// exists because the threat table names the row it closes.
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+
+const ALLOWED_EXTENSIONS = new Set([".pdf", ".docx", ".txt"]);
+const MAX_BYTES = 25 * 1024 * 1024; // 25 MB
+const UPLOAD_RATE_LIMIT_PER_HOUR = 20;
+
+/** Sniffs actual file content instead of trusting a client-supplied
+ * extension or content-type header (closes the Tampering row). */
+function looksLikeDeclaredType(buffer, extension) {
+  const magicBytes = {
+    ".pdf": Buffer.from("%PDF"),
+  };
+  const expected = magicBytes[extension];
+  if (!expected) return true; // no magic-byte check defined for this type
+  return buffer.subarray(0, expected.length).equals(expected);
+}
+
+export function handleUpload(req, res, storage, rateLimiter) {
+  const extension = path.extname(req.file.originalname).toLowerCase();
+
+  // Deny by default: nothing is accepted unless it's explicitly allowed.
+  if (!ALLOWED_EXTENSIONS.has(extension)) {
+    return res.status(400).json({ error: "File type not allowed" });
+  }
+  if (req.file.buffer.length > MAX_BYTES) {
+    return res.status(413).json({ error: "File too large" });
+  }
+  if (!looksLikeDeclaredType(req.file.buffer, extension)) {
+    return res
+      .status(400)
+      .json({ error: "File content does not match its extension" });
+  }
+  if (!rateLimiter.allow(req.user.id, UPLOAD_RATE_LIMIT_PER_HOUR)) {
+    return res.status(429).json({ error: "Upload rate limit exceeded" });
+  }
+
+  // Random, non-sequential key — never derived from the client-supplied
+  // filename (closes the Information disclosure row).
+  const destinationKey = `quarantine/${randomUUID()}${extension}`;
+  storage.write(destinationKey, req.file.buffer);
+
+  // Logged for repudiation coverage before anything else happens.
+  storage.auditLog({
+    actorId: req.user.id,
+    action: "upload",
+    key: destinationKey,
+    sourceIp: req.ip,
+    at: new Date().toISOString(),
+  });
+
+  // Not servable yet — a separate scan worker promotes it out of
+  // quarantine once it clears (closes the "served before scan" row).
+  res.status(202).json({ status: "queued_for_scan", key: destinationKey });
+}
+```
+
+The permissive version isn't shorter because it's simpler — it's
+shorter because every one of Meridian's eight threat-table rows was
+somebody else's problem to notice later. Every extra branch in the
+restrictive version has a specific row above it that named the branch
+before the code was written, which is the entire point of doing the
+threat model first: none of this is guesswork about what _might_
+matter.
+
+<Checkpoint question="Fenwick adds a second upload field later for course syllabi, reusing meridian-upload.js's handleUpload but passing a new ALLOWED_EXTENSIONS set that includes '.html' for embeddable syllabus pages. Does the secure-by-default structure of this code make that a safe change to review quickly, or does it need its own full threat-modeling pass?">
+
+It still needs its own look, and not a rubber-stamp one — secure by
+default lowers the _baseline_ risk of a change, it doesn't eliminate
+the need to think about what changed. Adding `.html` specifically
+reopens exactly the stored-XSS path from L1's Halcyon scenario: an
+HTML file served from the app's own origin can run script in the
+context of a logged-in user. The magic-byte check as written also has
+no entry for `.html`, so it would pass through unchecked. The
+restrictive structure means a reviewer only has to reason about _this
+one new branch_ instead of re-auditing the whole handler from scratch
+— which is real value — but "the framework is secure by default"
+never means "any change made inside it is automatically safe."
+
+</Checkpoint>
+
+## The design-doc section, filled in
+
+This is what actually shipped inside Meridian's design doc — the
+artifact that made the STRIDE table durable instead of a workshop
+exercise nobody could find again three months later:
+
+**Security considerations — Assignment file upload**
+
+- **Trust boundaries crossed**: student browser → upload API (untrusted
+  input); scan queue → storage (quarantine → servable promotion).
+- **Threats identified**: see the full STRIDE table above — 8 rows
+  covering tampering, DoS, information disclosure, elevation of
+  privilege, spoofing, and repudiation.
+- **Mitigations landing in this implementation**: extension allowlist,
+  server-side content sniffing, random storage keys, quarantine-then-
+  promote scanning, 10-minute signed URLs, per-account rate limiting,
+  upload audit logging.
+- **Explicitly out of scope for this design**: protecting against a
+  compromised instructor account with legitimate access to a course's
+  files — covered by `authorization-models` and `incident-response`,
+  not by this feature's own design.
+- **Reviewed by**: design-review gate, same session as the scalability
+  and rollout sections, per `adr-governance`'s standing review process.
+
+Writing "explicitly out of scope" is as important as writing the
+mitigations — a threat model that silently ignores a risk looks the
+same, to a future reader, as one that considered it and correctly
+decided it belonged to a different layer of the system. Naming the
+boundary out loud is what keeps that distinction visible.
+
+<Checkpoint question="A reviewer asks why the design doc lists 'compromised instructor account' as out of scope instead of just adding a ninth STRIDE row and a mitigation for it inside this same feature's design. What's the actual argument for drawing the boundary there instead of solving it inside the upload feature?">
+
+Because that threat isn't specific to file upload at all — it's a
+threat against the authorization model itself, and every feature an
+instructor can touch (grading, roster management, file upload among
+them) shares the exact same exposure the moment their account is
+compromised. Solving it inside the upload feature's own design would
+mean re-solving the same problem in every other feature separately,
+each time slightly differently, instead of once in the layer that
+actually owns it (`authorization-models` for how access is granted,
+`incident-response` for what happens once an account is confirmed
+compromised). A good threat model knows which threats belong to the
+feature in front of it and which belong to a shared layer underneath
+it — treating every threat as this feature's problem to solve is its
+own kind of scope failure, just as much as ignoring a real one.
+
+</Checkpoint>
+
+## Where this could go differently
+
+Meridian's table is one system, one feature, one specific set of
+mitigations — a case, not the whole territory. What would change if
+the uploaded files were videos that get transcoded server-side instead
+of PDFs read as-is — does that shift the biggest risk from "what gets
+served back" toward "what the transcoder itself is tricked into doing"
+(a classic SSRF/resource-exhaustion shape, not an information-
+disclosure one)? And what would change if this upload endpoint were
+internal-only, used by trusted staff rather than any enrolled student
+— does a smaller, more trusted set of callers mean some of these eight
+rows can be dropped, or does "internal" just mean the blast radius of
+getting it wrong moves from one student's data to the whole
+institution's? Both are worth walking through with the same DFD-plus-
+STRIDE method used above, not just accepting this one worked example
+as the complete list of what threat modeling ever produces.
