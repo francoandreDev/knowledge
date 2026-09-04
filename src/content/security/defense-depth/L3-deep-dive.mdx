@@ -1,0 +1,401 @@
+---
+title: "L3 — How do we design a system assuming a component will be breached? (defense in depth, least privilege, zero trust)"
+---
+
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 built the model: independent layers, least-privilege scoping, and
+zero-trust verification. This level makes every one of those real —
+config and code you could actually deploy — and ends with a working
+calculator that turns "how exposed is this design" into an actual
+number, using Meridian and Castellan's own numbers from L1.
+
+<LevelIntro
+  items={[
+    "A least-privilege database role, granted and denied explicitly",
+    "Kubernetes NetworkPolicy enforcing L2's segmentation diagram",
+    "A blast-radius calculator over a real permission graph",
+  ]}
+/>
+
+## Turning "scoped account" into an actual granted policy
+
+L2's table compared a shared admin account to a scoped read-only proxy
+account in the abstract. Here's what actually creating that distinction
+looks like, as real SQL a DBA would run — not a description of the
+idea, the literal statements.
+
+```sql
+-- Meridian's actual account (never do this):
+-- one shared login, used by every service, with blanket privileges.
+CREATE ROLE app_shared_admin LOGIN PASSWORD 'hunter2';
+GRANT ALL PRIVILEGES ON DATABASE storefront TO app_shared_admin;
+-- Every one of the database's 47 tables — including admin_audit_log,
+-- payment_methods, and internal_staff_notes — is reachable, with
+-- SELECT, INSERT, UPDATE, DELETE, and DROP, by a credential that lives
+-- in the web server's environment variables.
+
+-- Castellan's web-tier read proxy account:
+-- a distinct role per service, granted only what that service uses.
+CREATE ROLE web_catalog_reader LOGIN PASSWORD 'a-real-generated-secret';
+
+-- Explicit grants, table by table, operation by operation —
+-- the opposite of GRANT ALL.
+GRANT SELECT ON products TO web_catalog_reader;
+GRANT SELECT ON product_categories TO web_catalog_reader;
+
+-- Everything not explicitly granted stays denied by default in
+-- PostgreSQL — REVOKE here is defense-in-depth belt-and-suspenders,
+-- documenting the boundary rather than relying purely on the default.
+REVOKE ALL ON payment_methods FROM web_catalog_reader;
+REVOKE ALL ON customer_pii FROM web_catalog_reader;
+REVOKE ALL ON admin_audit_log FROM web_catalog_reader;
+
+-- A row-level policy narrows it further: even within the two
+-- permitted tables, this account can't read a row marked internal-only.
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+CREATE POLICY public_catalog_only ON products
+  FOR SELECT
+  USING (visibility = 'public');
+```
+
+If the web server's credentials are exfiltrated wholesale — the exact
+failure mode from L1's 0-day — `app_shared_admin` hands the attacker the
+entire database. `web_catalog_reader` hands them two tables' worth of
+publicly-visible product data. Same theft, same credential-exfiltration
+technique, different outcome, decided entirely by what was granted
+_before_ the breach.
+
+## Enforcing the network layer: a Kubernetes `NetworkPolicy`
+
+L2's diagram showed segmentation as a box the request has to pass
+through. In a Kubernetes cluster, that box is a `NetworkPolicy` — by
+default, pods can reach any other pod; a `NetworkPolicy` switches a pod
+to **default-deny** and then explicitly allows only the traffic it
+actually needs, the network-layer equivalent of the SQL grants above.
+
+```yaml
+# default-deny-all.yaml — applied cluster-wide first: nothing is
+# reachable unless a later policy explicitly allows it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: storefront
+spec:
+  podSelector: {} # selects every pod in the namespace
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# web-tier-egress.yaml — the web server can call the internal proxy
+# service on its API port, and nothing else. Notably: it CANNOT reach
+# the database pods directly, even with stolen credentials, because
+# there's no network path to them at all — the credentials alone
+# aren't enough without a route to use them over.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: web-tier-egress
+  namespace: storefront
+spec:
+  podSelector:
+    matchLabels:
+      tier: web
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              tier: db-proxy
+      ports:
+        - protocol: TCP
+          port: 8443
+---
+# db-proxy-ingress.yaml — only the db-proxy tier may reach the actual
+# database pods, and only on the Postgres port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: db-tier-ingress
+  namespace: storefront
+spec:
+  podSelector:
+    matchLabels:
+      tier: database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              tier: db-proxy
+      ports:
+        - protocol: TCP
+          port: 5432
+```
+
+This is why Castellan's attacker had "nowhere useful to go" in L1: even
+with full code execution on the web-tier pod, `web_catalog_reader`'s
+credentials are useless without a network path to the database — and
+the only path that exists routes through a proxy the web tier was never
+granted egress to. The credential scope and the network scope are two
+independent layers doing two different jobs; either one alone would
+have stopped this specific attacker, but neither depends on the other
+holding.
+
+<Checkpoint question="Suppose Castellan had deployed the NetworkPolicies above but had left the database account as a shared admin login (skipped the SQL from the previous section). Would the breach still have been contained to 2 tables?">
+
+No — containment there came entirely from the network layer having no
+route from the web tier to the database tier at all, which is a real,
+independent win on its own (it would have stopped this specific
+attacker cold). But it's not the same guarantee as the scoped account.
+The moment there's a legitimate route through the proxy — which there
+has to be, since the app needs to serve real product data — a shared
+admin credential sitting behind that proxy is available to anything
+that can reach the proxy, including a future misconfiguration, a
+compromised proxy service itself, or a different attack path this
+particular 0-day didn't happen to use. The two layers protect against
+overlapping but distinct failure modes: NetworkPolicy against "this
+component shouldn't be able to reach that tier at all," least privilege
+against "even a component that legitimately reaches that tier shouldn't
+be able to do everything once it's there." Skipping either one leaves a
+real gap; L2's point about independent layers isn't decorative here.
+
+</Checkpoint>
+
+## Zero trust in code: a service-to-service authorization check
+
+Kubernetes' `NetworkPolicy` controls _whether a packet can arrive at
+all_ — it says nothing about _what the receiving service does once
+it's there_. Zero trust's "never trust, always verify" means the
+receiving service itself re-checks the caller's identity and
+permissions on every request, even though the network already filtered
+who could reach it. Here's a minimal but real service-to-service check,
+using mutual TLS client certificates for identity and an explicit
+per-caller permission table for authorization — the two questions kept
+deliberately separate, mirroring authentication vs. authorization from
+`authorization-models`.
+
+```ts
+// db-proxy/src/authorize.ts
+//
+// Runs on every incoming request to the db-proxy service, regardless
+// of which internal service is calling or what network segment it
+// arrived from. mTLS already proved *which* service is calling
+// (the caller's cert has to chain to a CA this proxy trusts, and be
+// unexpired — that's TLS's job, not this function's); this function
+// answers the separate question of what that specific caller is
+// allowed to ask for.
+
+interface CallerIdentity {
+  // Extracted from the verified client certificate's Subject CN —
+  // NOT from a header the caller could set itself. A header like
+  // `X-Service-Name: db-proxy-admin` is a claim; a cert CN validated
+  // against the proxy's own trusted CA is a verified fact.
+  serviceName: string;
+}
+
+interface QueryRequest {
+  table: string;
+  operation: "SELECT" | "INSERT" | "UPDATE" | "DELETE";
+}
+
+// The permission table itself — this IS the zero-trust policy,
+// expressed as data instead of scattered across ad hoc if-statements.
+// Notice web-catalog-service isn't even listed for "orders" or
+// "payment_methods" — an unlisted (caller, table) pair denies by
+// default, the same default-deny posture as the NetworkPolicy above.
+const SERVICE_PERMISSIONS: Record<
+  string,
+  Record<string, Array<QueryRequest["operation"]>>
+> = {
+  "web-catalog-service": {
+    products: ["SELECT"],
+    product_categories: ["SELECT"],
+  },
+  "order-processing-service": {
+    orders: ["SELECT", "INSERT", "UPDATE"],
+    products: ["SELECT"],
+  },
+  "billing-reconciliation-service": {
+    payment_methods: ["SELECT"],
+    orders: ["SELECT"],
+  },
+};
+
+export class AuthorizationDeniedError extends Error {
+  constructor(caller: string, req: QueryRequest) {
+    super(`${caller} is not authorized to ${req.operation} on "${req.table}"`);
+    this.name = "AuthorizationDeniedError";
+  }
+}
+
+/**
+ * Re-verifies authorization for every single request, from every
+ * caller, regardless of network origin. Being on the cluster's
+ * internal network, having passed the NetworkPolicy, and having a
+ * valid mTLS certificate all establish WHO is calling — none of them
+ * establish WHAT that caller is allowed to do. That's this function's
+ * one job, checked fresh every time, never cached as "already trusted
+ * from a previous request."
+ */
+export function authorizeQuery(
+  caller: CallerIdentity,
+  req: QueryRequest,
+): void {
+  const allowedTables = SERVICE_PERMISSIONS[caller.serviceName];
+  const allowedOps = allowedTables?.[req.table];
+
+  if (!allowedOps || !allowedOps.includes(req.operation)) {
+    throw new AuthorizationDeniedError(caller.serviceName, req);
+  }
+}
+```
+
+```ts
+// Worked example: order-processing-service asks for something it was
+// never granted — a plausible compromise scenario, since it's a real
+// internal service with real database credentials, just not for this.
+authorizeQuery(
+  { serviceName: "order-processing-service" },
+  { table: "payment_methods", operation: "SELECT" },
+);
+// throws AuthorizationDeniedError: order-processing-service is not
+// authorized to SELECT on "payment_methods"
+//
+// Note what did NOT stop this call: the caller has a valid mTLS cert
+// (it's a real, legitimate service). It's on the internal network. It
+// passed every NetworkPolicy — db-proxy explicitly allows connections
+// from any tier: db-consumer pod. The only thing standing between a
+// compromised order-processing-service and payment_methods is this
+// one function re-checking permissions on this one request. That's
+// the entire point of "never trust, always verify": none of the
+// upstream layers get to substitute for this check.
+```
+
+## Blast radius: turning "how exposed is this" into a number
+
+Every section above built one layer. The question a real design review
+actually needs answered is: **given everything currently granted,
+if this one component is compromised, exactly what can it reach?**
+That's answerable mechanically — as a graph traversal over whatever
+`SERVICE_PERMISSIONS`-style grants already exist — rather than as a
+guess.
+
+```ts
+// blast-radius.ts
+//
+// Models the permission graph as: componentName -> resources it can
+// reach, each resource tagged with how many records it exposes. Reuses
+// the same shape SERVICE_PERMISSIONS above already captures — this
+// isn't a new source of truth, it's the existing grants read back as
+// a graph instead of enforced one request at a time.
+
+interface ResourceGrant {
+  resource: string;
+  recordCount: number;
+  sensitivity: "public" | "internal" | "restricted";
+}
+
+type PermissionGraph = Record<string, ResourceGrant[]>;
+
+/**
+ * Direct grants only — component reaches exactly what it was
+ * explicitly given, nothing inferred, nothing assumed. This mirrors
+ * the SQL GRANTs and the SERVICE_PERMISSIONS table above: if it
+ * isn't listed, it isn't reachable.
+ */
+export function blastRadius(
+  graph: PermissionGraph,
+  compromisedComponent: string,
+): { totalRecordsExposed: number; resourcesReached: ResourceGrant[] } {
+  const resourcesReached = graph[compromisedComponent] ?? [];
+  const totalRecordsExposed = resourcesReached.reduce(
+    (sum, r) => sum + r.recordCount,
+    0,
+  );
+  return { totalRecordsExposed, resourcesReached };
+}
+```
+
+```ts
+// Meridian's graph: one component, one grant, everything.
+const meridianGraph: PermissionGraph = {
+  "web-server": [
+    {
+      resource: "all_tables",
+      recordCount: 14_000_000,
+      sensitivity: "restricted",
+    },
+  ],
+};
+
+// Castellan's graph: the same web-server role, scoped down.
+const castellanGraph: PermissionGraph = {
+  "web-server": [
+    { resource: "products", recordCount: 8_200, sensitivity: "public" },
+    { resource: "product_categories", recordCount: 340, sensitivity: "public" },
+  ],
+};
+
+blastRadius(meridianGraph, "web-server");
+// { totalRecordsExposed: 14000000, resourcesReached: [...] }
+
+blastRadius(castellanGraph, "web-server");
+// { totalRecordsExposed: 8540, resourcesReached: [...] }
+```
+
+The exact same 0-day, run through each company's own actual grants,
+reproduces L1's outcome as a computed number instead of a narrative
+claim — 14,000,000 vs. 8,540, and zero of Castellan's exposed records
+carry `restricted` sensitivity. This is the artifact a real design
+review should produce for any new service before it ships: not "we
+added a WAF," but "here's the blast radius if this specific component
+is the one that gets popped."
+
+<Checkpoint question="The blast-radius function above only counts DIRECT grants for the compromised component. A real attacker who takes over the order-processing-service might not stop there — they might then try to pivot and compromise a second service reachable from the first. Does the function above account for that?">
+
+No, and that's a genuine limitation worth naming rather than glossing
+over — this version measures the blast radius of _this one component's
+own credentials_, not multi-hop lateral movement through a chain of
+compromised services. A more complete version would need to walk the
+graph transitively: if order-processing-service can itself call
+billing-reconciliation-service's API, and that path isn't independently
+authorized the way `authorizeQuery` above authorizes it, the real blast
+radius includes billing-reconciliation-service's grants too. That's
+exactly the gap zero trust's "verify every call, including
+internal ones" is designed to close: if every hop re-authorizes
+independently (as `authorizeQuery` does), a compromised
+order-processing-service still can't silently ride on
+billing-reconciliation-service's grants just by calling it — it has to
+pass its _own_ authorization check at that hop, which its permission
+row (`orders`, `products` only) doesn't grant. The single-hop
+calculator above is the right first tool for a design review; a
+lateral-movement-aware version is the natural extension once a system
+has more than a couple of internal service hops worth graphing.
+
+</Checkpoint>
+
+## Where the budget actually goes
+
+None of this is free — L1 named latency, complexity, and operational
+overhead as the real cost, and a design review has to actually weigh
+it, not wave at "more security is always better."
+
+| Layer                            | What it costs                                                   | What it buys                                                  |
+| -------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------- |
+| Network segmentation             | Extra hops, proxy services to build and run                     | Stops a compromised component with no legitimate network path |
+| Least-privilege DB accounts      | Ongoing maintenance as schemas/features change                  | Bounds exactly what a stolen credential can do                |
+| Per-request service authz (mTLS) | A few ms of latency per internal call, cert rotation operations | Removes "inside the network" as an implicit trust signal      |
+| Monitoring/alerting              | Storage, noise, false-positive triage time                      | Turns "undetected for 14 days" into "caught in minutes"       |
+
+A team with unlimited time would build all four for every service. A
+team that's honest about its actual constraints spends the budget where
+the component's own blast radius is largest first — the calculator
+above is exactly how you find out where that is, instead of guessing.
+Extend it yourself: what does the blast-radius number look like for a
+service that's read-only versus one with `INSERT`/`UPDATE` grants, and
+does that change which layer is worth building first for each one?
