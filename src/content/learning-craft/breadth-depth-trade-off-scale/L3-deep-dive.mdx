@@ -1,0 +1,185 @@
+---
+title: "L3 — How does a staff engineer learn fast enough to be credible across domains they don't own? (breadth-depth trade-off at scale, asking the right expert the right question)"
+---
+
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 gave Priya a framework — stakes, reversibility, time-to-signal — and
+a technique for the conversation that follows once breadth turns out
+to be enough. This level walks her actual evening end to end, including
+the point where she nearly signs off on bad information, to show what
+the trade-off looks like when it doesn't go cleanly on the first try.
+
+<LevelIntro
+  items={[
+    "Priya's real decision, worked step by step",
+    "A near-miss: the wrong expert, a confident-sounding wrong answer",
+    "Recovering, and what she actually signs off on",
+  ]}
+/>
+
+## Running the framework on Priya's actual evening
+
+It's 5:15pm. Priya has the VP's message, a link to the pull request
+changing the sync interval from once an hour to every fifteen minutes,
+and a morning deadline. **Before doing anything else, what's the first
+question she actually needs to answer — not about mobile, but about
+the decision itself?**
+
+She runs the three factors from L2 against this specific call, not
+against "mobile background sync" in the abstract:
+
+| Factor         | Priya's read | Why                                                                                                           |
+| -------------- | ------------ | ------------------------------------------------------------------------------------------------------------- |
+| Stakes         | High         | Millions of installs; battery drain complaints hit app store ratings and support volume for weeks             |
+| Reversibility  | Medium       | A follow-up release can revert the interval, but only after it's already shipped and users have updated       |
+| Time-to-signal | Low (slow)   | Battery drain doesn't crash anything — it shows up gradually, in reviews and support tickets, well after ship |
+
+Two of three factors land on the "this needs real care" side — not
+because mobile is inherently scary, but because a wrong call here is
+expensive, only cheaply fixable after the damage starts, and wouldn't
+announce itself until it already had. That rules out the laziest
+option (skim the PR, say "looks reasonable," move on) without requiring
+the other extreme (Priya spending her evening learning Android's
+`JobScheduler` and wakelock APIs from scratch). The right-sized
+response is borrowed judgment, handled carefully — which means finding
+the actual owner of this mechanism and asking them something specific.
+
+<Checkpoint question="Priya considers just approving the PR because the mobile team's tests are all green. Does a passing test suite substitute for the depth-vs-breadth analysis she just ran?">
+
+No — a green test suite answers a different question than the one on
+the table. Tests confirm the code does what its authors expected it to
+do; they don't tell Priya whether "run this job four times as often"
+has a battery-drain consequence nobody wrote a test for in the first
+place, because nobody thought to. The three-factor read isn't about
+whether the change is bug-free — it's about whether a plausible,
+undetected-by-tests failure mode (background battery drain) is
+expensive and slow enough to surface that it deserves real scrutiny
+before shipping. A passing suite is reassuring about a narrower claim
+than the one actually at stake.
+
+</Checkpoint>
+
+## The near-miss: asking the wrong person the wrong way
+
+Priya messages the mobile team's engineering manager, Deja, since
+she's the most senior person on the team and the fastest to respond.
+**"Hey — sync interval's going from an hour to fifteen minutes, any
+battery concerns?"** Deja replies within five minutes: **"We've bumped
+sync frequency before without issues, I think we're fine."**
+
+That answer is fast, comes from someone senior and plausible, and
+matches what Priya wants to hear at 5:40pm with a deadline looming. For
+about ten minutes, she drafts an approval message. **What's actually
+missing from Deja's answer that should have stopped Priya before she
+sent it?**
+
+Two things, both invisible unless you go looking for them: Deja
+manages the team but doesn't write the scheduling code herself — her
+"we've bumped frequency before" is a memory of a different change, not
+firsthand knowledge of how _this_ interval change interacts with
+Android's wakelock behavior. And Priya's question — "any battery
+concerns?" — was exactly the vague kind L2 flagged: it asked for a
+verdict, not a mechanism, so there was nothing in Deja's answer Priya
+could actually check. She had gotten a confident-sounding response
+from someone real, to a real domain question, and it was worth almost
+nothing — not because Deja lied, but because neither the person nor
+the question was sharp enough to produce a checkable answer.
+
+Priya catches this herself, re-reading her own draft approval and
+noticing she can't actually explain _why_ it's safe in one sentence —
+only that someone told her it probably was. That gap is the tell.
+
+<Checkpoint question="Deja wasn't being dishonest, and she is genuinely senior on the mobile team. Why wasn't 'ask someone senior and plausible' good enough here?">
+
+Because seniority and plausibility aren't the same signal as depth in
+the specific mechanism at play. Deja has real organizational knowledge
+and was answering in good faith, but she doesn't personally own the
+scheduling code, so her answer was a recollection, not a verified
+claim about this change. This is the same lesson `weighing-credibility`
+teaches about written sources applied to a live conversation: fluency
+and seniority make an answer _feel_ more trustworthy without making it
+more checkable. The fix isn't distrusting Deja generally — it's routing
+the specific question to whoever actually has depth on the specific
+mechanism, which in this case is someone on her team, not Deja herself.
+
+</Checkpoint>
+
+## Recovering: the right expert, the right question
+
+Priya asks Deja one more thing: **"Who actually wrote the background
+sync scheduler?"** Deja points her to Marcus, a senior engineer on the
+team. It's 6pm. Priya messages Marcus directly, and this time frames
+the question the way L2 described — specific enough to force a
+checkable answer:
+
+**"If the sync job runs every 15 minutes instead of every hour, does
+it hold a wakelock long enough each time to meaningfully increase
+battery drain — and is there a way we'd catch that in testing before
+it ships, or only after users report it?"**
+
+Marcus's answer, ten minutes later, is different in kind from Deja's:
+**"The job itself is quick — under two seconds — but it wakes the
+radio each time, and four times an hour instead of once is a real
+increase in radio wake-ups, which is where the actual battery cost is.
+We don't have an automated battery test in CI, so we wouldn't catch it
+before ship. Past changes like this got caught by a canary rollout to
+1% of users first, watched against battery-usage telemetry for 48
+hours."** This is checkable in a way Deja's wasn't: it names a specific
+mechanism (radio wake-ups, not wakelocks in the abstract), states
+plainly what testing does and doesn't cover, and gives Priya something
+concrete to verify rather than just trust.
+
+Priya sanity-checks it anyway rather than accepting it outright —
+she asks Marcus how he knows past canary rollouts actually caught
+drain issues, and he points to two real incidents where 1%-rollout
+telemetry flagged a problem before full release. That's a track
+record, not just an assertion, and it's the piece that turns Marcus's
+answer from "sounds right" into something Priya can actually stand
+behind if asked to defend the call tomorrow.
+
+## What Priya actually signs off on
+
+Priya doesn't approve the PR as-is, and she doesn't block it either —
+both would have been overreactions to what she now actually knows. She
+tells the VP: ship it behind a canary to 1% of users, watch
+battery-usage telemetry for 48 hours before a full rollout, because
+that's the specific gap Marcus identified (no automated test, real
+radio-wake-up cost) and the specific mitigation his team has used
+successfully before. The stakes and slow time-to-signal that made this
+call worth real care in the first place are exactly what the canary
+addresses — it converts a slow, expensive-to-detect failure mode into
+a fast, cheap-to-detect one, which is the actual lever available here,
+not a substitute for Priya personally understanding Android's power
+management model.
+
+**What would have changed if Marcus had turned out to be wrong — if
+the canary had shipped and battery complaints appeared anyway? Would
+that mean asking an expert instead of going deep herself was the wrong
+call, or does the framework already account for that possibility?**
+It doesn't mean the approach was wrong: borrowed judgment, sanity-checked
+and paired with a cheap, fast-to-detect mitigation, is still the better
+bet than either blind approval or three weeks of self-study Priya didn't
+have — the canary exists precisely because even a well-verified answer
+from a real expert isn't a guarantee, only a much better-informed bet
+than a coin flip. **And what would have changed if the sync-interval
+change had been trivially reversible instead — say, a client-side
+config flag flippable without a new release?** The stakes-and-reversibility
+math would have shifted enough that a canary might have been overkill;
+a quick ship-and-watch, with the flag ready to flip back within minutes,
+could have been the right-sized response instead, no expert conversation
+required at all.
+
+## Extending past this one example
+
+Priya's evening happened to be about mobile battery drain, but nothing
+about the sequence — read the stakes, decide breadth or depth, find the
+real owner, ask a sharp question, sanity-check the answer, choose a
+mitigation sized to the actual risk — is specific to mobile. The same
+sequence runs identically for a staff engineer weighing in on a
+database sharding strategy they've never designed, a security control
+in a domain they don't own, or a legal or compliance question routed
+to them because no one else was available. What changes each time is
+only which factor dominates and who the real expert turns out to be —
+the mechanism for finding out stays the same.
