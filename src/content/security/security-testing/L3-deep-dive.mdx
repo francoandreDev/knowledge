@@ -1,0 +1,363 @@
+---
+title: "L3 — How do we find our own vulnerabilities before attackers do? (security testing: SAST/DAST, pentesting basics)"
+---
+
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 placed each technique on a timeline and named what it catches and
+misses. L3 builds small, real, runnable versions of the automated
+layers — a SAST-style scanner, a fuzz harness, a DAST-style prober —
+wires them into a CI gate, then walks through what the pentest stage L2
+put at the far right actually looks like as a real engagement.
+
+<LevelIntro
+  items={[
+    "A working SAST pattern matcher, and the exact false positive/negative it trades off",
+    "A fuzz harness and a DAST-style header/error prober, both runnable end to end",
+    "What a real pentest engagement contains: scope, rules of engagement, severity, remediation SLAs",
+  ]}
+/>
+
+## A small, real SAST scanner
+
+SAST tools like Semgrep are, underneath a lot of tooling, doing
+something you can build a working miniature of in under sixty lines:
+walk source text, match known-dangerous shapes, report the line. Here's
+a scanner that would have caught Aegis's near-miss and Vantage's actual
+breach — string-concatenated SQL — plus `eval()` on unsanitized input:
+
+```js
+// sast-scanner.js — a minimal static pattern matcher
+const RULES = [
+  {
+    id: "sql-string-concat",
+    severity: "high",
+    // Matches: `"SELECT ... " + something` or `query + userInput`
+    pattern:
+      /(['"]\s*(SELECT|INSERT|UPDATE|DELETE)\b[^'"]*['"]\s*\+|\+\s*['"]\s*(SELECT|INSERT|UPDATE|DELETE)\b)/i,
+    message:
+      "Possible SQL built by string concatenation — use a parameterized query instead.",
+  },
+  {
+    id: "eval-usage",
+    severity: "critical",
+    pattern: /\beval\s*\(/,
+    message: "eval() executes its argument as code — avoid it entirely.",
+  },
+  {
+    id: "hardcoded-secret",
+    severity: "high",
+    pattern: /(api[_-]?key|secret|password)\s*=\s*['"][A-Za-z0-9_\-]{8,}['"]/i,
+    message:
+      "Looks like a hardcoded credential — load it from the environment instead.",
+  },
+];
+
+function scanSource(filename, source) {
+  const findings = [];
+  const lines = source.split("\n");
+  lines.forEach((line, idx) => {
+    for (const rule of RULES) {
+      if (rule.pattern.test(line)) {
+        findings.push({
+          file: filename,
+          line: idx + 1,
+          ruleId: rule.id,
+          severity: rule.severity,
+          message: rule.message,
+          snippet: line.trim(),
+        });
+      }
+    }
+  });
+  return findings;
+}
+
+module.exports = { scanSource, RULES };
+```
+
+### Running it against Aegis's actual pull request
+
+```js
+const { scanSource } = require("./sast-scanner");
+
+const prDiff = `
+function searchOrders(customerName) {
+  const query = "SELECT * FROM orders WHERE customer = '" + customerName + "'";
+  return db.raw(query);
+}
+`;
+
+const findings = scanSource("orders.js", prDiff);
+console.log(findings);
+// [{
+//   file: "orders.js", line: 3, ruleId: "sql-string-concat",
+//   severity: "high",
+//   message: "Possible SQL built by string concatenation — use a parameterized query instead.",
+//   snippet: "const query = \"SELECT * FROM orders WHERE customer = '\" + customerName + \"'\";"
+// }]
+```
+
+This is the exact line that blocked Aegis's PR. Vantage's identical
+line, with no scanner wired in, merged clean.
+
+### The trade-off this scanner makes, on purpose
+
+```js
+// A false positive this scanner WILL raise:
+const query = "SELECT * FROM orders WHERE status = 'shipped'"; // no concatenation at all
+// ...but a line further down in the same function:
+const filtered = results + " (filtered)"; // "+" near a capital SELECT-shaped string upstream can still trip the regex in some layouts
+
+// A false negative this scanner WILL miss:
+const clause = buildWhereClause(customerName); // concatenation hidden inside a helper function
+const query = `SELECT * FROM orders WHERE ${clause}`;
+```
+
+A regex has no idea what `buildWhereClause` does — it only sees text on
+the line it's looking at. Real SAST tools (Semgrep, CodeQL) improve on
+this by parsing an actual syntax tree and tracing _data flow_ — following
+`customerName` across function boundaries to see whether it eventually
+reaches a query unsanitized — but the underlying limitation never fully
+disappears: a pattern matcher, however sophisticated, still recognizes
+_shapes_, not _intent_.
+
+<Checkpoint question="The scanner above would flag `const q = 'SELECT * FROM orders WHERE id = ' + orderId;` even if `orderId` is always an internally-generated integer that can never contain attacker input. Is that a bug in the scanner?">
+
+Not a bug — a false positive, and an expected one. The scanner can't
+see where `orderId` comes from; it only sees the concatenation shape,
+which is _usually_ dangerous. This is the SAST row of L2's table in
+practice: high recall (it won't miss the pattern) at the cost of
+precision (it will also flag safe uses of the same pattern). Teams tune
+this with an inline suppression comment reviewed at PR time, not by
+weakening the rule — weakening it to avoid this false positive would
+also let Vantage's real bug through.
+
+</Checkpoint>
+
+## A fuzz harness for a parser
+
+Fuzzing doesn't look for known-bad shapes — it looks for volume of
+weird input causing a crash. Here's a harness fuzzing a small function
+that parses a `key=value&key2=value2` query string, the kind of
+hand-rolled parser that ends up in more codebases than anyone expects:
+
+```js
+// fuzz-query-parser.js
+function parseQueryString(input) {
+  const result = {};
+  for (const pair of input.split("&")) {
+    const [key, value] = pair.split("=");
+    result[key.trim()] = decodeURIComponent(value.trim());
+  }
+  return result;
+}
+
+function randomFuzzInput() {
+  const chars = "=&%\0\n\t\uD800abc123 ";
+  const length = Math.floor(Math.random() * 40);
+  let out = "";
+  for (let i = 0; i < length; i++) {
+    out += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return out;
+}
+
+function fuzz(fn, iterations = 5000) {
+  const crashes = [];
+  for (let i = 0; i < iterations; i++) {
+    const input = randomFuzzInput();
+    try {
+      fn(input);
+    } catch (err) {
+      crashes.push({ input, error: err.message });
+    }
+  }
+  return crashes;
+}
+
+const crashes = fuzz(parseQueryString);
+console.log(`${crashes.length} crashing inputs found out of 5000`);
+console.log(crashes.slice(0, 3));
+// e.g. { input: "abc", error: "Cannot read properties of undefined (reading 'trim')" }
+//   — a pair with no "=" makes value undefined; .trim() on it throws
+```
+
+No human writing test cases by hand thinks to try `"abc"` with no `=`
+at all, or a lone `%` (an incomplete percent-escape that makes
+`decodeURIComponent` throw `URIError`). A fuzzer finds both in the
+first few hundred iterations because it isn't reasoning about what a
+"normal" query string looks like — it's just trying everything, fast.
+The fix (`value?.trim() ?? ""`, and a `try/catch` around
+`decodeURIComponent`) is trivial once you know where to look; finding
+where to look is the entire value fuzzing adds.
+
+## A DAST-style prober
+
+DAST tools attack a _running_ app. A real one drives a browser and
+tries hundreds of payloads; a minimal one still catches real, common
+misconfigurations by just inspecting responses:
+
+```js
+// dast-prober.js — checks a running server for common misconfigurations
+async function probeEndpoint(baseUrl, path) {
+  const res = await fetch(baseUrl + path);
+  const body = await res.text();
+  const findings = [];
+
+  const REQUIRED_HEADERS = [
+    "x-content-type-options",
+    "x-frame-options",
+    "strict-transport-security",
+  ];
+  for (const header of REQUIRED_HEADERS) {
+    if (!res.headers.get(header)) {
+      findings.push({
+        path,
+        severity: "medium",
+        issue: `Missing security header: ${header}`,
+      });
+    }
+  }
+
+  if (res.status >= 500 && /at\s+\S+\s+\(.*:\d+:\d+\)/.test(body)) {
+    findings.push({
+      path,
+      severity: "high",
+      issue: "Server error response leaks a stack trace",
+    });
+  }
+
+  return findings;
+}
+
+async function probeAll(baseUrl, paths) {
+  const all = [];
+  for (const path of paths) {
+    all.push(...(await probeEndpoint(baseUrl, path)));
+  }
+  return all;
+}
+
+// probeAll("https://staging.example.com", ["/", "/api/orders", "/api/orders/nonexistent"])
+//   .then(findings => console.table(findings));
+```
+
+This is deliberately shallow compared to a real tool like OWASP ZAP
+(which also injects payloads into every parameter it finds and
+crawls the app to discover paths on its own) — but the shape is
+identical: send real requests, inspect real responses, flag what
+doesn't match a security baseline. It only runs against something
+already deployed, which is exactly why it sits at the staging stage
+in L2's pipeline, not the commit stage.
+
+## Wiring SAST and SCA into a PR gate
+
+The scanner earlier is useless sitting in a file nobody runs. Here's
+it wired into CI as an actual merge gate, alongside a dependency check,
+both failing the build above a severity threshold:
+
+```yaml
+# .github/workflows/security-gate.yml
+name: Security gate
+on: [pull_request]
+
+jobs:
+  sast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run SAST scan
+        run: node scripts/sast-scanner.js --fail-on=high
+        # exits non-zero if any "high" or "critical" finding exists,
+        # which fails this job and blocks the merge
+
+  sca:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+        # npm audit itself exits non-zero above the given severity —
+        # no extra scripting needed for the gate
+
+  require-both:
+    needs: [sast, sca]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Both scans passed — safe to merge"
+```
+
+The threshold (`--fail-on=high`) is a deliberate choice, not a default:
+gate on everything (including "low") and every PR drowns in noise
+until people start ignoring the bot entirely; gate on nothing and the
+scanner becomes decoration. "High and above blocks, medium and below
+gets filed as a ticket" is the version most teams converge on in
+practice.
+
+## What a real pentest engagement actually contains
+
+Everything above runs without asking anyone's permission — it's your
+own CI, your own staging. A pentest is different: a person outside
+(or a dedicated internal team) is given explicit, time-boxed permission
+to attack a real system, and that permission has to be defined
+precisely before anyone touches anything.
+
+| Phase                   | What it actually specifies                                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| **Scope**               | Exactly which systems/domains are in bounds (e.g. `staging.example.com`, not the corporate VPN)                    |
+| **Rules of engagement** | What's allowed: may they attempt denial-of-service? Social-engineer employees? Test in production or only staging? |
+| **Timeline**            | Start/end dates, and an emergency contact if something breaks unexpectedly mid-test                                |
+| **Severity rating**     | Each finding scored (commonly CVSS) so "critical" means the same thing across every report                         |
+| **Remediation SLA**     | How fast each severity must be fixed once reported — e.g. critical: 7 days, high: 30, medium: 90                   |
+| **Retest**              | The tester verifies each fix actually closes the finding, not just that a ticket was marked done                   |
+
+This is exactly the engagement that found Aegis's negative-quantity
+refund bug: in scope (`checkout-service-aegis`, staging), rules of
+engagement allowed business-logic abuse (not just injection payloads),
+and the finding came back rated critical (real financial loss) with a
+7-day remediation SLA — closed and retested before the report was
+even finalized.
+
+<Checkpoint question="A pentest report rates the negative-quantity refund bug as 'critical' with a 7-day fix SLA, while a missing `x-frame-options` header from the DAST prober above is rated 'medium' with a 90-day SLA. Both are real findings — why the different urgency?">
+
+Severity tracks _actual impact and exploitability_, not "which stage
+found it." The refund bug lets anyone with a browser directly extract
+money, with no special access or complex chaining required — that's
+concretely severe and cheap to exploit right now. A missing
+`x-frame-options` header enables clickjacking, which requires a victim
+to be tricked into visiting an attacker's page and clicking through a
+disguised UI — real, but higher effort, narrower blast radius, and
+several extra conditions have to line up. The stage that found a bug
+(fast automated scan vs. slow human engagement) says nothing about how
+bad the bug itself is — that's why every finding, regardless of
+source, gets scored on the same severity scale before an SLA is
+attached.
+
+</Checkpoint>
+
+## Bug bounty: continuous, not periodic
+
+L2's diagram put bug bounty at the far right, running continuously
+rather than on a schedule. The idea: instead of paying for a fixed
+block of a pentester's time a few times a year, a company publishes a
+standing scope and a reward table, and any outside researcher who finds
+and responsibly reports a real vulnerability gets paid for it — anytime,
+indefinitely. It doesn't replace scheduled pentesting (a bounty program
+has no obligation to look at any specific part of the system, so
+coverage is opportunistic, not guaranteed) but it adds a second,
+always-on incentive for someone to find a bug before an attacker with
+worse intentions does. Together with everything else in this unit, that's
+the actual answer to L1's question — not one tool, but automated checks
+running on every commit, deeper scans on every deploy, and paid human
+attention running on top of both, continuously and periodically at once.
+
+**One more question worth sitting with**: every example in this unit
+found a bug that already existed. What would it take to build a
+version of the SAST scanner above that also catches a category of bug
+_this unit never showed you_ — say, a hardcoded internal IP address, or
+a `TODO: remove before prod` comment left in shipped code? The pattern
+for adding a rule is already right there in `RULES` — the harder
+question is what regex would catch real instances of that new category
+without drowning the team in false positives on the first run.

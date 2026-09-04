@@ -1,0 +1,140 @@
+---
+title: "L1 — How do we find our own vulnerabilities before attackers do? (security testing: SAST/DAST, pentesting basics)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+
+<Scenario label="Same bug, same week — one team's pipeline caught it in 90 seconds, the other's customers found out on the news">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5">
+        <span>🅰️</span> <strong>Team Aegis</strong> — SAST scans every pull
+        request, blocks merge on high-severity findings
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span>🅱️</span> <strong>Team Vantage</strong> — same feature, same
+        bug, no scanner in the pipeline
+      </div>
+    </div>
+    <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div class="rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950">
+        <p class="font-semibold text-emerald-600 dark:text-emerald-400">
+          Team Aegis
+        </p>
+        PR blocked, string-built SQL query flagged, fixed in 10 minutes,
+        never reached staging
+      </div>
+      <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
+        <p class="font-semibold text-rose-600 dark:text-rose-400">
+          Team Vantage
+        </p>
+        Identical bug shipped to production, exploited 19 days later
+      </div>
+    </div>
+    <div class="not-prose mt-3 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs dark:border-amber-800 dark:bg-amber-950">
+      <p class="font-semibold text-amber-600 dark:text-amber-400">
+        Six months later
+      </p>
+      Team Aegis — clean SAST, clean DAST, still breached: a manual pentest
+      found customers could set a negative order quantity and get{" "}
+      <em>paid</em> at checkout — no scanner flags "logic," only "patterns"
+    </div>
+  </Fragment>
+
+Two teams, `checkout-service-aegis` and `checkout-service-vantage`, both
+add a search endpoint the same week that builds a SQL query by gluing
+strings together instead of using parameters — a textbook SQL injection
+waiting to happen. Aegis's pull request never merges: their pipeline's
+static scanner flags the exact line, the developer swaps in a
+parameterized query, and the fix ships in the same PR. Vantage has no
+such scanner — the identical bug merges clean, reaches production, and
+19 days later an attacker uses it to dump the customer table.
+
+Six months after that, Aegis gets breached anyway — not through code a
+scanner could have flagged, but because nothing ever tested "what if a
+customer sets quantity to −5 and the total goes negative, refunding
+them at checkout." **If Aegis had already turned on every automated
+scanner there is, why did they still need someone to try to break the
+product on purpose?**
+
+</Scenario>
+
+A pattern-matching tool can only flag what it has a pattern for —
+string-built SQL is a known shape; "the business logic allows a
+negative number where only positive ones make sense" isn't a pattern
+at all, it's a judgment call about what the system was supposed to
+allow. That gap between "no tool flagged it" and "it's safe" is this
+unit's entire subject.
+
+<LevelIntro
+  items={[
+    "The four automated testing types: SAST, DAST, SCA, fuzzing",
+    "What each catches, what each structurally cannot catch",
+    "Where a real pentest and bug bounty fit in, and why they're still needed",
+  ]}
+/>
+
+## The shape of the problem
+
+- `security-mindset` (a sibling unit) is the posture — asking "how would
+  I break this" before writing code. `owasp-top-10` is the catalog — the
+  named categories of thing that tend to go wrong. **This unit is the
+  practice that actually goes looking**: the tools and processes that
+  scan, attack, and probe a real system to find instances of those
+  categories before someone outside the company does.
+- No single technique covers everything. Automated scanners are fast,
+  cheap, and run on every commit — but they can only recognize shapes
+  they were built to recognize. A skilled human trying to break the
+  product on purpose is slow and expensive — but can reason about intent
+  in a way no pattern-matcher can.
+- The practical answer isn't "pick one" — it's layering cheap automated
+  checks early (so obvious bugs never reach a human) with expensive
+  human judgment periodically (so the bugs no tool could see still get
+  found by someone on your side, not an attacker).
+
+## Key terms
+
+| Term               | Plain meaning                                                                                           |
+| ------------------ | ------------------------------------------------------------------------------------------------------- |
+| **SAST**           | Static Application Security Testing — scans source code for known-bad patterns without running it       |
+| **DAST**           | Dynamic Application Security Testing — attacks a _running_ instance of the app from the outside         |
+| **SCA**            | Software Composition Analysis — scans your dependencies for versions with publicly known flaws          |
+| **Fuzzing**        | Feeding a function or endpoint huge volumes of malformed/random input, watching for crashes             |
+| **Pentest**        | A time-boxed engagement where a human deliberately tries to break a specific system, under agreed rules |
+| **Bug bounty**     | An open, ongoing invitation for outside researchers to report real vulnerabilities for a reward         |
+| **False positive** | A tool flags something that isn't actually a problem                                                    |
+| **False negative** | A tool stays silent about something that _is_ a real problem                                            |
+
+## What each one is actually looking at
+
+- **SAST** reads source code the way a very fast, very literal reviewer
+  would — looking for shapes like `eval(userInput)` or a SQL string built
+  with `+` instead of a parameter placeholder. It never runs the app, so
+  it can flag a dangerous pattern the instant it's typed, before a build
+  even happens.
+- **DAST** doesn't read code at all — it sends real requests at a running
+  app (staging, usually) the way an outside attacker would: malformed
+  input in every field, checking response headers, probing for
+  information leaks in error messages. It finds what SAST can't (runtime
+  configuration, how components interact) but only after something is
+  deployed somewhere.
+- **SCA** doesn't look at your code either — it looks at the list of
+  open-source packages your code depends on and checks each version
+  against public vulnerability databases. (The deeper trust-chain
+  problem behind a "clean" dependency is `supply-chain-security`'s
+  territory; SCA here is the specific automated scan step.)
+- **Fuzzing** throws volume at the problem: thousands of malformed,
+  oversized, or unexpected inputs at one function or endpoint,
+  automatically, looking for crashes or hangs a human tester would never
+  think to try by hand.
+- **Manual pentesting** is a person (or small team) given explicit
+  permission and a defined scope, trying to break the system the way a
+  real attacker would — including business-logic abuse no automated tool
+  has a pattern for, like Aegis's negative-quantity refund.
+
+The rest of this unit builds the pipeline these five things actually sit
+in — L2 covers _where_ each one runs and what it trades off against the
+others; L3 builds a small working version of a SAST scanner, a fuzz
+harness, and a DAST-style prober, then walks through what a real pentest
+engagement looks like end to end.
