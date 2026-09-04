@@ -1,0 +1,116 @@
+---
+title: "L1 — How do I test properties instead of examples? (property-based testing, generative testing)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+
+<Scenario label="6 passing examples, 1 real bug nobody picked as an input">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div>
+        <div class="mb-1 flex items-center justify-between">
+          <span>Hand-picked example tests</span><span class="font-semibold">6</span>
+        </div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+          <div class="h-full rounded-full bg-sky-500 animate-fill-bar" style="--target-width: 2%"></div>
+        </div>
+      </div>
+      <div>
+        <div class="mb-1 flex items-center justify-between">
+          <span>Random cases tried before a failure appeared</span><span class="font-semibold">340</span>
+        </div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+          <div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 100%"></div>
+        </div>
+      </div>
+      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>The bug</strong> — encoding an empty array returned a string that decoded back to <code>undefined</code>, not <code>[]</code></div>
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>The 6 examples</strong> — none of them happened to include an empty array</div>
+    </div>
+  </Fragment>
+
+A small library ships `encode(value)` / `decode(string)` functions for
+saving app state to `localStorage`. Six unit tests cover it: a number, a
+string, a nested object, a boolean, `null`, and an array of three items.
+All six pass. The team ships it.
+
+| Test input                 | `decode(encode(x))` equals `x`? |
+| -------------------------- | ------------------------------- |
+| `42`                       | ✅                              |
+| `"hello"`                  | ✅                              |
+| `{ name: "Ana", age: 30 }` | ✅                              |
+| `true`                     | ✅                              |
+| `null`                     | ✅                              |
+| `[1, 2, 3]`                | ✅                              |
+
+A week later, someone adds one more check: instead of picking examples by
+hand, generate 500 random values — arrays, objects, numbers, nested
+combinations — and check the same rule for every single one:
+`decode(encode(x))` should always equal `x`. **It fails on attempt 340: an
+empty array (`[]`) round-trips to `undefined`.**
+
+**All six hand-picked examples passed. Why did it take a machine
+generating random junk to find a bug a careful reviewer should have
+caught?**
+
+Because none of the six people who wrote those examples happened to
+think of the empty array. Each example test checks one input the author
+already imagined. Nobody imagined this one — not because it's obscure,
+but because "the input list" a human writes by hand is always short, and
+an empty array doesn't feel like it needs its own line.
+
+</Scenario>
+
+The six examples weren't wrong — they just never happened to touch the
+one input where the bug actually lived. That's not a fluke; it's a
+structural limit of picking test inputs by hand.
+
+<LevelIntro
+  items={[
+    "The difference between an example and a property",
+    "Why generated random inputs find bugs hand-picked ones miss",
+    "What 'shrinking' does once a failure is found",
+  ]}
+/>
+
+## The shape of the problem
+
+- **Example-based testing** (every unit covered so far in this track —
+  `case-automated-testing`, `assertions-matter`, `tdd-basics`, `bdd`)
+  picks specific inputs and specific expected outputs by hand: "given
+  `42`, expect `42`." Each test is only as good as the inputs someone
+  thought to write.
+- **Property-based testing** flips the question. Instead of "given this
+  input, expect this output," you state a rule that should hold for
+  _every_ valid input — a **property** — and a tool generates hundreds of
+  inputs automatically to try to break it.
+- Here, the property is simple to say and easy to miss testing by hand:
+  **"for any value `x`, `decode(encode(x))` equals `x`."** No human has
+  to imagine every shape `x` could take — the generator's job is to try
+  as many shapes as it can, including the ones nobody thought to write.
+- When a generated input breaks the property, the tool doesn't just hand
+  you the raw failing case (which might be a deeply nested, 40-item
+  random object) — it **shrinks** it down to the smallest input that
+  still fails, so the bug report reads "fails on `[]`," not "fails on
+  this unreadable blob."
+- This isn't a replacement for `mutation-testing` (which checks whether
+  your _existing_ tests would catch a known kind of bug) or for example
+  tests generally — it's a different way of _generating_ the test inputs
+  in the first place, useful anywhere a real invariant exists to check.
+
+## Key terms
+
+- **Property** — a rule that should hold true for an entire class of
+  inputs, not just one ("encoding then decoding returns the original
+  value"), as opposed to an example's single input → single output.
+- **Generator** — code that produces random (and edge-case-biased) test
+  inputs of a given type — numbers, strings, arrays, custom objects.
+- **Falsify** — to find an input for which the property does not hold;
+  the generator's whole job is trying to falsify the property.
+- **Counterexample** — a specific input that broke the property.
+- **Shrinking** — automatically simplifying a failing input down to the
+  smallest, simplest version that still reproduces the failure.
+- **Round-trip property** — a property of the form "doing A then undoing
+  A returns the original value" (encode/decode, serialize/parse,
+  compress/decompress) — one of the most common and easiest property
+  patterns to write, covered in depth in L2.
