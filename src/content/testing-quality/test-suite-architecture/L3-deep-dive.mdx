@@ -1,0 +1,412 @@
+---
+title: "L3 — A shared counter that flakes under parallel execution, the isolated fix, and a real quarantine mechanism"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="Green for two years, serially. Red within minutes of turning on parallelism.">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🧩</span> <strong>Under test</strong> — a rate-limit counter shared by tests via one module-level object</div>
+      <div class="flex items-center gap-1.5"><span>🕳️</span> <strong>The bug</strong> — every test reads/writes the same in-memory counter; fine serially, wrong concurrently</div>
+      <div class="flex items-center gap-1.5"><span>🧪</span> <strong>Reproduced</strong> — simulated concurrent execution via `Promise.all`, deterministically, no real timers</div>
+      <div class="flex items-center gap-1.5"><span>🔧</span> <strong>The fix</strong> — per-test isolated fixture, plus a quarantine mechanism for the one test that stays genuinely flaky</div>
+    </div>
+  </Fragment>
+
+L2 named the hazard (shared mutable state) and the fix (isolation) in
+the abstract. This level builds one real example of each, plus the
+quarantine mechanism from L2's last section as actual code — a
+tagging convention, a routing check, and a ticket format — instead of
+just a description of what quarantine should look like. **If a test
+suite has run green for two years serially, and starts failing the
+moment it's parallelized, is the failing test newly broken, or was it
+always broken and just never exposed?** This level answers that with
+a reproducible example, not just an assertion.
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "A shared-counter bug that only breaks under simulated parallel execution",
+    "The isolated-fixture fix, verified against the same simulation",
+    "A quarantine tag, a routing check, and a ticket — the mechanism, not just the idea",
+  ]}
+/>
+
+## The suite as originally written
+
+A small rate-limiter module tracks how many requests a client has made
+in the current window, and a handful of tests exercise it:
+
+```js
+// rate-limiter.js
+
+function createLimiter(maxRequests) {
+  let count = 0;
+  return {
+    tryRequest() {
+      if (count >= maxRequests) return { allowed: false, count };
+      count += 1;
+      return { allowed: true, count };
+    },
+    reset() {
+      count = 0;
+    },
+  };
+}
+
+module.exports = { createLimiter };
+```
+
+`createLimiter` itself is fine — each call returns a fresh closure
+over its own `count`. The bug isn't in the module. It's in how the
+_tests_ use it:
+
+```js
+// rate-limiter.test.js (as originally written)
+
+const { createLimiter } = require("./rate-limiter");
+
+// module-level: one limiter, reused by every test in this file --
+// this is exactly L2's "shared mutable state" hazard, hiding in test
+// setup rather than in the code under test
+const sharedLimiter = createLimiter(3);
+
+function testFirstRequestAllowed() {
+  const result = sharedLimiter.tryRequest();
+  return result.allowed === true;
+}
+
+function testThirdRequestAllowed() {
+  // relies on this being exactly the 3rd call against sharedLimiter
+  sharedLimiter.tryRequest();
+  sharedLimiter.tryRequest();
+  const result = sharedLimiter.tryRequest();
+  return result.allowed === true;
+}
+
+function testFourthRequestBlocked() {
+  // relies on this being exactly the 4th call against sharedLimiter
+  sharedLimiter.tryRequest();
+  sharedLimiter.tryRequest();
+  sharedLimiter.tryRequest();
+  const result = sharedLimiter.tryRequest();
+  return result.allowed === false;
+}
+
+module.exports = {
+  sharedLimiter,
+  testFirstRequestAllowed,
+  testThirdRequestAllowed,
+  testFourthRequestBlocked,
+};
+```
+
+Run one at a time, in file order, this passes every time: each test's
+assertion depends on being exactly the _Nth_ call against
+`sharedLimiter` since the last reset, and running them serially in
+this order happens to line up. **What happens the moment two of these
+run at the same time, or in a different order?**
+
+## Reproducing the bug without real timers
+
+L2's shared-state hazard doesn't need a real multi-process test runner
+to demonstrate — interleaved async execution against one shared
+object reproduces the same failure deterministically, using
+`Promise.all` to run two calls "at once" against the same limiter:
+
+```js
+// parallel-simulation.js
+
+const { createLimiter } = require("./rate-limiter");
+
+// Simulates two tests hitting the SAME shared limiter concurrently --
+// the exact scenario a parallel test runner creates when two test
+// files/workers share a module-level fixture.
+async function runConcurrentlyAgainstSharedLimiter() {
+  const limiter = createLimiter(3);
+
+  const [a, b, c, d] = await Promise.all([
+    Promise.resolve().then(() => limiter.tryRequest()),
+    Promise.resolve().then(() => limiter.tryRequest()),
+    Promise.resolve().then(() => limiter.tryRequest()),
+    Promise.resolve().then(() => limiter.tryRequest()),
+  ]);
+
+  // Exactly 3 of the 4 calls should be allowed (maxRequests = 3) --
+  // but WHICH 3 is not guaranteed once calls interleave, because
+  // "read count, then write count" is not an atomic step here.
+  const allowedCount = [a, b, c, d].filter((r) => r.allowed).length;
+  return { results: [a, b, c, d], allowedCount };
+}
+
+// Contrast: each "test" gets its OWN limiter -- nothing shared, so
+// concurrent execution can't interleave on the same counter at all.
+async function runConcurrentlyAgainstIsolatedLimiters() {
+  const [a, b, c, d] = await Promise.all([
+    Promise.resolve().then(() => createLimiter(3).tryRequest()),
+    Promise.resolve().then(() => createLimiter(3).tryRequest()),
+    Promise.resolve().then(() => createLimiter(3).tryRequest()),
+    Promise.resolve().then(() => createLimiter(3).tryRequest()),
+  ]);
+  // Each limiter is fresh, so every call is call #1 against its own
+  // counter -- always allowed, always deterministic, run order or not.
+  const allowedCount = [a, b, c, d].filter((r) => r.allowed).length;
+  return { results: [a, b, c, d], allowedCount };
+}
+
+module.exports = {
+  runConcurrentlyAgainstSharedLimiter,
+  runConcurrentlyAgainstIsolatedLimiters,
+};
+```
+
+Running `runConcurrentlyAgainstSharedLimiter()` repeatedly produces
+`allowedCount: 3` every time (JavaScript's single-threaded event loop
+still resolves these microtasks in a fixed order here) — but the
+_specific_ result objects tied to each call site become unpredictable
+under a real multi-worker or multi-process test runner, where "read
+count, then increment count" genuinely isn't atomic across threads.
+The `rate-limiter.test.js` tests above assert on much more than
+`allowedCount === 3` — they assert that _their specific call_ was the
+3rd or 4th, which breaks the instant another test's calls interleave
+with theirs against the same shared object. `allowedCount` from
+`runConcurrentlyAgainstIsolatedLimiters()` is `3` too — but every
+result there is deterministic per test, because nothing is shared.
+
+<Checkpoint question="The shared-limiter simulation above still returns exactly 3 allowed and 1 blocked, every single run, in this environment. If the count is always right, what's actually wrong with sharing the limiter across tests?">
+
+The aggregate count being right is a coincidence of this specific,
+single-threaded simulation — not a guarantee. The real
+`rate-limiter.test.js` tests don't assert an aggregate; each one
+asserts that _its own_ call was specifically the 1st, 3rd, or 4th
+request. That assertion is only true if no other test's calls land
+between a given test's calls against the same shared limiter — a
+guarantee serial execution provides by accident (nothing else is
+running) and that a real parallel test runner does not provide at
+all. A worker running `testThirdRequestAllowed` while another worker's
+test also calls `sharedLimiter.tryRequest()` can make "the 3rd call"
+actually be someone else's request — the test's assumption about
+_which_ call it's making breaks, even if the limiter's internal count
+stays numerically sane.
+
+</Checkpoint>
+
+## The fix: an isolated fixture per test
+
+The fix isn't inside `rate-limiter.js` at all — the module was never
+broken. It's in how the tests are structured: each test needs its own
+limiter, not a shared one.
+
+```js
+// rate-limiter.test.js (fixed)
+
+const { createLimiter } = require("./rate-limiter");
+
+function testFirstRequestAllowed() {
+  const limiter = createLimiter(3); // fresh fixture, this test only
+  const result = limiter.tryRequest();
+  return result.allowed === true;
+}
+
+function testThirdRequestAllowed() {
+  const limiter = createLimiter(3); // fresh fixture, this test only
+  limiter.tryRequest();
+  limiter.tryRequest();
+  const result = limiter.tryRequest();
+  return result.allowed === true;
+}
+
+function testFourthRequestBlocked() {
+  const limiter = createLimiter(3); // fresh fixture, this test only
+  limiter.tryRequest();
+  limiter.tryRequest();
+  limiter.tryRequest();
+  const result = limiter.tryRequest();
+  return result.allowed === false;
+}
+
+module.exports = {
+  testFirstRequestAllowed,
+  testThirdRequestAllowed,
+  testFourthRequestBlocked,
+};
+```
+
+Every test now constructs its own `limiter`. Run these three (or
+three thousand others just like them) serially, in parallel across 8
+shards, or in any order at all, and each one's outcome depends only on
+calls it made itself — nothing to interleave with, because there's
+nothing shared left to interleave on. This is the concrete version of
+L2's fix pattern row: "give each test its own fresh instance/fixture;
+never share mutable module state across tests."
+
+## Quarantine, as an actual mechanism
+
+Suppose one test in this suite really is flaky for a reason that
+_isn't_ a quick fix — say, it depends on a downstream service's
+timing in a way nobody has root-caused yet. L2 named the shape
+(tagged, routed to a non-blocking track, owner + reason + revisit-by
+date). Here's that shape as code, not just policy:
+
+```js
+// quarantine.js
+
+// A test file/suite calls markQuarantined(...) to opt a specific test
+// out of the blocking run. This is deliberately a tiny, explicit
+// registry -- not a magic decorator -- so `grep`-ing for
+// "quarantined:" always finds every quarantined test in the repo.
+const quarantineRegistry = new Map();
+
+function markQuarantined(testId, { owner, reason, revisitBy }) {
+  if (!owner || !reason || !revisitBy) {
+    throw new Error(
+      `quarantine entry for "${testId}" is missing owner, reason, or revisitBy -- ` +
+        "quarantine requires all three, it is not a place tests go unattended",
+    );
+  }
+  quarantineRegistry.set(testId, { owner, reason, revisitBy });
+}
+
+function isQuarantined(testId) {
+  return quarantineRegistry.has(testId);
+}
+
+// The routing check a CI config calls: split a list of test ids into
+// the blocking set and the non-blocking (quarantined) set.
+function routeTests(testIds) {
+  const blocking = [];
+  const nonBlocking = [];
+  for (const id of testIds) {
+    (isQuarantined(id) ? nonBlocking : blocking).push(id);
+  }
+  return { blocking, nonBlocking };
+}
+
+// Surfaces quarantine entries whose revisit-by date has already
+// passed -- the mechanism that stops quarantine from being a shelf.
+// `today` is passed in explicitly so this stays pure and testable,
+// rather than reading the real clock inside the function.
+function overdueQuarantines(today) {
+  const overdue = [];
+  for (const [testId, entry] of quarantineRegistry) {
+    if (new Date(entry.revisitBy) < today) {
+      overdue.push({ testId, ...entry });
+    }
+  }
+  return overdue;
+}
+
+module.exports = {
+  markQuarantined,
+  isQuarantined,
+  routeTests,
+  overdueQuarantines,
+};
+```
+
+Using it against this unit's own suite — say the `testFourthRequestBlocked`
+test above turns out to be flaky against a real (not simulated)
+downstream timing dependency in some fuller version of this system:
+
+```js
+// quarantine-ticket.js
+
+const {
+  markQuarantined,
+  routeTests,
+  overdueQuarantines,
+} = require("./quarantine");
+
+markQuarantined("rate-limiter.testFourthRequestBlocked", {
+  owner: "team-checkout",
+  reason:
+    "Intermittent failure traced to real downstream clock skew in CI; " +
+    "root cause not yet fixed, tracked in TICKET-4821",
+  revisitBy: "2026-09-19", // two weeks out -- not indefinite
+});
+
+const allTests = [
+  "rate-limiter.testFirstRequestAllowed",
+  "rate-limiter.testThirdRequestAllowed",
+  "rate-limiter.testFourthRequestBlocked",
+];
+
+const { blocking, nonBlocking } = routeTests(allTests);
+// blocking:    ["rate-limiter.testFirstRequestAllowed", "rate-limiter.testThirdRequestAllowed"]
+// nonBlocking: ["rate-limiter.testFourthRequestBlocked"]
+
+const overdue = overdueQuarantines(new Date("2026-09-25"));
+// overdue: [{ testId: "rate-limiter.testFourthRequestBlocked", owner: "team-checkout", ... }]
+// -- past its revisitBy date, this shows up in a report a team
+// actually has to look at, instead of silently staying quarantined
+```
+
+`routeTests` is what a CI pipeline calls to decide which results can
+fail the build and which only get reported. `overdueQuarantines` is
+what turns quarantine from a one-way door into a tracked, time-boxed
+detour — a CI job (or a weekly bot report) calling it with today's
+date is what actually enforces the "revisit-by," not just the
+convention of writing one down.
+
+<Checkpoint question="Why does markQuarantined throw if owner, reason, or revisitBy is missing, instead of just quietly accepting a bare test id?">
+
+Because a quarantine entry with no owner, no reason, and no date is
+functionally identical to just deleting the test's ability to block
+anything, forever, with none of quarantine's actual point (a tracked,
+time-boxed detour) preserved. L2 is explicit that quarantine only
+works as an escape valve if those three things are attached the
+moment a test enters it — making the function refuse to create an
+entry without them turns that requirement from a convention someone
+has to remember into something the mechanism itself enforces, the
+same way a required field in a schema does.
+
+</Checkpoint>
+
+## Trade-offs: what sharding and quarantine each cost
+
+**Sharding has diminishing returns past a certain point.** Splitting
+work has real overhead — spinning up a worker, distributing test
+files to it, collecting and merging its results — and that overhead
+is roughly fixed per shard, not per test. Going from 1 shard to 4
+usually pays for itself many times over on a large suite. Going from
+20 shards to 40 often barely moves the number, because by then the
+fixed per-shard overhead is a bigger fraction of each shard's total
+time, and a suite's single slowest individual test (one 90-second
+integration test, say) puts a floor under runtime that no amount of
+extra sharding touches — you can't out-shard one slow test by giving
+it more company.
+
+**Quarantine is a temporary escape valve, not a permanent shelf.** A
+`revisitBy` date that nobody ever enforces is indistinguishable from
+no date at all — the whole mechanism above exists because a
+convention alone ("we'll circle back") reliably doesn't happen without
+something surfacing it. A suite where quarantine only grows, never
+shrinks, has quietly built a second suite nobody trusts, running
+alongside the one that does — exactly the trust-erosion problem from
+L1's `Scenario`, just moved one level down instead of solved.
+
+**Sharding requires the isolation this level just built, not the
+other way around.** Parallelizing a suite full of tests like the
+_original_ `rate-limiter.test.js` — sharing state across workers —
+doesn't just fail to speed things up; it turns a bug that was latent
+and invisible for two years into one that fails unpredictably on
+every run, often in a _different_ test each time depending on which
+shard happens to land which test. Sharding a shared-state suite makes
+the flakiness worse, faster, and harder to diagnose (it now looks like
+a different test is broken each time) than leaving it serial ever did.
+
+**Two directions to extend this yourself.** First: two _different_
+quarantined tests turn out, on investigation, to share the same real
+root cause (say, both depend on the same flaky downstream clock-skew
+issue from the ticket above) — does `quarantine.js` as written give a
+team any way to see that connection, or would every entry need to be
+read individually to notice the pattern? What would you add to
+`markQuarantined`'s shape to make that discoverable without reading
+every ticket by hand? Second: this suite scales from 4 shards to 40 as
+the codebase keeps growing — at what point does the trade-off in the
+first paragraph above actually start to bite, and what would you
+measure to know you'd crossed it, rather than guessing?
