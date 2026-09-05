@@ -1,0 +1,245 @@
+---
+title: "L3 — One staff engineer, one team, six weeks: the change, the pushback, and the negotiated fix"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="Week 1: propose a blocking gate. Week 3: an engineer pushes back, hard.">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🧑‍💻</span> <strong>Protagonist</strong> — a staff engineer on L1's team, no authority over other engineers</div>
+      <div class="flex items-center gap-1.5"><span>📉</span> <strong>Starting point</strong> — 3% → 15% defect rate the two weeks QA was out (from L1)</div>
+      <div class="flex items-center gap-1.5"><span>⚔️</span> <strong>The pushback</strong> — a senior engineer argues the new blocking gate will slow the team down before a deadline</div>
+      <div class="flex items-center gap-1.5"><span>🤝</span> <strong>The resolution</strong> — negotiated, not overridden: a real exception path, not a blanket rule</div>
+    </div>
+  </Fragment>
+
+L2 named the levers in the abstract. This level follows one of them
+being pulled, on the real team from L1, over six real weeks —
+including the part a clean, resistance-free story always skips: a
+credible objection from someone who isn't wrong to be worried, and how
+it actually gets resolved instead of overridden.
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "The testing strategy table and the CI config that made it real",
+    "A genuine pushback moment and how it got negotiated, not steamrolled",
+    "What incident-review discipline changed six weeks later",
+  ]}
+/>
+
+## Week 1 — naming the problem out loud
+
+Priya, a staff engineer on the team from L1, doesn't have authority to
+tell anyone how to write tests. What she has is the defect-rate data
+from QA's two weeks of leave, and a standing invitation to bring
+proposals to the team's biweekly tech-standards meeting. She brings
+one artifact, not an opinion: the testing strategy table from L2,
+filled in with what the team's _current, undecided_ practice actually
+was next to what she's proposing.
+
+| Layer                        | Current practice (undecided, accidental)                       | Proposed (decided, visible)                                              |
+| ---------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Unit tests                   | "Whatever the PR author felt like," not reviewed for coverage  | Required for new logic in the PR; reviewer checks for it, not just style |
+| Integration / contract tests | None — two services had silently drifted apart twice this year | Required at service boundaries; see `contract-testing`                   |
+| End-to-end tests             | A handful, unmaintained, nobody sure which still pass          | A small, curated, owned set — quality over count                         |
+| Manual QA pass               | The _only_ real gate before release                            | A complement: exploratory judgment on top of an automated floor          |
+
+**Why present the current state next to the proposal, instead of just
+the proposal on its own?** Because "you're doing it wrong" invites
+defensiveness, while "here's what we're actually doing, which nobody
+chose" invites the team to recognize their own accidental system —
+the same table also makes clear this isn't about QA being
+insufficient; it's about QA having been asked to be the _only_ net,
+which was never a fair ask of one person.
+
+The team agrees, in principle, that the accidental version is
+indefensible once it's written down this plainly. Agreement in a
+meeting is cheap, though. **What turns this into something that's
+actually true of the system, rather than a shared feeling that fades
+by Friday?**
+
+## Week 2 — making the gate mechanical, not aspirational
+
+Priya doesn't ask engineers to "try to write more tests." She changes
+what merging a pull request requires — the mechanism from L2's first
+lever, made real:
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run test:unit -- --coverage
+      - run: npm run test:contract
+      # A failing suite fails this job, and the branch protection rule
+      # below means a failing job blocks the merge button entirely --
+      # not a norm anyone has to remember, a constraint nobody can skip.
+
+  block-on-red:
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if [ "${{ needs.test.result }}" != "success" ]; then
+            echo "Tests failed or were skipped -- this PR cannot merge."
+            exit 1
+          fi
+```
+
+Paired with a GitHub branch protection rule requiring the `test` job
+to pass before the merge button is even clickable. This is the concrete
+version of L2's first lever: nobody has to remind anyone to write
+tests, because a PR without them (or with ones that don't pass) simply
+can't land. The mechanism doesn't care whether the author agrees with
+the philosophy yet.
+
+<Checkpoint question="Priya could have just asked engineers, in the same meeting, to 'please write more tests going forward.' Why does making the CI job actually block the merge button do something that request can't?">
+
+A verbal request depends on everyone remembering it, every time, under
+whatever deadline pressure they're under that week — and the first
+time someone skips it without consequence, the request quietly becomes
+optional for everyone who notices. A blocking CI job doesn't depend on
+memory or goodwill: the merge button is unavailable until the job
+passes, for every PR, including Priya's own. It converts a norm that
+has to be actively maintained by social pressure into a mechanical
+constraint that holds by default — which is exactly L2's point about
+incentives beating instructions.
+
+</Checkpoint>
+
+## Week 3 — the pushback
+
+Two weeks in, a senior engineer on the team, Marcus, raises a real
+objection in the same standards meeting — not a complaint about
+principle, a concrete, defensible one: the team has a hard external
+deadline in three weeks, and the new contract-test requirement is
+adding real time to PRs for a payments-integration feature he's
+leading, because the contract tests for that particular service
+weren't written yet and now block every PR touching it.
+
+**"I'm not against this. I'm against it landing on my team's hardest
+deadline with no ramp-up."** Marcus isn't wrong. Requiring tests that
+don't exist yet, at the exact moment a team is under the most delivery
+pressure, is a real cost — and dismissing that as "just resistance to
+change" would be both untrue and exactly the kind of steamrolling that
+makes the _next_ proposal harder to land, from Priya or anyone else.
+
+**What does a staff engineer do with an objection that's actually
+correct, from someone who isn't wrong to raise it?**
+
+Not override it, and not withdraw the change either — negotiate the
+actual disagreement, which turns out to be narrower than it first
+sounds: Marcus isn't objecting to the testing strategy, he's objecting
+to zero ramp-up on one service, under one deadline. The resolution,
+worked out together over one follow-up conversation:
+
+- The payments-integration service gets a **two-week exception**,
+  tracked with an owner and a date — the exact same discipline
+  `test-suite-architecture`'s quarantine mechanism uses for flaky
+  tests, applied here to a _missing_ contract test instead of a broken
+  one: not "skip it forever," a tracked, time-boxed gap with a name on
+  it.
+- Priya pairs with one engineer on Marcus's team for half a day to
+  write the first contract test as a template, so the rest aren't
+  written from scratch under deadline pressure.
+- The exception is written down in the same testing strategy document,
+  not handled quietly over Slack — so it's visible to the whole team,
+  not a special favor nobody else knows about.
+
+This is the difference between a staff engineer's actual leverage and
+a manager's formal authority: Priya can't order the deadline moved or
+order Marcus to accept the gate as-is, but she can make the gate's
+_terms_ negotiable in a way that preserves the mechanism (nothing
+merges without a passing gate, still true) while addressing the real,
+specific cost (this one service, this one deadline, this one ramp-up
+gap). A rule with zero exceptions invites people to quietly route
+around it; a rule with a visible, tracked exception process stays
+credible precisely because it bends without breaking.
+
+## Week 6 — the first real regression, treated as an incident
+
+Five weeks after the gate goes live, a bug reaches production anyway —
+a null-handling edge case in a code path the unit tests didn't cover,
+because nobody had written a test for that specific branch. Under the
+old system, this would have been a quiet Slack message and a same-day
+fix, exactly the kind of thing that used to get absorbed silently.
+
+Priya proposes treating it as a real, short incident review — the
+same discipline `incident-response` describes for outages, scaled to
+its size: a 30-minute retro, not a two-hour post-mortem, asking one
+specific question: **what about the testing strategy let this
+through, and does the table from week 1 need to change?** The answer
+turns out to be concrete: the strategy table didn't say anything about
+null/edge-case branches specifically, so the team adds one row —
+"boundary and null-handling paths" as an explicit category unit tests
+are expected to cover, reviewed the same way any other row is.
+
+**Why does this matter more than just fixing the one bug?** Because
+skipping the retro — quietly fixing it and moving on — would have sent
+exactly the signal L1 opened with: that a testing gap gets absorbed
+without consequence. Treating it as worth thirty minutes of the team's
+attention is what keeps the gate meaning something six months from
+now, not just in the first excited weeks after it launched.
+
+<Checkpoint question="The team could have responded to the week-6 regression by quietly patching the bug and saying nothing further. What would that choice have actually taught the team, even without anyone saying it out loud?">
+
+That a testing gap, once past the gate, doesn't really cost anything —
+which is precisely the lesson L1's Scenario showed was already true
+before any of this started, just relocated instead of removed. The
+gate stops obviously-thin PRs from merging, but a gap that gets through
+anyway and then gets absorbed silently teaches the same lesson QA's
+absence taught in L1: that catching this kind of thing is somebody
+else's problem, or nobody's. A short, real retro is what keeps "the
+gate matters" true in practice, not just in the week it launched.
+
+</Checkpoint>
+
+## What this six weeks actually changed
+
+Nothing here required Priya to have authority over Marcus, over the
+payments team, or over anyone's performance review. What changed was
+the system everyone operates inside: a blocking gate that doesn't
+depend on memory, a visible strategy document that makes "who owns
+this layer" answerable instead of assumed, a negotiated exception
+process that kept the gate credible under real deadline pressure
+instead of either ignoring the pressure or caving to it, and a retro
+habit that keeps a rare regression from quietly teaching the team the
+gate doesn't matter. Six months later, the team's defect rate no
+longer moves noticeably whether or not any single person is on leave —
+not because everyone became more careful by willpower, but because the
+system stopped depending on any one person's carefulness in the first
+place.
+
+**Two ways to extend this beyond the scenario shown.** First: this
+was one team of roughly eight engineers, with a staff engineer who had
+a standing seat at the tech-standards meeting. What actually changes
+about this approach at a 200-person org, where "the team" isn't one
+group in one room — does a blocking CI gate still work the same way
+across dozens of independently-deploying services, or does the
+strategy-table step need to happen at a different level entirely?
+Second: Marcus's pushback came from an IC with a legitimate, narrow
+technical objection, and it got resolved through negotiation. What
+would change about the resolution if the same objection — "this will
+slow us down before the deadline" — had come from a director instead,
+with the authority to simply mandate an exception rather than discuss
+one? Does the same tracked, time-boxed exception process still hold up,
+or does it need a different kind of visibility to survive contact with
+that much more authority on one side of the table?

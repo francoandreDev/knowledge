@@ -237,21 +237,21 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 
 ## testing-quality/
 
-| #   | Slug                    | Problem                                                                                                                                               | Tags                                    | Status  |
-| --- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ------- |
-| 01  | case-automated-testing  | Why doesn't "it passed my manual check" mean it works? (the case for automated testing)                                                               | testing, mental-models                  | done    |
-| 02  | test-pyramid            | How do I know what level to test something at? (the test pyramid: unit vs. integration vs. e2e)                                                       | testing, architecture                   | done    |
-| 03  | assertions-matter       | How do I write a test that actually catches bugs, not just exercises code? (assertions that matter, avoiding tautological tests)                      | testing, code-quality, debugging        | done    |
-| 04  | tdd-basics              | Why does writing the test first change the design? (TDD basics, red-green-refactor)                                                                   | testing, design-patterns, code-quality  | done    |
-| 05  | bdd                     | How do I test behavior instead of implementation? (BDD, testing through the public interface)                                                         | testing, design-patterns                | done    |
-| 06  | test-doubles            | How do I test something that depends on time, randomness, or external services? (test doubles: mocks/stubs/fakes, seams)                              | testing, design-patterns                | done    |
-| 07  | flaky-tests             | Why does my test suite pass locally but fail in CI? (flaky tests, non-determinism, environment leakage)                                               | testing, debugging, reliability         | done    |
-| 08  | mutation-testing        | How do I know if my tests are actually testing anything? (mutation testing, coverage as a signal, not a target)                                       | testing, code-quality                   | done    |
-| 09  | property-based-testing  | How do I test properties instead of examples? (property-based testing, generative testing)                                                            | testing, algorithms                     | done    |
-| 10  | contract-testing        | How do I test that two services still agree on their contract? (contract testing, consumer-driven contracts)                                          | testing, api-design, architecture       | done    |
-| 11  | fault-injection         | How do I test a system's behavior under failure, not just the happy path? (fault injection, failure-mode testing)                                     | testing, reliability, incident-response | done    |
-| 12  | test-suite-architecture | How do I keep a test suite fast and trustworthy as the codebase grows? (test suite architecture, parallelization, quarantine strategy)                | testing, architecture, performance      | done    |
-| 13  | quality-culture         | How does a staff engineer build a culture where quality is everyone's job, not QA's? (quality culture, testing strategy as an architectural decision) | testing, leadership, team-management    | planned |
+| #   | Slug                    | Problem                                                                                                                                               | Tags                                    | Status |
+| --- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ------ |
+| 01  | case-automated-testing  | Why doesn't "it passed my manual check" mean it works? (the case for automated testing)                                                               | testing, mental-models                  | done   |
+| 02  | test-pyramid            | How do I know what level to test something at? (the test pyramid: unit vs. integration vs. e2e)                                                       | testing, architecture                   | done   |
+| 03  | assertions-matter       | How do I write a test that actually catches bugs, not just exercises code? (assertions that matter, avoiding tautological tests)                      | testing, code-quality, debugging        | done   |
+| 04  | tdd-basics              | Why does writing the test first change the design? (TDD basics, red-green-refactor)                                                                   | testing, design-patterns, code-quality  | done   |
+| 05  | bdd                     | How do I test behavior instead of implementation? (BDD, testing through the public interface)                                                         | testing, design-patterns                | done   |
+| 06  | test-doubles            | How do I test something that depends on time, randomness, or external services? (test doubles: mocks/stubs/fakes, seams)                              | testing, design-patterns                | done   |
+| 07  | flaky-tests             | Why does my test suite pass locally but fail in CI? (flaky tests, non-determinism, environment leakage)                                               | testing, debugging, reliability         | done   |
+| 08  | mutation-testing        | How do I know if my tests are actually testing anything? (mutation testing, coverage as a signal, not a target)                                       | testing, code-quality                   | done   |
+| 09  | property-based-testing  | How do I test properties instead of examples? (property-based testing, generative testing)                                                            | testing, algorithms                     | done   |
+| 10  | contract-testing        | How do I test that two services still agree on their contract? (contract testing, consumer-driven contracts)                                          | testing, api-design, architecture       | done   |
+| 11  | fault-injection         | How do I test a system's behavior under failure, not just the happy path? (fault injection, failure-mode testing)                                     | testing, reliability, incident-response | done   |
+| 12  | test-suite-architecture | How do I keep a test suite fast and trustworthy as the codebase grows? (test suite architecture, parallelization, quarantine strategy)                | testing, architecture, performance      | done   |
+| 13  | quality-culture         | How does a staff engineer build a culture where quality is everyone's job, not QA's? (quality culture, testing strategy as an architectural decision) | testing, leadership, team-management    | done   |
 
 ## software-design/
 
