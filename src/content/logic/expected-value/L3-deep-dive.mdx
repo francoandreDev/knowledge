@@ -1,0 +1,269 @@
+---
+title: "L3 — Computing EV, tail risk, and a risk-tolerance filter that can flip the recommendation"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="Turning the whiteboard numbers into code that can be re-run and pressure-tested">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-1.5 text-sm">
+      <div class="flex items-center gap-1.5"><span>💰</span> Staged rollout — EV $17,300, worst case $18,000</div>
+      <div class="flex items-center gap-1.5"><span>💰</span> Big-bang cutover — EV $13,600, worst case $60,000</div>
+      <div class="flex items-center gap-1.5"><span>🚫</span> Risk filter (reject &gt;10% chance of a ≥$50k outcome) removes big-bang entirely</div>
+    </div>
+  </Fragment>
+
+L1 and L2 hand-computed EV for two migration strategies: staged rollout at
+$17,300, big-bang cutover at $13,600. By that number alone, big-bang
+wins. **But L2 also argued that a decision-maker who can't survive a
+tail outcome shouldn't take the EV-best option just because it's
+EV-best. Can real code make that argument automatically, instead of
+relying on someone remembering to ask the question by hand every time?**
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "A real EV calculator, plus a worst-case/tail-risk view computed alongside it",
+    "A risk-tolerance filter, applied before ranking, that can change the recommendation",
+    "A sensitivity check for bad input estimates, and where EV stops being the right frame at all",
+  ]}
+/>
+
+## Modeling a decision as a set of weighted outcomes
+
+Each option is a name plus a list of outcomes; each outcome carries a
+probability and a cost. Probabilities within one option must sum to 1 —
+worth asserting in code, not just trusting by eye.
+
+```js
+function assertValidOutcomes(outcomes) {
+  const total = outcomes.reduce((sum, o) => sum + o.probability, 0);
+  if (Math.abs(total - 1) > 1e-9) {
+    throw new Error(`Probabilities must sum to 1, got ${total}`);
+  }
+}
+
+const options = [
+  {
+    name: "staged rollout",
+    outcomes: [
+      { label: "goes fine", probability: 0.95, cost: 18000 },
+      { label: "minor cleanup", probability: 0.05, cost: 4000 },
+    ],
+  },
+  {
+    name: "big-bang cutover",
+    outcomes: [
+      { label: "goes fine", probability: 0.8, cost: 2000 },
+      { label: "multi-hour outage", probability: 0.2, cost: 60000 },
+    ],
+  },
+];
+
+options.forEach((opt) => assertValidOutcomes(opt.outcomes));
+```
+
+## Computing EV, and the tail view alongside it — never EV alone
+
+```js
+function expectedValue(outcomes) {
+  return outcomes.reduce((sum, o) => sum + o.probability * o.cost, 0);
+}
+
+function worstCase(outcomes) {
+  return Math.max(...outcomes.map((o) => o.cost));
+}
+
+// Probability of landing at or above some catastrophic cost threshold —
+// the number a plain EV figure hides.
+function tailRisk(outcomes, threshold) {
+  return outcomes
+    .filter((o) => o.cost >= threshold)
+    .reduce((sum, o) => sum + o.probability, 0);
+}
+
+function summarize(option) {
+  return {
+    name: option.name,
+    ev: expectedValue(option.outcomes),
+    worstCase: worstCase(option.outcomes),
+    tailRiskOver50k: tailRisk(option.outcomes, 50000),
+  };
+}
+
+options.map(summarize);
+// [
+//   { name: "staged rollout",   ev: 17300, worstCase: 18000, tailRiskOver50k: 0 },
+//   { name: "big-bang cutover", ev: 13600, worstCase: 60000, tailRiskOver50k: 0.2 },
+// ]
+```
+
+Ranked by EV alone, big-bang cutover wins by $3,700. **But look at the two
+numbers next to EV: big-bang cutover's worst case is more than 3x
+staged rollout's, and there's a real 20% chance of landing in a
+≥$50,000 outcome versus 0% for staged.** EV in isolation erases exactly
+the information that matters most for a once-only, high-stakes decision.
+
+<Checkpoint question="summarize() computes ev, worstCase, and tailRiskOver50k for both options in the same function. Why compute all three instead of just ev, given that ev is the number the decision ultimately ranks on?">
+
+Because ranking on `ev` alone is exactly the mistake L2 warned about — it
+silently assumes the decision repeats enough times for the average to
+actually materialize. `worstCase` and `tailRiskOver50k` surface the
+information EV throws away: not just "what's the average," but "what's
+the worst realistic single draw, and how likely is it." A reader looking
+only at `ev: 13600` versus `ev: 17300` has no way to see that big-bang's
+worst case is $60,000 with a real 20% chance of hitting it — that number
+only exists in the other two fields. Computing all three side by side is
+what makes the tail risk visible instead of buried.
+
+</Checkpoint>
+
+## A risk-tolerance filter, applied before ranking
+
+L2's two-step process: filter out anything unsurvivable first, then rank
+the survivors by EV. In code, that's a hard boolean gate applied before
+any sorting happens — not a penalty subtracted from EV, not a tiebreaker
+consulted only when two options are close.
+
+```js
+function passesRiskTolerance(option, { maxTailProbability, tailThreshold }) {
+  const tail = tailRisk(option.outcomes, tailThreshold);
+  return tail <= maxTailProbability;
+}
+
+function recommend(options, riskTolerance) {
+  const survivors = options.filter((opt) =>
+    passesRiskTolerance(opt, riskTolerance),
+  );
+  if (survivors.length === 0) {
+    return { recommendation: null, reason: "no option meets risk tolerance" };
+  }
+  const ranked = [...survivors].sort(
+    (a, b) => expectedValue(a.outcomes) - expectedValue(b.outcomes),
+  );
+  return {
+    recommendation: ranked[0].name,
+    survivors: survivors.map((o) => o.name),
+  };
+}
+
+// "Reject any option with more than a 10% chance of a $50,000+ outcome."
+const riskTolerance = { maxTailProbability: 0.1, tailThreshold: 50000 };
+
+recommend(options, riskTolerance);
+// { recommendation: "staged rollout", survivors: ["staged rollout"] }
+```
+
+**The recommendation flips.** Big-bang cutover had the better EV
+($13,600 vs. $17,300) but fails the risk-tolerance filter outright — a
+20% chance of a ≥$50,000 outcome exceeds the stated 10% tolerance — so it
+never even reaches the ranking step. Staged rollout, the EV-losing
+option, becomes the recommendation not because its EV improved, but
+because it's the only option the decision-maker's actual risk tolerance
+allows them to take.
+
+<Checkpoint question="recommend() filters options with passesRiskTolerance() before sorting by expectedValue(). What would break about this function's guarantee if the order were reversed — sort by EV first, then drop any option that fails the risk filter?">
+
+Nothing about the final surviving list would actually change — filtering
+and sorting are order-independent set operations here, so the same
+options end up excluded either way. What would break is the reasoning
+the function is supposed to embody: sorting by EV first frames the risk
+filter as a late-stage exception applied to an EV-ranked list, the exact
+"EV first, risk as an afterthought" instinct L2 argued against. Filtering
+first encodes, structurally, that survivability is a precondition for
+being ranked at all — not a tiebreaker consulted after EV has already
+done the real work of ordering the options. Same output, different (and
+here, wrong) story about which consideration is doing the deciding.
+
+</Checkpoint>
+
+## Garbage in, garbage out — a sensitivity check
+
+**Every number above was an estimate, not a measurement — where does
+this all fall apart if the 20% outage-probability guess for big-bang
+cutover was simply wrong?** Find the breakeven probability where
+big-bang cutover's EV would equal staged rollout's, holding the costs
+fixed:
+
+```js
+function breakevenProbability(cheapCost, expensiveCost, targetEV) {
+  // (1 - p) * cheapCost + p * expensiveCost = targetEV, solved for p
+  return (targetEV - cheapCost) / (expensiveCost - cheapCost);
+}
+
+const stagedEV = expectedValue(options[0].outcomes); // 17300
+breakevenProbability(2000, 60000, stagedEV);
+// ≈ 0.2638 — at roughly a 26.4% chance of a bad outcome, big-bang cutover's
+// EV would already equal staged rollout's EV
+```
+
+The estimated probability was 20%. The breakeven point is about 26.4%.
+**That's not a wide margin** — a modest, entirely plausible amount of
+estimation error (this team has run three similar cutovers before, one
+went badly; a rough base-rate estimate off by a few points either way is
+completely realistic) is enough to flip which option looks better by EV
+alone, before the risk filter even gets involved. This is why L2 pushed
+disciplined estimation (real historical data, `fermi-estimation`-style
+decomposition, reference classes) instead of "just pick a number that
+feels right" — a garbage probability estimate produces a confident-looking
+EV number that's actually pointing the wrong way.
+
+## When EV isn't the right frame at all
+
+The risk-tolerance filter above treats survivability as a hard
+precondition and still ranks the rest by EV — but for some decisions,
+even that understates it. **Rare, catastrophic, hard-to-reverse
+decisions** (an irreversible data-deletion migration with no rollback
+path, a security change that could expose customer data if it goes
+wrong, any "bet the company" scenario) shouldn't have their outcome
+space treated as one more input to an averaging formula at all — risk
+tolerance should dominate the decision, not just filter its candidate
+list. In those cases, the honest process is closer to "enumerate the
+irreversible failure modes and eliminate them structurally (better
+rollback tooling, a smaller blast radius, a dry run against a copy of
+production) until the worst case is survivable — then, and only then,
+compare what's left by EV." EV is a tool for comparing options once
+the unsurvivable ones are off the table, never a tool for deciding
+whether an unsurvivable option is worth the risk.
+
+## Extend the example: what changes under different conditions?
+
+**What changes if a third option exists — an automated-canary rollout
+with rollback, whose outcome distribution is much wider than either
+option above: 85% chance of a smooth $9,000 run, 12% chance of a partial
+rollback costing $15,000, and a rare 3% chance of the rollback itself
+failing, leading to an extended $90,000 outage?** Try computing its `ev`,
+`worstCase`, and `tailRiskOver50k` with the functions above before
+reading on — does it pass the same 10%-tail-probability filter that
+eliminated big-bang cutover, and if it does, does it actually beat
+staged rollout on EV among the survivors? (Its EV comes out lower than
+staged rollout's, and its tail risk at the $50k threshold — 3% — is
+under the 10% tolerance, so it survives the filter and becomes the new
+recommendation — a good exercise in confirming `recommend()`'s logic
+generalizes past the two-option case it was written against.)
+
+**What changes if this exact migration decision weren't one-shot, but
+something the team runs every quarter for a different service — the
+same probability distribution, twenty times over the next five years?**
+This is precisely the condition under which EV alone becomes the right
+frame again, not just a component of a bigger one: across twenty
+independent repetitions, the law of large numbers means the actual total
+cost really does converge toward twenty times the per-decision EV, and a
+single bad draw in any one quarter gets absorbed by the other nineteen.
+The risk-tolerance filter earns its keep specifically because this
+decision is being made once, for one irreversible migration — strip
+that condition away and ranking by EV alone stops being the mistake it
+is above.
+
+## Failure modes
+
+| Failure mode                                                                  | What it gets wrong                                                                                                                                 |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ranking purely by `expectedValue()`, ignoring `worstCase`/`tailRisk`          | Treats a one-shot decision as if it were an average over many repetitions it will never actually get to take                                       |
+| Applying the risk-tolerance filter as a tiebreaker after sorting by EV        | Structurally implies EV decides and risk only intervenes on close calls, rather than survivability being a precondition                            |
+| Trusting a probability estimate without a sensitivity/breakeven check         | A modest, realistic estimation error can flip which option has the better EV, and a confident wrong number looks the same as a confident right one |
+| Using EV (even filtered) for an irreversible, catastrophic, one-shot decision | Some decisions need risk tolerance to dominate the choice outright, not just narrow the candidate list before EV ranks it                          |
+| Refusing to estimate probabilities at all because there's no clean data       | Hides the uncertainty behind an unexamined gut call instead of an explicit, arguable, improvable number                                            |
