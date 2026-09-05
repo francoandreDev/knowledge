@@ -104,7 +104,7 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 | 08  | fermi-estimation                         | How do I estimate an answer when I can't compute the exact one? (Fermi estimation, back-of-envelope reasoning)             | estimation, math, mental-models              | done    |
 | 09  | expected-value                           | How do I make a decision under uncertainty? (expected value, probabilistic reasoning)                                      | decision-making, math, risk-management       | done    |
 | 10  | correlation-causation                    | How do I avoid fooling myself with data? (correlation vs. causation, cognitive biases, base rate fallacy)                  | mental-models, decision-making               | done    |
-| 11  | abstraction                              | How do I formally model a messy real-world problem well enough to solve it? (abstraction, formal modeling)                 | mental-models, architecture, design-patterns | planned |
+| 11  | abstraction                              | How do I formally model a messy real-world problem well enough to solve it? (abstraction, formal modeling)                 | mental-models, architecture, design-patterns | done    |
 | 12  | multi-criteria-decisions-under-ambiguity | How does a staff engineer reason about trade-offs with no clearly right answer? (multi-criteria decisions under ambiguity) | decision-making, leadership, risk-management | planned |
 
 ## security/

@@ -1,0 +1,320 @@
+---
+title: "L3 — Modeling service dependencies as a graph: cycle detection and deploy order"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="Same 10 services, two implementations: a checklist and a graph">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📋</span> <strong>Naive version</strong> — one-pass checklist over the spreadsheet's row order</div>
+      <div class="flex items-center gap-1.5"><span>🕸️</span> <strong>Graph version</strong> — same dependency facts, adjacency list + DFS</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — deploy 10 services in an order where every dependency starts first</div>
+    </div>
+  </Fragment>
+
+**Before running anything: if the checklist approach hits the same
+`accounts → audit-log → billing → accounts` cycle from L1, will it
+crash with an error pointing at the cycle — or will it just quietly
+fail to make progress, with no clue why?**
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "The naive checklist approach failing silently on a real cycle",
+    "The same facts as a graph: cycle detection and topological order, from scratch",
+    "When formalizing is worth it, and when forcing the wrong structure backfires",
+  ]}
+/>
+
+## The naive approach: a one-pass checklist
+
+The spreadsheet from L1 has ten services, each listing what it needs.
+The obvious, no-modeling way to compute a deploy order is to walk the
+rows top to bottom, deploying each service once everything it needs
+has already been deployed:
+
+```js
+function naiveDeployOrder(deps) {
+  const order = Object.keys(deps);
+  const deployed = new Set();
+  const result = [];
+  const skipped = [];
+
+  for (const service of order) {
+    const needs = deps[service];
+    const ready = needs.every((n) => deployed.has(n));
+    if (ready) {
+      deployed.add(service);
+      result.push(service);
+    } else {
+      skipped.push(service);
+    }
+  }
+  return { result, skipped };
+}
+
+const deps = {
+  "web-gateway": ["auth", "billing"],
+  auth: ["accounts"],
+  billing: ["accounts", "ledger"],
+  ledger: ["accounts"],
+  accounts: ["audit-log"],
+  "audit-log": ["billing"],
+};
+
+naiveDeployOrder(deps);
+// => { result: [], skipped: ["web-gateway", "auth", "billing",
+//                             "ledger", "accounts", "audit-log"] }
+```
+
+Every single service gets skipped. Not because the code is buggy —
+it's a completely correct implementation of "check the row order once"
+— but because `accounts` needs `audit-log`, which needs `billing`,
+which needs `accounts`: nothing in that loop can ever go first, no
+matter what order the rows are read in, or how many passes get added.
+A team debugging this output sees an empty deploy list and a pile of
+skipped services, with **no indication of which services, or why**.
+That's the six-months-undetected failure from L1, reproduced exactly:
+the facts were all there; nothing turned them into an answer.
+
+<Checkpoint question="Would running naiveDeployOrder in a loop — repeating the pass until no more services become ready — fix the problem, or just take longer to fail the same way?">
+
+Just take longer to fail the same way. Repeating the pass lets
+services that were skipped only because of _ordering_ (a dependency
+appearing later in the list) eventually get picked up on a later pass
+— that part is a real limitation of the single-pass version. But for
+`accounts`/`audit-log`/`billing`, every one of the three is only ever
+blocked by another member of the same cycle. No number of additional
+passes changes that: the loop terminates with the same three services
+permanently unready, and the output still doesn't say why — it just
+stops making progress. Detecting _that specific situation_ is a
+different problem than "did I loop enough times," which is exactly
+what cycle detection below is built to answer directly.
+
+</Checkpoint>
+
+## The formal model: a directed graph
+
+Model each service as a node and each "needs" relationship as a
+directed edge, using an adjacency list:
+
+```js
+function buildGraph(deps) {
+  const graph = new Map();
+  for (const service of Object.keys(deps)) {
+    if (!graph.has(service)) graph.set(service, []);
+  }
+  for (const [service, needs] of Object.entries(deps)) {
+    for (const need of needs) {
+      if (!graph.has(need)) graph.set(need, []);
+      graph.get(service).push(need);
+    }
+  }
+  return graph;
+}
+```
+
+**What does "the graph now has all the facts" actually buy, that the
+spreadsheet's rows didn't already have?** Nothing new about the world
+— the same needs-relationships are present either way. What changes is
+that a graph has _known algorithms_ that operate on exactly this
+shape, regardless of how large or tangled it gets.
+
+### Cycle detection: depth-first search with a "currently visiting" set
+
+```js
+function findCycle(graph) {
+  const state = new Map(); // "visiting" | "visited"
+  const path = [];
+
+  function visit(node) {
+    state.set(node, "visiting");
+    path.push(node);
+    for (const dep of graph.get(node) ?? []) {
+      const depState = state.get(dep);
+      if (depState === "visiting") {
+        const cycleStart = path.indexOf(dep);
+        return [...path.slice(cycleStart), dep];
+      }
+      if (depState !== "visited") {
+        const found = visit(dep);
+        if (found) return found;
+      }
+    }
+    path.pop();
+    state.set(node, "visited");
+    return null;
+  }
+
+  for (const node of graph.keys()) {
+    if (!state.has(node)) {
+      const found = visit(node);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+```
+
+The trick is the `"visiting"` state: a node currently on the _active_
+DFS path is `"visiting"`; a node whose whole subtree has already been
+explored safely is `"visited"`. Hitting a `"visiting"` node means the
+search walked back onto its own current path — a cycle, and the exact
+loop of nodes that forms it, not just a yes/no answer:
+
+```js
+const deps = {
+  "web-gateway": ["auth", "billing"],
+  auth: ["accounts"],
+  billing: ["accounts", "ledger"],
+  ledger: ["accounts"],
+  accounts: ["audit-log"],
+  "audit-log": ["billing"],
+  notifications: ["accounts"],
+  search: ["catalog"],
+  catalog: [],
+  reporting: ["ledger", "catalog"],
+};
+
+const graph = buildGraph(deps);
+findCycle(graph);
+// => ["accounts", "audit-log", "billing", "accounts"]
+```
+
+One function call, on the same ten services the naive checklist choked
+on silently, names the exact three-node loop — the same cycle a human
+eventually found by hand after six months in L1's scenario.
+
+### Topological sort: the deploy order itself
+
+Once a graph is known to be cycle-free, a topological sort — visit
+every dependency before recording a node — gives a valid deploy order
+directly:
+
+```js
+function topologicalOrder(graph) {
+  const cycle = findCycle(graph);
+  if (cycle) {
+    throw new Error(`Cannot order: dependency cycle ${cycle.join(" -> ")}`);
+  }
+  const order = [];
+  const visited = new Set();
+
+  function visit(node) {
+    if (visited.has(node)) return;
+    visited.add(node);
+    for (const dep of graph.get(node) ?? []) visit(dep);
+    order.push(node);
+  }
+
+  for (const node of graph.keys()) visit(node);
+  return order;
+}
+
+topologicalOrder(graph);
+// throws: "Cannot order: dependency cycle accounts -> audit-log -> billing -> accounts"
+```
+
+Fixing the real bug — `audit-log` should not have needed `billing`
+back — and re-running gives a concrete, checkable order:
+
+```js
+deps["audit-log"] = []; // the actual fix: drop the wrong edge
+const fixedGraph = buildGraph(deps);
+findCycle(fixedGraph); // => null
+topologicalOrder(fixedGraph);
+// => ["audit-log", "accounts", "auth", "ledger", "billing",
+//     "web-gateway", "notifications", "catalog", "search", "reporting"]
+```
+
+Every service in that list appears after everything it needs — a
+property that's easy to state and easy to get wrong by hand past
+five or six services, and essentially free to get right once the
+problem is in graph form.
+
+<Checkpoint question="findCycle and topologicalOrder both do a depth-first walk of the same graph. Why not just have topologicalOrder always run first and treat 'the recursion never terminates' as the cycle signal, instead of calling findCycle separately?">
+
+A plain recursive walk with no `"visiting"`/`"visited"` bookkeeping
+does terminate on a cyclic graph — it just revisits nodes forever only
+if there's no `visited` guard at all, but with one (as `topologicalOrder`
+has), it would silently mark `accounts` "visited" partway through the
+cycle and move on, producing a deploy order that's just plain wrong
+rather than throwing anything. `findCycle`'s three-state tracking
+(unvisited / currently-on-this-path / fully-done) is precisely what
+distinguishes "already fully processed, safe to skip" from "still
+being processed above me in the call stack, so this is a cycle" —
+that distinction has to exist somewhere, and separating it into its
+own function is what lets `topologicalOrder` report _which_ cycle
+broke it instead of returning a silently incorrect order.
+
+</Checkpoint>
+
+## When the wrong formal structure makes things harder
+
+Modeling isn't free, and the wrong choice of structure can turn an
+easy problem into a hard one. Suppose someone insists the dependency
+data "should really" be a strict tree — one parent per node, like an
+org chart — because trees are simpler to draw and simpler to reason
+about than a general graph:
+
+```js
+function forceIntoTree(deps) {
+  const parentOf = {};
+  for (const [service, needs] of Object.entries(deps)) {
+    // a tree only allows one parent — pick the first "need" and
+    // silently drop the rest
+    parentOf[service] = needs[0] ?? null;
+  }
+  return parentOf;
+}
+
+forceIntoTree(deps);
+// billing needs BOTH accounts and ledger in reality — the tree can
+// only keep one of them: { billing: "accounts", ... } — the edge to
+// "ledger" is gone, not deferred, gone.
+```
+
+`billing` genuinely depends on both `accounts` and `ledger` — a
+many-to-many relationship, not a one-parent one. Forcing it into a
+tree doesn't simplify the real problem; it silently deletes a real
+dependency edge to make the data fit the chosen shape. Any deploy
+order computed from that tree can now be wrong in a way that's _worse_
+than the naive checklist's failure — the checklist at least stalled
+visibly; the tree model produces a confident, wrong answer with the
+missing edge nowhere in sight. The lesson generalizes: picking a
+formal structure isn't just about familiarity or simplicity in the
+abstract — it's about whether the structure can even _represent_ the
+relationships the real problem actually has.
+
+## Is formalizing worth it here?
+
+Building `buildGraph`/`findCycle`/`topologicalOrder` took real,
+non-zero effort — around fifty lines of code, plus the ten minutes to
+verify it against a few services whose correct order was already
+known by hand (step 5 of L2's workflow). For ten services, an
+experienced engineer might have caught the cycle by careful manual
+tracing eventually, the way L1's team did — just six months late. For
+a hundred services with edges added weekly by different teams, manual
+tracing doesn't degrade gracefully; it becomes actively unreliable,
+because the number of paths to check grows far faster than the number
+of services. The formal model's build cost is roughly fixed; the
+manual approach's reliability keeps dropping as the real system grows.
+That crossover — small problem, cheap enough to eyeball vs. large or
+high-stakes enough that eyeballing is guaranteed to eventually miss
+something — is the actual decision, not "formalize everything" or
+"formalize nothing."
+
+**Two ways to push this further: what would have to change in
+`buildGraph` and `findCycle` if a dependency could be marked
+_optional_ (nice to have running first, but not blocking) instead of
+required? And separately, what would change if each edge needed a
+_cost_ attached — say, the number of seconds a service takes to become
+healthy — so the question shifts from "is there a valid order" to
+"what's the fastest valid order"? Neither is a hypothetical extension
+this unit will answer for you; both are exactly the kind of follow-up
+question a well-chosen model is supposed to make tractable to explore,
+instead of requiring the whole approach to be rebuilt from scratch.**
