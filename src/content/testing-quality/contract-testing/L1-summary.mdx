@@ -1,0 +1,106 @@
+---
+title: "L1 — How do I test that two services still agree on their contract? (contract testing, consumer-driven contracts)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+
+<Scenario label="The mock said total, the API said totalAmount">
+  <Fragment slot="facts">
+    <div class="not-prose grid grid-cols-2 gap-3 text-sm text-slate-700 dark:text-slate-300">
+      <div class="rounded-lg border border-sky-300 bg-sky-50 p-3 dark:border-sky-700 dark:bg-sky-950">
+        <div class="mb-1 font-semibold">Frontend's mock says</div>
+        <code>{"{ id, total, status }"}</code>
+      </div>
+      <div class="rounded-lg border border-rose-300 bg-rose-50 p-3 dark:border-rose-700 dark:bg-rose-950">
+        <div class="mb-1 font-semibold">Real API now says</div>
+        <code>{"{ id, totalAmount, status }"}</code>
+      </div>
+      <div class="col-span-2 flex items-center gap-1.5"><span>✅</span> <strong>Frontend's tests</strong> — all green, because they only ever asked the mock</div>
+      <div class="col-span-2 flex items-center gap-1.5"><span>🐛</span> <strong>Production</strong> — order total shows <code>undefined</code> on every page</div>
+    </div>
+  </Fragment>
+
+A frontend team builds an order summary page against `GET /orders/:id`.
+Nobody wants to spin up the real backend just to write a test, so they
+hand-write a mock response: `{ id: "o1", total: 4999, status: "paid" }`.
+Every test passes against that mock.
+
+Weeks later, the backend team renames a field — `total` becomes
+`totalAmount`, to match a naming convention adopted elsewhere in the
+API — and ships it. Nobody on the backend team knows the frontend reads
+that field. Nobody on the frontend team knows the field was renamed.
+
+| What changed                               | Did anyone's tests catch it?                                |
+| ------------------------------------------ | ----------------------------------------------------------- |
+| Frontend's test suite, against its mock    | ✅ still passes — the mock never changed                    |
+| Backend's test suite, against its own code | ✅ still passes — the field rename is internally consistent |
+| Real users, in production                  | ❌ every order total renders as `undefined`                 |
+
+**Both teams' test suites were green. How did a breaking change reach
+production undetected?**
+
+Because the mock was never connected to the real API in the first
+place. It was a team's best guess at the provider's response shape,
+frozen at the moment someone wrote it — and nothing re-checked that
+guess against reality when the provider changed.
+
+</Scenario>
+
+The mock wasn't a bad idea — hand-written test doubles (`test-doubles`)
+are exactly the right tool for isolating a unit under test from a slow
+or unavailable dependency. The gap is what a mock can't do on its own:
+nothing forces it to stay accurate as the real dependency evolves. That
+gap is what contract testing closes.
+
+<LevelIntro
+  items={[
+    "What a contract is, and who writes it",
+    "Why a mock alone can't catch this class of bug",
+    "The shape of a consumer-driven contract test",
+  ]}
+/>
+
+## The shape of the problem
+
+- A **consumer** (the frontend, or another service calling an API) and a
+  **provider** (the service serving that API) agree, implicitly, on a
+  request/response shape. Nothing enforces that agreement automatically
+  — it lives in documentation, tribal knowledge, or a hand-written mock
+  that can silently drift from reality.
+- Full end-to-end tests (spin up both real services, make a real
+  request) would catch this — but they're slow, flaky, and need a live
+  environment for every dependency a service has, which doesn't scale
+  as the number of services grows. `test-pyramid` already argues for
+  fewer of these; contract testing is the specific technique that makes
+  having fewer of them safe.
+- **Contract testing** makes the implicit agreement explicit and
+  checkable: the consumer records exactly which requests it makes and
+  exactly what response shape it expects, as a **contract**. Both sides
+  can then verify their half of that contract independently, in CI,
+  without either service needing the other one running.
+- **Consumer-driven** means the consumer writes the contract, based on
+  what it actually uses — not a provider team guessing at an abstract
+  spec every possible consumer might need. If the frontend never reads
+  a `metadata` field, the contract never mentions it, and the provider
+  is free to change it without breaking anything.
+
+## Key terms
+
+- **Contract** — a concrete, versioned record of the exact requests a
+  consumer makes to a provider and the exact response shape it expects
+  back for each one.
+- **Consumer** — the side that calls the API and depends on its
+  response shape (a frontend, or a service calling another service).
+- **Provider** — the side that serves the API and must satisfy every
+  contract written against it.
+- **Consumer-driven contract** — a contract authored from the
+  consumer's actual usage, not a provider-imposed abstract spec —
+  covered in depth in L2.
+- **Provider verification** — replaying every interaction recorded in a
+  contract against the real provider implementation and checking the
+  actual response matches what the contract expects.
+- **Broker** — a shared service both teams' CI pipelines publish
+  contracts to and check verification results against, so "can I
+  deploy this provider version safely" is answerable without a live
+  end-to-end environment — covered in L3.
