@@ -1,0 +1,110 @@
+---
+title: "L1 — How do I test a system's behavior under failure, not just the happy path? (fault injection, failure-mode testing)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+
+<Scenario label="100% coverage, all green, down within an hour">
+  <Fragment slot="facts">
+    <div class="not-prose grid grid-cols-2 gap-3 text-sm text-slate-700 dark:text-slate-300">
+      <div class="rounded-lg border border-emerald-300 bg-emerald-50 p-3 dark:border-emerald-700 dark:bg-emerald-950">
+        <div class="mb-1 font-semibold">Tests covered</div>
+        <ul class="ml-4 list-disc space-y-0.5">
+          <li>Happy path checkout</li>
+          <li>Validation errors (bad card, empty cart)</li>
+          <li>Business logic (discounts, tax)</li>
+        </ul>
+      </div>
+      <div class="rounded-lg border border-rose-300 bg-rose-50 p-3 dark:border-rose-700 dark:bg-rose-950">
+        <div class="mb-1 font-semibold">Tests never covered</div>
+        <ul class="ml-4 list-disc space-y-0.5">
+          <li>Pricing API times out</li>
+          <li>Pricing API returns 500</li>
+          <li>Connection refused</li>
+          <li>Slow, not-quite-hung response</li>
+        </ul>
+      </div>
+      <div class="col-span-2 flex items-center gap-1.5"><span>🐛</span> <strong>The outage</strong> — came from the right-hand column, the one nobody ever wrote a test for</div>
+    </div>
+  </Fragment>
+
+A checkout service ships with 100% test coverage: every happy path,
+every validation error, every discount and tax rule, all green. Three
+weeks later, the third-party pricing API it calls has a bad afternoon
+and stops responding — not an error, just silence. The checkout
+service's code has no timeout anywhere in its network call, so every
+request to it just... waits. Forever.
+
+Within twenty minutes, every connection in the checkout service's pool
+is stuck waiting on a pricing API that will never answer. New checkout
+requests can't get a connection at all. The whole service is down —
+not because any line of business logic was wrong, but because nobody
+ever wrote a test for what happens when a dependency doesn't respond.
+
+**How does a test suite reach 100% coverage and still miss the exact
+scenario that takes the service down?**
+
+Because "coverage" measures which lines of code ran during tests — and
+every line in the checkout service ran, including the network call
+itself. What never ran was the pricing API failing. Coverage tools
+have no concept of "did you test what happens when this call hangs" —
+that's not a line of code, it's a scenario nobody deliberately
+constructed.
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "What fault injection is, and what it's for",
+    "The failure modes a dependency can actually produce",
+    "What 'graceful' vs. 'broken' looks like under failure",
+  ]}
+/>
+
+## The shape of the problem
+
+- Most test suites are built around **success**: call the function,
+  assert on the result. Even "error case" tests usually mean
+  _validation_ errors — bad input the code itself rejects on purpose.
+  They almost never mean "the network call this code depends on
+  failed."
+- **Fault injection** is deliberately forcing a dependency to fail in
+  a controlled test — timeout, error response, connection refused,
+  slow response — instead of only ever testing what happens when it
+  succeeds. It answers a question coverage numbers can't: not "did
+  this line run," but "does the system survive when a call it depends
+  on doesn't behave."
+- A system that's never been tested against a failing dependency isn't
+  proven safe against one — it's just untested against the one
+  scenario most likely to actually happen in production, since real
+  networks and real third parties fail constantly, quietly, and
+  without asking permission.
+- This isn't the same problem `test-doubles` solves. A test double
+  (mock/stub/fake) exists to isolate a test from a slow or
+  unpredictable real dependency, usually by making it behave
+  predictably and successfully. Fault injection reuses that same
+  seam — the point where a real dependency gets swapped for something
+  controllable — but points it at a different goal: making the
+  dependency fail on purpose, to see what the caller does about it.
+
+## Key terms
+
+- **Fault injection** — deliberately forcing a dependency to fail
+  (timeout, error, malformed response, slow response) in a controlled
+  test, to verify how the system under test handles it.
+- **Failure mode** — the specific way a dependency fails: hangs with
+  no response, returns an error status, drops the connection, returns
+  a partial or malformed body, or responds correctly but very slowly.
+- **Graceful degradation** — the system noticing a dependency failed
+  and doing something sensible about it: retrying, falling back to a
+  cached or default value, opening a circuit breaker, or returning a
+  clear error to its own caller — instead of hanging, crashing, or
+  corrupting data.
+- **Timeout** — a hard limit on how long a call is allowed to wait for
+  a response before the caller gives up and treats it as failed,
+  covered in depth in L3.
+- **Chaos engineering** — the production-scale cousin of fault
+  injection: deliberately breaking things in a live system to surface
+  failure modes nobody predicted, rather than verifying known ones in
+  a test — the distinction is covered in L3.

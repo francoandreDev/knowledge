@@ -1,0 +1,58 @@
+{
+  "items": [
+    {
+      "id": "timeout-threshold-tradeoff",
+      "level": 3,
+      "title": "Picking a timeout for fetchPricing: too short vs. too long",
+      "description": "L3's fix gives fetchPricing a 500ms timeout. Set it too low, and a pricing API that's merely slow (not actually broken) gets treated as failed, falling back to a stale price more often than necessary. Set it too high, and a genuinely hung dependency holds a connection open for longer before the fallback kicks in -- which is exactly the resource-exhaustion problem from L1's outage, just capped instead of unlimited. This chart shows the false-fallback rate assuming the pricing API's real response times are usually fast but occasionally spike, holding a worst-case hang at bay only once the timeout fires.",
+      "params": [
+        {
+          "name": "timeoutMs",
+          "label": "Timeout threshold",
+          "min": 50,
+          "max": 3000,
+          "step": 50,
+          "default": 500,
+          "unit": "ms"
+        }
+      ],
+      "compute": "const typicalP95Ms = 250; const spikeMs = 1200; const spikeShare = 0.08; let falseFallbackRate; if (params.timeoutMs >= spikeMs) { falseFallbackRate = 0; } else if (params.timeoutMs >= typicalP95Ms) { falseFallbackRate = spikeShare * (1 - (params.timeoutMs - typicalP95Ms) / (spikeMs - typicalP95Ms)); } else { falseFallbackRate = spikeShare + (1 - spikeShare) * (1 - params.timeoutMs / typicalP95Ms) * 0.5; } return { falseFallbackPercent: Math.max(0, Math.min(100, falseFallbackRate * 100)) };",
+      "outputs": [
+        {
+          "key": "falseFallbackPercent",
+          "label": "Requests that fall back to a stale price unnecessarily",
+          "unit": "%",
+          "color": "#fb7185"
+        }
+      ],
+      "chartParam": "timeoutMs"
+    },
+    {
+      "id": "fault-coverage-diminishing-returns",
+      "level": 3,
+      "title": "How many fault types are worth testing?",
+      "description": "Per L3's prioritization trade-off, faults aren't equally likely or equally costly -- timeout/hang and error responses are common and high-impact (like L1's outage); malformed bodies and slow-but-not-hung responses are less common; truly exotic faults (a specific byte sequence, a specific ordering of two failures) are rare. This shows the returns from testing the most-likely faults first: coverage of realistic production incident types climbs fast for the first few fault types tested, then flattens -- the diminishing-but-real returns L3 argues for prioritizing by likelihood and impact instead of trying to cover everything.",
+      "params": [
+        {
+          "name": "faultTypesTested",
+          "label": "Distinct fault types with a fault-injection test",
+          "min": 0,
+          "max": 8,
+          "step": 1,
+          "default": 2,
+          "unit": ""
+        }
+      ],
+      "compute": "const maxCoverage = 92; const rate = 0.55; const coverage = maxCoverage * (1 - Math.pow(1 - rate, params.faultTypesTested)); return { incidentTypesCovered: coverage };",
+      "outputs": [
+        {
+          "key": "incidentTypesCovered",
+          "label": "Real production incident types this would have caught",
+          "unit": "%",
+          "color": "#34d399"
+        }
+      ],
+      "chartParam": "faultTypesTested"
+    }
+  ]
+}

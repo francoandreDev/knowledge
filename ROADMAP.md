@@ -249,7 +249,7 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 | 08  | mutation-testing        | How do I know if my tests are actually testing anything? (mutation testing, coverage as a signal, not a target)                                       | testing, code-quality                   | done    |
 | 09  | property-based-testing  | How do I test properties instead of examples? (property-based testing, generative testing)                                                            | testing, algorithms                     | done    |
 | 10  | contract-testing        | How do I test that two services still agree on their contract? (contract testing, consumer-driven contracts)                                          | testing, api-design, architecture       | done    |
-| 11  | fault-injection         | How do I test a system's behavior under failure, not just the happy path? (fault injection, failure-mode testing)                                     | testing, reliability, incident-response | planned |
+| 11  | fault-injection         | How do I test a system's behavior under failure, not just the happy path? (fault injection, failure-mode testing)                                     | testing, reliability, incident-response | done    |
 | 12  | test-suite-architecture | How do I keep a test suite fast and trustworthy as the codebase grows? (test suite architecture, parallelization, quarantine strategy)                | testing, architecture, performance      | planned |
 | 13  | quality-culture         | How does a staff engineer build a culture where quality is everyone's job, not QA's? (quality culture, testing strategy as an architectural decision) | testing, leadership, team-management    | planned |
 
