@@ -1,0 +1,304 @@
+---
+title: "L3 — Computing a spurious correlation, controlling for the confound, and a real base rate calculator"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="Two dashboards that look related, and a detector's real precision, in code">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-1.5 text-sm">
+      <div class="flex items-center gap-1.5"><span>📈</span> Naive correlation, error rate vs. support tickets: <strong>r ≈ 0.65</strong> (strong)</div>
+      <div class="flex items-center gap-1.5"><span>🎛️</span> Same correlation, controlling for traffic: <strong>r ≈ 0.01</strong> (gone)</div>
+      <div class="flex items-center gap-1.5"><span>🚨</span> Alert precision at L1's numbers: <strong>27.9%</strong></div>
+      <div class="flex items-center gap-1.5"><span>🔎</span> Even at "99% accurate" on a 1-in-1,000 event: precision only <strong>9%</strong></div>
+    </div>
+  </Fragment>
+
+L1 and L2 built the model by hand: a confound can produce a real
+correlation with no direct causal link, and a rare-enough event can make
+a "95% accurate" detector wrong most of the time it fires. **Can both of
+these be shown with real, checkable code instead of just asserted with
+round numbers — a genuine spurious correlation that a controlling step
+makes disappear, and a base rate calculator that reproduces L1's 28% and
+then some?**
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "A spurious correlation from synthetic data with a real shared confound, then controlled for",
+    "A reusable base rate / precision calculator applied to L1's own numbers",
+    "Why 'more accurate' detectors can still fail badly on rare events, and what proxies exist for a real experiment",
+  ]}
+/>
+
+## Part 1 — a spurious correlation, and controlling for the confound
+
+Two dashboards at a hypothetical company: **error rate** (errors per
+minute) and **support ticket volume** (tickets opened per minute).
+Someone on-call notices they track each other closely and proposes
+"reducing error rate will reduce ticket volume" as a project. **Before
+funding that project, does the data actually support a direct link
+between the two — or is something else driving both?**
+
+The confound candidate: **traffic** (requests per minute). More traffic
+plausibly pushes both error rate up (more load, more edge cases hit) and
+ticket volume up (more users, more chances someone hits a rough edge) —
+independently of each other. Generate synthetic data that encodes exactly
+that structure, so the "true" answer is known in advance and the code's
+output can be checked against it:
+
+```js
+// A small seeded PRNG so results are reproducible.
+function mulberry32(seed) {
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function gaussian(rand) {
+  const u1 = rand();
+  const u2 = rand();
+  return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+}
+
+function generateData(n, seed) {
+  const rand = mulberry32(seed);
+  const traffic = [];
+  const errorRate = [];
+  const ticketVolume = [];
+  for (let i = 0; i < n; i++) {
+    const t = 500 + 400 * rand(); // requests/min, 500-900, the confound
+    traffic.push(t);
+    // Both driven by traffic, plus their own independent noise --
+    // no direct term connects errorRate to ticketVolume at all.
+    errorRate.push(0.01 * t + 1 * gaussian(rand));
+    ticketVolume.push(0.05 * t + 3 * gaussian(rand));
+  }
+  return { traffic, errorRate, ticketVolume };
+}
+```
+
+Note what's deliberately **not** in this code: nothing computes
+`ticketVolume` from `errorRate` or vice versa. Any correlation the code
+finds between them has to be coming entirely through their shared
+dependence on `traffic` — which is exactly the scenario a confound
+produces in the real world, just made explicit here instead of hidden.
+
+```js
+function mean(xs) {
+  return xs.reduce((sum, x) => sum + x, 0) / xs.length;
+}
+
+function pearsonCorrelation(xs, ys) {
+  const mx = mean(xs);
+  const my = mean(ys);
+  let numerator = 0;
+  let sumSqX = 0;
+  let sumSqY = 0;
+  for (let i = 0; i < xs.length; i++) {
+    const dx = xs[i] - mx;
+    const dy = ys[i] - my;
+    numerator += dx * dy;
+    sumSqX += dx * dx;
+    sumSqY += dy * dy;
+  }
+  return numerator / Math.sqrt(sumSqX * sumSqY);
+}
+
+const { traffic, errorRate, ticketVolume } = generateData(200, 42);
+
+pearsonCorrelation(errorRate, ticketVolume);
+// ≈ 0.652 -- a strong, real correlation. Not noise, not a bug.
+```
+
+**A real, strong correlation (r ≈ 0.65) — so was the on-call engineer
+right that fixing error rate would fix ticket volume?** Not yet. The next
+step is the one the naive reading skips: check whether that correlation
+survives once traffic is held constant, using a **partial correlation** —
+the correlation between two variables with a third variable's shared
+influence subtracted out algebraically:
+
+```js
+function partialCorrelation(rXY, rXZ, rYZ) {
+  return (rXY - rXZ * rYZ) / Math.sqrt((1 - rXZ * rXZ) * (1 - rYZ * rYZ));
+}
+
+const rErrorTicket = pearsonCorrelation(errorRate, ticketVolume); // ≈ 0.652
+const rErrorTraffic = pearsonCorrelation(errorRate, traffic); // ≈ 0.730
+const rTicketTraffic = pearsonCorrelation(ticketVolume, traffic); // ≈ 0.889
+
+partialCorrelation(rErrorTicket, rErrorTraffic, rTicketTraffic);
+// ≈ 0.009 -- controlling for traffic, the correlation is gone.
+```
+
+**The correlation between error rate and ticket volume, controlling for
+traffic, drops from 0.65 to essentially 0.** That's the code-level version
+of L2's confound fix: both metrics really do move together, but only
+because both are downstream of traffic — not because either one drives
+the other. A project that reduces error rate directly, without touching
+traffic, would have no reason to expect ticket volume to fall.
+
+<Checkpoint question="generateData() never writes a line of code connecting errorRate to ticketVolume directly -- yet pearsonCorrelation(errorRate, ticketVolume) comes back at 0.65. Where does that correlation actually come from, mechanically?">
+
+It comes entirely through the shared variable `traffic`. Both
+`errorRate` and `ticketVolume` are computed as `(some coefficient) * t +
+noise`, so whenever `t` happens to be high in a given synthetic sample,
+both `errorRate` and `ticketVolume` tend to be high together, and when
+`t` is low, both tend to be low together -- producing a strong
+association between the two even though neither one's value is ever
+read when computing the other. This is the confound mechanism made
+literal in code: two variables can move together with 0% of that
+movement caused by either one directly, entirely because a third
+variable independently pushes both. `partialCorrelation()` is what
+reveals this, by algebraically asking "how correlated are errorRate and
+ticketVolume among only the cases where traffic is effectively held
+fixed" -- and the answer is: barely at all.
+
+</Checkpoint>
+
+## Part 2 — a reusable base rate / precision calculator
+
+L1 and L2's 28% came from hand-multiplying counts. Turn it into a
+function that takes a base rate and a detector's two error rates, and
+returns the number that actually matters — precision, the probability the
+event is real given that the signal fired:
+
+```js
+function alertPrecision({ baseRate, truePositiveRate, falsePositiveRate }) {
+  const pAlertAndReal = baseRate * truePositiveRate;
+  const pAlertAndNotReal = (1 - baseRate) * falsePositiveRate;
+  const pAlertFires = pAlertAndReal + pAlertAndNotReal;
+  if (pAlertFires === 0) return 0;
+  return pAlertAndReal / pAlertFires;
+}
+
+// L1's own numbers: 2% base rate, 95% true positive rate, 5% false
+// positive rate.
+alertPrecision({
+  baseRate: 0.02,
+  truePositiveRate: 0.95,
+  falsePositiveRate: 0.05,
+});
+// ≈ 0.2794 -- matches L1/L2's hand-computed 28% exactly.
+```
+
+**Does making the detector "more accurate" actually fix this?** Try a
+detector that sounds much better — 99% true positive rate, 1% false
+positive rate — against a genuinely rare event, a 1-in-1,000 incident
+(a base rate of 0.1%, ten times rarer than L1's 2%):
+
+```js
+alertPrecision({
+  baseRate: 0.001,
+  truePositiveRate: 0.99,
+  falsePositiveRate: 0.01,
+});
+// ≈ 0.0902 -- a "99% accurate" detector, right only 9% of the time it fires.
+```
+
+**A detector that's objectively better on both error rates (99% vs. 95%
+true positive, 1% vs. 5% false positive) still ends up with _worse_
+precision than L1's original detector — 9% instead of 28%.** The reason
+is the base rate got ten times rarer at the same time the detector got
+better, and the base rate's effect dominated. This is the practical trap
+for anyone building monitoring or ML-based detection: **shipping a
+"more accurate" model for a rare event, without separately checking what
+happens to precision at that event's actual base rate, can make the
+false-alarm problem worse, not better** — every percentage point shaved
+off the false positive rate matters far more than the same point shaved
+off the true positive rate, exactly as L2's Checkpoint on FPR sensitivity
+showed.
+
+<Checkpoint question="Two teams each improve their anomaly detector. Team A's event has a 10% base rate; Team B's has a 0.1% base rate. Both detectors go from 90% to 99% true positive rate, false positive rate unchanged at 5%. Which team's precision improves more, in absolute terms, from that same true-positive-rate gain?">
+
+Team A's -- the team with the higher base rate. With a 10% base rate,
+true positives make up a much larger share of the alert-firing
+denominator to begin with (a lot of real events exist to be caught), so
+raising the true positive rate from 90% to 99% meaningfully shifts that
+balance. With a 0.1% base rate, false positives from the other 99.9% of
+checks dominate the denominator regardless of whether the true positive
+rate is 90% or 99% -- there simply aren't enough real events in the mix
+for a true-positive-rate improvement to move precision much. This is the
+same asymmetry as the FPR-sensitivity Checkpoint in L2, from the other
+direction: at a very low base rate, the false positive rate controls
+precision almost completely, and true positive rate improvements barely
+register.
+
+</Checkpoint>
+
+## Trade-offs: you can't always run a real experiment
+
+A partial correlation controlling for one known confound is still not a
+randomized, controlled experiment — it only controls for the confounds
+someone thought to measure and include. **When a true controlled
+comparison (randomly assign some users to a change, others to a control
+group, compare outcomes) isn't possible — no way to randomly assign
+"traffic level," can't ethically or practically run an A/B test — what's
+the next-best evidence for an actual causal claim?** Three real proxies,
+each weaker than a controlled experiment but stronger than a raw
+correlation:
+
+- **Natural experiments** — a real-world event changes one variable
+  without the researcher's involvement (a region-wide outage that
+  briefly cut traffic in half for reasons unrelated to error rate),
+  letting the shared-confound structure be checked against what actually
+  happened during that natural shift.
+- **Before/after with a control group** — compare a change's effect over
+  time against a similar system or population that didn't get the
+  change, so a shared trend (an unrelated confound moving over time)
+  doesn't get mistaken for the change's effect.
+- **Mechanism plausibility** — can anyone describe, concretely, the
+  physical or economic chain from cause to effect? "More load causes more
+  timeout errors because connection pools exhaust" is a mechanism.
+  "Support tickets cause errors" has no plausible mechanism running that
+  direction — a strong signal the correlation, however real, isn't
+  causal in that direction at all.
+
+None of these is as strong as a real randomized controlled trial — each
+can still be fooled by a confound nobody thought to check. **They're what
+you reach for when a controlled experiment genuinely isn't available**,
+not a substitute to prefer when one is.
+
+## Extend the example: what changes under different conditions?
+
+**What changes if the base rate itself is uncertain — not a clean 2%,
+but a rough estimate somewhere between 1% and 4%?** Run
+`alertPrecision()` at both ends of that range, holding the detector's
+true/false positive rates fixed at 95%/5%: at a 1% base rate, precision
+comes out to roughly 16%; at 4%, roughly 44%. A 4x uncertainty in the
+base rate produces almost a 3x swing in the answer that matters most —
+which means the base rate is worth pinning down with real historical
+counts (how many pages over the last quarter turned out to be real
+incidents?) before trusting any single precision number, the same
+"don't estimate the least-certain input and then trust the output
+blindly" lesson `logic/fermi-estimation` and `logic/expected-value` both
+raised in their own domains.
+
+**What changes if a real controlled comparison were possible after
+all — say, randomly routing half of all traffic through a code path with
+the suspected error-rate fix, and half through the unchanged path, over
+the same time window?** Because both groups would see the same traffic
+distribution by construction (random assignment balances confounds it
+didn't even know to look for, not just the ones named in advance), any
+difference in ticket volume between the two groups could be attributed
+to the fix directly — no partial correlation, no confound-hunting
+required, because the experiment itself rules out unmeasured confounds
+by design rather than needing to identify and control for each one by
+name.
+
+## Failure modes
+
+| Failure mode                                                                    | What it gets wrong                                                                                                            |
+| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Treating a strong correlation as proof of a direct causal link                  | Skips checking for a shared confound, reverse causation, or coincidence -- the correlation itself never distinguishes them    |
+| Reading a detector's "accuracy" (true positive rate) as its precision           | Confuses "right when tested against a known real case" with "right when it actually fires," which diverge as events get rarer |
+| Shipping a "more accurate" detector for a rare event without checking precision | An improved true positive rate can be swamped by an unchanged false positive rate against a very low base rate                |
+| Controlling for one known confound and calling the result "causal"              | A partial correlation only removes confounds someone thought to measure -- unmeasured ones can still be driving the result    |
+| Ignoring uncertainty in the base rate itself when computing precision           | A precision number built on a rough base rate guess inherits that guess's full uncertainty, however precise the output looks  |
