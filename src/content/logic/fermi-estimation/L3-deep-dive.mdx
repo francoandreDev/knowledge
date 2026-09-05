@@ -1,0 +1,262 @@
+---
+title: "L3 — Coding the storage estimate, and proving the errors-cancel claim"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="Turning the whiteboard math into code that can be re-run">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📦</span> <strong>Naive worst-case bound</strong> — multiply every factor's low, then every factor's high: 0.41 TB to 4.38 TB</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Realistic spread</strong> — 75% of the actual corner combinations land inside a much narrower 0.68–2.63 TB band</div>
+    </div>
+  </Fragment>
+
+L1's whiteboard estimate used single point guesses (200,000 users, 40
+events/day). A real Fermi estimate is more honest about its own
+uncertainty — each factor gets a **low/high range**, not one number.
+**If every factor now has a range instead of a point value, what happens
+to the combined estimate's range — does it just get wider and wider as
+more uncertain factors are multiplied in, the way the naive worst-case
+math above suggests?**
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "Propagating low/high ranges through a chain of multiplied factors",
+    "Proving errors-cancel with a corner-combination check, in code",
+    "Sanity-checking the estimate, and where this technique breaks",
+  ]}
+/>
+
+## Encoding the factors as ranges, not points
+
+Instead of "200,000 users," a properly-uncertain estimate says "somewhere
+between 150,000 and 250,000 users" — a range wide enough to genuinely
+cover the guesser's uncertainty, not a false-precision midpoint dressed
+up as a range.
+
+```js
+const factors = [
+  { name: "activeUsers", low: 150_000, high: 250_000 },
+  { name: "eventsPerUserPerDay", low: 25, high: 60 },
+  { name: "bytesPerEvent", low: 300, high: 800 },
+  { name: "daysPerYear", low: 365, high: 365 }, // known exactly — no range
+];
+```
+
+The most common way to get a single point estimate out of a low/high
+range is the **geometric mean** (`sqrt(low * high)`), not the arithmetic
+average — order-of-magnitude uncertainty is naturally multiplicative
+(the true value is as likely to be "half of X" as "double X"), and the
+geometric mean is the point that sits centered under that kind of
+uncertainty.
+
+```js
+function geometricMean(low, high) {
+  return Math.sqrt(low * high);
+}
+
+function pointEstimate(factors) {
+  return factors.reduce((product, f) => {
+    const mid = f.low === f.high ? f.low : geometricMean(f.low, f.high);
+    return product * mid;
+  }, 1);
+}
+
+pointEstimate(factors);
+// ≈ 1,341,000,000,000 bytes ≈ 1.34 TB — close to L1's whiteboard 1.5 TB,
+// with the extra rigor of coming from a real range instead of one guess
+```
+
+## The naive worst-case bound
+
+**The most obvious way to turn per-factor ranges into a combined range
+is to multiply every factor's low together, and separately multiply
+every factor's high together.** This is a real, correct upper and lower
+bound — but as L2's 3-factor table hinted, it's also the widest,
+least-likely-to-be-needed answer, because it assumes every factor errs
+in the same direction simultaneously.
+
+```js
+function naiveWorstCaseRange(factors) {
+  const low = factors.reduce((product, f) => product * f.low, 1);
+  const high = factors.reduce((product, f) => product * f.high, 1);
+  return { low, high };
+}
+
+naiveWorstCaseRange(factors);
+// { low: 410,625,000,000, high: 4,380,000,000,000 }
+// ≈ 0.41 TB to 4.38 TB — a 10.7x spread from bottom to top
+```
+
+<Checkpoint question="naiveWorstCaseRange's low and high are each mathematically correct bounds — nothing in the function is wrong. So why does L2 call this bound misleading if used on its own?">
+
+The bound is correct as an outer limit, but it represents only the two
+most extreme scenarios out of every possible combination of factor
+errors: the one where every single factor happens to land at its low
+end at once, and the one where every factor happens to land at its high
+end at once. Those are two specific outcomes among many roughly
+equally-plausible combinations — most real combinations mix some factors
+running high with others running low, which narrows the realistic range
+considerably. Reporting `[0.41 TB, 4.38 TB]` as "the" estimate implies
+those extremes are just as likely as the middle, when the corner check
+below shows they're actually the least likely outcomes of all.
+
+</Checkpoint>
+
+## Proving errors-cancel with every corner combination
+
+Instead of trusting intuition, check every possible combination of
+"this factor landed at its low end" vs. "this factor landed at its high
+end" directly — with 3 varying factors (the 4th, days per year, is
+fixed), there are only 2³ = 8 combinations, cheap enough to check
+exhaustively rather than needing a large random simulation.
+
+```js
+function cornerCombinations(factors) {
+  const varying = factors.filter((f) => f.low !== f.high);
+  const fixed = factors.filter((f) => f.low === f.high);
+  const fixedProduct = fixed.reduce((product, f) => product * f.low, 1);
+
+  const results = [];
+  const cornerCount = 2 ** varying.length;
+  for (let mask = 0; mask < cornerCount; mask++) {
+    let product = fixedProduct;
+    for (let i = 0; i < varying.length; i++) {
+      const useHigh = (mask >> i) & 1;
+      product *= useHigh ? varying[i].high : varying[i].low;
+    }
+    results.push(product);
+  }
+  return results.sort((a, b) => a - b);
+}
+
+const corners = cornerCombinations(factors);
+// 8 values, sorted (in bytes):
+// [410.6B, 684.4B, 985.5B, 1,095.0B, 1,642.5B, 1,825.0B, 2,628.0B, 4,380.0B]
+// (billions of bytes; divide by 1e12 for TB)
+```
+
+```js
+function shareWithinFactor(values, center, factor) {
+  const inRange = values.filter(
+    (v) => v >= center / factor && v <= center * factor,
+  );
+  return inRange.length / values.length;
+}
+
+const point = pointEstimate(factors); // ≈ 1.341 TB
+shareWithinFactor(corners, point, 2);
+// 0.75 — 6 of the 8 corner combinations land within a factor of 2 of the
+// point estimate; only the two all-low and all-high corners fall outside it
+```
+
+Only the single **all-low** corner (every factor at once running low)
+and the single **all-high** corner (every factor at once running high)
+reach the naive bound's extremes. The other six corners — every
+combination that mixes some factors running high with others running
+low — land inside a much narrower 0.68 TB–2.63 TB band, a 3.9x spread
+instead of the naive bound's 10.7x. This is the errors-cancel claim from
+L2, now checked exhaustively instead of asserted: it isn't that any
+individual factor's error shrinks, it's that most combinations of four
+independent errors don't all point the same way at once.
+
+## Sanity-checking against a reference point
+
+A similar, already-shipped feature at this company logs roughly 1 GB/day
+for every 100,000 active users. Scaled to this feature's 200,000-user
+estimate, that reference predicts about 2 GB/day, or ~0.73 TB/year —
+same order of magnitude as the 1.34 TB point estimate, off by less than
+2x. That's not a contradiction; it's exactly the kind of "same ballpark,
+not identical" agreement a sanity check is meant to produce; a reference
+point that came out at 15 TB or 0.015 TB would have been the real red
+flag, signaling a factor was wrong by an order of magnitude, not just a
+reasonable amount.
+
+```js
+function referenceSanityCheck(estimateBytes, referenceBytesPerUser, users) {
+  const referencePrediction = referenceBytesPerUser * users;
+  const ratio = estimateBytes / referencePrediction;
+  // Same order of magnitude (roughly 0.3x to 3x) is a pass; anything
+  // beyond that is worth re-checking a factor before trusting the number.
+  return { referencePrediction, ratio, plausible: ratio > 0.3 && ratio < 3 };
+}
+
+const bytesPerUserPerYearReference = (1_000_000_000 / 100_000) * 365; // 1GB/day per 100k users, annualized
+referenceSanityCheck(
+  pointEstimate(factors),
+  bytesPerUserPerYearReference,
+  200_000,
+);
+// { referencePrediction: ≈730,000,000,000, ratio: ≈1.84, plausible: true }
+```
+
+Six months after launch, the real measured number (annualized) came in
+at about 1.9 TB — inside the 0.68–2.63 TB band the corner check produced,
+and close to the 1.34 TB point estimate. The naive worst-case bound
+(0.41–4.38 TB) would also have "contained" the real answer, but so would
+almost anything; the corner-based band is the one that was actually
+narrow enough to be useful for a budget decision.
+
+<Checkpoint question="The reference sanity check above found a ratio of about 1.84 (not 1.0) between the point estimate and the reference-derived prediction, and still called it 'plausible.' Why isn't a ratio of exactly 1.0 the bar for a sanity check to pass?">
+
+A sanity check is asking "is this the right order of magnitude," not
+"does this match some other independent guess exactly." The reference
+feature and the new feature aren't identical — different event types,
+different usage patterns — so some disagreement is expected even if both
+estimates are reasonable. What the sanity check is actually screening for
+is a factor that's wrong by 10x or more: a missing units conversion, a
+forgotten days-per-year multiplier, an order-of-magnitude typo in one of
+the ranges. A ratio of 1.84 says "same ballpark, plausible disagreement
+in the details" — a ratio of 15 or 0.02 would say "something in this
+decomposition is fundamentally wrong," which is the actual failure mode
+this check exists to catch.
+
+</Checkpoint>
+
+## Extend the example: what changes under different assumptions?
+
+**Everything above assumed the four factors' errors are independent of
+each other. What changes if two of them are actually correlated —
+say, `eventsPerUserPerDay` and `bytesPerEvent` both quietly assume the
+same optimistic rollout timeline, so if one runs high, the other tends
+to run high too?** The corner-combination check still runs the same
+code, but its conclusion stops being trustworthy: the "6 of 8 corners
+land within 2x" result depended on each factor's high/low outcome being
+roughly as likely as any other combination. If two factors move
+together, the realistic set of outcomes shrinks toward the corners where
+those two agree (both high or both low) and away from the corners where
+they disagree — which pulls the _effective_ spread back toward the wider,
+naive bound, even though the code never changes. The fix isn't a
+different formula; it's re-examining the decomposition itself for a
+shared root assumption, the same non-overlapping check `L2` and
+`problem-decomposition` both apply to the factors before trusting the
+multiplication.
+
+**What if the ask isn't a low/high range at all, but a specific
+90% confidence interval — "we need to be 90% sure the real number is
+inside this range," not just "this range is plausible"?** The low/high
+ranges used above are honest bounds on each factor's plausible values,
+but they don't carry an explicit probability. A genuine 90% interval
+would require modeling each factor's uncertainty as a real probability
+distribution (not just two corner values) and running many random draws
+from each distribution — a Monte Carlo simulation, drawing thousands of
+random combinations instead of checking all 8 corners exhaustively — then
+reading off the 5th and 95th percentiles of the resulting products. The
+corner check used here is a fast, exhaustive stand-in that's good enough
+for a go/no-go budget decision; a contractual 90% capacity commitment
+would need the fuller probabilistic version.
+
+## Failure modes
+
+| Failure mode                                                                       | What it gets wrong                                                                                                        |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Treating the naive worst-case low/high bound as "the" estimate                     | It reports the two least-likely outcomes (all factors low, or all factors high) as if they were the typical case          |
+| Picking factors whose errors secretly share a root cause                           | Breaks the independence assumption the errors-cancel effect depends on — correlated factors don't cancel, they compound   |
+| Skipping the reference-point sanity check because a number "feels" right           | An order-of-magnitude mistake (a missing unit conversion, a wrong exponent) can hide inside a confident-sounding estimate |
+| Using a Fermi estimate for a decision that actually needs precision and can get it | Fast sizing is the point — when a real measurement is available in the time you have, use it instead of a rough range     |
+| Reporting a Fermi estimate's point value without its range                         | The range is the honest part of the estimate; a bare point number invites treating a rough guess as a precise measurement |
