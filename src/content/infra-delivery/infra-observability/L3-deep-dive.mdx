@@ -1,0 +1,302 @@
+---
+title: "L3 — Building an error-budget calculator and a burn-rate alerting function"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="Two ways to burn the same budget">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🐢</span> <strong>Slow burn</strong> — 0.3% error rate, steady, all day — would take ~10 days to exhaust the month's budget</div>
+      <div class="flex items-center gap-1.5"><span>🔥</span> <strong>Fast burn</strong> — 12% error rate, right now — would exhaust the same budget in about 6 hours</div>
+    </div>
+    <div class="not-prose mt-3 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs dark:border-amber-800 dark:bg-amber-950">
+      Same SLO, same budget size. Only the <em>rate</em> tells you which
+      one needs someone paged right now.
+    </div>
+
+  </Fragment>
+
+L1's connection-pool failure dropped checkout's success rate from 99.95%
+to 83% — a severe, fast-moving failure. A percentage-consumed number
+alone can't tell that apart from a mild, slow-moving problem eating the
+same budget over days instead of hours. This section builds both: an
+error-budget calculator, and a burn-rate function that catches exactly
+that distinction — the one L1's raw-metric dashboards never could, because
+they weren't measuring the SLI at all.
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "An error-budget calculator: SLO target + window → allowed downtime, and how much is spent",
+    "A burn-rate alerting function that distinguishes a real incident from a minor blip",
+    "Trade-offs: an SLO set too loose or too strict, and what changes with multiple SLOs or a rolling window",
+  ]}
+/>
+
+## The error-budget calculator
+
+The core arithmetic from L2 — a 99.9% SLO over 30 days permits about 43
+minutes of downtime — needs to generalize to any SLO target and any
+window, and needs to turn real observed request data into "how much of
+that budget is already spent."
+
+```typescript
+// error-budget.ts
+
+interface ErrorBudget {
+  sloTarget: number; // e.g. 0.999 for "99.9%"
+  windowMinutes: number; // e.g. 43200 for a 30-day window
+  totalBudgetMinutes: number; // allowed "down" time across the window
+}
+
+function computeErrorBudget(
+  sloTarget: number,
+  windowMinutes: number,
+): ErrorBudget {
+  if (sloTarget <= 0 || sloTarget >= 1) {
+    throw new Error(`sloTarget must be between 0 and 1, got: ${sloTarget}`);
+  }
+  const allowedFailureRatio = 1 - sloTarget;
+  const totalBudgetMinutes = windowMinutes * allowedFailureRatio;
+  return { sloTarget, windowMinutes, totalBudgetMinutes };
+}
+
+interface BudgetStatus {
+  consumedMinutes: number;
+  remainingMinutes: number;
+  percentConsumed: number;
+}
+
+// Treats "budget consumed" as proportional to the observed failure ratio
+// over the elapsed portion of the window — the standard way to translate
+// a request-based SLI (success rate) into a time-based budget without
+// needing to track literal downtime intervals.
+function computeBudgetStatus(
+  budget: ErrorBudget,
+  failedRequests: number,
+  totalRequests: number,
+  elapsedMinutes: number,
+): BudgetStatus {
+  if (totalRequests <= 0) {
+    throw new Error("totalRequests must be greater than 0");
+  }
+  const observedFailureRatio = failedRequests / totalRequests;
+  const consumedMinutes = elapsedMinutes * observedFailureRatio;
+  const remainingMinutes = budget.totalBudgetMinutes - consumedMinutes;
+  const percentConsumed = (consumedMinutes / budget.totalBudgetMinutes) * 100;
+  return { consumedMinutes, remainingMinutes, percentConsumed };
+}
+```
+
+Run against L2's worked numbers — a 99.9% SLO over a 30-day (43,200
+minute) window, with one bad incident that failed 35,000 of 500,000
+requests over the elapsed 5 days (7,200 minutes) so far:
+
+```typescript
+const budget = computeErrorBudget(0.999, 43_200);
+// budget.totalBudgetMinutes === 43.2
+
+const status = computeBudgetStatus(budget, 35_000, 500_000, 7_200);
+// observedFailureRatio = 0.07
+// consumedMinutes = 7200 * 0.07 = 504 minutes  <-- far over the 43.2 budget
+```
+
+That result matches L2's table directly: one bad incident burning a 7%
+failure ratio across several days worth of traffic spends the entire
+month's budget many times over — exactly the "budget already spent,
+freeze risky changes" row.
+
+<Checkpoint question="computeBudgetStatus treats 'minutes consumed' as elapsedMinutes times the observed failure ratio, rather than literally summing outage-interval durations. Why is that a reasonable stand-in for a request-based SLI like success rate?">
+
+A request-based SLI doesn't have discrete "up" and "down" intervals the
+way a simple uptime check does — at any given minute, some requests might
+succeed and others fail. Scaling elapsed time by the failure ratio gives
+an equivalent measure: if 7% of requests failed steadily across 7,200
+minutes, that's treated as the same budget impact as being fully "down"
+for 7% of that time. It's an approximation, not a literal outage log, but
+it's the standard way SLO tracking converts a success-rate SLI into the
+same time-denominated budget the SLO's target was expressed in.
+
+</Checkpoint>
+
+## Burn-rate alerting: rate matters as much as amount
+
+**A 12% failure rate for the last 10 minutes and a 0.3% failure rate for
+the last 10 hours can burn through similar-looking amounts of budget. Do
+they deserve the same response?**
+
+No — and this is the nuance a single "percent of budget consumed"
+threshold alarm misses entirely. A fast, severe burn rate deserves an
+immediate page even if the absolute budget consumed so far is small,
+because at that rate the entire month's budget will be gone in hours. A
+slow burn rate consuming a similar percentage over days might not need
+urgent paging at all — there's time to investigate calmly, or it may
+self-resolve.
+
+**Burn rate** answers "at the currently-observed error rate, how many
+times faster than sustainable is the budget being spent?" A burn rate of
+1 means "consuming the budget at exactly the rate that would use it all
+up right at the end of the window" — sustainable, if unwelcome. A burn
+rate of 14.4 means "consuming budget 14.4x faster than that" — enough to
+exhaust a 30-day budget in about 30/14.4 ≈ 2 days, or a fraction of that
+window in hours if sustained.
+
+```typescript
+// burn-rate.ts
+
+function computeBurnRate(
+  observedFailureRatio: number,
+  allowedFailureRatio: number,
+): number {
+  if (allowedFailureRatio <= 0) {
+    throw new Error("allowedFailureRatio must be greater than 0");
+  }
+  return observedFailureRatio / allowedFailureRatio;
+}
+
+type AlertSeverity = "none" | "ticket" | "page";
+
+interface BurnRateAlert {
+  severity: AlertSeverity;
+  shortWindowBurnRate: number;
+  longWindowBurnRate: number;
+  reason: string;
+}
+
+// Requires the burn rate to be elevated across BOTH a short window (catches
+// real incidents fast) and a longer window (filters out brief blips that
+// self-resolve before they meaningfully dent the budget) before paging —
+// a single short-window spike alone is exactly the kind of noisy trigger
+// that erodes trust in alerts, the same failure mode alert-fatigue-prone
+// CI gates hit in `test-suite-architecture` and `quality-culture`.
+function decideAlert(
+  shortWindowFailureRatio: number,
+  longWindowFailureRatio: number,
+  allowedFailureRatio: number,
+): BurnRateAlert {
+  const shortWindowBurnRate = computeBurnRate(
+    shortWindowFailureRatio,
+    allowedFailureRatio,
+  );
+  const longWindowBurnRate = computeBurnRate(
+    longWindowFailureRatio,
+    allowedFailureRatio,
+  );
+
+  if (shortWindowBurnRate >= 14.4 && longWindowBurnRate >= 6) {
+    return {
+      severity: "page",
+      shortWindowBurnRate,
+      longWindowBurnRate,
+      reason:
+        "Fast, severe burn sustained across both windows — at this rate the budget empties in hours, not weeks.",
+    };
+  }
+
+  if (shortWindowBurnRate >= 3 && longWindowBurnRate >= 1) {
+    return {
+      severity: "ticket",
+      shortWindowBurnRate,
+      longWindowBurnRate,
+      reason:
+        "Elevated but not severe burn — worth investigating during business hours, not worth waking anyone up.",
+    };
+  }
+
+  return {
+    severity: "none",
+    shortWindowBurnRate,
+    longWindowBurnRate,
+    reason: "Burn rate is within sustainable bounds for this SLO.",
+  };
+}
+```
+
+Run this against the Scenario's two cases, both against a 99.9% SLO
+(`allowedFailureRatio = 0.001`):
+
+```typescript
+// L1's real incident: severe, fast — 12% failing right now,
+// and it's already been elevated for the last hour too.
+decideAlert(0.12, 0.08, 0.001);
+// shortWindowBurnRate = 120, longWindowBurnRate = 80  ->  severity: "page"
+
+// A minor blip: 0.3% failing steadily, nothing acutely wrong.
+decideAlert(0.003, 0.003, 0.001);
+// shortWindowBurnRate = 3, longWindowBurnRate = 3  ->  severity: "ticket"
+
+// Background noise: 0.05% failing, well within the SLO's own allowance.
+decideAlert(0.0005, 0.0004, 0.001);
+// shortWindowBurnRate = 0.5, longWindowBurnRate = 0.4  ->  severity: "none"
+```
+
+The first case is L1's actual incident, reconstructed: request success
+rate collapsing from 99.95% to 83% is a 17% failure ratio — well past the
+120x burn rate shown above even using a more conservative 12% reading —
+and it should have paged someone within minutes. A raw-metric dashboard
+never would have, because CPU, memory, and disk were never the signal
+that mattered.
+
+<Checkpoint question="decideAlert requires the burn rate to be elevated in both the short window and the long window before paging, not just the short window alone. What real problem does the long-window requirement prevent?">
+
+A single short-window spike — a brief blip, a deploy's health check
+warming up, one bad minute of retries — can produce a very high short-term
+burn rate that looks alarming in isolation but self-resolves before it
+meaningfully dents the budget. Requiring the long window to also be
+elevated filters exactly that case out: a real incident stays elevated
+across both windows, while a brief blip fades from the short window
+before the long window ever catches up to it. Paging on the short window
+alone would produce the same alert-fatigue problem `test-suite-architecture`
+describes for flaky tests — the page fires often enough for non-issues
+that on-call starts distrusting it.
+
+</Checkpoint>
+
+## Trade-offs: how loose or strict should the SLO be
+
+An SLO isn't free to set arbitrarily tight or loose — both directions
+have a real, different failure mode:
+
+| SLO set...     | Practical effect                                                                                                                                                                   |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Too loose**  | Gives false confidence — the org believes it's meeting its reliability bar while real users experience meaningful, uncounted pain that never burns enough budget to trigger action |
+| **Too strict** | Either can't realistically be met given the infrastructure's actual failure modes, or forces the team into overly conservative, slow shipping to avoid ever touching the budget    |
+
+A 99.9% SLO on a service that realistically experiences dependency
+hiccups a few times a month may be unmeetable as written — the team
+either quietly stops trusting the SLO (the same erosion pattern as an
+over-strict CI gate nobody respects anymore), or ships so conservatively
+that shipping speed itself becomes the real cost. A 99% SLO on a
+checkout flow, meanwhile, permits over 7 hours of allowed failure a month
+— technically "met," while a meaningful fraction of real purchases
+silently fail the whole time. The right SLO is set from what actually
+matters to users and what the infrastructure can realistically sustain —
+not from whichever number sounds impressive in a slide.
+
+**Two extensions worth thinking through beyond this worked example:**
+
+What changes if a service has **multiple SLOs that trade off against each
+other** — say, a strict latency SLO and a strict availability SLO, where
+the fastest way to satisfy one (aggressively timing out and retrying slow
+requests) actively burns the other's budget (each retry is another
+chance to fail, and a hard timeout turns a slow-but-eventually-successful
+request into a counted failure)? A single burn-rate function per SLO
+isn't enough anymore — the alerting and the shipping decision both need
+to reason about which budget is scarcer right now, since a change that
+helps one can actively spend the other.
+
+And what changes if the **error budget resets on a rolling window**
+(e.g. "the trailing 30 days," recalculated every day) instead of a fixed
+calendar month? A fixed month lets a team burn recklessly on day 29 and
+get a clean slate on day 1 regardless of how bad day 29 was. A rolling
+window has no such reset point — a bad incident stays inside the
+30-day lookback and keeps suppressing the budget every single day until
+it finally ages out, which means `computeBudgetStatus` above would need
+to track a sliding sum of failures over the trailing window rather than
+a single elapsed-minutes-since-period-start figure — a materially
+different (and more realistic) accounting model than the fixed-window
+version built here.

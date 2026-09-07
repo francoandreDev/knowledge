@@ -138,7 +138,7 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 | 07  | progressive-delivery                     | How do we ship a risky change without risking everyone? (progressive delivery: canary, blue-green, feature flags)        | infra, deployment, risk-management          | done    |
 | 08  | rollback-strategy                        | How do we undo a bad deploy fast? (rollback strategy, deployment safety nets)                                            | infra, deployment, incident-response        | done    |
 | 09  | config-management                        | Why does the same code behave differently in staging vs. prod? (config management, environment-specific behavior)        | infra, debugging, reliability               | done    |
-| 10  | infra-observability                      | How do we know if our infrastructure itself is healthy? (infra observability, SLOs/SLIs, alerting)                       | infra, observability, reliability           | planned |
+| 10  | infra-observability                      | How do we know if our infrastructure itself is healthy? (infra observability, SLOs/SLIs, alerting)                       | infra, observability, reliability           | done    |
 | 11  | cost-awareness                           | How do we avoid a surprise cloud bill? (cost awareness, resource right-sizing)                                           | infra, cost-management                      | planned |
 | 12  | staff-level-release-engineering-strategy | How do we design a deployment architecture that survives a bad Friday deploy? (staff-level release engineering strategy) | infra, deployment, leadership, architecture | planned |
 
