@@ -1,0 +1,81 @@
+---
+title: "L1 — Why does the same code behave differently in staging vs. prod? (config management, environment-specific behavior)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+
+<Scenario label="The timeout nobody set">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🧪</span> <strong>Staging</strong> — `PAYMENT_GATEWAY_TIMEOUT_MS=30000` set explicitly</div>
+      <div class="flex items-center gap-1.5"><span>☁️</span> <strong>Production</strong> — variable never set, code silently falls back to 3000</div>
+    </div>
+    <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div class="rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950">
+        <p class="font-semibold text-emerald-600 dark:text-emerald-400">Staging</p>
+        30s timeout, payment provider responds in ~1s. Always passes.
+      </div>
+      <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
+        <p class="font-semibold text-rose-600 dark:text-rose-400">Production</p>
+        3s timeout, real provider takes 4-8s at peak. Legitimate checkouts fail.
+      </div>
+    </div>
+
+  </Fragment>
+
+A checkout feature ships. It's reviewed, it passes every test in staging,
+and the deploy goes out clean — the exact same built container image that
+staging ran, now running in production. Within an hour, support tickets
+start piling up: real customers, with valid cards, getting "payment failed"
+at checkout. Nobody touched the payment code. Nobody rolled back anything.
+So what changed?
+
+| Where      | `PAYMENT_GATEWAY_TIMEOUT_MS` | Effective timeout   | Provider's real response time | Result           |
+| ---------- | ---------------------------- | ------------------- | ----------------------------- | ---------------- |
+| Staging    | set to `30000`               | 30 seconds          | ~1 second (low traffic)       | Always succeeds  |
+| Production | never set                    | 3 seconds (default) | 4-8 seconds (real load)       | Times out, fails |
+
+**The code is identical. The container image is identical — it's the same
+build artifact, promoted from staging to production without a rebuild.**
+The only thing that differs is a single environment variable someone
+meant to set in production and never did — so the code quietly fell back
+to a default value that was never tested against production's real
+latency. Nothing in the code review could have caught this: the bug isn't
+in the code, it's in a value that lives outside the code entirely.
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "The config-vs-code distinction",
+    "Where config values live (env vars, files, secrets manager)",
+    "Why validating config at startup beats finding out in production",
+  ]}
+/>
+
+- **Config** is anything that legitimately varies by environment without the
+  code changing — a database URL, a timeout, a feature flag, a rate limit,
+  an API key. **Code** is the logic that should behave identically
+  everywhere it runs. Keeping the two separate is what lets one built
+  artifact run correctly in every environment.
+- This is a different problem from **environment parity** (making
+  environments _structurally identical_ so nothing drifts by accident) —
+  here, the differences are intentional and necessary. Staging genuinely
+  should point at a different database than production. The problem isn't
+  that they differ; it's making sure the differences are the _right_ ones,
+  on purpose, and nothing silently falls back to a value nobody chose.
+- Config can live in **environment variables** (simple, but easy to typo
+  or forget to set), **per-environment config files** (versioned,
+  reviewable, but can't hold secrets safely), or a **secrets manager**
+  (secure, auditable, but adds real operational complexity) — each has
+  real trade-offs, covered in L2.
+- **Fail-fast validation**: checking that required config is present and
+  well-formed the moment a service starts, instead of discovering a
+  missing or wrong value deep inside a real request — the difference
+  between a service refusing to start with a clear error, and a service
+  starting successfully and then silently misbehaving under real traffic.
+
+**Key terms:** config vs. code, environment variable, per-environment
+config file, secrets manager, silent default, fail-fast validation, build
+once / configure per environment.
