@@ -194,7 +194,7 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 | 10  | documentation-discipline   | How do I protect myself with a paper trail without looking paranoid? (documentation discipline, written confirmations, CYA done well)                         | writing, risk-management, influence-politics           | done    |
 | 11  | calibrated-confrontation   | How do I respond when someone takes credit for my work? (calibrated confrontation, escalating correctly)                                                      | conflict-resolution, communication, influence-politics | done    |
 | 12  | coalition-building-defense | How do I build alliances that protect me before I need protecting? (coalition-building as defense, sponsors vs. mentors)                                      | influence-politics, collaboration, career-growth       | done    |
-| 13  | staying-principled         | How do I stay effective in a highly political org without becoming what I dislike? (staying principled, choosing battles, knowing when to exit)               | influence-politics, mental-models, burnout             | planned |
+| 13  | staying-principled         | How do I stay effective in a highly political org without becoming what I dislike? (staying principled, choosing battles, knowing when to exit)               | influence-politics, mental-models, burnout             | done    |
 | 14  | influence-tool-org-s-good  | How does a staff engineer wield influence ethically at scale without playing dirty? (influence as a tool for the org's good, not personal power accumulation) | influence-politics, leadership, mental-models          | planned |
 
 ## learning-craft/
