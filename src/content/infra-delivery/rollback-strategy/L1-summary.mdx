@@ -1,0 +1,111 @@
+---
+title: "L1 — How do we undo a bad deploy fast? (rollback strategy, deployment safety nets)"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+
+<Scenario label="A bad deploy started throwing errors at 2am. 'Roll back' turned out to mean 40 minutes of rebuilding from source.">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-3 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🔥</span> <strong>The trigger</strong> — a deploy at 1:58am starts throwing errors on 1 in 8 requests</div>
+      <div class="flex flex-col gap-1">
+        <div class="flex items-center justify-between text-xs">
+          <span>On-call: manual rebuild-from-source rollback</span>
+          <span class="font-semibold">40 min</span>
+        </div>
+        <div class="h-2.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+          <div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 100%"></div>
+        </div>
+      </div>
+      <div class="flex flex-col gap-1">
+        <div class="flex items-center justify-between text-xs">
+          <span>Team with a ready previous artifact</span>
+          <span class="font-semibold">2 min</span>
+        </div>
+        <div class="h-2.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+          <div class="h-full rounded-full bg-emerald-500 animate-fill-bar" style="--target-width: 5%"></div>
+        </div>
+      </div>
+      <div class="flex items-center gap-1.5"><span>📉</span> <strong>The gap</strong> — same bug, same team, a 20x difference in recovery time, decided entirely before the incident even started</div>
+    </div>
+  </Fragment>
+
+It's 1:58am. A deploy goes out, and within minutes 1 in 8 requests
+start failing. The on-call engineer's instinct is right — roll back —
+but "roll back" turns out to mean checking out the previous commit,
+rebuilding the container image from source, waiting for CI, and
+redeploying. That takes 40 minutes, during which the bug keeps
+running in production. **The decision to roll back was fast. The
+actual mechanics of doing it were the bottleneck. Where was that 40
+minutes actually lost — in deciding what to do, or in not having
+already prepared to do it?**
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "What makes a rollback fast vs. slow",
+    "Why reverting code isn't automatically safe",
+    "Automatic vs. manual rollback triggers",
+  ]}
+/>
+
+## The shape of the problem
+
+- A bad deploy is not primarily a testing failure — even a well-tested
+  system will occasionally ship something that only breaks under real
+  production conditions (this is the same problem `progressive-delivery`
+  covers: some bugs only surface at scale, under real traffic, in
+  production). Rollback strategy is about what happens **after** that,
+  once a bad deploy is already live: how fast and how safely can it be
+  undone.
+- **Speed** is mostly a preparation problem, not a decision problem. A
+  team that already has the previous version's build artifact sitting
+  ready to redeploy can revert in the time it takes to point traffic
+  back at it. A team that treats "the old version" as something you
+  regenerate from source when you need it pays a rebuild-and-retest
+  tax at the worst possible moment — during an active incident.
+- **Safety** is where rollback strategy gets genuinely tricky, not just
+  operationally busy. Redeploying old application code is easy. But if
+  the bad deploy already changed the database schema, the old code may
+  not actually work against the new schema — a "rollback" can leave the
+  system in a state that's worse than the original bug, because now
+  the code doesn't even agree with its own database.
+- A rollback strategy is a plan **designed before an incident**, the
+  same way `incident-response` treats disclosure and post-mortems as
+  pre-planned rather than improvised — deciding at 1:58am, live, what
+  "rollback" even means for this system is exactly the moment when
+  that decision is most likely to be made badly.
+
+## Key terms
+
+- **Rollback** — reverting a system to its previous known-good deployed
+  state after a bad deploy, as distinct from a "fix forward" deploy
+  that ships a new correction on top of the bad version.
+- **Deployable artifact** — the built, ready-to-run output of a deploy
+  (a container image, a compiled binary, a packaged bundle) as opposed
+  to the source code it was built from. Rollback speed depends on
+  whether the previous artifact still exists ready to run, or has to
+  be rebuilt.
+- **Backward-compatible migration** — a database schema change written
+  so that both the old application code and the new application code
+  can run correctly against it, which is what makes a code rollback
+  actually safe to perform.
+- **Health check** — an automated signal (error rate, latency, a
+  specific metric) used to decide whether a deploy is behaving
+  correctly, checked continuously after a deploy rather than only
+  when someone happens to notice a problem.
+- **Rollback trigger** — the condition that starts a rollback, which
+  can be automatic (a health check crosses a threshold, no human
+  needed) or manual (a person reviews an ambiguous signal and decides).
+
+## What this unit covers
+
+L2 builds the model: what makes a rollback mechanically fast (having
+the previous artifact ready, not rebuilding it), the database
+migration trap that makes "just redeploy the old code" unsafe by
+default, and the line between automatic and manual rollback triggers.
+L3 implements a real health-check-driven rollback decision function
+against realistic metric windows, plus a concrete unsafe-vs-safe
+migration example using the expand-contract pattern.

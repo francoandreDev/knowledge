@@ -1,0 +1,322 @@
+---
+title: "L3 — Building an automatic rollback decision and a rollback-safe migration"
+---
+
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+L2 established the model: fast rollback needs a ready artifact, safe
+rollback needs schema compatibility, and the trigger can be automatic
+or manual depending on how certain the signal is. This level
+implements the two pieces that make that model real: a health-check
+state machine that decides when to roll back, and a concrete
+migration rewritten from unsafe to rollback-safe.
+
+<LevelIntro
+  items={[
+    "A health-check-driven rollback decision function",
+    "Tuning it against flapping vs. slowness",
+    "Rewriting an unsafe migration as expand-contract",
+  ]}
+/>
+
+## A rollback decision that watches windows, not single data points
+
+**A health check needs to tell the difference between a real
+regression and ordinary noise. If it reacts to a single bad
+measurement, what goes wrong?** A single elevated error count could
+just be a handful of unrelated failed requests — rolling back on that
+alone risks reverting a perfectly healthy deploy. The fix is to judge
+a deploy over a series of windows, requiring a pattern to persist
+before acting, except for signals unambiguous enough not to need
+confirmation:
+
+```js
+function classifyWindow(metrics, config) {
+  if (metrics.sampleSize < config.minSampleSize) {
+    return "insufficient-data";
+  }
+  const errorRate = metrics.errors / metrics.sampleSize;
+  if (errorRate >= config.severeErrorRateThreshold) {
+    return "severe";
+  }
+  if (
+    errorRate >= config.errorRateThreshold ||
+    metrics.latencyP99Ms >= config.latencyThresholdMs
+  ) {
+    return "bad";
+  }
+  return "good";
+}
+
+function decideRollbackAction(state, metrics, config) {
+  const classification = classifyWindow(metrics, config);
+
+  if (classification === "insufficient-data") {
+    return {
+      action: "watching",
+      state,
+      reason: "not enough traffic yet to judge this window",
+    };
+  }
+
+  if (classification === "severe") {
+    return {
+      action: "rollback",
+      state: { consecutiveBadWindows: 0, consecutiveGoodWindows: 0 },
+      reason:
+        "severe error rate spike — rolling back immediately, no need to wait for confirmation",
+    };
+  }
+
+  if (classification === "bad") {
+    const consecutiveBadWindows = state.consecutiveBadWindows + 1;
+    if (consecutiveBadWindows >= config.badWindowsToTriggerRollback) {
+      return {
+        action: "rollback",
+        state: { consecutiveBadWindows: 0, consecutiveGoodWindows: 0 },
+        reason: `${consecutiveBadWindows} consecutive bad windows crossed the rollback threshold`,
+      };
+    }
+    return {
+      action: "watching",
+      state: { consecutiveBadWindows, consecutiveGoodWindows: 0 },
+      reason: `bad window ${consecutiveBadWindows}/${config.badWindowsToTriggerRollback} — waiting for confirmation before rolling back`,
+    };
+  }
+
+  const consecutiveGoodWindows = state.consecutiveGoodWindows + 1;
+  if (consecutiveGoodWindows >= config.goodWindowsToMarkHealthy) {
+    return {
+      action: "healthy",
+      state: { consecutiveBadWindows: 0, consecutiveGoodWindows },
+      reason: `${consecutiveGoodWindows} consecutive good windows — marking deploy healthy`,
+    };
+  }
+  return {
+    action: "watching",
+    state: { consecutiveBadWindows: 0, consecutiveGoodWindows },
+    reason: `good window ${consecutiveGoodWindows}/${config.goodWindowsToMarkHealthy} — still building confidence`,
+  };
+}
+```
+
+This is a small state machine: `state` carries only two counters
+forward between calls, `decideRollbackAction` is called once per
+monitoring window with the latest metrics, and its return value is
+both the decision (`watching` / `healthy` / `rollback`) and the next
+`state` to pass in on the following call. Note that `severe` bypasses
+the counters entirely — an unambiguous spike doesn't need three
+windows of confirmation, matching L2's point that certainty, not just
+severity, is what decides whether a machine should act alone.
+
+<Checkpoint question="Why does classifyWindow check sampleSize before computing an error rate at all, instead of just computing errors / sampleSize directly and comparing it to the thresholds?">
+
+Because a rate computed from very few requests is unreliable and can
+swing wildly on tiny absolute numbers — 1 error out of 4 requests is a
+25% error rate that would trip the severe threshold, but it's not
+meaningfully different from ordinary noise at that volume. Checking
+`sampleSize` first means the function only trusts a computed rate once
+there's enough traffic in the window for that rate to actually mean
+something, returning `insufficient-data` instead of a possibly
+misleading `bad` or `severe` classification when there isn't.
+
+</Checkpoint>
+
+## Running it against realistic windows
+
+**Does this actually behave the way L2 described — ignoring noise,
+catching a real regression, and acting fast on an unambiguous one?**
+Here's the same function run against three scenarios, using a
+50-request minimum sample, a 5% bad-error-rate threshold, a 25% severe
+threshold, an 800ms latency threshold, and 3 consecutive windows
+required in either direction:
+
+```js
+const config = {
+  minSampleSize: 50,
+  errorRateThreshold: 0.05,
+  severeErrorRateThreshold: 0.25,
+  latencyThresholdMs: 800,
+  badWindowsToTriggerRollback: 3,
+  goodWindowsToMarkHealthy: 3,
+};
+```
+
+**Scenario A — a real, sustained regression** (8, 9, then 10 errors
+out of 100 requests per window, all above the 5% threshold):
+
+```
+watching - bad window 1/3 — waiting for confirmation before rolling back
+watching - bad window 2/3 — waiting for confirmation before rolling back
+rollback - 3 consecutive bad windows crossed the rollback threshold
+```
+
+**Scenario B — one noisy blip that recovers** (6 errors, then 1, 2, 1
+out of 100 requests — a single bad window followed by three good
+ones):
+
+```
+watching - bad window 1/3 — waiting for confirmation before rolling back
+watching - good window 1/3 — still building confidence
+watching - good window 2/3 — still building confidence
+healthy - 3 consecutive good windows — marking deploy healthy
+```
+
+**Scenario C — a severe spike** (40 errors out of 100 requests, well
+past the 25% severe threshold):
+
+```
+rollback - severe error rate spike — rolling back immediately, no need to wait for confirmation
+```
+
+Scenario A shows the state machine correctly distinguishing a
+persisting problem from noise — it doesn't act on the first bad
+window alone. Scenario B shows the same restraint working in the
+other direction: a single blip doesn't get treated as the start of a
+regression, because the very next windows are good and the bad
+counter resets. Scenario C shows the bypass working as designed —
+severity alone is enough to skip confirmation entirely.
+
+## Tuning: flapping vs. too slow to help
+
+**If 3 consecutive windows is the right number, why not just pick a
+much smaller number, like 1, to be extra safe?** Because the
+"confirmation" requirement is exactly what Scenario B depended on —
+with `badWindowsToTriggerRollback` set to 1, that same noisy blip
+would have triggered an unnecessary rollback of a perfectly healthy
+deploy. This is called **flapping**: a trigger so sensitive that
+ordinary variance repeatedly rolls back good deploys, which erodes
+trust in the automation until someone disables it — the worst outcome,
+since a disabled automatic rollback is no better than not having one.
+
+**So why not go the other way and require, say, 10 consecutive bad
+windows, to be extra sure?** Because that reintroduces the exact
+problem this unit opened with — if each window is one minute, a real
+regression now runs in production for 10 minutes before anything acts,
+most of the way back to the Scenario's 40-minute manual rollback.
+An overly conservative trigger is technically automatic, but too slow
+to actually deliver the benefit automation was supposed to provide.
+
+There's no single correct number — the right value depends on how
+noisy the system's baseline metrics actually are (a high-traffic,
+low-variance service can use a tighter window than a bursty one) and
+how expensive a false-positive rollback is relative to how expensive
+extra minutes of a real regression are. What's not tunable away is the
+trade-off itself: tightening the confirmation requirement always
+trades slower reaction for fewer false positives, and loosening it
+always trades the reverse. The `severe` bypass exists precisely
+because some signals are clear enough not to need this trade-off at
+all — a 25%+ error rate is not something ordinary noise plausibly
+produces, so waiting for confirmation there only costs time for no
+real confidence gained.
+
+<Checkpoint question="A team lowers badWindowsToTriggerRollback from 3 to 1 after a regression that once took 6 minutes to auto-rollback, wanting faster reaction next time. A week later, three perfectly healthy deploys get auto-rolled-back on ordinary traffic noise. What's the actual relationship between these two changes?">
+
+They're the same trade-off, just observed from its two different
+costs. Lowering the confirmation requirement to 1 window does make a
+real regression trigger faster — but it removes the exact protection
+that was filtering out ordinary noise from looking like a regression,
+which is what Scenario B's blip-then-recovery case depended on. The
+team traded reaction speed for false-positive resistance, got the
+speed they wanted, and is now also paying the cost they didn't
+intend: flapping on healthy deploys. The fix isn't reverting to 3
+outright — it's treating the number as a dial to retune based on how
+noisy this specific system's baseline actually is, not a constant to
+set once and forget.
+
+</Checkpoint>
+
+## The migration trap, made concrete
+
+L2 described the danger in the abstract: a rollback that reverts code
+but leaves an incompatible schema behind can crash the old code
+against the new schema. Here's the exact unsafe version and its
+rollback-safe rewrite, for a service that stores an order's status.
+
+**Unsafe: drop a column the old code still reads.**
+
+```sql
+-- Migration shipped alongside the new deploy
+ALTER TABLE orders DROP COLUMN legacy_status;
+```
+
+```js
+// v41 (the version a rollback would redeploy) still does this:
+function getOrderSummary(order) {
+  return { id: order.id, status: order.legacy_status }; // column no longer exists
+}
+```
+
+If v42 turns out to be bad and the team redeploys v41, every call to
+`getOrderSummary` throws, because `legacy_status` was already dropped
+and nothing about redeploying old application code puts it back. The
+rollback trades one incident for a different, guaranteed one.
+
+**Safe: expand-contract, split across two separate deploys.**
+
+```sql
+-- Deploy N (the risky one): expand only, nothing removed
+ALTER TABLE orders ADD COLUMN order_status TEXT;
+```
+
+```js
+// v42 (deploy N): writes both columns, so either code version
+// can read a correct value during the rollback window
+function setOrderStatus(order, status) {
+  order.legacy_status = status; // old column, still present
+  order.order_status = status; // new column, kept in sync
+}
+
+// v41 (what a rollback would redeploy) is untouched — it only
+// ever reads legacy_status, which was never removed
+function getOrderSummary(order) {
+  return { id: order.id, status: order.legacy_status };
+}
+```
+
+```sql
+-- Deploy N+k (a later, separate deploy, once the rollback window
+-- for deploy N has safely passed): contract, now safe to remove
+ALTER TABLE orders DROP COLUMN legacy_status;
+```
+
+During deploy N's rollback window, `legacy_status` is never touched,
+so v41 keeps working exactly as before if a rollback happens — the
+migration risk has been moved out of the deploy that's actually risky
+(the code change) and into a later deploy that, on its own, changes
+nothing about application behavior at all.
+
+## What generalizes and what doesn't
+
+The core lesson — a rollback is only as safe as the least
+backward-compatible thing shipped alongside it, and a health-check
+trigger's sensitivity is a real trade-off, not a setting with one
+correct value — generalizes past database migrations to any coupled,
+independently-versioned pair: a mobile app and its API, a producer and
+consumer of a message queue's schema, a library and its callers. What's
+specific to this worked example: the exact thresholds
+(`errorRateThreshold: 0.05`, three consecutive windows) are tuned for
+this hypothetical service's traffic pattern, not universal constants —
+a different system's real numbers come from its own historical noise,
+not this unit's example. **Try extending it yourself:** if the bad
+deploy's schema change had already accepted writes in the new,
+incompatible format before the rollback triggered — orders actually
+saved with only `order_status` populated, no `legacy_status` — would
+redeploying v41 alone be enough to fix things, or does the rollback
+now also need a data-repair step for what was already written? And
+separately: if this system had no health-check signal at all yet, only
+raw application logs, what would have to change about this whole
+model — could `decideRollbackAction` still run automatically, or does
+the absence of a structured metric turn every rollback decision back
+into a manual, human-triggered one until that signal exists?
+
+## Failure modes
+
+| Failure mode                                                             | What it gets wrong                                                                                                                                                                              |
+| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Discarding previous build artifacts after each successful deploy         | Turns every rollback into a rebuild-from-source, reintroducing the exact delay a ready-artifact rollback exists to avoid                                                                        |
+| Dropping or renaming a column in the same deploy as a code change        | The old code, which a rollback would redeploy, no longer matches the schema — a rollback can create a second, guaranteed incident                                                               |
+| Setting the confirmation window too low (e.g. 1 bad window)              | Flapping — ordinary metric noise repeatedly triggers rollbacks of healthy deploys, eroding trust in the automation until it gets disabled                                                       |
+| Setting the confirmation window too high, or requiring it for everything | An automatic trigger that reacts too slowly delivers little of the speed benefit automation exists for, and forces even unambiguous spikes through the same slow confirmation as ambiguous ones |
+| Treating "we have a rollback plan" as a one-time decision                | Migration safety and trigger tuning both depend on the system's current traffic and schema — a plan written once and never revisited drifts out of date as the system changes                   |
