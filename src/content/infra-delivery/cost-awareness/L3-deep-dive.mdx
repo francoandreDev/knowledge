@@ -1,0 +1,317 @@
+---
+title: "L3 — Building a right-sizing calculator and a budget-forecast alert"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="Two tools, one bill">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📏</span> <strong>Right-sizing calculator</strong> — turns measured utilization into a recommended size + savings</div>
+      <div class="flex items-center gap-1.5"><span>📉</span> <strong>Budget-forecast alert</strong> — flags spend on track to exceed budget, before period end</div>
+      <div class="flex items-center gap-1.5"><span>⚖️</span> <strong>The catch</strong> — both tools can go too far and remove real safety margin</div>
+    </div>
+  </Fragment>
+
+L1's staging environment was guessed at 4x normal load and measured at
+1.2x. L2 named the fix as a loop — measure, right-size, budget-alert,
+re-audit — but never made any of that concrete. This section builds the
+two pieces that make the loop real: a calculator that turns raw
+utilization samples into an actual sizing recommendation and a dollar
+figure, and a forecast-based alert that catches a budget overrun while
+there's still time to act on it, the same early-warning instinct
+`infra-observability`'s burn-rate alert applies to an error budget.
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "A right-sizing calculator: utilization samples + current size → recommendation + savings",
+    "A budget-forecast alert: spend-so-far + time elapsed → will this exceed budget",
+    "Trade-offs: right-sizing too aggressively, and a scaling ceiling set too low",
+  ]}
+/>
+
+## The right-sizing calculator
+
+**Given raw utilization samples for a resource and what it currently
+costs, how do you turn that into a specific, defensible "resize to X"
+recommendation instead of a vague 'usage looks low'?**
+
+The calculator needs three things: a peak (not average) utilization
+reading — average would hide a real spike that headroom must cover — a
+target utilization band to size toward, and the resource's current cost
+so savings can be reported in dollars, not just percent.
+
+```typescript
+// right-sizing.ts
+
+interface UtilizationSample {
+  timestampMinute: number;
+  cpuPercent: number;
+  memoryPercent: number;
+}
+
+interface ProvisionedResource {
+  name: string;
+  vcpu: number;
+  monthlyCostUsd: number;
+}
+
+interface RightSizingRecommendation {
+  name: string;
+  peakCpuPercent: number;
+  peakMemoryPercent: number;
+  currentVcpu: number;
+  recommendedVcpu: number;
+  currentMonthlyCostUsd: number;
+  recommendedMonthlyCostUsd: number;
+  monthlySavingsUsd: number;
+}
+
+// Sizes toward a target peak utilization band (default 60-70%) rather than
+// 100% — real headroom is deliberate, not incidental, so a genuine spike
+// above the measured peak doesn't immediately saturate the resource.
+function recommendSize(
+  resource: ProvisionedResource,
+  samples: UtilizationSample[],
+  targetPeakUtilizationPercent = 65,
+): RightSizingRecommendation {
+  if (samples.length === 0) {
+    throw new Error("Need at least one utilization sample to right-size");
+  }
+
+  const peakCpuPercent = Math.max(...samples.map((s) => s.cpuPercent));
+  const peakMemoryPercent = Math.max(...samples.map((s) => s.memoryPercent));
+  const bindingPeakPercent = Math.max(peakCpuPercent, peakMemoryPercent);
+
+  // If the current vCPU count fully absorbed `bindingPeakPercent` load,
+  // how many vCPUs would put that same absolute load at the target band?
+  const impliedVcpu =
+    (resource.vcpu * bindingPeakPercent) / targetPeakUtilizationPercent;
+
+  // Never recommend below 1 vCPU, and round up — a fraction of a vCPU
+  // isn't a purchasable unit on most providers.
+  const recommendedVcpu = Math.max(1, Math.ceil(impliedVcpu));
+
+  const costPerVcpu = resource.monthlyCostUsd / resource.vcpu;
+  const recommendedMonthlyCostUsd =
+    Math.round(recommendedVcpu * costPerVcpu * 100) / 100;
+  const monthlySavingsUsd =
+    Math.round((resource.monthlyCostUsd - recommendedMonthlyCostUsd) * 100) /
+    100;
+
+  return {
+    name: resource.name,
+    peakCpuPercent,
+    peakMemoryPercent,
+    currentVcpu: resource.vcpu,
+    recommendedVcpu,
+    currentMonthlyCostUsd: resource.monthlyCostUsd,
+    recommendedMonthlyCostUsd,
+    monthlySavingsUsd,
+  };
+}
+```
+
+Run against L1's staging environment — provisioned at 16 vCPU for $3,600 a
+month, "just in case," with two weeks of real utilization samples showing
+it never really worked hard:
+
+```typescript
+const stagingResource: ProvisionedResource = {
+  name: "staging",
+  vcpu: 16,
+  monthlyCostUsd: 3600,
+};
+
+// Two weeks of samples: mostly idle, with one real load-test spike.
+const stagingSamples: UtilizationSample[] = [
+  { timestampMinute: 0, cpuPercent: 8, memoryPercent: 12 },
+  { timestampMinute: 60, cpuPercent: 11, memoryPercent: 14 },
+  { timestampMinute: 120, cpuPercent: 9, memoryPercent: 13 },
+  { timestampMinute: 180, cpuPercent: 19, memoryPercent: 22 }, // the load test
+  { timestampMinute: 240, cpuPercent: 10, memoryPercent: 15 },
+];
+
+const recommendation = recommendSize(stagingResource, stagingSamples);
+// bindingPeakPercent = 22 (memory, during the load test)
+// impliedVcpu = 16 * 22 / 65 ≈ 5.42 -> recommendedVcpu = 6
+// recommendedMonthlyCostUsd = 6 * (3600/16) = 1350
+// monthlySavingsUsd = 3600 - 1350 = 2250
+```
+
+Six right-sized vCPUs, not sixteen — a $2,250/month savings on this one
+resource alone, and staging still keeps real headroom (65% target vs. a
+measured 22% peak) rather than being trimmed to the exact observed
+number. That headroom is the deliberate part: right-sizing to the target
+band, not to the bare measured peak, is what keeps this from becoming the
+aggressive-trim failure mode covered later in this level.
+
+<Checkpoint question="recommendSize takes the max of cpuPercent and memoryPercent as the 'binding' peak, rather than averaging the two or using CPU alone. Why does that choice matter for the recommendation's safety?">
+
+A resource is only as capable as its most constrained dimension — if
+memory peaks at 22% while CPU peaks at 8%, sizing purely off CPU would
+recommend a vCPU count with no regard for whether memory actually fits,
+and averaging the two would understate whichever one is closer to
+saturation. Taking the max ensures the recommendation is sized to survive
+whichever resource is actually closest to its limit, which is the
+dimension that would cause a real problem first if trimmed too far.
+
+</Checkpoint>
+
+## The budget-forecast alert
+
+**Spend so far this month is $8,000 against a $10,000 budget, with ten
+days left in a thirty-day period. Is that fine, on track, or already a
+problem?**
+
+"$8,000 of $10,000 spent" alone can't answer that — it depends entirely
+on the _rate_ the remaining $2,000 is likely to run out at, exactly the
+same insight `infra-observability`'s burn-rate alert applies to an error
+budget instead of catching a plain "budget already exceeded" too late to
+act on it. A forecast-based check projects the current daily spend rate
+forward to the end of the period and compares that projection, not just
+today's total, against the budget.
+
+```typescript
+// budget-forecast.ts
+
+interface SpendSnapshot {
+  budgetUsd: number;
+  periodDays: number;
+  daysElapsed: number;
+  spendSoFarUsd: number;
+}
+
+type BudgetSeverity = "on-track" | "watch" | "over-budget-forecast";
+
+interface BudgetForecast {
+  dailyRateUsd: number;
+  forecastedSpendUsd: number;
+  percentOfBudgetForecasted: number;
+  severity: BudgetSeverity;
+}
+
+// Projects a straight-line daily rate forward to the end of the period.
+// A simple model on purpose — it catches "this rate ends badly" days
+// before the money's actually gone, which is the entire point.
+function forecastSpend(snapshot: SpendSnapshot): BudgetForecast {
+  if (snapshot.daysElapsed <= 0) {
+    throw new Error("daysElapsed must be greater than 0");
+  }
+  if (snapshot.periodDays <= 0) {
+    throw new Error("periodDays must be greater than 0");
+  }
+
+  const dailyRateUsd = snapshot.spendSoFarUsd / snapshot.daysElapsed;
+  const forecastedSpendUsd =
+    Math.round(dailyRateUsd * snapshot.periodDays * 100) / 100;
+  const percentOfBudgetForecasted =
+    Math.round((forecastedSpendUsd / snapshot.budgetUsd) * 1000) / 10;
+
+  let severity: BudgetSeverity = "on-track";
+  if (percentOfBudgetForecasted >= 110) {
+    severity = "over-budget-forecast";
+  } else if (percentOfBudgetForecasted >= 95) {
+    severity = "watch";
+  }
+
+  return {
+    dailyRateUsd: Math.round(dailyRateUsd * 100) / 100,
+    forecastedSpendUsd,
+    percentOfBudgetForecasted,
+    severity,
+  };
+}
+```
+
+Run against L1's actual trajectory — a $10,000/month budget, with the
+bill's climb reconstructed as ten days into a thirty-day period:
+
+```typescript
+// Early into the climb: $8,000 spent by day 10 of 30.
+forecastSpend({
+  budgetUsd: 10_000,
+  periodDays: 30,
+  daysElapsed: 10,
+  spendSoFarUsd: 8_000,
+});
+// dailyRateUsd = 800, forecastedSpendUsd = 24,000
+// percentOfBudgetForecasted = 240 -> severity: "over-budget-forecast"
+
+// A healthy month, same day 10: $3,000 spent.
+forecastSpend({
+  budgetUsd: 10_000,
+  periodDays: 30,
+  daysElapsed: 10,
+  spendSoFarUsd: 3_000,
+});
+// dailyRateUsd = 300, forecastedSpendUsd = 9,000
+// percentOfBudgetForecasted = 90 -> severity: "on-track"
+```
+
+At day 10, only $8,000 of a $10,000 budget has technically been spent —
+still under budget by the raw number — but the forecast already shows
+$24,000 by month's end, 240% of budget. This is exactly the alert that
+was missing from L1: catching the trajectory on day 10, twenty days
+before the invoice would have surfaced it on its own.
+
+<Checkpoint question="forecastSpend uses a single straight-line daily rate across the whole elapsed period, rather than, say, only the most recent few days. What real-world spend pattern would that make this forecast slow to react to?">
+
+A sudden, recent change in spend rate — an autoscaling group that just
+started scaling up uncontrollably yesterday, for instance — gets diluted
+by averaging it in with many previous days of much lower, steady spend.
+The forecast would understate the danger for a while, since the blended
+average rate rises more slowly than the actual current rate. A more
+responsive version would weight recent days more heavily, or compute a
+forecast off a trailing window (e.g. the last 3 days) the same way a
+short-window burn-rate check catches a fast-moving problem faster than a
+long-window one alone would.
+
+</Checkpoint>
+
+## Trade-offs: cost isn't the only variable
+
+Both tools built above can be pushed too far in the name of savings, and
+both failure modes are real outages, not just bad optics:
+
+| Pushed too far...                                   | What actually breaks                                                                                                                                     |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Right-sizing to the bare measured peak, no headroom | A genuine traffic spike above anything previously observed saturates the resource immediately — a cost fix causes a real outage                          |
+| An auto-scaling ceiling set too low to control cost | A legitimate traffic spike gets capped by the ceiling instead of absorbed — the exact reliability failure a cost guardrail was supposed to avoid causing |
+
+This is the same cost-vs-reliability tension `infra-observability`
+surfaces from the other direction: over-provisioning "for safety" costs
+real money, but under-provisioning "for savings" risks a real incident.
+Neither axis wins by default — `recommendSize`'s target utilization band
+(65%, not 100%) and a sensible, non-zero auto-scaling ceiling are both
+deliberate compromises between the two, not just cost minimization with a
+reliability afterthought.
+
+**Two extensions worth thinking through beyond this worked example:**
+
+What changes if usage is **highly seasonal** — a predictable end-of-month
+billing run, or a holiday traffic surge, rather than steady day-to-day
+load? `recommendSize`'s peak-based sizing, run against a full month of
+samples, would correctly catch a real recurring spike and size for it —
+but `forecastSpend`'s straight-line daily rate would badly misread a
+month where spend is naturally lumpy: cheap for three weeks, then a
+legitimate, expected spike in the last week. A seasonal-aware version
+needs to compare the current trajectory against the _same point in a
+typical cycle_, not a flat daily average, the same way a retailer
+forecasts December against last December rather than against November's
+rate.
+
+What changes if the resource in question is **shared or multi-tenant** —
+a database cluster serving five teams' workloads, where usage isn't
+attributable to any single team? Both tools above assume one team owns
+one resource's full cost and utilization. On a shared resource,
+right-sizing the whole cluster is still valid, but the savings and the
+budget both need to be _allocated_ back to the teams generating the
+usage — usually by a proportional-usage split — before either number
+means anything to an individual team's own budget conversation.
+Otherwise a shared resource's savings or overrun lands on whichever team
+happens to be asked about it, not the team actually driving the usage.
