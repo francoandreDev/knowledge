@@ -92,20 +92,20 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 
 ## logic/
 
-| #   | Slug                                     | Problem                                                                                                                    | Tags                                         | Status  |
-| --- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------- |
-| 01  | formal-informal-logic                    | What actually makes an argument valid vs. just convincing? (formal vs. informal logic)                                     | mental-models, decision-making               | done    |
-| 02  | fallacies                                | Why does "if it's not A, it must be B" often fail? (fallacies, false dichotomy)                                            | mental-models, debugging                     | done    |
-| 03  | problem-decomposition                    | How do I break a vague problem into solvable pieces? (problem decomposition)                                               | mental-models, algorithms                    | done    |
-| 04  | boolean-logic                            | Why do two "correct" pieces of code produce different results? (boolean logic, precedence, De Morgan's laws)               | algorithms, debugging, code-quality          | done    |
-| 05  | state-machines                           | How do I reason about a system with many possible states? (state machines, truth tables)                                   | mental-models, architecture, design-patterns | done    |
-| 06  | edge-case-reasoning                      | How do I prove my code handles every case, not just the ones I tested? (edge case reasoning, invariants)                   | testing, code-quality, debugging             | done    |
-| 07  | induction                                | How do I reason about something recursive without getting lost? (induction, recursion tracing)                             | algorithms, mental-models                    | done    |
-| 08  | fermi-estimation                         | How do I estimate an answer when I can't compute the exact one? (Fermi estimation, back-of-envelope reasoning)             | estimation, math, mental-models              | done    |
-| 09  | expected-value                           | How do I make a decision under uncertainty? (expected value, probabilistic reasoning)                                      | decision-making, math, risk-management       | done    |
-| 10  | correlation-causation                    | How do I avoid fooling myself with data? (correlation vs. causation, cognitive biases, base rate fallacy)                  | mental-models, decision-making               | done    |
-| 11  | abstraction                              | How do I formally model a messy real-world problem well enough to solve it? (abstraction, formal modeling)                 | mental-models, architecture, design-patterns | done    |
-| 12  | multi-criteria-decisions-under-ambiguity | How does a staff engineer reason about trade-offs with no clearly right answer? (multi-criteria decisions under ambiguity) | decision-making, leadership, risk-management | planned |
+| #   | Slug                                     | Problem                                                                                                                    | Tags                                         | Status |
+| --- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------ |
+| 01  | formal-informal-logic                    | What actually makes an argument valid vs. just convincing? (formal vs. informal logic)                                     | mental-models, decision-making               | done   |
+| 02  | fallacies                                | Why does "if it's not A, it must be B" often fail? (fallacies, false dichotomy)                                            | mental-models, debugging                     | done   |
+| 03  | problem-decomposition                    | How do I break a vague problem into solvable pieces? (problem decomposition)                                               | mental-models, algorithms                    | done   |
+| 04  | boolean-logic                            | Why do two "correct" pieces of code produce different results? (boolean logic, precedence, De Morgan's laws)               | algorithms, debugging, code-quality          | done   |
+| 05  | state-machines                           | How do I reason about a system with many possible states? (state machines, truth tables)                                   | mental-models, architecture, design-patterns | done   |
+| 06  | edge-case-reasoning                      | How do I prove my code handles every case, not just the ones I tested? (edge case reasoning, invariants)                   | testing, code-quality, debugging             | done   |
+| 07  | induction                                | How do I reason about something recursive without getting lost? (induction, recursion tracing)                             | algorithms, mental-models                    | done   |
+| 08  | fermi-estimation                         | How do I estimate an answer when I can't compute the exact one? (Fermi estimation, back-of-envelope reasoning)             | estimation, math, mental-models              | done   |
+| 09  | expected-value                           | How do I make a decision under uncertainty? (expected value, probabilistic reasoning)                                      | decision-making, math, risk-management       | done   |
+| 10  | correlation-causation                    | How do I avoid fooling myself with data? (correlation vs. causation, cognitive biases, base rate fallacy)                  | mental-models, decision-making               | done   |
+| 11  | abstraction                              | How do I formally model a messy real-world problem well enough to solve it? (abstraction, formal modeling)                 | mental-models, architecture, design-patterns | done   |
+| 12  | multi-criteria-decisions-under-ambiguity | How does a staff engineer reason about trade-offs with no clearly right answer? (multi-criteria decisions under ambiguity) | decision-making, leadership, risk-management | done   |
 
 ## security/
 
