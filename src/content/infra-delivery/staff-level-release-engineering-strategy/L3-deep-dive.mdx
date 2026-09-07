@@ -1,0 +1,349 @@
+---
+title: "L3 — Building a release-pipeline orchestrator that chains config validation, canary rollout, and rollback"
+---
+
+import Scenario from "../../../components/Scenario.astro";
+import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+
+<Scenario label="One orchestrator, four gates">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🛂</span> <strong>Gate 1</strong> — config validation, fails fast before any traffic</div>
+      <div class="flex items-center gap-1.5"><span>🕊️</span> <strong>Gate 2-3</strong> — canary stages with SLO health checks at each one</div>
+      <div class="flex items-center gap-1.5"><span>⏪</span> <strong>Gate 4</strong> — automatic rollback on a detected regression</div>
+    </div>
+  </Fragment>
+
+L2 described the pipeline as a diagram: validate, expose, detect,
+reverse. This section builds it as one real, runnable orchestrator
+function — small enough to read in full, but structurally the same shape
+a real release-engineering platform (Spinnaker, Argo Rollouts, a custom
+in-house deployer) actually implements. Then it runs L1's exact bug
+through it, step by step, and shows the bug get caught at 5% traffic
+instead of reaching 100%.
+
+</Scenario>
+
+<LevelIntro
+  items={[
+    "The orchestrator: config validation, staged canary rollout, SLO health checks, automatic rollback",
+    "L1's bug traced through the orchestrator step by step — caught at the canary, not in production",
+    "Real trade-offs: added deploy latency and infra cost, and when the full pipeline is and isn't worth it",
+  ]}
+/>
+
+## Building the orchestrator
+
+**What does "chain these four techniques together" actually look like as
+code, rather than as a diagram?**
+
+The orchestrator takes a candidate deploy, its config, and a source of
+live health signal (in production, this would be a real metrics
+backend — here it's an injected function so the logic is testable
+without one), and returns a structured result describing exactly what
+happened at each stage.
+
+```typescript
+// release-orchestrator.ts
+
+interface DeployConfig {
+  [key: string]: string | number | boolean | undefined;
+}
+
+interface ConfigRule {
+  key: string;
+  required: boolean;
+  validate?: (value: unknown) => boolean;
+}
+
+// Gate 1: config-management's fail-fast validation, reused here as the
+// pipeline's first and cheapest gate.
+function validateConfig(
+  config: DeployConfig,
+  rules: ConfigRule[],
+): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  for (const rule of rules) {
+    const value = config[rule.key];
+    if (rule.required && (value === undefined || value === "")) {
+      errors.push(`Missing required config key: ${rule.key}`);
+      continue;
+    }
+    if (value !== undefined && rule.validate && !rule.validate(value)) {
+      errors.push(
+        `Config key '${rule.key}' failed validation: ${String(value)}`,
+      );
+    }
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+interface CanaryStage {
+  trafficPercent: number;
+  durationMinutes: number;
+}
+
+interface SloSnapshot {
+  requestCount: number;
+  errorCount: number;
+}
+
+// A minimal SLO health check: is the observed error rate at this stage
+// within the burn-rate threshold infra-observability defines for a
+// short-window canary check? Real systems compare short- and long-window
+// burn rates together (see infra-observability L3) — this simplifies to
+// one window since the canary stage itself is already short.
+function isHealthy(
+  snapshot: SloSnapshot,
+  maxErrorRatePercent: number,
+): boolean {
+  if (snapshot.requestCount === 0) return true;
+  const errorRatePercent = (snapshot.errorCount / snapshot.requestCount) * 100;
+  return errorRatePercent <= maxErrorRatePercent;
+}
+
+interface StageResult {
+  trafficPercent: number;
+  errorRatePercent: number;
+  healthy: boolean;
+}
+
+type PipelineOutcome =
+  | { status: "rejected-invalid-config"; errors: string[] }
+  | { status: "rolled-back"; stages: StageResult[]; failedAtPercent: number }
+  | { status: "shipped-to-100"; stages: StageResult[] };
+
+interface ReleaseInput {
+  config: DeployConfig;
+  configRules: ConfigRule[];
+  canaryStages: CanaryStage[];
+  // Injected health source: given the traffic percent about to be
+  // exposed, returns the observed request/error counts for that slice.
+  // In production this calls a real metrics backend; here it's a plain
+  // function so the pipeline is fully testable offline.
+  observeHealth: (trafficPercent: number) => SloSnapshot;
+  maxErrorRatePercent: number;
+  rollback: () => void;
+}
+
+// The orchestrator: validate -> stage through the canary, checking
+// health at each step -> roll back on the first unhealthy stage,
+// otherwise ship to 100%. This is Gates 1 through 4 from L2's diagram,
+// as one function.
+function runRelease(input: ReleaseInput): PipelineOutcome {
+  // Gate 1: config-management
+  const configCheck = validateConfig(input.config, input.configRules);
+  if (!configCheck.valid) {
+    return { status: "rejected-invalid-config", errors: configCheck.errors };
+  }
+
+  const stages: StageResult[] = [];
+
+  // Gates 2 & 3: progressive-delivery's staged exposure, each stage
+  // checked against infra-observability's SLO-based signal.
+  for (const stage of input.canaryStages) {
+    const snapshot = input.observeHealth(stage.trafficPercent);
+    const errorRatePercent =
+      snapshot.requestCount === 0
+        ? 0
+        : (snapshot.errorCount / snapshot.requestCount) * 100;
+    const healthy = isHealthy(snapshot, input.maxErrorRatePercent);
+    stages.push({
+      trafficPercent: stage.trafficPercent,
+      errorRatePercent,
+      healthy,
+    });
+
+    if (!healthy) {
+      // Gate 4: rollback-strategy. This only completes fast in reality
+      // if the deploy's migration was written compatibly (L2) — the
+      // orchestrator can't fix an incompatible migration, it can only
+      // call rollback() and trust that the deploy was built so this
+      // call actually succeeds quickly.
+      input.rollback();
+      return {
+        status: "rolled-back",
+        stages,
+        failedAtPercent: stage.trafficPercent,
+      };
+    }
+  }
+
+  return { status: "shipped-to-100", stages };
+}
+```
+
+<Checkpoint question="validateConfig runs before the loop even starts, and its result short-circuits the entire function with a plain return — no canary stages run at all if config is invalid. Why is that the correct behavior, rather than running the canary anyway and letting it catch a bad config too?">
+
+Running the canary anyway would work eventually — a badly misconfigured
+deploy would likely also fail its health check — but it throws away the
+whole reason config validation exists as a separate, earlier gate: it's
+supposed to be the cheapest possible failure, catching a whole class of
+bug before a single request is served on the new version at all. Letting
+it fall through to the canary means paying for at least one canary
+stage's real traffic and duration on a build that was already knowably
+broken, which is strictly worse than rejecting it in milliseconds.
+
+</Checkpoint>
+
+## Tracing L1's bug through the orchestrator
+
+**L1 described Team B's outcome in prose — an alert fires, a rollback
+happens, 95% of traffic is untouched. What does that actually look like
+running through `runRelease` step by step?**
+
+The checkout price calculator regression is a real code bug, not a
+config problem, so it passes Gate 1 cleanly. It's only visible once real
+requests start hitting the new code — which is exactly what the canary
+stages exist to expose gradually instead of all at once.
+
+```typescript
+const checkoutConfigRules: ConfigRule[] = [
+  {
+    key: "PAYMENT_GATEWAY_TIMEOUT_MS",
+    required: true,
+    validate: (v) => typeof v === "number" && v >= 1000 && v <= 30000,
+  },
+  { key: "PRICE_CALC_VERSION", required: true },
+];
+
+const badDeployConfig: DeployConfig = {
+  PAYMENT_GATEWAY_TIMEOUT_MS: 8000,
+  PRICE_CALC_VERSION: "v2-null-pointer-bug", // the regression, unrelated to config
+};
+
+let rolledBack = false;
+
+const outcome = runRelease({
+  config: badDeployConfig,
+  configRules: checkoutConfigRules,
+  canaryStages: [
+    { trafficPercent: 5, durationMinutes: 3 },
+    { trafficPercent: 25, durationMinutes: 5 },
+    { trafficPercent: 100, durationMinutes: 0 },
+  ],
+  // Simulates the null-pointer bug: at 5% traffic, a slice of checkout
+  // requests already hit the broken code path and fail.
+  observeHealth: (trafficPercent) => {
+    if (trafficPercent === 5) {
+      return { requestCount: 400, errorCount: 48 }; // 12% error rate
+    }
+    return { requestCount: 2000, errorCount: 4 }; // never reached
+  },
+  maxErrorRatePercent: 2,
+  rollback: () => {
+    rolledBack = true;
+  },
+});
+
+// outcome.status === "rolled-back"
+// outcome.failedAtPercent === 5
+// outcome.stages === [{ trafficPercent: 5, errorRatePercent: 12, healthy: false }]
+// rolledBack === true
+```
+
+Config validation passes (Gate 1), so the pipeline proceeds. The very
+first canary stage exposes the bug immediately: 12% of the 5%-traffic
+slice's checkout requests error out, well past the 2% threshold. The
+orchestrator never even evaluates the 25% or 100% stages — `runRelease`
+returns as soon as the first unhealthy stage is found and calls
+`rollback()`. In L1's prose telling, this is the moment the SLO-based
+alert fires within 3 minutes and the team's already-tested rollback
+completes in under a minute. Here, it's a single `if (!healthy)` branch
+firing on the first loop iteration — the whole difference between Team A
+and Team B's afternoon comes down to that branch existing and being
+reachable before 100% of traffic sees the bug, not after.
+
+Compare that to what Team A's setup effectively does: no `canaryStages`
+worth calling stages (traffic goes straight to 100%), and no
+`observeHealth` wired to anything meaningful (only resource metrics, which
+stay quiet). Modeled through this same orchestrator shape, Team A's
+config would look like a single stage at 100% with a health check that
+can't see the actual regression — which is exactly why detection fell to
+a customer complaint instead of an automated gate.
+
+## Trade-offs: this pipeline is not free
+
+**If `runRelease` reliably catches L1's bug at 5% traffic, why wouldn't
+every deploy of every service always go through the full three-stage
+version of it?**
+
+Two honest costs, both real, echoing `cost-awareness`'s central point
+that safety margin is an ongoing expense to be sized deliberately, not
+maximized by default:
+
+**Latency, on every single deploy.** The three-stage canary in the
+example above adds a minimum of 3 + 5 = 8 minutes to every deploy that
+passes health checks cleanly, before the last stage even starts — and
+real canary stages are often longer than this simplified example, to
+gather enough traffic for a statistically meaningful error rate. A team
+that deploys twenty times a day pays that latency twenty times a day,
+even on deploys with no bug at all.
+
+**Infrastructure and engineering cost.** Running staged traffic-splitting
+requires real infrastructure (a load balancer or service mesh capable of
+percentage-based routing) that has to be built, run, and kept correct.
+Wiring `observeHealth` to a real, trustworthy SLO signal — not just a
+resource metric — is real engineering investment, the same investment
+`infra-observability` describes for defining a good SLI in the first
+place. None of this is a one-time cost; it's ongoing operational surface
+area someone has to maintain.
+
+For a payment checkout path, that cost is clearly worth it — L1's
+72-minute customer-facing incident is far more expensive than 8 minutes
+of extra deploy latency. For a low-traffic internal admin tool used by a
+handful of engineers, running the full three-stage canary-and-SLO
+machinery is very likely over-engineering: a simpler pipeline (config
+validation plus a fast rollback path, skipping the canary staging
+entirely) captures most of the real risk at a fraction of the cost. The
+staff-level judgment call isn't "always build the strongest version" —
+it's sizing each gate to what a bad deploy on that specific service would
+actually cost.
+
+<Checkpoint question="A team removes the canary stages entirely to save on deploy latency, keeping only config validation and rollback. For a service where a bad deploy is genuinely expensive, what does the pipeline lose?">
+
+It loses the entire limited-blast-radius benefit — without a canary
+stage, every deploy either fully passes or fully fails against 100% of
+traffic, with no smaller slice absorbing the risk first. Config
+validation still catches configuration mistakes, and rollback still
+makes recovery fast once a problem is detected, but detection itself now
+has to come from something watching 100%-scale production traffic in
+real time, and by the time that detection fires, every user has already
+been exposed rather than just 5% of them. For a genuinely expensive
+service, that's the exact trade this unit argues against making
+casually — cutting the canary stage doesn't just save latency, it
+removes the mechanism that kept L1's Team B's incident small in the
+first place.
+
+</Checkpoint>
+
+**Two questions worth working through beyond this exact example:**
+
+What changes if the bad deploy is a **config change, not a code change** —
+say, someone accidentally sets `PAYMENT_GATEWAY_TIMEOUT_MS` to `100`
+instead of `8000`? Does `runRelease` still catch it, and at which gate?
+Trace it through: if `100` fails the `validate` function's `v >= 1000`
+check, it never reaches the canary at all — Gate 1 catches it in
+milliseconds, cheaper than Gate 2 ever could. But if the bad value were,
+say, `5000` — technically inside the allowed range but still too
+aggressive for production's real latency — Gate 1 would pass it silently
+(exactly the "reasonable range, still wrong for current conditions" gap
+`config-management` names explicitly), and it would only get caught, if
+at all, by the canary stage's health check reacting to elevated timeout
+failures. The same bug can land at a different gate depending on exactly
+how wrong the value is.
+
+What changes if **two independent bad changes ship close together**, and
+their symptoms overlap — say, a code regression and a separate config
+mistake both degrading checkout success rate within the same canary
+window? `runRelease` as written would still correctly reject the deploy
+(one unhealthy stage is enough to trigger rollback), but the `stages`
+result wouldn't tell the team _which_ change caused the failure, only
+that the combined error rate crossed the threshold. Untangling that
+after rollback needs something this orchestrator doesn't attempt:
+correlating the health signal against which specific change (code
+version vs. config version) was active in that canary window — usually
+by deploying and canarying independent changes one at a time rather than
+bundling them, precisely so a single failed canary stage always has one
+unambiguous cause.

@@ -127,20 +127,20 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 
 ## infra-delivery/
 
-| #   | Slug                                     | Problem                                                                                                                  | Tags                                        | Status  |
-| --- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- | ------- |
-| 01  | environment-parity                       | Why does "it works on my machine" keep happening? (environment parity, containers basics)                                | infra, reliability, debugging               | done    |
-| 02  | docker                                   | How do we package an app so it runs the same everywhere? (Docker, images vs. containers)                                 | infra, deployment                           | done    |
-| 03  | ci-cd-pipeline-anatomy                   | How does code get from a commit to running in production? (CI/CD pipeline anatomy)                                       | infra, deployment, architecture             | done    |
-| 04  | deployment-automation                    | Why do manual deploys eventually cause an outage? (deployment automation, repeatability)                                 | infra, deployment, reliability              | done    |
-| 05  | orchestration-basics                     | How do we run many containers reliably across many machines? (orchestration basics: Kubernetes concepts)                 | infra, architecture, reliability            | done    |
-| 06  | infrastructure-code                      | How do we change infrastructure without clicking through a console? (Infrastructure as Code)                             | infra, code-quality, deployment             | done    |
-| 07  | progressive-delivery                     | How do we ship a risky change without risking everyone? (progressive delivery: canary, blue-green, feature flags)        | infra, deployment, risk-management          | done    |
-| 08  | rollback-strategy                        | How do we undo a bad deploy fast? (rollback strategy, deployment safety nets)                                            | infra, deployment, incident-response        | done    |
-| 09  | config-management                        | Why does the same code behave differently in staging vs. prod? (config management, environment-specific behavior)        | infra, debugging, reliability               | done    |
-| 10  | infra-observability                      | How do we know if our infrastructure itself is healthy? (infra observability, SLOs/SLIs, alerting)                       | infra, observability, reliability           | done    |
-| 11  | cost-awareness                           | How do we avoid a surprise cloud bill? (cost awareness, resource right-sizing)                                           | infra, cost-management                      | done    |
-| 12  | staff-level-release-engineering-strategy | How do we design a deployment architecture that survives a bad Friday deploy? (staff-level release engineering strategy) | infra, deployment, leadership, architecture | planned |
+| #   | Slug                                     | Problem                                                                                                                  | Tags                                        | Status |
+| --- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- | ------ |
+| 01  | environment-parity                       | Why does "it works on my machine" keep happening? (environment parity, containers basics)                                | infra, reliability, debugging               | done   |
+| 02  | docker                                   | How do we package an app so it runs the same everywhere? (Docker, images vs. containers)                                 | infra, deployment                           | done   |
+| 03  | ci-cd-pipeline-anatomy                   | How does code get from a commit to running in production? (CI/CD pipeline anatomy)                                       | infra, deployment, architecture             | done   |
+| 04  | deployment-automation                    | Why do manual deploys eventually cause an outage? (deployment automation, repeatability)                                 | infra, deployment, reliability              | done   |
+| 05  | orchestration-basics                     | How do we run many containers reliably across many machines? (orchestration basics: Kubernetes concepts)                 | infra, architecture, reliability            | done   |
+| 06  | infrastructure-code                      | How do we change infrastructure without clicking through a console? (Infrastructure as Code)                             | infra, code-quality, deployment             | done   |
+| 07  | progressive-delivery                     | How do we ship a risky change without risking everyone? (progressive delivery: canary, blue-green, feature flags)        | infra, deployment, risk-management          | done   |
+| 08  | rollback-strategy                        | How do we undo a bad deploy fast? (rollback strategy, deployment safety nets)                                            | infra, deployment, incident-response        | done   |
+| 09  | config-management                        | Why does the same code behave differently in staging vs. prod? (config management, environment-specific behavior)        | infra, debugging, reliability               | done   |
+| 10  | infra-observability                      | How do we know if our infrastructure itself is healthy? (infra observability, SLOs/SLIs, alerting)                       | infra, observability, reliability           | done   |
+| 11  | cost-awareness                           | How do we avoid a surprise cloud bill? (cost awareness, resource right-sizing)                                           | infra, cost-management                      | done   |
+| 12  | staff-level-release-engineering-strategy | How do we design a deployment architecture that survives a bad Friday deploy? (staff-level release engineering strategy) | infra, deployment, leadership, architecture | done   |
 
 ## career-craft/
 
