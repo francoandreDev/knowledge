@@ -18,6 +18,7 @@ import {
   Rocket,
   History,
   Lightbulb,
+  RotateCcw,
 } from "lucide-astro";
 import { roadmap, getUnit } from "../data/roadmap";
 import { getWrittenUnits } from "../lib/curriculum";
@@ -311,15 +312,52 @@ const gaugeTracks = roadmap.tracks.filter(
         class="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900/50"
       >
         <div
+          data-streak-icon-row
           class="flex items-center gap-1.5 text-slate-400 dark:text-slate-600"
         >
           <Flame class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span class="text-[10px] font-semibold tracking-wide uppercase"
-            >This week</span
+            >Streak</span
           >
         </div>
-        <p data-streak-label class="mt-1 text-xl font-bold tabular-nums">0/5</p>
+        <p data-streak-label class="mt-1 text-xl font-bold tabular-nums">
+          0 days
+        </p>
+        <div
+          data-streak-strip
+          class="mt-1.5 flex items-center gap-1"
+          aria-hidden="true"
+        >
+          {
+            Array.from({ length: 7 }).map(() => (
+              <span
+                data-day-dot
+                class="h-1.5 w-1.5 rounded-full bg-slate-200 dark:bg-slate-700"
+              />
+            ))
+          }
+        </div>
       </div>
+    </div>
+  </section>
+
+  <section
+    data-due-review
+    class="mt-10 hidden animate-fade-slide-in rounded-xl border p-4"
+    style="border-color: var(--gauge-warn); background: color-mix(in srgb, var(--gauge-warn) 10%, transparent)"
+  >
+    <p
+      class="inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide uppercase"
+      style="color: var(--gauge-warn)"
+    >
+      <RotateCcw class="h-3.5 w-3.5" aria-hidden="true" />
+      <span data-due-review-heading>Due for review</span>
+    </p>
+    <p class="mt-1 text-xs text-slate-600 dark:text-slate-400">
+      Spaced repetition works because you forget a little between visits —
+      that's the point. A quick re-check now is what makes it stick.
+    </p>
+    <div data-due-review-cards class="mt-3 flex gap-3 overflow-x-auto pb-1">
     </div>
   </section>
 
@@ -579,7 +617,9 @@ const gaugeTracks = roadmap.tracks.filter(
     import {
       applyTrackGauges,
       countTotalDone,
-      countDoneInLastDays,
+      computeStreak,
+      isDayActive,
+      getDueUnits,
       GAUGE_CIRCUMFERENCE,
     } from "../lib/progress-gauges";
 
@@ -764,18 +804,121 @@ const gaugeTracks = roadmap.tracks.filter(
             : "Nothing written yet";
       }
 
-      const streakLabel = document.querySelector<HTMLElement>(
-        "[data-streak-label]",
-      );
-      const streakGoal = 5;
-      const streakDone = countDoneInLastDays(7);
-      if (streakLabel) {
-        streakLabel.textContent = `${streakDone}/${streakGoal}`;
-        streakLabel.title = `${streakDone}/${streakGoal} units done this week`;
-      }
+      renderStreak();
     }
     initTrackGauges();
     document.addEventListener("astro:page-load", initTrackGauges);
+
+    // Real day-over-day continuity, not a weekly quota — a streak is what
+    // actually makes someone open the app again tomorrow instead of
+    // "sometime this week." See lib/progress-gauges.ts's computeStreak for
+    // how this is derived from existing progress records (no new storage).
+    function renderStreak() {
+      const streakLabel = document.querySelector<HTMLElement>(
+        "[data-streak-label]",
+      );
+      const streakIconRow = document.querySelector<HTMLElement>(
+        "[data-streak-icon-row]",
+      );
+      const dayDots = document.querySelectorAll<HTMLElement>(
+        "[data-streak-strip] [data-day-dot]",
+      );
+      const { current, longest, activeToday } = computeStreak();
+
+      if (streakLabel) {
+        streakLabel.textContent = current === 1 ? "1 day" : `${current} days`;
+        streakLabel.title = activeToday
+          ? `${current}-day streak — you're in today. Best: ${longest}.`
+          : current > 0
+            ? `${current}-day streak — do one unit today to keep it alive. Best: ${longest}.`
+            : `No active streak yet. Best so far: ${longest}.`;
+      }
+      if (streakIconRow) {
+        const lit = current > 0;
+        streakIconRow.classList.toggle("text-orange-500", lit);
+        streakIconRow.classList.toggle("dark:text-orange-400", lit);
+        streakIconRow.classList.toggle("text-slate-400", !lit);
+        streakIconRow.classList.toggle("dark:text-slate-600", !lit);
+      }
+
+      const DAY_MS = 24 * 60 * 60 * 1000;
+      const today = Date.now();
+      dayDots.forEach((dot, i) => {
+        // Dots run oldest (6 days ago) to newest (today), left to right.
+        const offsetFromToday = dayDots.length - 1 - i;
+        const active = isDayActive(today - offsetFromToday * DAY_MS);
+        dot.classList.toggle("bg-orange-400", active);
+        dot.classList.toggle("dark:bg-orange-500", active);
+        dot.classList.toggle("bg-slate-200", !active);
+        dot.classList.toggle("dark:bg-slate-700", !active);
+      });
+    }
+
+    interface DueUnit {
+      track: string;
+      slug: string;
+      problem: string;
+    }
+
+    function buildDueCard(unit: DueUnit): HTMLAnchorElement {
+      const a = document.createElement("a");
+      a.href = `/${unit.track}/${unit.slug}/`;
+      a.className =
+        "group flex w-56 shrink-0 flex-col rounded-lg border p-3 transition hover:brightness-95";
+      a.style.borderColor = "var(--gauge-warn)";
+      a.style.background =
+        "color-mix(in srgb, var(--gauge-warn) 8%, transparent)";
+      const eyebrowEl = document.createElement("span");
+      eyebrowEl.className = "text-[10px] font-semibold tracking-wide uppercase";
+      eyebrowEl.style.color = "var(--gauge-warn)";
+      eyebrowEl.textContent = "Review due";
+      const titleEl = document.createElement("span");
+      titleEl.className =
+        "mt-1 text-sm font-medium text-slate-900 group-hover:underline dark:text-slate-100";
+      titleEl.textContent = unit.problem;
+      a.append(eyebrowEl, titleEl);
+      return a;
+    }
+
+    // Spaced repetition already schedules re-exams (7/30/90 days after a
+    // unit is marked done) — this is what actually surfaces that schedule
+    // as a reason to open the app, instead of it silently waiting until
+    // the reader happens to revisit that one unit's own page.
+    function initDueReview() {
+      const section = document.querySelector<HTMLElement>("[data-due-review]");
+      const cardsHost = document.querySelector<HTMLElement>(
+        "[data-due-review-cards]",
+      );
+      const heading = document.querySelector<HTMLElement>(
+        "[data-due-review-heading]",
+      );
+      const lookupEl = document.getElementById("unit-lookup");
+      if (!section || !cardsHost || !heading || !lookupEl) return;
+      if (section.dataset.wired === "true") return;
+      section.dataset.wired = "true";
+
+      let lookup: DueUnit[];
+      try {
+        lookup = JSON.parse(lookupEl.textContent || "[]");
+      } catch {
+        return;
+      }
+
+      const due = getDueUnits(lookup);
+      if (due.length === 0) return;
+
+      heading.textContent =
+        due.length === 1
+          ? "1 unit due for review"
+          : `${due.length} units due for review`;
+      cardsHost.innerHTML = "";
+      for (const unit of due.slice(0, 6)) {
+        cardsHost.append(buildDueCard(unit));
+      }
+      section.classList.remove("hidden");
+    }
+    initDueReview();
+    document.addEventListener("astro:page-load", initDueReview);
 
     function initInterestPersonalization() {
       const grid = document.querySelector<HTMLElement>("[data-track-grid]");
