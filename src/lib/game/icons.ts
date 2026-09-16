@@ -163,11 +163,19 @@ export const UI_ICON = {
   warning: ICON_WARNING,
   necromancy: ICON_NECROMANCY,
   lock: ICON_LOCK,
+  // Phase 16 — reuses ICON_SPARKLE (also EVOLUTION_ICON) for the synergy
+  // discovery toast: both represent a "special moment" flourish, not a
+  // stat or a warning.
+  synergy: ICON_SPARKLE,
 } as const;
 
 // Injects a size/utility class onto an icon string's root <svg> tag —
 // lets one icon constant be reused at different sizes (h-5 w-5 on level-up
 // cards, h-4 w-4 in the denser shop rows) without baking a size into it.
+// Guards against an undefined/empty `svg` (a lookup miss in one of the
+// icon maps above) rather than throwing — a single missing icon key should
+// render as nothing, not crash the whole init() call it's used from.
 export function sizedIcon(svg: string, className: string): string {
+  if (!svg) return "";
   return svg.replace("<svg ", `<svg class="${className}" `);
 }
