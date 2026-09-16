@@ -1,5 +1,5 @@
 ---
-import { Check, Lock, Circle } from "lucide-astro";
+import { Check, Lock, Circle, Flame } from "lucide-astro";
 
 interface Props {
   track: string;
@@ -10,18 +10,27 @@ interface Props {
 const { track, unitSlug, hasExercises } = Astro.props;
 ---
 
-<button
-  data-progress-toggle
-  data-track={track}
-  data-unit={unitSlug}
-  data-has-exercises={String(hasExercises)}
-  class="inline-flex items-center gap-2 rounded-full border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-slate-300 data-[done=true]:border-emerald-500 data-[done=true]:bg-emerald-50 data-[done=true]:text-emerald-700 data-[due=true]:border-amber-500 data-[due=true]:bg-amber-50 data-[due=true]:text-amber-700 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-500 dark:disabled:hover:border-slate-700 dark:data-[done=true]:border-emerald-500 dark:data-[done=true]:bg-emerald-950 dark:data-[done=true]:text-emerald-400 dark:data-[due=true]:border-amber-500 dark:data-[due=true]:bg-amber-950 dark:data-[due=true]:text-amber-400"
->
-  <Check data-icon="done" class="hidden h-4 w-4" aria-hidden="true" />
-  <Lock data-icon="gated" class="hidden h-4 w-4" aria-hidden="true" />
-  <Circle data-icon="default" class="hidden h-4 w-4" aria-hidden="true" />
-  <span data-progress-label>Mark as done</span>
-</button>
+<div class="flex flex-col items-end gap-1.5">
+  <button
+    data-progress-toggle
+    data-track={track}
+    data-unit={unitSlug}
+    data-has-exercises={String(hasExercises)}
+    class="inline-flex items-center gap-2 rounded-full border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-slate-300 data-[done=true]:border-emerald-500 data-[done=true]:bg-emerald-50 data-[done=true]:text-emerald-700 data-[due=true]:border-amber-500 data-[due=true]:bg-amber-50 data-[due=true]:text-amber-700 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-500 dark:disabled:hover:border-slate-700 dark:data-[done=true]:border-emerald-500 dark:data-[done=true]:bg-emerald-950 dark:data-[done=true]:text-emerald-400 dark:data-[due=true]:border-amber-500 dark:data-[due=true]:bg-amber-950 dark:data-[due=true]:text-amber-400"
+  >
+    <Check data-icon="done" class="hidden h-4 w-4" aria-hidden="true" />
+    <Lock data-icon="gated" class="hidden h-4 w-4" aria-hidden="true" />
+    <Circle data-icon="default" class="hidden h-4 w-4" aria-hidden="true" />
+    <span data-progress-label>Mark as done</span>
+  </button>
+  <p
+    data-streak-note
+    class="hidden items-center gap-1 text-xs font-medium text-orange-600 dark:text-orange-400"
+  >
+    <Flame class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+    <span data-streak-note-text></span>
+  </p>
+</div>
 
 <script>
   import {
@@ -33,6 +42,7 @@ const { track, unitSlug, hasExercises } = Astro.props;
     daysUntil,
   } from "../lib/spaced-repetition";
   import { addToken } from "../lib/game/tokens";
+  import { computeStreak } from "../lib/progress-gauges";
 
   // Exercise panels are scoped to one level each and pick their own random
   // 2-of-N pools on init (see ExercisePanel.astro), writing the result onto
@@ -107,10 +117,18 @@ const { track, unitSlug, hasExercises } = Astro.props;
       document.dispatchEvent(new CustomEvent("exercises:reset"));
     }
 
+    const streakNote =
+      button.parentElement?.querySelector<HTMLElement>("[data-streak-note]");
+    const streakNoteText = streakNote?.querySelector<HTMLElement>(
+      "[data-streak-note-text]",
+    );
+
     button.addEventListener("click", () => {
       const state = getProgress(track, unitSlug);
       if (state.done) {
         unmarkDone(track, unitSlug);
+        streakNote?.classList.add("hidden");
+        streakNote?.classList.remove("flex");
       } else {
         const hasExercises = button.dataset.hasExercises === "true";
         const shown = getShownExerciseIds();
@@ -128,6 +146,22 @@ const { track, unitSlug, hasExercises } = Astro.props;
         // for a moment before it's added back.
         void button.offsetWidth;
         button.classList.add("animate-pop");
+
+        // A one-shot callout at the exact moment of completion — the
+        // homepage's streak chip reinforces continuity passively, this is
+        // the same signal delivered right when it's earned.
+        if (streakNote && streakNoteText) {
+          const { current } = computeStreak();
+          streakNoteText.textContent =
+            current <= 1
+              ? "Streak started — come back tomorrow to keep it going"
+              : `${current}-day streak — nice`;
+          streakNote.classList.remove("hidden");
+          streakNote.classList.add("flex");
+          streakNote.classList.remove("animate-fade-slide-in");
+          void streakNote.offsetWidth;
+          streakNote.classList.add("animate-fade-slide-in");
+        }
       }
       renderToggle(button);
     });
