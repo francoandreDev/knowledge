@@ -14,6 +14,35 @@ Se audita track por track, 3-4 unidades por agente en paralelo. Esta ronda
 **no corrige nada automaticamente** — solo registra hallazgos; las
 correcciones se hacen en una pasada separada cuando el usuario lo pide.
 
+### Fix aplicado — defecto de pools, mitad `code` del proyecto completo (2026-10-05)
+
+Tras encontrar el defecto de pools (un `poolId` agrupa dos ejercicios
+_distintos_, no variantes) repetido en varias unidades de `systems` y
+`git-teamwork`, se corrio un escaneo mecanico sobre los 246
+`exercises.json` del proyecto completo (no solo las unidades ya auditadas),
+usando dos pasadas: (1) comparar el conjunto completo de nombres de funcion
+extraidos de `solution`/`starterCode`/`prompt` entre los miembros de cada
+pool `code` — si son completamente disjuntos, son ejercicios distintos, no
+variantes; (2) para nombrar el nuevo poolId de cada sub-grupo, cruzar contra
+que funcion referencian los `tests` de cada item. Resultado: **154 pools
+separados en 66 unidades** — cada funcion probada por 2+ miembros conserva
+un poolId (mas angosto); cada funcion probada por un solo miembro pasa a
+ser un ejercicio independiente sin poolId. No se borro ni reescribio ningun
+ejercicio, solo se dejo de esconder uno al azar. Commit `c82ffc4`,
+`lint`/`format`/`typecheck`/`validate:content`/`test`/`build` verificados
+limpios despues.
+
+**Esto resuelve la parte `code` del defecto** en `commit-conventions`,
+`trade-off-documentation` y `transactions` (las 3 instancias originalmente
+encontradas que eran de tipo `code`). **No resuelve** las instancias de tipo
+`quiz` encontradas en `shared-history`, `technical-leadership` y
+`working-tree` — un heuristico de solapamiento de palabras probo ser
+demasiado ruidoso para confiar en el sin revision humana/de agente (misma
+pregunta vista desde otro angulo tiene solapamiento de palabras bajo por
+diseño, igual que una pregunta genuinamente distinta). Esas 3 quedan
+pendientes para la revision por agente, unidad por unidad, igual que el
+resto de hallazgos de esta ronda.
+
 ### Track `web` (17/17 unidades) — auditado 2026-10-05
 
 11/17 SOLID sin hallazgos: `bff`, `bundling`, `client-side-caching`,
