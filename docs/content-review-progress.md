@@ -495,3 +495,89 @@ exercises, diagramas). Quedan marcadas `done` en `ROADMAP.md`, pero
 no pasaron por una revision independiente posterior al estilo de las
 34 tandas — serian candidatas a una tanda 35 si se quiere ese mismo
 nivel de verificacion cruzada.
+
+### Track `infra-delivery` (12/12 unidades) — auditado 2026-10-05
+
+4/12 SOLID: `docker`, `infra-observability`, `orchestration-basics`,
+`rollback-strategy`.
+
+8/12 MINOR ISSUES, de mas a menos concreto:
+
+1. **`cost-awareness` — bug real de interactivo.** `interactives.json`'s
+   `safety-margin-vs-cost`: el texto dice que staging esta provisionado
+   "roughly 3.3x el pico medido, cerca de $3,600/mes", pero `compute` es
+   `900 * marginMultiplier` — $3,600/$900 = 4.0x, no 3.3x. El 3.3x viene de
+   otro ratio definido en otra parte de L1/L2 contra una baseline
+   distinta; arrastrar el slider a 3.3 da $2,970, no los $3,600 que cita
+   el texto. **Sin corregir.**
+2. **`ci-cd-pipeline-anatomy` — bug de pool.**
+   `pipeline-flow-order-pool` (exercises.json) agrupa dos hechos distintos
+   bajo un mismo poolId: item `-1` prueba el orden
+   commit→build→test→staging→production, item `-2` prueba que un gate
+   frena el pipeline al fallar un test — relacionados pero no variantes
+   intercambiables de la misma pregunta. Ambos items tambien carecen de
+   `learnMore` (el resto de los pools si lo tiene). **Sin corregir.**
+3. **`environment-parity` — ejemplo central de L3 no reproduce lo que
+   afirma.** El ejemplo de `isToday` muestra
+   `console.log(isToday(Date.now()))` devolviendo `true` en laptop y
+   `false` en CI, pero como ambos argumentos (`now` interno y
+   `Date.now()` pasado) se computan en el mismo instante en cualquier
+   entorno, la funcion en realidad siempre devuelve `true` — nunca
+   reproduce el bug que el comentario afirma. El bug real que se quiere
+   modelar (comparar un timestamp _guardado_ en una zona horaria contra
+   "ahora" calculado en otra) es legitimo, pero el codigo mostrado no lo
+   hace. Es el ejemplo central de la unidad, vale la pena corregirlo.
+   **Sin corregir.**
+4. **`progressive-delivery` — recurrencia del anti-patron de pares
+   complementarios.** `interactives.json`'s
+   `canary-percent-vs-users-affected` grafica `usersAffected` y
+   `usersProtected = totalUsers - usersAffected` — complementos
+   aritmeticos exactos de un total fijo, el mismo anti-patron ya nombrado
+   y corregido antes en este proyecto. Ademas los 3 elementos visuales de
+   la unidad estan todos clusterizados en L2 (L1 y L3 sin ninguno), y
+   `exercises.json` tiene solo 20 items (10/6/4, la mitad del objetivo
+   ~40). **Sin corregir.**
+5. **`deployment-automation` — interactivo con linea plana.**
+   `interactives.json`'s `manual-vs-automated-recovery`:
+   `automatedSeconds` esta hardcodeado a `10` y nunca varia con ningun
+   param, por lo que en el chart (`chartParam: stepCount`) se ve como una
+   linea perfectamente plana en todo el rango — el anti-patron de "output
+   constante" ya nombrado en el proyecto. Puede ser intencional (el tiempo
+   de automatizacion no escala con steps) pero el texto no lo aclara.
+   Tambien L1 no tiene ningun diagrama/tabla/chart propio (todo el peso
+   visual esta en L2/L3). **Sin corregir.**
+6. **`infrastructure-code` — exercises redundantes + interactivo
+   derivado.** Los 4 items de codigo de L3 (`diff-resources`,
+   `diff-plan`, `detect-drift`, `find-drift`) son singletons sin poolId,
+   pero `diff-resources`/`diff-plan` tienen logica de `solution` identica
+   byte a byte (solo cambia el nombre de funcion), igual que
+   `detect-drift`/`find-drift` — deberian haber sido 2 pools reales con
+   datos de test variados, no 4 slots separados que un lector puede
+   terminar resolviendo dos veces el mismo problema con otro nombre.
+   Ademas `interactives.json`'s `drift-detection-delay` grafica
+   `avgDetectionDelayDays = interval/2` y `worstCaseDelayDays = interval`
+   — no son complementos aritmeticos literales, pero `avg` es siempre
+   exactamente la mitad de `worst`, mismo espiritu del anti-patron (las
+   dos lineas no aportan informacion independiente entre si). **Sin
+   corregir.**
+7. **`config-management` — gap menor de problem-first.** La seccion
+   intermedia de `L2-concept.mdx` ("Where config actually lives") abre
+   directo con una tabla comparativa sin pregunta-guia previa, a
+   diferencia de las otras dos secciones de ese mismo L2 que si abren con
+   una pregunta en negrita. **Sin corregir.**
+8. **`staff-level-release-engineering-strategy` — L1 sin estructura de
+   encabezados.** `L1-summary.mdx` no tiene ningun `##` — pasa
+   directamente de `<Scenario>` a `<LevelIntro>` a una lista sin
+   encabezar, saltandose el patron de "## The shape of the problem" /
+   "## Key terms" que usan las otras 3 unidades del track y el resto del
+   proyecto — no rompe ninguna regla puntual pero rompe la paridad
+   estructural y deja sin un puente explicito hacia L2/L3. El uso
+   narrativo de "staff-level" en el contenido es correcto (nunca se usa
+   como tag de clasificacion, cumple la excepcion de la regla 3). **Sin
+   corregir.**
+
+Ningun unit del track califico NEEDS WORK. Codigo/config (Dockerfiles,
+TypeScript, YAML, el motor plan/apply de `infrastructure-code`, la
+maquina de estados de `rollback-strategy`) se verifico correcto en los 12
+casos — todos los hallazgos son de `interactives.json`/`exercises.json`/
+estructura, no errores logicos en el codigo de referencia.
