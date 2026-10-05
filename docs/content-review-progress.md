@@ -129,6 +129,47 @@ desparejos entre niveles): `bundling`, `client-side-caching`,
    `exercises.json` tiene solo 26 items (objetivo ~40, L2 particularmente
    delgado con 6). **Sin corregir.**
 
+### Track `business-communication` (14/14 unidades) — auditado 2026-10-05
+
+10/14 SOLID: `audience-awareness` (el unit piloto, confirmado solido),
+`change-management`, `executive-summaries`, `informal-authority`,
+`org-level-influence`, `pushback-frameworks`, `status-updates-build-trust`,
+`upward-disagreement`, `visibility-self-promotion`,
+`reading-stakeholder-incentives` (1 nitpick menor de pool, ver abajo).
+
+4/14 MINOR ISSUES:
+
+1. **`translating-technical-risk-business-risk` — contradiccion numerica
+   real entre niveles.** L1 dice que el trafico (creciendo ~8%/mes) cruza el
+   100% de capacidad "en unos 6 meses" (matematicamente correcto:
+   `62*1.08^n=100` da n≈6.2) y el `interactives.json` coincide exactamente
+   con ese calculo — pero L2 (prosa + su propio `xychart-beta`) y L3 dicen
+   que eso pasa "alrededor de la semana 11" (~2.5 meses), usando la misma
+   tasa de 8%/mes declarada. La serie de datos del chart de L2
+   (62,71,82,92,108,124 en semanas 0,4,8,11,16,20) tampoco corresponde a una
+   curva de crecimiento compuesto limpia al 8%/mes — implica mas bien
+   ~15-16%/mes. Es el numero central que la unidad usa para fundamentar el
+   caso de negocio, y L1/interactivo por un lado y L2/L3 por el otro se
+   contradicen. **Sin corregir.**
+2. **`conflict-resolution` — exercises muy delgados** (26 items vs ~40
+   objetivo) y L3 no reutiliza el componente `&lt;Scenario&gt;` (solo
+   prosa), a diferencia de las otras unidades del track. Sin
+   `interactives.json` sin justificacion explicita de por que no aplica.
+   **Sin corregir.**
+3. **`decision-making-frameworks` — exercises delgados** (28 vs ~40) y
+   algunos pools mezclan hechos distintos (`daci-roles-table-pool`:
+   "Approver es singular" vs "Contributors no votan" — dos roles
+   diferentes). **Sin corregir.**
+4. **`building-credibility-ahead-ask` — L1 sin ningun elemento visual**
+   (todo en L2/L3). Exercises ligeramente debajo del objetivo (38 vs ~40).
+   **Sin corregir.**
+
+Hallazgos menores sin corregir: `executive-summaries` (32 items, un pool
+mezcla "que es BLUF" con "donde se origino BLUF"), `reading-stakeholder-incentives`
+(un pool con 3 variantes algo heterogeneas), `informal-authority` (L1 sin
+ningun `##`, visuales concentrados en L2), `org-level-influence` (ninguno,
+la unidad mas solida del lote).
+
 Bugs de codigo reales adicionales encontrados en `systems` (fuera de los 2
 NEEDS WORK):
 
