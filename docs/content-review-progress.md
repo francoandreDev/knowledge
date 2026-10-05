@@ -1,5 +1,182 @@
 # Progreso de revision pedagogica
 
+## Ronda 2: auditoria profunda por agentes (2026-10-05 en adelante)
+
+La revision original (tandas 1-34, mas abajo) se cerro como completa pero su
+criterio era mas liviano: jerga sin glosar, puentes pedagogicos,
+`interactives.json` desconectado. Esta ronda usa agentes en paralelo con un
+criterio mas estricto: trazar el codigo linea por linea (no solo leerlo),
+verificar que las formulas de `interactives.json` coincidan matematicamente
+con los numeros que la propia unidad ya usa, y chequear la estructura
+pedagogica completa de CLAUDE.md (problem-first, LevelIntro, Checkpoints,
+exercises con explanation/solution, 2-3+ elementos visuales por unidad).
+Se audita track por track, 3-4 unidades por agente en paralelo. Esta ronda
+**no corrige nada automaticamente** — solo registra hallazgos; las
+correcciones se hacen en una pasada separada cuando el usuario lo pide.
+
+### Track `web` (17/17 unidades) — auditado 2026-10-05
+
+11/17 SOLID sin hallazgos: `bff`, `bundling`, `client-side-caching`,
+`http-request-response-basics`, `need-html-semantics-just-divs`,
+`rest-graphql`, `ssr`, `component-state`, `dom-event-model`,
+`stateless-auth`, `strangler-fig`.
+
+6/17 con hallazgos, de mas a menos grave:
+
+1. **`cdn` — bug de codigo real.** `L3-deep-dive.mdx`, `EdgeCache.get()`:
+   `cached ? "MISS" : "MISS"` — ambas ramas del ternario devuelven lo mismo
+   (probablemente debia ser `"STALE"` en la rama `cached`). El codigo de
+   referencia no distingue stale-pero-presente de un miss real, contradiciendo
+   lo que el texto dice que el codigo hace. **Sin corregir.**
+2. **`css-cascade-specificity` — contradiccion pedagogica.** El texto ensena
+   explicitamente que la especificidad es una tupla, no aditiva, y hasta lista
+   "tratarla como aditiva" como failure mode con exercises dedicados a esa
+   confusion — pero `interactives.json`'s "specificity-score" demo calcula
+   `idCount*100 + classCount*10 + 1`, el mismo modelo aditivo que la unidad
+   dice que esta mal, sin ninguna aclaracion. Dentro de los rangos del slider
+   no llega a mostrar un caso donde el modelo aditivo falle visiblemente, pero
+   refuerza un modelo mental que la propia unidad desautoriza. **Sin
+   corregir.**
+3. **`service-boundaries` — demo interactivo inconsistente con su propio
+   grafico.** `interactives.json`'s `consumers-vs-branches` usa
+   `consumers + consumers*(consumers-1)` (da 1,4,9,16) pero el `xychart-beta`
+   de L2-concept.mdx para el mismo escenario muestra 1,3,8,16. Deberian
+   compartir formula o el demo deberia aclarar que es una aproximacion.
+   **Sin corregir.** Nota adicional (no bloqueante): `L3-deep-dive.mdx` no
+   tiene ningun diagrama/tabla — todo el peso visual esta en L1/L2.
+4. **`cors` — demo desconectado del contenido.** `interactives.json`'s
+   "preflight-caching" gira en torno a `Access-Control-Max-Age`, un concepto
+   que nunca se menciona en L1/L2/L3. **Sin corregir.** Nota adicional:
+   `exercises.json` tiene solo 24 items (objetivo ~40), L2 especialmente
+   delgado (6 items).
+5. **`xss` — gaps estructurales.** El `<Scenario>` de L1 no se resuelve antes
+   de `<LevelIntro>` (rompe la regla problem-first — las otras dos unidades de
+   ese mismo lote si lo hacen bien). `exercises.json` tiene solo 22 items
+   (objetivo ~40, L3 especialmente delgado con 4), y 18/22 items no tienen el
+   campo `reference` del whiteboard (solo los 2 pools de L3 code lo tienen).
+   **Sin corregir.**
+6. **`render-performance` — ejercicios delgados.** `exercises.json` tiene 22
+   items (objetivo ~40) y ninguno tiene `reference`/`learnMore`. El resto de
+   la unidad (codigo, Checkpoints, interactivo) esta verificado correcto.
+   **Sin corregir.**
+
+Hallazgos menores sin corregir (type-imbalance en exercises, visuales un poco
+desparejos entre niveles): `bundling`, `client-side-caching`,
+`component-state`, `dom-event-model` — ninguno bloqueante.
+
+### Track `systems` (17/17 unidades) — auditado 2026-10-05
+
+8/17 SOLID: `horizontal-scaling`, `indexing`, `redundancy`, `process`,
+`queues`, `race-conditions`, `algorithmic-complexity`, `concurrency`.
+
+7/17 MINOR ISSUES: `logging`, `persistence`, `sockets`, `timeouts`,
+`query-planning`, `trade-off-documentation`, `cap-theorem`.
+
+2/17 NEEDS WORK (los hallazgos mas graves de esta ronda):
+
+1. **`domain-boundaries` — el ejemplo central de L3 se contradice con su
+   propio codigo.** `L3-deep-dive.mdx` afirma que `scoreBoundary(monolith,
+["Shipping","Fulfillment"])` da `internalCallRatio: 0.76`,
+   `externalSharedTables: []`, verdict `"clean"` — pero trazando el codigo
+   contra sus propios datos (`Orders→Shipping`/`Shipping→Orders` con
+   `sharedTables: ["order_items"]`) el resultado real es `0.77`,
+   `["order_items"]`, verdict `"blocked"`. Un segundo numero
+   (`suggestBoundary` confidence) tambien esta mal: el texto dice `0.93`, el
+   codigo da `0.90` — y encima `interactives.json` para el mismo escenario
+   SI calcula 0.90 correctamente, o sea el interactivo y la prosa de L3 se
+   contradicen entre si. Son justo los 3 numeros que la unidad usa para
+   enseniar "mide, no asumas" — ninguno coincide con lo que el codigo
+   mostrado produce de verdad. **Sin corregir.**
+2. **`transactions` — gap de profundidad en la propiedad mas riesgosa
+   (Isolation) + bug de interactivo + exercises delgados.** La unidad define
+   Isolation conceptualmente pero nunca da un ejemplo concreto de
+   dirty-read/non-repeatable-read/phantom-read ni compara READ COMMITTED vs
+   SERIALIZABLE con codigo — queda como pregunta abierta en el cierre de L3
+   en vez de enseniarse. Ademas, `interactives.json`'s
+   `phantom-stock-loss`'s `compute` devuelve `phantomStockLostTransactional:
+0` constante en todo el rango del slider (el mismo anti-patron de "linea
+   constante en 0" que ya se habia encontrado y corregido antes en este
+   proyecto). L1 y L3 no tienen ningun elemento visual (todo esta en L2).
+   `exercises.json` tiene solo 26 items (objetivo ~40, L2 particularmente
+   delgado con 6). **Sin corregir.**
+
+Bugs de codigo reales adicionales encontrados en `systems` (fuera de los 2
+NEEDS WORK):
+
+3. **`timeouts` — `CircuitBreaker.canAttempt()` no limita a un solo intento
+   en estado half-open** como el texto, el diagrama y el exercise
+   `breaker-states-2` afirman — una vez en `"half-open"`, cualquier llamada
+   concurrente pasa (`return true` sin condicion). **Sin corregir.**
+4. **`logging` — test de exercise roto que nunca falla.** En
+   `exercises.json`, item `sampling-decision-2`, el test usa
+   `toBeCloseToOrEqual`, un metodo que no existe en el mini-API de
+   `expect()` (solo soporta `toBe`/`toEqual`/`toBeTruthy`/`toThrow`) — el
+   test nunca verifica nada real, pasa siempre sin importar la
+   implementacion del lector. La formula en si es correcta, solo el test
+   esta roto. **Sin corregir.**
+5. **`persistence` — bloques de codigo en L2 mal etiquetados como
+   ` ```python ` cuando no son ni Python ni JS valido** (mezclan
+   `function foo(x, y):` — sintaxis de ambos lenguajes pegada). Dos
+   ocurrencias en `L2-concept.mdx`. **Sin corregir.**
+6. **`sockets` — `L1-summary.mdx` rompe problem-first:** abre con
+   `## The minimum map` (una lista seca) antes de que aparezca el
+   `&lt;Scenario&gt;`, y por lo tanto tambien el `&lt;LevelIntro&gt;` queda
+   despues del primer `##` en vez de antes. **Sin corregir.**
+7. **Defecto de diseno de pools, encontrado en `trade-off-documentation` Y
+   `transactions`:** varios `poolId` agrupan dos tareas de codigo
+   _distintas_ (no variantes de la misma pregunta) bajo el mismo pool — como
+   `ExercisePanel` solo muestra una variante al azar por pool, una de las
+   dos tareas queda oculta para el lector en cada vista. Ejemplos:
+   `l3-weighted-score-code` (`totalWeightedScore` vs `winningOption`),
+   `l3-stale-flagger-code` (`ageInDays` vs `isStaleStatus`),
+   `transaction-wrapper-pool` (`runTransaction` vs `stockNeverNegative`),
+   `durability-pool` (`durableCommit` vs `recoverFromLog`). **Sin
+   corregir** — vale la pena revisar si este patron aparece en mas tracks.
+
+Hallazgos menores sin corregir: `query-planning`/`timeouts` con exercises
+delgados (22 items c/u); `cap-theorem`/`cors` sin elementos visuales en L3
+(todo en L1/L2); `indexing`'s interactive probablemente aplana la linea de
+B-tree en el chart compartido (no es bug de computo, es de escala visual —
+verificar en navegador).
+
+### Track `git-teamwork` (16/16 unidades) — auditado 2026-10-05
+
+9/16 SOLID: `feature-flags`, `feedback-framing`, `merge`, `ownership`,
+`reflog`, `rfcs`, `checkout`, `documentation-culture`,
+`snapshots-manual-copies`.
+
+6/16 MINOR ISSUES: `merge-rebase` (sin `interactives.json`, exercises
+delgados 24 vs ~40), `prs` (exercises delgados 30 vs ~40, L3 sin diagramas),
+`shared-history` (exercises muy delgados ~20 vs ~40 + defecto de pools),
+`technical-leadership` (defecto de pools), `working-tree` (defecto de pools +
+interactivo con 2 lineas que son complemento aritmetico — el mismo
+anti-patron que CLAUDE.md ya marca como bug conocido corregido antes),
+`branching-strategies` (exercises delgados en L2, L3 sin la pregunta de
+extension "beyond this example" que las otras 3 unidades del mismo lote si
+tienen).
+
+1/16 NEEDS WORK: **`commit-conventions`** — defecto de pools (dos veces):
+`bisect-implementation-pool` mezcla `bisect()` y `stepsNeeded()` (funciones
+distintas, no variantes) bajo un mismo poolId, y
+`conventional-commits-parsing-pool` mezcla `parseConventionalCommit` y
+`groupCommitsByType` de la misma forma. Como solo se muestra una variante
+por pool, una de las dos tareas de codigo queda oculta para el lector cada
+vez. Tambien exercises delgados (35 vs ~40). **Sin corregir.**
+
+**Patron confirmado y ahora recurrente — defecto de diseno de pools.**
+Encontrado en 6 unidades distintas entre `systems` y `git-teamwork`
+(`trade-off-documentation`, `transactions`, `shared-history`,
+`technical-leadership`, `working-tree`, `commit-conventions`): un `poolId`
+agrupa dos ejercicios que son preguntas/tareas genuinamente distintas (no
+variantes de la misma pregunta), y como `ExercisePanel` solo muestra una
+variante al azar por pool, una de las dos queda permanentemente invisible
+para cualquier lector dado. Dado que ya aparecio en 2 de 2 tracks
+auditados hasta ahora, vale la pena correr un escaneo estructural
+(no necesariamente con agentes, podria ser un script que compare los
+`prompt`/nombres de funcion dentro de cada poolId) sobre **todos** los
+tracks en paralelo a seguir auditando contenido en profundidad, en vez de
+esperar a toparse con el mismo defecto track por track.
+
 Este registro acompana la revision por tandas de 4 unidades. La meta es
 detectar dudas que tendria una persona con base escolar, extender sin borrar
 contenido existente y validar que cada unidad responda la pregunta del
