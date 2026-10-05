@@ -170,6 +170,45 @@ mezcla "que es BLUF" con "donde se origino BLUF"), `reading-stakeholder-incentiv
 ningun `##`, visuales concentrados en L2), `org-level-influence` (ninguno,
 la unidad mas solida del lote).
 
+### Track `logic` (12/12 unidades) — auditado 2026-10-05
+
+8/12 SOLID: `abstraction`, `correlation-causation`, `edge-case-reasoning`,
+`induction`, `expected-value`, `fallacies`, `fermi-estimation`,
+`formal-informal-logic`.
+
+4/12 MINOR ISSUES:
+
+1. **`boolean-logic` — bug real de renderizado.** `L1-summary.mdx`, la
+   tabla "operator cheat sheet" tiene una fila rota para `||`: un `|` sin
+   escapar dentro de un code span (`` ` | | ` ``) parte la celda en
+   columnas extra, descuadrando esa fila de la tabla. Ademas, sin
+   `interactives.json` (candidato obvio: filas de la truth table creciendo
+   como 2^n segun cantidad de variables, igual al patron que `abstraction`
+   ya usa). **Sin corregir.**
+2. **`multi-criteria-decisions-under-ambiguity` — 2 bugs de pools.**
+   `terms-misc` (L1, quiz) mezcla "que es sensitivity analysis" con "que es
+   tie-breaker judgment" — dos conceptos distintos. `sensitivity-code` (L3,
+   code) mezcla `topTwoGap` con `winnerHoldsAcrossAll` — dos funciones
+   distintas (esta no la agarro el fix mecanico anterior). **Sin
+   corregir.**
+3. **`state-machines` — 1 bug de pool que el fix mecanico no agarro.**
+   `combinatorics-pool` (L3, code) mezcla `totalCombinations` con
+   `meaningfulPercent` — pero la solucion de `meaningfulPercent` _reutiliza_
+   `totalCombinations` como helper interno, asi que el chequeo de
+   "conjuntos de nombres totalmente disjuntos" del script no lo detecto (hay
+   solapamiento real, aunque la pregunta principal es distinta). Tambien
+   exercises delgados (~28 vs ~40). **Sin corregir.**
+4. **`problem-decomposition` — 2 pools borderline.**
+   `exhaustive-nonoverlap-intro-pool` y `two-properties-flowchart-pool`
+   agrupan hechos relacionados pero distintos (no el mismo angulo de una
+   sola pregunta). **Sin corregir.**
+
+Nota sobre el fix mecanico de pools (commit `c82ffc4`): estos 2 casos
+nuevos confirman que tiene puntos ciegos reales (funciones helper
+compartidas entre soluciones rompen el chequeo de disjuncion total) — la
+revision por agente sigue siendo necesaria para encontrar el resto, no solo
+para los pools tipo `quiz`.
+
 Bugs de codigo reales adicionales encontrados en `systems` (fuera de los 2
 NEEDS WORK):
 
