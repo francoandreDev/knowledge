@@ -248,6 +248,78 @@ delgados (22 items c/u); `cap-theorem`/`cors` sin elementos visuales en L3
 B-tree en el chart compartido (no es bug de computo, es de escala visual —
 verificar en navegador).
 
+### Track `security` (13/13 unidades) — auditado 2026-10-05
+
+6/13 SOLID: `authentication-fundamentals`, `hashing`, `incident-response`,
+`secrets-management`, `secure-by-design`,
+`symmetric-asymmetric-encryption-basics`.
+
+6/13 MINOR ISSUES:
+
+1. **`authorization-models`.** `dark:text-amber-390` (shade invalido de
+   Tailwind) aparece 6 veces en `exercises.json` — no aplica color en modo
+   oscuro. El output `fixedUnauthorizedPaths` de `interactives.json` es
+   constante-cero en todo el rango del slider (ruido visual, el
+   anti-patron ya nombrado en CLAUDE.md). **Sin corregir.**
+2. **`defense-depth`.** Error factico real en `L3-deep-dive.mdx`: el
+   comentario de `default-deny-all.yaml` afirma que la politica se aplica
+   "cluster-wide" cuando el YAML tiene `namespace: storefront` — un
+   `NetworkPolicy` de Kubernetes estandar es scoped por namespace, no
+   cluster-wide (eso requeriria una extension de CNI como
+   `GlobalNetworkPolicy` de Calico). Tambien un stat sin respaldo ("14 dias
+   → detectado en minutos") en una tabla de costos que no se establece en
+   ningun lado del escenario propio de la unidad, y un mismatch de
+   nombre/archivo YAML (`db-proxy-ingress.yaml` vs `db-tier-ingress`).
+   **Sin corregir.**
+3. **`owasp-top-10` — bug de pool.** `classify-vulnerability-shape-pool`
+   (L2, quiz) mezcla reconocer _broken access control/IDOR_ con
+   reconocer _SSRF_ — dos categorias de vulnerabilidad distintas, no el
+   mismo concepto desde otro angulo. Ademas exercises mas delgado que el
+   resto del track (~28 items, 0 quiz en L3) y sin `interactives.json` sin
+   nota explicita de por que se omite. **Sin corregir.**
+4. **`security-mindset` — bug de pool.** `rate-limiter` (L3, code) mezcla
+   `createRateLimiter` (limite por conteo) con `createSizeLimiter` (limite
+   por tamaño) — dos mitigaciones de DoS distintas, dos funciones
+   distintas. **Sin corregir.**
+5. **`security-testing`.** Inexactitud menor en `L3`: el comentario del
+   "falso positivo que este scanner VA a levantar" en `sast-scanner.js`
+   describe un comportamiento que el regex (que matchea linea por linea)
+   en realidad no produce con el ejemplo mostrado — la linea citada no
+   contiene ninguna keyword SQL. **Sin corregir.**
+6. **`tls-https` — vacio de alcance.** A pesar del nombre de la unidad,
+   ningun nivel cubre el handshake de TLS en si (ClientHello/ServerHello,
+   intercambio de claves, cipher suites, forward secrecy) — cero menciones
+   reales de "handshake"/"ECDHE"/"forward secrecy"/"cipher suite" en todo
+   el contenido. Todo el unit queda acotado a cadena de confianza de
+   certificados / validacion de dominio / phishing, que esta bien hecho
+   pero es un alcance mas chico de lo que promete el titulo. Tampoco tiene
+   `interactives.json` pese a que hay candidatos naturales (profundidad de
+   la cadena, superficie de ataque). **Sin corregir.**
+
+1/13 NEEDS WORK:
+
+7. **`supply-chain-security` — defecto de pools sistemico (contenido en si
+   solido).** Las 5 pools `code` de `exercises.json` agrupan funciones
+   genuinamente distintas, no variantes:
+   `integrity-verify` (`verifyIntegrity`/`findTampered`/`allIntact`),
+   `loose-range-detector`
+   (`isLooseRange`/`findLooseRanges`/`countPinnedVsLoose`),
+   `sbom-component-collector`
+   (`toPurl`/`flattenComponents`/`generateSBOM`),
+   `scan-sbom-advisories` (`scanSBOM`/`hasCriticalFinding`),
+   `typosquat-distance`
+   (`levenshtein`/`findTyposquatCandidates`/`isSuspiciouslyClose`). Esto
+   reduce 15 ejercicios de codigo a solo 5 expuestos al azar por vista —
+   el peor caso de este defecto encontrado hasta ahora en un solo unit.
+   Tambien un no-op inofensivo pero confuso en
+   `integrity-check.mjs`:`algorithm.replace("sha", "sha")`. **Sin
+   corregir.**
+
+Nota: ninguno de los 13 units tenia labels explicitos de nivel, y
+`LevelIntro`/`Checkpoint` estan bien ubicados en los 13 sin excepcion — el
+track esta estructuralmente solido, los hallazgos son puntuales (contenido
+factico + pools) mas que estructurales.
+
 ### Track `git-teamwork` (16/16 unidades) — auditado 2026-10-05
 
 9/16 SOLID: `feature-flags`, `feedback-framing`, `merge`, `ownership`,
