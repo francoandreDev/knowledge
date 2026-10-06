@@ -825,3 +825,67 @@ exercises mezcla conceptos no relacionados en este track (el unico hallazgo
 de pools fue el gap de alcance de `solid-principles`, no un bug de pool en
 si). El codigo de referencia (incluidos los ejemplos de patrones clasicos
 y los refactors before/after) se verifico correcto en los 13 casos.
+
+### Track `testing-quality` (13/13 unidades) — auditado 2026-10-06
+
+7/13 SOLID: `assertions-matter`, `contract-testing`, `flaky-tests`,
+`mutation-testing` (cada numero del ejemplo de L3 — 3 tests, 4 mutantes,
+kill/survive — se verifico a mano y coincide exacto), `tdd-basics` (los 4
+ciclos red→green se trazaron y son consistentes), `test-pyramid`,
+`test-suite-architecture`.
+
+6/13 MINOR ISSUES:
+
+1. **`fault-injection` — bug real en el ejemplo central de L3.** La
+   funcion original (pre-fix) `fetchPricing` tiene firma
+   `(productId, pricingService)`, pero el test de fault-injection la llama
+   como `fetchPricing(hangingService, "sku-1")` — orden de argumentos
+   invertido respecto a la firma. Esto hace que `"sku-1".getPrice(...)`
+   tire un `TypeError` inmediato en vez de colgarse como afirma el texto
+   ("test guard tripped" por timeout) — el ejemplo no demuestra lo que
+   dice demostrar. La version fixed si usa el orden correcto. **Sin
+   corregir.**
+2. **`property-based-testing` — el shrink "convergido" no es el que
+   produce el algoritmo mostrado.** L3 afirma que `shrink()` converge a
+   `[{start:1,end:10},{start:2,end:3}]` para el caso de 4 intervalos, pero
+   trazando el algoritmo exacto mostrado (quitar-un-intervalo, luego
+   ajustar-bordes-en-1, repetir hasta que ninguno funcione) ese resultado
+   NO es un punto fijo — seguir aplicando la regla de "achicar el borde en
+   1" a `{1,10}` da un input mas chico que _sigue_ fallando la propiedad,
+   asi que el loop seguiria achicando mas alla del valor que el texto
+   afirma como final. La forma de la leccion (converge a 2 intervalos, uno
+   contenido en el otro) sigue siendo correcta, solo el valor numerico
+   especifico presentado como output deterministico del codigo mostrado
+   esta mal. **Sin corregir.**
+3. **`quality-culture` — descripcion de interactivo no coincide con su
+   formula.** `distributed-ownership-vs-defect-rate` afirma en la
+   descripcion que "la tasa cae mas rapido en la mitad del rango, no en
+   los extremos" (una curva no lineal), pero `compute` es
+   `worstCase - (worstCase - bestCase) * share` — una funcion
+   perfectamente lineal, pendiente constante en todo el rango. **Sin
+   corregir.**
+4. **`bdd` — bug de pool real.** `cart-v2-addItem-pool` agrupa 2 variantes
+   de codigo que prueban funciones genuinamente distintas:
+   `cart-v2-addItem-1` pide implementar un metodo de clase
+   (`ShoppingCartV2.addItem`), `merge-or-add-1` pide una funcion
+   standalone (`mergeOrAdd(map, key, quantity, createFn)`) con firma
+   distinta — solo se muestra una variante al azar por vista, asi que el
+   concepto enseñado cambia segun el azar. **Sin corregir.**
+5. **`case-automated-testing` — fence de codigo mal etiquetado.** El
+   bloque pseudocode `ship_change` en `L2-concept.mdx` esta marcado
+   ` ```python ` pero escrito con sintaxis JS (`function ship_change(...):`,
+   invalido en Python). **Sin corregir.**
+6. **`test-doubles` — precision de terminologia.** `createMockPaymentGateway`
+   es, en la taxonomia estricta (Meszaros/Fowler), un **spy** (solo
+   graba llamadas para que el test las verifique despues) y no un
+   **mock** (que pre-registra expectativas y se auto-falla si no se
+   cumplen) — la definicion de "mock" de L1/L2 describe en realidad un
+   spy. Es una confusion comun en la industria (los "mock functions" de
+   Jest tambien son spies) y defendible como convencion de la casa, pero
+   vale la pena una decision consciente. **Sin corregir.**
+
+Ningun unit califico NEEDS WORK. Cross-cutting: ningun bug de
+`interactives.json` del tipo `params.` faltante/linea constante/pares
+complementarios en 11 de los 13 units; los unicos 2 hallazgos de
+interactivos son de "la descripcion promete una forma que la formula no
+tiene" (`quality-culture`), no errores de computo en si.
