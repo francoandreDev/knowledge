@@ -1127,3 +1127,51 @@ Ningun unit califico NEEDS WORK. Cero bugs de `interactives.json` del tipo
 `params.` faltante/constante/complementos aritmeticos en los 13 — los 2
 hallazgos reales fueron inconsistencias numericas en la prosa/charts, no
 errores de computo de los demos en si.
+
+### Track `people-management` (15/15 unidades) — auditado 2026-10-06
+
+Nota: la carpeta `src/content/people-management/1/` tiene ese slug
+literal a proposito (unidad 02 del roadmap, sobre reuniones 1:1) — no es
+un error, confirmado contra `ROADMAP.md`. Se verifico ademas que
+`people-management/goal-setting` y `career-craft/goal-setting` cubren
+angulos distintos (equipo/OKRs vs. individuo/promocion), y que
+`people-management/calibration` cubre el lado del manager mientras
+`career-craft/calibration-processes` cubre el lado del IC — ninguno de
+los 2 pares es contenido duplicado.
+
+13/15 SOLID: `ic-excellence-management`, `1` (reuniones 1:1),
+`delegation-levels`, `sbi-framework`, `goal-setting`, `early-signals`,
+`mediation` (nota: sin `interactives.json` y sin razon declarada — a
+diferencia de otros casos de este tipo en tracks anteriores, aqui no
+rompe el veredicto SOLID porque el resto del unit es impecable),
+`onboarding-design`, `calibration`, `termination-process` (manejo
+ejemplar de contenido legalmente sensible — "at-will employment"
+explicitamente marcado como dependiente de jurisdiccion, con disclaimer
+de que la unidad no es asesoria legal), `bus-factor`, `org-design`
+(verificada la aritmetica de span-of-control con cuidado especial —
+180/5, /8, /11, /15, /20 — exacta e identica en L1/L2/L3, el unico lugar
+de todo el track con mas riesgo de desviacion y resulto limpio),
+`management-managers`.
+
+2/15 MINOR ISSUES:
+
+1. **`performance-improvement-plans` — bug factual real de fecha.** L3
+   dice en el cierre "The May 15 checkpoint note above is what makes
+   Outcome B defensible later" — pero el PIP escrito y ambos outcomes
+   narrados usan consistentemente **15 de junio** como fecha de
+   checkpoint intermedio en el resto del documento; "May 15" no aparece
+   en ningun otro lado. **Sin corregir.**
+2. **`defining-role` — 0 de 38 items con `reference`/`learnMore`.** El
+   unico caso de "cero total" encontrado en este track (otros como
+   `calibration` y `termination-process` tambien tienen 0, pero no
+   bajaron de SOLID por ser el unico hallazgo en units por lo demas
+   impecables; `defining-role` se marco MINOR porque es el hallazgo
+   principal reportado). **Sin corregir.**
+
+Ningun unit califico NEEDS WORK. Patron cross-cutting: en ~5 de las 15
+unidades, L1 depende solo del panel de hechos del `<Scenario>` sin tabla/
+diagrama/chart propio — cumple el minimo pero queda mas delgado que L2/L3.
+Cero bugs de `interactives.json` del tipo `params.` faltante/constante/
+complementos aritmeticos en las 15 unidades — el track con la aritmetica
+mas verificada (span-of-control, decay curves, etc.) sin encontrar un solo
+error de computo real.
