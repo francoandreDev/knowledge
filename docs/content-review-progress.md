@@ -956,3 +956,65 @@ mayoria factuales (ARIA, WCAG, regulacion) o de desajuste
 interactivo/narrativa, no bugs de pools ni violaciones estructurales
 graves — la estructura pedagogica (Scenario/LevelIntro/Checkpoint en
 prosa conectada, sin pseudocodigo disfrazado) fue consistente en las 14.
+
+### Track `career-craft` (13/13 unidades) — auditado 2026-10-06
+
+7/13 SOLID: `asking-feedback` (el mas fuerte, tratar como referencia junto
+a `business-communication/audience-awareness`), `ic-em-tracks`,
+`impact-scope-over-correctness`, `market-research`,
+`mentoring-fundamentals`, `negotiation-tactics`, `peer-mentoring`.
+
+5/13 MINOR ISSUES:
+
+1. **`goal-setting` — complemento aritmetico exacto en interactivo.**
+   `missingEvidence = 100 - evidenceScore` — el anti-patron ya nombrado en
+   CLAUDE.md, la segunda linea no aporta nada mas alla de "100 menos la
+   primera". **Sin corregir.**
+2. **`leveling-expectations` — interactivo con 6 lineas, la mayoria
+   redundantes.** `compute` devuelve 3 de los 4 parametros de entrada
+   sin cambios como "outputs" (se grafican como lineas planas), mas el
+   propio `chartParam` graficado contra si mismo (linea diagonal
+   identidad), y solo 2 de las 6 lineas (`scopeProfileAverage`/
+   `influenceGap`) aportan informacion real — y esas 2 son linealmente
+   dependientes entre si una vez conocido el eje X. **Sin corregir.**
+3. **`staff-scope` — interactivo desconectado del escenario propio.** El
+   demo deja arrastrar "teams adopting" hasta 6, con la descripcion
+   afirmando "de 6 equipos en la organizacion" — pero la unidad establece
+   consistentemente en L1/L2/L3 que son **3 equipos** (Payments,
+   Fulfillment, Search); el "6" parece una confusion con "el equipo de
+   Marcus: 6 ingenieros" (un dato de headcount, no de cantidad de
+   equipos). Los equipos 4-6 nunca se mostro que tuvieran el bug de
+   duplicate-charge, asi que acreditarles "costo evitado" no tiene
+   fundamento en los numeros propios de la unidad. **Sin corregir.**
+4. **`calibration-processes` — enriquecimiento incompleto.** 26 de 28
+   exercises no tienen el campo `reference` del whiteboard (solo 2 lo
+   tienen) — CLAUDE.md pide autorarlo activamente, no dejarlo sin
+   completar por defecto. Tampoco tiene `interactives.json` pese a que
+   existe una relacion cuantificable natural (casos que superan el
+   rubric vs. slots disponibles), y los elementos visuales de L1/L3 son
+   delgados (solo 1 tabla cada uno, todo el peso de diagramas en L2).
+   **Sin corregir.**
+5. **`documentation-career-tool` — mismo patron de enriquecimiento
+   incompleto que `calibration-processes`** (sin `interactives.json`
+   pese a una relacion natural obvia — % de 6 meses de trabajo recordado
+   con vs. sin brag doc —, visuales clusterizados en L2) pero con
+   `exercises.json` limpio (0 `reference` faltantes, a diferencia del
+   anterior). **Sin corregir.**
+
+1/13 NEEDS WORK:
+
+6. **`structured-interviewing` — bug real de interactivo, el anti-patron
+   nombrado explicitamente en CLAUDE.md.** `gut-feel-vs-rubric-weight`:
+   `candidateAScore + candidateBScore = 8` para CUALQUIER valor del
+   slider — complementos aritmeticos exactos de un total fijo. Peor aun,
+   se grafica una TERCERA linea (`scoreGap`) que es una transformacion
+   lineal de las otras 2 ya mostradas — 3 lineas en el chart donde 1
+   bastaria. Ademas, L1 no tiene ningun elemento visual real (solo una
+   lista de terminos, ni tabla ni diagrama). **Sin corregir.**
+
+Cross-cutting: ningun unit uso labels de nivel como clasificacion (los que
+hablan de seniority/leveling lo hacen narrativamente, como corresponde al
+tema). El patron mas comun de este track no fueron errores factuales sino
+la "capa de enriquecimiento opcional" (interactivos ausentes, `reference`
+sin completar, visuales clusterizados en L2) que CLAUDE.md pide perseguir
+activamente en vez de omitir por defecto.
