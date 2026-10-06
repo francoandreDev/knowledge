@@ -1018,3 +1018,60 @@ tema). El patron mas comun de este track no fueron errores factuales sino
 la "capa de enriquecimiento opcional" (interactivos ausentes, `reference`
 sin completar, visuales clusterizados en L2) que CLAUDE.md pide perseguir
 activamente en vez de omitir por defecto.
+
+### Track `corporate-politics` (14/14 unidades) — auditado 2026-10-06
+
+5/14 SOLID: `favor-economy`, `power-real-resource` (el mejor repartido
+en visuales de todo el track), `strategic-ambiguity`, `white` (verificado
+que el nombre de la carpeta corresponde al tema real de "white-hat
+influence building", no "mentiras piadosas" — coincide con
+`ROADMAP.md`), `who-holds-influence` (unico caso donde la ausencia
+deliberada de `interactives.json` esta documentada explicitamente en
+`PROGRESS.md` — exactamente la practica que CLAUDE.md pide).
+
+9/14 MINOR ISSUES — el patron dominante de este track es el mismo que en
+`career-craft`: no errores factuales, sino la "capa de enriquecimiento
+opcional" (interactivos ausentes sin razon declarada, `reference` sin
+completar, visuales clusterizados) sin perseguir activamente:
+
+1. **`credit-stealing`** — cero items de `exercises.json` tienen
+   `reference`/`learnMore` (cero de ~33), y no tiene `interactives.json`
+   sin ninguna razon declarada pese a existir una relacion cuantificable
+   plausible (ambiguedad de la redaccion vs. confianza en que fue
+   deliberado). Es, junto con `documentation-discipline`, el caso mas
+   completo de este gap. **Sin corregir.**
+2. **`documentation-discipline`** — el mas debil de los 14: exercises
+   notablemente delgado (~17 items vs. el objetivo ~40 y vs. 32-33 del
+   resto del track), casi todos los pools son singletons sin variantes,
+   cero items con `reference`, y solo 1 interactivo (vs. 2 en el resto).
+   **Sin corregir.**
+3. **`framing`** — sin `interactives.json` pese a una relacion
+   cuantificable plausible mencionada en la propia pregunta de extension
+   de L3 (severidad de un incidente omitido vs. cuanto se lee como spin).
+   `exercises.json` tambien delgado (24 items vs. 40 del resto del
+   track). **Sin corregir.**
+4. **`subtext`** — sin `interactives.json`, sin razon declarada (a
+   diferencia de `who-holds-influence`, que si documento su decision de
+   omitirlo). **Sin corregir.**
+5. **`coalition-building-defense`** — solo 3 de ~15 pools tienen
+   `reference`; el resto (incluidos pools centrales como
+   `honesty-line`/`l3-self-check`) no lo tiene. L3 sin ningun elemento
+   visual (puro prosa/dialogo). **Sin corregir.**
+6. **`influence-tool-org-s-good`** — 5 de 22 pools sin `reference`
+   (`l1-scenario-what-tempts`, `checkpoint-venue`, `what-if-wrong`,
+   `what-if-org-punishes`, `l3-synthesis-close`); L3 sin ningun elemento
+   visual. **Sin corregir.**
+7. **`staying-principled`** — L3 sin ningun elemento visual; 8 de 21
+   pools sin `reference`. **Sin corregir.**
+8. **`calibrated-confrontation`** — L3 sin ningun elemento visual
+   (visuales clusterizados en L1/L2). **Sin corregir.**
+9. **`warning-signs`** — todas las tablas reales del unit viven en L2;
+   L1 y L3 no tienen ni tabla ni diagrama (el "timeline semana 6" de L3
+   esta en un bloque ```text plano en vez de tabla real). **Sin
+   corregir.**
+
+Ningun unit califico NEEDS WORK. Cero bugs de `interactives.json` del tipo
+`params.` faltante/constante/complementos aritmeticos en todo el track —
+el unico tipo de hallazgo tecnico real en los 14 fue la ausencia o
+desconexion del enriquecimiento opcional, nunca un error de contenido o
+de computo.
