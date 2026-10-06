@@ -758,3 +758,70 @@ conjunto, el mas solido auditado hasta ahora (0 bugs numericos/logicos
 reales en codigo de referencia fuera del detalle puntual de
 `platform-engineering`; los demas hallazgos son de grading/prompt/render,
 no de contenido tecnico incorrecto).
+
+### Track `software-design` (13/13 unidades) — auditado 2026-10-06
+
+8/13 SOLID: `api-design`, `classic-design-patterns`, `cost-design`, `dry`,
+`naming` (nota menor: `LevelIntro` de L1/L2 casi identicos, deberian
+redactarse distinto por nivel), `refactoring-technique` (el mejor de los
+13 — cada paso before/after se trazo a mano y preserva comportamiento
+exactamente, incluida una rareza deliberadamente preservada), `single-responsibility`,
+`technical-debt-deliberate-trade-off`.
+
+4/13 MINOR ISSUES:
+
+1. **`evolutionary-design` — inconsistencia numerica entre L1 y el resto.**
+   El `xychart-beta` de L1 grafica `[2, 9, 11, 13]` para "absorbing via
+   seam", pero `interactives.json` (con sus propios defaults) y 2
+   `learnMore` de `exercises.json` coinciden entre si en `[2, 7, 9, 11]` —
+   el chart de L1 es el que queda aislado y contradice a los otros dos.
+   **Sin corregir.**
+2. **`immutability` — gaps de contenido mas que de logica.** L1 no tiene
+   ningun elemento visual (todo el peso esta en L2/L3). Los 18 items de
+   quiz en L1+L2 no tienen `reference`/`learnMore` (solo los 4 de L3 code
+   lo tienen), inconsistente con las unidades hermanas del mismo lote que
+   si lo completan en todos los items. Exercises tambien mas delgado que
+   el resto (22 items vs ~40 objetivo). La logica de inmutabilidad en si
+   (incluyendo el caso de "spread solo copia un nivel") esta bien manejada
+   y explicitamente señalada con un Checkpoint. **Sin corregir.**
+3. **`long-term-design-judgment` — linea plana en interactivo.** El
+   segundo output de `interactives.json`, `legibleFromStartCost`, es una
+   constante (`= 6`) que no depende de ningun parametro del slider —
+   graficado como segunda linea en todo el rango de `numberOfDependents`,
+   el mismo anti-patron de "referencia fija deberia ir en texto, no como
+   linea cruzando el chart" que CLAUDE.md ya nombra. **Sin corregir.**
+4. **`oop-design-trade-offs` — Checkpoint con los numeros invertidos.**
+   El segundo `Checkpoint` de L3 dice que el chart de L2 muestra
+   composicion e inheritance-per-combo "tied at 1 style each (2 vs. 1) y
+   inheritance-per-combo already ahead by 2x2" — pero los datos reales
+   del chart (`[2,4,6,8,10]` vs `[1,4,9,16,25]`) muestran exactamente lo
+   contrario: en 1x1 NO estan empatados (2 vs 1, inheritance mas barato),
+   y en 2x2 SI estan empatados (4 vs 4) — los dos hechos estan
+   intercambiados. Ademas L1 no tiene ningun elemento visual (los 3
+   diagramas/chart del unit estan todos clusterizados en L2). **Sin
+   corregir.**
+
+1/13 NEEDS WORK:
+
+5. **`solid-principles` — bug de interactivo + gap real de alcance
+   pedagogico.** `interactives.json`'s `files-touched-switching-providers`:
+   `filesToTouchInverted` esta hardcodeado a `1` sin importar el valor del
+   slider — el anti-patron de "linea constante" ya nombrado por el
+   proyecto. Mas relevante: la unidad se llama `solid-principles` pero en
+   la practica solo enseña Dependency Inversion en profundidad (con codigo
+   real y un refactor completo); Single Responsibility y Open/Closed
+   reciben solo una fila de tabla (aceptable, se cubren en otras unidades
+   dedicadas) — pero **Liskov substitution e Interface segregation no se
+   cubren en NINGUNA otra parte del roadmap completo** (verificado via
+   grep en `ROADMAP.md`), y aca tambien reciben solo una fila de tabla sin
+   ningun ejemplo de codigo de violacion/fix real. Es decir, 2 de los 5
+   principios "SOLID" no tienen tratamiento sustantivo en todo el
+   proyecto. Requiere una decision de producto: re-alcanzar el nombre/
+   descripcion de la unidad, o agregar cobertura real de L e I en algun
+   lado. **Sin corregir.**
+
+Cross-cutting: ningun unit usa labels explicitos de nivel; ningun pool de
+exercises mezcla conceptos no relacionados en este track (el unico hallazgo
+de pools fue el gap de alcance de `solid-principles`, no un bug de pool en
+si). El codigo de referencia (incluidos los ejemplos de patrones clasicos
+y los refactors before/after) se verifico correcto en los 13 casos.
