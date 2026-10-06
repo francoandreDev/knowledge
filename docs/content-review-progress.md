@@ -889,3 +889,70 @@ Ningun unit califico NEEDS WORK. Cross-cutting: ningun bug de
 complementarios en 11 de los 13 units; los unicos 2 hallazgos de
 interactivos son de "la descripcion promete una forma que la formula no
 tiene" (`quality-culture`), no errores de computo en si.
+
+### Track `design` (14/14 unidades) — auditado 2026-10-06
+
+Track no-tecnico (segun regla 9 de CLAUDE.md) — se verifico ademas que
+ningun L3 disfraza razonamiento llano como codigo falso; no se encontro
+ninguna instancia de ese anti-patron en las 14 unidades.
+
+8/14 SOLID: `design-engineering-handoff` (el mas limpio de las 14 en el
+checklist de interactivos), `design-thinking-process`,
+`information-architecture`, `interaction-design-patterns`,
+`prototyping-feedback-loops`, `responsive-adaptive-design`,
+`usability-testing`, `ux-writing-microcopy`.
+
+6/14 MINOR ISSUES:
+
+1. **`accessibility-by-design` — bug factual real de ARIA.**
+   `L2-concept.mdx` afirma que el orden de resolucion del nombre accesible
+   es "`aria-label` gana si esta presente, si no cae a `aria-labelledby`"
+   — esto esta al reves segun la especificacion W3C accname (y MDN):
+   `aria-labelledby` se chequea PRIMERO y pisa a `aria-label`, no al
+   reves. El ejemplo puntual que da la unidad sigue siendo cierto
+   independientemente del orden, pero el orden general enseñado esta mal.
+   **Sin corregir.**
+2. **`dark-patterns-ethics` — afirmacion regulatoria desactualizada.** L3
+   presenta la "FTC click-to-cancel rule (US, 2024)" como ley vigente y
+   asentada, pero el Octavo Circuito de EEUU la anulo en julio 2025 (la
+   FTC no completo un analisis regulatorio preliminar requerido dado el
+   impacto economico >$100M de la regla) — no esta vigente a nivel
+   nacional actualmente. El resto de la categorizacion de dark patterns es
+   correcta. **Sin corregir.**
+3. **`design-debt-at-scale` — 3 problemas reales en `interactives.json`.**
+   `resolution-rate-vs-team-size` da ~93%/~31% en sus extremos cuando la
+   narrativa de la propia unidad establece 88%/41% — discrepancia de
+   doble digito entre el demo y el escenario que deberia reproducir.
+   `governance-gap-orphans`'s `compute` devuelve `orphans` Y
+   `wouldHaveBeen`, pero `outputs` solo declara `orphans` — la comparacion
+   "con vs. sin gobernanza" prometida nunca se renderiza. Ademas, las
+   descripciones de ambos demos mencionan una "linea de referencia
+   punteada" que el componente `InteractiveDemo` no implementa (solo
+   marca la posicion actual del slider, no una referencia historica fija)
+   — overclaim de una funcionalidad visual inexistente. **Sin corregir.**
+4. **`design-systems` — default de interactivo no reproduce el ancla
+   propia de la unidad.** La descripcion fija el demo en "10% adoption y
+   14 incidentes" (coincidiendo con el punto de partida de Northwind en
+   L1/L3), pero `compute` en realidad da **12.8** incidentes al 10% de
+   adopcion por default, no 14. **Sin corregir.**
+5. **`usability-heuristics` — LevelIntro fuera de lugar.**
+   `L3-deep-dive.mdx` abre con un `## The interface under audit` (encabezado
+   - parrafo) ANTES de que empiece el `<Scenario>`, y recien despues
+     aparece `<LevelIntro>` — viola la regla de que el Scenario debe ser el
+     gancho real de apertura y `LevelIntro` debe ir antes del primer `##`.
+     L1 y L2 no tienen este problema. **Sin corregir.**
+6. **`visual-design-fundamentals` — error real de matematica WCAG,**
+   relevante porque la tesis central de la unidad es "verifica con
+   matematica, no a ojo." L3 afirma que `#5c5c5c` da "luminance ≈0.108,
+   ratio ≈6.2:1" — recalculando la formula de luminancia relativa WCAG a
+   mano, la luminancia (≈0.107) es correcta pero el ratio de contraste
+   real es **≈6.69:1, no 6.2:1** (un 8% de diferencia). No cambia la
+   conclusion pedagogica (ambos numeros pasan AA comodamente) pero es
+   exactamente el tipo de error que un lector haciendo la cuenta el mismo
+   detectaria. **Sin corregir.**
+
+Ningun unit califico NEEDS WORK. Los hallazgos de este track son en su
+mayoria factuales (ARIA, WCAG, regulacion) o de desajuste
+interactivo/narrativa, no bugs de pools ni violaciones estructurales
+graves — la estructura pedagogica (Scenario/LevelIntro/Checkpoint en
+prosa conectada, sin pseudocodigo disfrazado) fue consistente en las 14.
