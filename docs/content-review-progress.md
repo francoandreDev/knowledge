@@ -1075,3 +1075,55 @@ Ningun unit califico NEEDS WORK. Cero bugs de `interactives.json` del tipo
 el unico tipo de hallazgo tecnico real en los 14 fue la ausencia o
 desconexion del enriquecimiento opcional, nunca un error de contenido o
 de computo.
+
+### Track `learning-craft` (13/13 unidades) — auditado 2026-10-06
+
+El track mejor posicionado hasta ahora en enriquecimiento opcional (varios
+units populan `reference` Y `learnMore` en todos los items, algo poco
+comun en otros tracks no-tecnicos auditados).
+
+9/13 SOLID: `breadth-depth-trade-off-scale`, `curation`,
+`feynman-technique`, `notes`, `prioritization`, `search-literacy`,
+`source-evaluation`, `systematic-exploration` (unico unit del track con
+exercises de codigo real — justificado por regla 4c ya que explorar
+codebases es una habilidad inherentemente tecnica; el pool de codigo se
+verifico como variantes genuinas, no un bug de mezcla), `verification-habits`.
+
+4/13 MINOR ISSUES:
+
+1. **`calibration` — chart que contradice su propia prosa y al personaje
+   establecido en L1.** El `xychart-beta` de L2 grafica una serie "Ben"
+   `[82, 93, 99]` contra confianza declarada `[60, 80, 95]`, y la prosa
+   debajo dice que Ben "acierta mas seguido en el extremo bajo y menos en
+   el alto — timido en confianza media pero temerario en confianza alta."
+   Pero los numeros reales son MAS altos que lo declarado en los 3 puntos,
+   incluido el extremo alto (99 > 95) — osea subconfianza en todos los
+   niveles, lo opuesto de lo que describe el texto. Ademas contradice al
+   "Ben" de L1 y de `exercises.json`, consistentemente caracterizado como
+   SOBREconfiado (90% declarado → 58% real). **Sin corregir.**
+2. **`exposure-understanding` — inconsistencia real de numeros en L3.**
+   El Scenario y el "Step 3" establecen 9 fallos repartidos en 7 hechos
+   distintos ("7×6 al 7×12 cada uno falla al menos una vez"), pero "Step
+   5" y la tabla de resumen dicen que la practica de recuperacion apunto a
+   "los 4 hechos especificos" que el quiz identifico como debiles — 7 (o
+   9 fallos) vs. 4 es una contradiccion real y visible en la misma pagina,
+   probablemente un numero cambiado en un lugar sin actualizar los otros
+   dos. **Sin corregir.**
+3. **`spaced-repetition` — gaps de enriquecimiento.** Los 40 items de
+   `exercises.json` no tienen `learnMore` (si tienen `reference`),
+   regresion respecto a los otros 2 units del mismo lote que si lo
+   completan. Ademas `L1-summary.mdx` no tiene ningun elemento visual
+   (ni tabla ni diagrama), a diferencia de L2 (chart + 2 tablas) y L3 (2
+   tablas) — el patron de clusterizacion ya nombrado como recurrente en
+   tracks no-tecnicos. **Sin corregir.**
+4. **`weighing-credibility` — exercises mas delgado que el resto (28 vs
+   ~40).** La ausencia de `interactives.json` en este caso SI esta
+   documentada deliberadamente en `PROGRESS.md` (contenido cualitativo
+   sin cantidad continua natural para un slider) — cumple exactamente lo
+   que pide la regla 5c, a diferencia de otros tracks donde la omision no
+   tenia razon declarada. **Sin corregir.**
+
+Ningun unit califico NEEDS WORK. Cero bugs de `interactives.json` del tipo
+`params.` faltante/constante/complementos aritmeticos en los 13 — los 2
+hallazgos reales fueron inconsistencias numericas en la prosa/charts, no
+errores de computo de los demos en si.
