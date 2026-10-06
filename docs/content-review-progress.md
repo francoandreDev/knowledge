@@ -581,3 +581,121 @@ TypeScript, YAML, el motor plan/apply de `infrastructure-code`, la
 maquina de estados de `rollback-strategy`) se verifico correcto en los 12
 casos — todos los hallazgos son de `interactives.json`/`exercises.json`/
 estructura, no errores logicos en el codigo de referencia.
+
+### Track `applied-math` (15/15 unidades) — auditado 2026-10-06
+
+Track de matematica — los agentes recomputaron a mano (y en varios casos
+ejecutando el codigo real en Node) cada formula, tabla y chart para
+detectar errores numericos silenciosos, no solo revisar estructura.
+
+6/15 SOLID: `asymptotic-analysis`, `capacity-planning-math` (nota menor:
+L3 no tiene ningun elemento visual propio — todo el peso visual esta en
+L1/L2), `expected-value`, `linear-algebra-basics-vectors-matrices-where`,
+`probability-distributions-uniform`, `time-series-basics`.
+
+7/15 MINOR ISSUES:
+
+1. **`statistics` — numero mal calculado.** `L3-deep-dive.mdx` afirma que
+   `neededSampleSizeForSignificance(0.12, 0.18)` da `300`, pero ejecutando
+   la funcion real (con el redondeo de `Math.round()` que aplica
+   internamente) el primer `n` donde `|z| >= 1.96` es **260**, no 300
+   (verificado: n=250 da z≈1.879 — no significativo, n=260 da z≈1.965 —
+   significativo). El resto de la unidad (two-proportion z-test del
+   escenario, interactivo, exercises) se verifico correcto. **Sin
+   corregir.**
+2. **`queueing-theory-basics` — error de redaccion numerica en un
+   Checkpoint.** El Checkpoint de L2 dice "Arrival rate rises from λ = 8
+   to λ = 9 — a 1.5-request increase" cuando 9−8=1, no 1.5; la respuesta
+   del propio Checkpoint usa correctamente la caida de capacidad libre de
+   2 a 1 (consistente con un aumento de 1, no 1.5). El resto de la
+   unidad (formulas M/M/1, simulacion con PRNG semillada reproducida
+   exactamente en Node) se verifico correcto. **Sin corregir.**
+3. **`quantitative-modeling-design-decisions` — eje de chart mal
+   etiquetado.** El `xychart-beta` de L2 ("Total monthly cost vs.
+   volume") tiene labels de eje X redondos (`15M/20M/25M/.../45M`) pero
+   los valores graficados en realidad corresponden a los volumenes reales
+   de los meses 1,3,5,7,9,11,12 del cronograma de crecimiento (≈15M,
+   20.45M, 25.91M, etc.), no a los volumenes redondos que dicen las
+   etiquetas — confirmado recomputando el costo en el volumen redondo real
+   (20M → 9250) contra el valor que muestra el chart (9490, que en
+   realidad coincide con el mes 3 real de 20.45M). La leccion cualitativa
+   (crossover ~16.9M) sigue siendo correcta via algebra, pero el chart
+   esta mal rotulado contra sus propios datos. **Sin corregir.**
+4. **`orders-magnitude` — explicacion de exercise sin editar + linea
+   plana en interactivo.** `exercises.json`, item `conversion-factor-3`:
+   el campo `explanation` quedo con texto de borrador sin terminar,
+   autocontradictorio ("...producing a 1,000×1,000... no, exactly the
+   1,000x error..."). Ademas `interactives.json`'s output `correctGB` es
+   constante (siempre 10 GB) en todo el rango del slider — el anti-patron
+   de "linea plana" que CLAUDE.md pide evitar, mejor mover a texto fijo en
+   la descripcion. **Sin corregir.**
+5. **`measurement-theory` — 2 hallazgos.** `exercises.json`, item
+   `goodhart-formula-2` (implementa `proxyScore`, una funcion lineal
+   simple sin termino de correlacion/penalizacion): sus campos
+   `reference`/`learnMore` son copia literal del OTRO exercise
+   (`goodhart-formula-1`, sobre `realTarget`) — describen una formula de
+   penalizacion cuadratica que no tiene nada que ver con `proxyScore`. Un
+   lector que falle este exercise y abra el whiteboard vera la
+   explicacion de la funcion equivocada. Ademas, el `xychart` de L2
+   termina en `98` para pressure=100, pero la formula real
+   (`min(100, 40+0.6×pressure)`, reproducida identica en L3/interactives)
+   da exactamente `100` en ese punto — los otros 4 puntos del chart si
+   coinciden con la formula, solo el ultimo parece ajustado a mano para
+   calzar con la narrativa del equipo B. **Sin corregir.**
+6. **`math-tool-prediction` — chart con 2 valores mal calculados.** El
+   `xychart-beta` de L3 ("Wait-time multiplier vs. traffic-growth
+   multiplier") da `[1.0, 2.1, 3.6, 6.0]`, pero recalculando la formula
+   exacta usada dos parrafos antes (`relativeWaitTime(u)/baseline`, con
+   `u = 0.6 × growth`) el resultado correcto es `[1.0, 1.56, 2.67, 6.0]`
+   — los 2 puntos intermedios estan mal (deberian ser ≈1.6 y ≈2.7, no 2.1
+   y 3.6); solo los extremos coinciden. Contradice directamente el codigo
+   `capacity-plan.mjs` renderizado arriba en el mismo archivo. **Sin
+   corregir.**
+7. **`graph-theory-basics` — inconsistencia numerica menor.** `L1-summary.mdx`
+   dice "Six cities, five listed routes" pero la tabla de hechos y el
+   diagrama mermaid solo tienen 5 nodos (SEA/DEN/ORD/ATL/MIA) — deberia
+   decir "Five cities" (el resto de la unidad, incluida la matriz de
+   adyacencia de L2 con "25 celdas" para 5 nodos, es consistente). **Sin
+   corregir.**
+
+2/15 NEEDS WORK:
+
+8. **`combinatorics` — bug numerico real en el ejemplo central de L3,
+   con efecto cascada.** El `console.log` de `findUncoveredPairs` en
+   `L3-deep-dive.mdx` afirma el output
+   `[['newCheckoutUI','promoCode'], ['applePay','promoCode'],
+['applePay','expressShipping']]`, pero ejecutando el codigo real
+   contra los 8 `adHocTestCases` del mismo archivo (verificado en Node) el
+   resultado real es `[['newCheckoutUI','expressShipping'],
+['applePay','promoCode'], ['applePay','expressShipping']]` — el primer
+   par sin cubrir es `newCheckoutUI`/`expressShipping`, no
+   `newCheckoutUI`/`promoCode` (ese par si esta cubierto). El error se
+   propaga: la seccion "Extend it" (agregar un 9no test case) afirma que
+   queda "un par sin cubrir" cuando en realidad quedan dos; y 2 items de
+   `exercises.json` (`which-pairs-missed-1`, `ninth-test-case-1`) repiten
+   la respuesta incorrecta como la "correcta". Ademas un test de
+   `exercises.json` (`find-uncovered-pairs-2`) espera `[['b','c']]` pero
+   la `solution` provista por el propio pool devuelve
+   `[['a','c'],['b','c']]` contra ese input — un lector que implemente la
+   funcion correctamente reprueba el test. **Sin corregir.**
+9. **`unit-economics` — 2 charts cuyos datos no corresponden a la formula
+   que la propia unidad establece.** El `xychart-beta` de L3 ("cumulative
+   revenue vs. cumulative cost") usa una linea de costo que no seria la
+   formula `cost(users) = 3200 + 0.66×users` establecida 2 parrafos antes
+   — en x=283 el chart muestra cost=$5,000 cuando la formula da ≈$3,387,
+   y la prosa afirma que el break-even ocurre en 283 "justo donde la
+   linea de revenue cruza la de costo", pero con los valores graficados
+   NO cruzan ahi (si cruzarian con el valor correcto de la formula). Solo
+   x=0 coincide. Por separado, el `xychart-beta` de L2 (costo por unidad
+   en función del volumen, con un escalon de costo fijo en 2000K) tiene 3
+   puntos post-escalon que no corresponden a ninguna formula de costo fijo
+   consistente (implican $12,000/$10,000/$9,000 de costo fijo nuevo segun
+   el punto) — parecen elegidos a mano por efecto visual. El resto de la
+   unidad (aritmetica de prosa, codigo TS, interactivos, exercises) se
+   verifico extensamente correcto. **Sin corregir.**
+
+Cross-cutting: ningun unit del track usa labels explicitos de nivel; la
+estructura pedagogica (Scenario/LevelIntro/Checkpoint/extend-question) es
+consistente en los 15. Todos los hallazgos de esta ronda son errores
+numericos puntuales en prosa/charts/exercises, no errores de logica en el
+codigo de referencia (salvo el test roto de `combinatorics`).
