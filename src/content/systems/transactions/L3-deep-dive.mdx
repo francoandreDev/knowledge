@@ -25,7 +25,7 @@ the two — or will both versions fail in the same way?**
 <LevelIntro
   items={[
     "Reproducing L1's bug in real code",
-    "A transaction wrapper with rollback and invariant checks",
+    "A transaction wrapper with rollback, invariant checks, and the lost-update race that neither one catches alone",
     "A write-ahead log surviving a simulated crash",
   ]}
 />
@@ -237,17 +237,150 @@ any in-memory object in between.
 
 </Checkpoint>
 
-## Extend it: what if two orders for the same product arrive at once?
+## Isolation: what goes wrong when two orders overlap
 
-**The `runTransaction` above handles one transaction at a time
-correctly. If two separate calls to `runTransaction` ran concurrently
-against the same `store` — each cloning `store` into their own
-`working` copy before either one commits — could both transactions
-individually pass the `stockNeverNegative` check, yet still leave stock
-negative once both commits are applied?** This is exactly the gap
-isolation is meant to close — try sketching what a `lock`-based
-mechanism (only one transaction allowed to run against a given store
-at a time) would need to add to `runTransaction` to prevent this.
+Atomicity and Consistency, as coded above, both check a single
+transaction's own math. Neither one notices a second transaction in
+flight at the same time — that gap is exactly what Isolation closes,
+and it's worth seeing fail before seeing it fixed.
+
+Three named anomalies come up whenever this topic is discussed, so it's
+worth being able to tell them apart by what each one actually lets
+leak across transactions:
+
+| Anomaly                 | What leaks                                                                                                                                                     |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Dirty read**          | Transaction B reads a value Transaction A wrote but hasn't committed yet — and A then rolls back, so B acted on data that never really existed                 |
+| **Non-repeatable read** | B reads the same row twice in one transaction and gets two different answers, because A committed a change to that row in between B's two reads                |
+| **Phantom read**        | B re-runs the same range query twice and gets a different set of _rows_ the second time, because A inserted or deleted a row that matches the query in between |
+
+The bug below isn't literally any of the three — it's a close cousin
+called a **lost update**, and it's the one that matters most for the
+stock/order scenario this unit has been using throughout.
+
+**Before running the code: `runTransaction` has each caller clone
+`store` into its own private `working` copy before doing anything else.
+If two separate calls to `runTransaction` both start — both taking
+their clone — before either one commits, could both individually pass
+the `stockNeverNegative` check, yet the store still end up having
+"sold" more stock than it ever had?**
+
+```js
+// lost-update.js
+const store3 = createStore(); // { stock: { widget: 10 }, orders: [] }
+
+// Both transactions clone the SAME starting store — stock: 10 — before
+// either one has committed. This is what "concurrently" means here:
+// each clone is a snapshot frozen at a moment when neither transaction
+// knows about the other's in-flight work.
+const workingA = deepClone(store3);
+const workingB = deepClone(store3);
+
+workingA.stock.widget -= 6; // A's own view: 10 - 6 = 4
+console.log(stockNeverNegative(workingA)); // true — A's invariant check passes, A commits
+Object.assign(store3.stock, workingA.stock);
+console.log(store3.stock.widget); // 4
+
+workingB.stock.widget -= 8; // B's own view: 10 - 8 = 2 (B never saw A's 6)
+console.log(stockNeverNegative(workingB)); // true — B's invariant check passes too, B commits
+Object.assign(store3.stock, workingB.stock);
+console.log(store3.stock.widget); // 2
+```
+
+The final number, **2**, isn't negative — so a naive glance at
+`stockNeverNegative` never catches anything wrong. But 6 + 8 = 14
+widgets were sold out of a stock of 10 that only ever existed once.
+B's commit didn't add to A's result, it silently overwrote it, because
+B's `working` copy was cloned from the stock=10 snapshot that existed
+_before_ A ever committed. Each transaction's own math was flawless;
+the two transactions' math together was not — and nothing in either
+one's own invariant check could have caught that, because each only
+ever sees its own `working` copy.
+
+<Checkpoint question="The lost-update bug above happens because workingB was cloned before workingA committed. Would making B's clone happen strictly AFTER A's commit — with no other change to the code — be enough to fix it?">
+
+Yes, for this exact pair of transactions: if B's `deepClone(store3)`
+ran after `Object.assign(store3.stock, workingA.stock)` instead of
+before it, B's `working` copy would start from `{ widget: 4 }`, not
+`{ widget: 10 }` — so `workingB.stock.widget -= 8` would produce `-4`,
+`stockNeverNegative(workingB)` would correctly return `false`, and B
+would roll back instead of silently overwriting A's result. The fix
+isn't a smarter invariant check; it's never letting B take its
+snapshot while A still has uncommitted work outstanding. That's exactly
+what an isolation mechanism (a lock, or a database's own concurrency
+control) has to guarantee — not "check the math harder," but "don't
+let two transactions clone the same stale moment in the first place."
+
+</Checkpoint>
+
+This is the difference between isolation levels in a real database:
+under a weak level like **READ COMMITTED**, a database guarantees B
+never sees A's _uncommitted_ writes (no dirty reads) but says nothing
+about B acting on a snapshot that's gone stale the instant A commits —
+the lost-update race above is exactly what READ COMMITTED still
+allows. **SERIALIZABLE** is the guarantee that the end result is as if
+every transaction ran one at a time, in some order, with no overlap at
+all — which is strong enough to rule out dirty reads, non-repeatable
+reads, phantoms, and lost updates alike, at the cost of either locking
+more or aborting and retrying more transactions under contention.
+
+A simple lock models the SERIALIZABLE end of that trade-off directly:
+nobody is allowed to even take a clone of `store` while another
+transaction's clone is still outstanding.
+
+```js
+// isolation-fix-lock.js
+let locked = false;
+
+function runTransactionSerialized(store, operation, invariant) {
+  if (locked) {
+    throw new Error("Store locked by another in-flight transaction");
+  }
+  locked = true;
+  try {
+    return runTransaction(store, operation, invariant);
+  } finally {
+    locked = false;
+  }
+}
+
+const store4 = createStore(); // { stock: { widget: 10 }, orders: [] }
+
+runTransactionSerialized(
+  store4,
+  (working) => {
+    working.stock.widget -= 6;
+  },
+  stockNeverNegative,
+);
+console.log(store4.stock.widget); // 4 — A committed, and crucially, fully finished first
+
+runTransactionSerialized(
+  store4,
+  (working) => {
+    working.stock.widget -= 8;
+  },
+  stockNeverNegative,
+);
+console.log(store4.stock.widget); // still 4 — B's clone started AFTER A released
+// the lock, so working.stock.widget began at 4, 4 - 8 = -4 failed
+// stockNeverNegative, and B rolled back instead of overwriting A
+```
+
+Because `runTransactionSerialized` releases the lock only after a
+transaction has fully committed or rolled back, B's `deepClone` can't
+happen until it does — so B's invariant check runs against the real,
+current stock (4), not the stale snapshot (10) from before A ever ran.
+The exact same two order attempts that silently lost 4 widgets' worth
+of stock in the race above now correctly let A through and reject B.
+
+**Extend it: the lock above serializes every transaction against
+every other one, for every product, even when two orders touch
+completely unrelated items (one buying widgets, one buying gears).
+What would change if the lock were keyed per-product instead of
+global — and is there a case where even a per-product lock still isn't
+enough (two orders for the same bundle of two different products, each
+only holding one of the two product locks)?**
 
 ## Failure modes
 

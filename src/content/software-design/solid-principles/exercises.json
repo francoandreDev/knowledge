@@ -662,6 +662,62 @@
       "solution": "function countMessagesTo(fakeClient, address) {\n  return fakeClient.sentMessages.filter((m) => m.to === address).length;\n}",
       "explanation": "This is exactly the kind of assertion a real test would make against FakeEmailClient's recorded state — confirming not just that something was sent, but that the right number of messages went to the right recipient.",
       "reference": "<div class=\"not-prose rounded-md border border-slate-300 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900\"><div class=\"mb-1.5 font-semibold text-slate-700 dark:text-slate-300\">Testing with a fake</div><div class=\"flex flex-col gap-1\"><div>📝 Records instead of sending</div><div>🔍 Test inspects sentMessages afterward</div></div><div class=\"mt-1.5\"><strong>Why:</strong> this only works because OrderService accepts any object satisfying the abstraction.</div></div>"
+    },
+    {
+      "type": "quiz",
+      "id": "lsp-substitutability-1",
+      "poolId": "lsp-substitutability-pool",
+      "level": 3,
+      "prompt": "BrokenLoggingEmailClient and NullEmailClient both have a `.send(to, subject, body)` method that returns an object with a `sent` key — the same shape OrderService expects. Only one is actually safe to substitute in. Which one, and why?",
+      "choices": [
+        "NullEmailClient — it reports `sent: false` when nothing was sent, so callers checking that flag still behave correctly; BrokenLoggingEmailClient reports `sent: true` for a message it never sent",
+        "BrokenLoggingEmailClient — logging the message to the console is a reasonable substitute for actually sending it",
+        "Neither — only the exact SendgridEmailClient class is safe to use with OrderService",
+        "Both — matching the method signature is all substitutability requires"
+      ],
+      "correctIndex": 0,
+      "explanation": "Substitutability is about honoring the caller's behavioral expectations, not just matching a method's shape. NullEmailClient keeps the implicit promise that `sent: true` means the email actually went out by truthfully reporting `sent: false`; BrokenLoggingEmailClient breaks that promise while looking identical on the surface.",
+      "reference": "<div class=\"not-prose rounded-md border border-slate-300 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900\"><div class=\"mb-1.5 font-semibold text-slate-700 dark:text-slate-300\">Liskov substitution</div><div class=\"flex flex-col gap-1\"><div>Same method shape ≠ safe to substitute</div><div>The contract includes what the return value means, not just its shape</div></div><div class=\"mt-1.5\"><strong>Why:</strong> a type-correct stand-in can still silently break every caller that trusted the real behavior.</div></div>"
+    },
+    {
+      "type": "quiz",
+      "id": "isp-fat-interface-1",
+      "poolId": "isp-fat-interface-pool",
+      "level": 3,
+      "prompt": "If OrderService's constructor were typed against FullFeaturedEmailClient's full shape (send, scheduleSend, trackOpens, manageUnsubscribeList) instead of just \"anything with a .send() method,\" what would happen to FakeEmailClient from earlier in this unit?",
+      "choices": [
+        "It would stop being a valid substitute, since it only implements .send() and would now need three more stub methods it never actually uses",
+        "Nothing would change — OrderService never calls the other three methods, so FakeEmailClient would keep working exactly as before",
+        "FakeEmailClient would automatically gain the other three methods at runtime",
+        "OrderService would throw an error immediately on construction, regardless of which email client it's given"
+      ],
+      "correctIndex": 0,
+      "explanation": "Depending on a fatter interface than what's actually used forces every implementer — including test doubles — to satisfy methods they have no real need for. FakeEmailClient only ever needs to implement .send(); widening the required shape to match FullFeaturedEmailClient would break it even though OrderService's own logic never changed.",
+      "reference": "<div class=\"not-prose rounded-md border border-slate-300 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900\"><div class=\"mb-1.5 font-semibold text-slate-700 dark:text-slate-300\">Interface segregation</div><div class=\"flex flex-col gap-1\"><div>Sendable: { send }</div><div>Schedulable: { scheduleSend }</div><div>Trackable: { trackOpens }</div></div><div class=\"mt-1.5\"><strong>Why:</strong> depending on the narrow shape actually used keeps every test double and minimal implementation valid.</div></div>"
+    },
+    {
+      "type": "code",
+      "id": "null-email-client-1",
+      "level": 3,
+      "prompt": "Implement `NullEmailClient`, matching L3's Liskov substitution example: `send(to, subject, body)` should return `{ sent: false, provider: 'null', reason: 'disabled' }` without doing anything else — a genuine, honest no-op, unlike a client that falsely reports success.",
+      "starterCode": "class NullEmailClient {\n  send(to, subject, body) {\n    // TODO: return { sent: false, provider: 'null', reason: 'disabled' }\n  }\n}\n",
+      "tests": [
+        {
+          "description": "returns the expected no-op result shape",
+          "expr": "(() => { const client = new NullEmailClient(); return expect(client.send('a@b.com', 'Sub', 'Body')).toEqual({ sent: false, provider: 'null', reason: 'disabled' }); })()"
+        },
+        {
+          "description": "returns the same result regardless of arguments",
+          "expr": "(() => { const client = new NullEmailClient(); const r1 = client.send('x@y.com', 'S1', 'B1'); const r2 = client.send('z@w.com', 'S2', 'B2'); return expect(r1).toEqual(r2); })()"
+        },
+        {
+          "description": "sent is explicitly false, not merely falsy/undefined",
+          "expr": "(() => { const client = new NullEmailClient(); return expect(client.send('a@b.com', 'Sub', 'Body').sent).toBe(false); })()"
+        }
+      ],
+      "solution": "class NullEmailClient {\n  send(to, subject, body) {\n    return { sent: false, provider: 'null', reason: 'disabled' };\n  }\n}",
+      "explanation": "The point of NullEmailClient is that it's substitutable precisely because it's honest: it never claims an email was sent when it wasn't, so any caller checking `result.sent` reacts correctly — unlike BrokenLoggingEmailClient, which has the identical method shape but silently lies.",
+      "reference": "<div class=\"not-prose rounded-md border border-slate-300 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900\"><div class=\"mb-1.5 font-semibold text-slate-700 dark:text-slate-300\">Liskov substitution</div><div class=\"flex flex-col gap-1\"><div>Same method shape ≠ safe to substitute</div><div>The contract includes what the return value means, not just its shape</div></div><div class=\"mt-1.5\"><strong>Why:</strong> a type-correct stand-in can still silently break every caller that trusted the real behavior.</div></div>"
     }
   ]
 }

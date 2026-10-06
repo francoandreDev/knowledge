@@ -23,9 +23,9 @@ change when a third email provider is added?**
 
 <LevelIntro
   items={[
-    "OrderService, before and after dependency inversion",
-    "Adding a third provider with zero changes to OrderService",
-    "Where the vendor decision actually goes, and common failure modes",
+    "OrderService, before and after dependency inversion — and adding a third provider with zero changes",
+    "Liskov substitution: an EmailClient that lies about its contract vs. one that doesn't",
+    "Interface segregation: splitting one fat EmailClient shape into focused ones",
   ]}
 />
 
@@ -178,6 +178,153 @@ actually called (often called the "composition root," typically near
 application startup). The difference isn't that nobody decides
 anymore, it's that exactly one place decides, instead of the decision
 being duplicated across every class that needed to send an email.
+
+## Liskov substitution: when a new implementation lies about the contract
+
+Dependency inversion only pays off if every implementation of the
+abstraction actually behaves the way callers of that abstraction
+expect — not just matches the method signature. That expectation is
+exactly what the Liskov substitution principle names: a subtype (or,
+in a duck-typed language, any object substituted in for the
+abstraction) has to be usable anywhere the original was expected,
+_safely_. "Has a `.send()` method" isn't the real contract
+`OrderService` depends on — "calling `.send()` either genuinely
+delivers the email or throws, and never returns `{ sent: true }` for a
+message that was never sent" is.
+
+```js
+// Looks like a valid EmailClient — same method name, same return
+// shape — but silently breaks the contract every caller actually
+// relies on: it reports success without sending anything.
+class BrokenLoggingEmailClient {
+  send(to, subject, body) {
+    console.log(`Would send to ${to}: ${subject}`);
+    return { sent: true, provider: "broken-logging" }; // a lie
+  }
+}
+
+const withBroken = new OrderService(new BrokenLoggingEmailClient());
+console.log(withBroken.placeOrder({ id: 5, customerEmail: "i@j.com" }));
+// { sent: true, provider: "broken-logging" } — OrderService has no way to tell
+```
+
+`BrokenLoggingEmailClient` passes every structural check `OrderService`
+could write (it has a `.send()` method, it returns an object with a
+`sent` key) and is still unsafe to substitute in, because it violates
+the _behavioral_ half of the contract: a caller that checks
+`result.sent` to decide whether to show the customer a confirmation now
+shows one for an email that never left the building. The fix isn't a
+different method shape — it's being honest about what actually
+happened, so callers that rely on the contract aren't misled:
+
+```js
+// A genuine no-op implementation is substitutable precisely because
+// it doesn't lie about what it did — it reports sent: false, so any
+// caller checking result.sent behaves correctly without ever needing
+// to know this implementation exists.
+class NullEmailClient {
+  send(to, subject, body) {
+    return { sent: false, provider: "null", reason: "disabled" };
+  }
+}
+
+const withNull = new OrderService(new NullEmailClient());
+console.log(withNull.placeOrder({ id: 6, customerEmail: "k@l.com" }));
+// { sent: false, provider: "null", reason: "disabled" } — truthful, so callers can react correctly
+```
+
+<Checkpoint question="BrokenLoggingEmailClient and NullEmailClient both satisfy 'has a .send(to, subject, body) method that returns an object.' Only one of them is actually safe to substitute for SendgridEmailClient. What's the difference, if it isn't the method signature?">
+
+The difference is in what each implementation's return value _means_
+to a caller, not in its shape. `OrderService` and anything downstream
+of it treat `result.sent === true` as a promise that the email really
+went out — that's the behavioral half of the contract, invisible in
+the method signature itself. `NullEmailClient` is substitutable
+because it keeps that promise honestly: it reports `sent: false`
+whenever nothing was actually sent, so any caller checking that flag
+reacts correctly. `BrokenLoggingEmailClient` breaks the promise while
+keeping the shape — it reports `sent: true` for a message it never
+sent — which means every caller that trusted the contract now silently
+believes something false. Liskov substitution is exactly this
+distinction: a type-correct stand-in isn't automatically a safe one.
+
+</Checkpoint>
+
+## Interface segregation: one fat `EmailClient` shape vs. several narrow ones
+
+`OrderService` only ever calls one method — `.send()` — so the
+abstraction it depends on has stayed narrow by accident throughout
+this unit. Interface segregation is what happens when that discipline
+is dropped: instead of depending on the one capability actually used,
+a class (or a test double) gets forced to satisfy a far bigger shape
+than it needs.
+
+```js
+// A single "do everything an email provider could ever do" shape.
+// Every implementer — including FakeEmailClient from earlier in this
+// unit — is now forced to provide all four methods, whether or not it
+// has any real way to support scheduling, open-tracking, or
+// unsubscribe-list management.
+class FullFeaturedEmailClient {
+  send(to, subject, body) {
+    /* ... */
+  }
+  scheduleSend(to, subject, body, sendAt) {
+    /* ... */
+  }
+  trackOpens(messageId) {
+    /* ... */
+  }
+  manageUnsubscribeList(email) {
+    /* ... */
+  }
+}
+```
+
+If `OrderService`'s constructor were typed (or, in a language with real
+interfaces, declared) against `FullFeaturedEmailClient`'s full shape
+instead of "anything with a `.send()` method," `FakeEmailClient` from
+earlier would stop being a valid substitute — a 40-line test double
+would need three more stub methods added purely to satisfy a type it
+never actually calls. The fix is splitting the fat shape into the
+capabilities that are actually independent, and depending on only the
+narrow one that's genuinely used:
+
+```js
+// Four narrow shapes instead of one fat one. OrderService's
+// dependency stays exactly "anything with .send()" — Sendable — and
+// never has to know Schedulable, Trackable, or SubscriptionManageable
+// exist, because it never calls any of their methods.
+//
+// Sendable:                  { send(to, subject, body) }
+// Schedulable:                { scheduleSend(to, subject, body, sendAt) }
+// Trackable:                  { trackOpens(messageId) }
+// SubscriptionManageable:     { manageUnsubscribeList(email) }
+
+class ScheduledCampaignClient {
+  // Implements Sendable AND Schedulable, because a real marketing
+  // provider genuinely supports both — but OrderService only ever
+  // sees it through the Sendable half, so this still works as
+  // OrderService's email dependency without any other changes.
+  send(to, subject, body) {
+    return { sent: true, provider: "campaign-client" };
+  }
+  scheduleSend(to, subject, body, sendAt) {
+    return { scheduled: true, sendAt };
+  }
+}
+
+const withScheduled = new OrderService(new ScheduledCampaignClient());
+console.log(withScheduled.placeOrder({ id: 7, customerEmail: "m@n.com" }));
+// { sent: true, provider: "campaign-client" }
+```
+
+Splitting the interface doesn't forbid one class from implementing
+several of the narrow shapes at once — `ScheduledCampaignClient`
+genuinely supports both sending and scheduling. What it prevents is
+forcing every implementer, including the ones that only need to send,
+to carry stub methods for capabilities they don't have and
+`OrderService` never calls.
 
 ## Failure modes
 

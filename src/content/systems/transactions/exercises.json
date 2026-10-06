@@ -437,6 +437,82 @@
       "solution": "function recoverFromLog(log) {\n  const state = { stock: { widget: 10 }, orders: [] };\n  for (const entryStr of log) {\n    const entry = JSON.parse(entryStr);\n    state.stock[entry.productId] -= entry.qty;\n    state.orders.push(entry);\n  }\n  return state;\n}",
       "explanation": "This is exactly how a real database recovers after a crash — replaying the durable log from scratch reconstructs the same state that existed right before the crash, which is what L3 verifies by discarding the in-memory store entirely and rebuilding from the log alone.",
       "reference": "<div class=\"not-prose rounded-md border border-slate-300 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900\"><div class=\"mb-1.5 font-semibold text-slate-700 dark:text-slate-300\">Durability, verified</div><div class=\"flex flex-col gap-1\"><div>In-memory store discarded</div><div>Log replay → stock 5, 2 orders</div></div><div class=\"mt-1.5\"><strong>Why:</strong> durability means a crash can't erase an already-reported success.</div></div>"
+    },
+    {
+      "type": "quiz",
+      "id": "isolation-anomaly-1",
+      "poolId": "isolation-anomaly-pool",
+      "level": 3,
+      "prompt": "In L3's lost-update example, workingA and workingB are both cloned from store3 (stock: 10) before either commits. A commits first (stock becomes 4), then B commits (stock becomes 2) using its own stale clone. What concurrency anomaly is this?",
+      "choices": [
+        "A lost update — B's commit overwrites A's result because B's snapshot never saw A's change",
+        "A dirty read — B read a value A hadn't committed yet",
+        "A phantom read — B's query returned a different set of rows the second time",
+        "No anomaly — both invariant checks passed, so the final state is correct"
+      ],
+      "correctIndex": 0,
+      "explanation": "This is a lost update: both transactions read the same pre-commit snapshot, both did correct, individually-passing math, and B's commit silently overwrote A's instead of building on it — not a dirty read (nobody read uncommitted data) and not a phantom (no row set changed), and very much an anomaly despite both invariant checks passing.",
+      "reference": "<div class=\"not-prose rounded-md border border-slate-300 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900\"><div class=\"mb-1.5 font-semibold text-slate-700 dark:text-slate-300\">Isolation anomalies</div><div class=\"flex flex-col gap-1\"><div>Dirty read: sees A's uncommitted write</div><div>Non-repeatable read: same row, two different answers</div><div>Phantom read: same query, different rows</div><div>Lost update: two commits, one silently overwrites the other</div></div><div class=\"mt-1.5\"><strong>Why:</strong> each name describes a different way one transaction's view can be invalidated by another's.</div></div>"
+    },
+    {
+      "type": "quiz",
+      "id": "isolation-anomaly-2",
+      "poolId": "isolation-anomaly-pool",
+      "level": 3,
+      "prompt": "Which of the three classic read anomalies (dirty read, non-repeatable read, phantom read) involves a transaction re-running the SAME range query twice and getting back a different set of rows, not just different values in an existing row?",
+      "choices": [
+        "Phantom read",
+        "Dirty read",
+        "Non-repeatable read",
+        "Lost update"
+      ],
+      "correctIndex": 0,
+      "explanation": "A phantom read is specifically about rows appearing or disappearing from a repeated query's result set (an insert or delete elsewhere), which is different from a non-repeatable read (the same row's value changing) or a dirty read (seeing another transaction's uncommitted write).",
+      "reference": "<div class=\"not-prose rounded-md border border-slate-300 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900\"><div class=\"mb-1.5 font-semibold text-slate-700 dark:text-slate-300\">Isolation anomalies</div><div class=\"flex flex-col gap-1\"><div>Dirty read: sees A's uncommitted write</div><div>Non-repeatable read: same row, two different answers</div><div>Phantom read: same query, different rows</div><div>Lost update: two commits, one silently overwrites the other</div></div><div class=\"mt-1.5\"><strong>Why:</strong> each name describes a different way one transaction's view can be invalidated by another's.</div></div>"
+    },
+    {
+      "type": "quiz",
+      "id": "isolation-levels-1",
+      "poolId": "isolation-levels-pool",
+      "level": 3,
+      "prompt": "READ COMMITTED guarantees no dirty reads. Does it, by itself, prevent the lost-update anomaly from L3's example?",
+      "choices": [
+        "No — READ COMMITTED only guarantees a transaction never sees another's uncommitted writes; it says nothing about acting on a committed snapshot that goes stale the instant another transaction commits",
+        "Yes — READ COMMITTED guarantees every transaction always sees the very latest committed state at every point during its execution",
+        "Yes — READ COMMITTED and SERIALIZABLE provide identical guarantees, just with different names",
+        "No — READ COMMITTED doesn't even guarantee atomicity, so the question doesn't apply"
+      ],
+      "correctIndex": 0,
+      "explanation": "READ COMMITTED's guarantee is narrow: no dirty reads. It doesn't guarantee a transaction's snapshot stays valid for its whole duration — which is exactly the gap the lost-update race exploits. Only a stronger level like SERIALIZABLE (or explicit locking) closes that gap.",
+      "reference": "<div class=\"not-prose rounded-md border border-slate-300 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900\"><div class=\"mb-1.5 font-semibold text-slate-700 dark:text-slate-300\">Isolation levels</div><div class=\"flex flex-col gap-1\"><div>READ COMMITTED: no dirty reads, lost updates still possible</div><div>SERIALIZABLE: acts as if transactions ran one at a time</div></div><div class=\"mt-1.5\"><strong>Why:</strong> stronger isolation rules out more anomalies, at the cost of more locking or more retries under contention.</div></div>"
+    },
+    {
+      "type": "code",
+      "id": "run-transaction-serialized-1",
+      "level": 3,
+      "prompt": "Implement `runTransactionSerialized(store, operation, invariant)`, matching L3: if a module-level `locked` flag is already `true`, throw an error immediately without touching `store`. Otherwise, set `locked = true`, delegate to the existing `runTransaction(store, operation, invariant)`, and set `locked = false` again before returning its result — even if `runTransaction` throws.",
+      "starterCode": "let locked = false;\n\nfunction runTransaction(store, operation, invariant) {\n  const working = JSON.parse(JSON.stringify(store));\n  operation(working);\n  if (invariant && !invariant(working)) {\n    throw new Error('Invariant violated');\n  }\n  Object.assign(store.stock, working.stock);\n  return { committed: true };\n}\n\nfunction runTransactionSerialized(store, operation, invariant) {\n  // TODO: throw if locked is already true; otherwise set locked = true,\n  // call runTransaction, and always reset locked = false before returning\n}\n",
+      "tests": [
+        {
+          "description": "delegates to runTransaction and returns its result when unlocked",
+          "expr": "(() => { const store = { stock: { widget: 10 } }; const result = runTransactionSerialized(store, (w) => { w.stock.widget -= 3; }, (s) => s.stock.widget >= 0); return expect(result.committed && store.stock.widget === 7).toBeTruthy(); })()"
+        },
+        {
+          "description": "throws immediately without touching store when already locked",
+          "expr": "(() => { locked = true; const store = { stock: { widget: 10 } }; let threw = false; try { runTransactionSerialized(store, (w) => { w.stock.widget -= 3; }, null); } catch (e) { threw = true; } locked = false; return expect(threw && store.stock.widget === 10).toBeTruthy(); })()"
+        },
+        {
+          "description": "releases the lock after a successful commit, allowing a second call to run",
+          "expr": "(() => { const store = { stock: { widget: 10 } }; runTransactionSerialized(store, (w) => { w.stock.widget -= 2; }, null); runTransactionSerialized(store, (w) => { w.stock.widget -= 3; }, null); return expect(store.stock.widget).toBe(5); })()"
+        },
+        {
+          "description": "releases the lock even when the operation throws an invariant violation",
+          "expr": "(() => { const store = { stock: { widget: 2 } }; try { runTransactionSerialized(store, (w) => { w.stock.widget -= 5; }, (s) => s.stock.widget >= 0); } catch (e) {} const result = runTransactionSerialized(store, (w) => { w.stock.widget -= 1; }, (s) => s.stock.widget >= 0); return expect(result.committed && store.stock.widget === 1).toBeTruthy(); })()"
+        }
+      ],
+      "solution": "function runTransactionSerialized(store, operation, invariant) {\n  if (locked) {\n    throw new Error('Store locked by another in-flight transaction');\n  }\n  locked = true;\n  try {\n    return runTransaction(store, operation, invariant);\n  } finally {\n    locked = false;\n  }\n}",
+      "explanation": "The `finally` block is what makes this safe under failure: whether `runTransaction` returns normally or throws (an invariant violation, say), `locked` always gets reset to `false` before control leaves the function. Without that, one failed transaction would permanently wedge every later call — the lock has to release unconditionally, not just on the success path.",
+      "reference": "<div class=\"not-prose rounded-md border border-slate-300 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900\"><div class=\"mb-1.5 font-semibold text-slate-700 dark:text-slate-300\">Isolation levels</div><div class=\"flex flex-col gap-1\"><div>READ COMMITTED: no dirty reads, lost updates still possible</div><div>SERIALIZABLE: acts as if transactions ran one at a time</div></div><div class=\"mt-1.5\"><strong>Why:</strong> stronger isolation rules out more anomalies, at the cost of more locking or more retries under contention.</div></div>"
     }
   ]
 }

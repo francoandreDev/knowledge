@@ -175,13 +175,18 @@ scoreBoundary(monolith, ["Orders"]);
 // { internalCallRatio: 0, externalSharedTables: ["order_items", "inventory_reservations"], verdict: "blocked — ..." }
 
 scoreBoundary(monolith, ["Shipping", "Fulfillment"]);
-// { internalCallRatio: 0.76, externalSharedTables: [], verdict: "clean" }
+// { internalCallRatio: 0.77, externalSharedTables: ["order_items"], verdict: "blocked — shared data crosses the line" }
 ```
 
-That's the sentence for the review, with the number attached: "Orders
-alone shares two tables across the line it would cut along; Shipping
-plus Fulfillment shares zero and keeps 76% of its call volume
-internal — that's why it goes first."
+That's the sentence for the review, with the numbers attached: "Orders
+alone shares two tables across the line it would cut along and keeps
+none of its call volume internal; Shipping plus Fulfillment keeps 77%
+of its call volume internal but still shares one table — `order_items`,
+inherited from its calls into and out of Orders. The second candidate
+is far closer to extractable, but 'closer' isn't 'clean': that
+`order_items` coupling needs a real migration — give Shipping its own
+copy of the order-item data it actually needs, synced via an event
+instead of a shared write — before the boundary is safe to cut."
 
 <Checkpoint question="externalSharedTables only counts an edge when `fromIn !== toIn` — exactly one endpoint is inside the group. Why not also count an edge where BOTH endpoints are inside the group but the shared table is also touched by a third module outside it entirely?">
 
@@ -264,10 +269,10 @@ const shippingLabelUsage = {
 };
 
 suggestBoundary(shippingLabelUsage, moduleOwnership);
-// { module: "Shipping", confidence: 0.93 }
+// { module: "Shipping", confidence: 0.9 }
 ```
 
-93% confidence Shipping owns it — the five `order_items` touches are
+90% confidence Shipping owns it — the five `order_items` touches are
 real and worth a follow-up ticket to remove, but they're not enough
 to override forty `shipping_labels` accesses and thirty Shipping
 callers. This is exactly the kind of ambiguous case a review needs an
