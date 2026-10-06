@@ -1175,3 +1175,84 @@ Cero bugs de `interactives.json` del tipo `params.` faltante/constante/
 complementos aritmeticos en las 15 unidades — el track con la aritmetica
 mas verificada (span-of-control, decay curves, etc.) sin encontrar un solo
 error de computo real.
+
+### Track `product-domain` (13/13 unidades) — auditado 2026-10-06
+
+Se verifico explicitamente que ningun par de units se superpone con otro
+track: `bounded-contexts`/`domain-driven-design-basics` (conceptual,
+cross-team) vs. `architecture/domain-driven-design` (tecnico,
+aggregates/repositories/codigo) estan bien separados y cada uno referencia
+al otro como prerequisito, sin contenido duplicado; `value-based-selling`
+(conversacion de venta B2B) vs. `value-framing-over-feature-framing`
+(comunicacion de valor domain-general) tampoco se superponen — el primero
+incluso declara explicitamente en su L1 que asume el segundo como
+prerequisito.
+
+6/13 SOLID: `bounded-contexts`, `domain-driven-design-basics`,
+`requirements-gathering`, `translating-capability-into-their-vocabulary-cfo`
+(aritmetica financiera verificada: $60×400=$24,000/mes=$288,000/año,
+"se paga solo en menos de 2 meses" consistente), `value-based-selling`
+(cadena completa de aritmetica de ROI verificada a mano, incluido un
+payback ajustado por rampa semana a semana), `value-framing-over-feature-framing`.
+
+6/13 MINOR ISSUES — el patron dominante, igual que en otros tracks
+no-tecnicos, es visuales clusterizados (L1 y/o L3 sin tabla/diagrama,
+dependiendo solo del panel de hechos del Scenario):
+
+1. **`validation` — 2 hallazgos reales.** `interactives.json`'s segundo
+   output `validationCostWeeks` es una constante (0.5) en todo el rango
+   del slider — el anti-patron de "linea de referencia fija deberia ir en
+   texto, no graficada" ya nombrado en el proyecto. Ademas, varios pools
+   de `exercises.json` (`scenario-facts-pool`,
+   `loop-never-skips-test-pool`) agrupan 3 HECHOS DISTINTOS bajo un mismo
+   poolId en vez de parafrasis de una sola pregunta — como solo se
+   muestra una variante por vista, 2 de cada 3 hechos quedan sin probar
+   nunca para un lector dado. **Sin corregir.**
+2. **`understanding-user-s-problem-solution` — el chart estatico de L2 y
+   el interactivo no coinciden.** El `xychart-beta` de L2 da
+   `[40, 55, 75, 95, 90, 55]` (pico en profundidad 3), pero
+   `interactives.json`'s formula da `[40, 55, 70, 85, 100, 75, 50, 25]`
+   (pico en profundidad 4) — dos representaciones numericas distintas de
+   la misma relacion afirmada. Ningun exercise prueba los numeros exactos,
+   asi que no rompe nada graded, pero un lector que compare ambos graficos
+   vera curvas diferentes. **Sin corregir.**
+3. **`discovery`** — el caso mas extremo de clusterizacion: L1 Y L3 sin
+   ningun elemento visual (solo panel de Scenario), con L3 corriendo
+   ~180 lineas de puro dialogo/prosa sin ninguna tabla que lo corte pese
+   a cubrir un escenario de 3 stakeholders que se presta naturalmente a
+   una. Solo L2 tiene visuales reales. **Sin corregir.**
+4. **`objection-handling`** — mismo patron: L1 y L3 (~240 lineas de
+   dialogo) sin tabla ni diagrama, solo L2 los tiene. **Sin corregir.**
+5. **`case-studies`** — L1 sin ningun elemento visual (solo panel de
+   Scenario); destaca positivamente por su consistencia numerica
+   cross-unit con `objection-handling` ($2,100/incidente × 4 = $8,400/
+   trimestre = $33,600/año, verificado exacto entre ambas unidades). **Sin
+   corregir.**
+6. **`buyer-psychology`** — L1 sin ningun elemento visual, y sin
+   `interactives.json` sin razon declarada (a diferencia de casos en
+   otros tracks donde la omision si estaba documentada). **Sin
+   corregir.**
+
+1/13 NEEDS WORK:
+
+7. **`presales-engineering` — bug real de `params.` faltante, confirmado
+   contra el codigo fuente de `InteractiveDemo.astro`.** Los 2 items de
+   `interactives.json` (`risk-specificity-vs-credibility` y
+   `stall-duration-vs-deal-loss`) usan identificadores sueltos
+   (`specificity`, `evaluatorSkepticism`, `daysUnresolved`,
+   `competitivePressure`) en vez de `params.xxx` — como `compute` se
+   ejecuta via `new Function("params", config.compute)`, estas variables
+   no existen en scope y el `compute` tira `ReferenceError` apenas carga
+   la pagina o se mueve el slider. **100% de los interactivos de este
+   unit estan rotos en el navegador.** `validate:content` no lo detecta
+   (solo chequea estructura, no ejecuta `compute`) — exactamente el tipo
+   de bug que requiere verificacion manual en navegador real (paso 7 del
+   workflow de sesion), que aparentemente no se hizo para esta unidad. La
+   matematica en si (una vez arreglado el prefijo) es correcta y esta
+   bien fundamentada en los numeros propios de la unidad. **Sin
+   corregir — es el bug mas accionable de todo este track.**
+
+Cross-cutting: ningun unit tuvo errores factuales de contenido (DDD,
+objeciones, discovery, selling) — todos los hallazgos fueron de
+interactivos/pools/visuales, salvo el bug de `presales-engineering` que es
+puramente tecnico (prefijo de JS), no de contenido.
