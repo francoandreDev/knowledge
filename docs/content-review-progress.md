@@ -1256,3 +1256,125 @@ Cross-cutting: ningun unit tuvo errores factuales de contenido (DDD,
 objeciones, discovery, selling) — todos los hallazgos fueron de
 interactivos/pools/visuales, salvo el bug de `presales-engineering` que es
 puramente tecnico (prefijo de JS), no de contenido.
+
+### Track `sustainable-performance` (8/8 unidades) — auditado 2026-10-06
+
+El track no-tecnico mejor posicionado de toda la Ronda 2: cero errores
+factuales, cero pools rotos, cero bugs de `params.` faltante/complementos
+aritmeticos en ningun interactivo de los 8 units.
+
+6/8 SOLID: `attention-management` (nota menor: el interactivo da "120 min
+de deep-work" en sus defaults cuando la narrativa de L1/L3 dice que el Dia
+A solo produjo ~40 min reales con esos mismos parametros — el demo es un
+modelo simplificado y explicitamente rotulado como tal, pero vale la pena
+ajustar los defaults), `early-warning-signs` (nota menor: el interactivo
+default da ~6.0 meses cuando L3 narra 4 meses para el Path A), `energy-management-across-day-week`
+(unico hallazgo real del track: L3 tiene un bloque de codigo literal
+`function effectiveness(energy, difficulty) { if/else return }` — una
+formula simple y correctamente implementada, reproducida identica en
+`interactives.json`, no el "razonamiento disfrazado de rigor" que la regla
+9 ataca principalmente, pero sigue siendo codigo real `function`/`if`/
+`return` en un track no-tecnico, que la letra de la regla pide evitar
+siempre — se recomienda reescribirlo como tabla o prosa condicional),
+`long-horizon-sustainability` (el unico unit donde "junior/senior/staff"
+aparece en la narrativa de carrera de Priya — uso legitimo, es literalmente
+el tema del unit, no una clasificacion), `myth-linear-output` (la cita
+Pencavel de WWI esta correctamente caracterizada como un hallazgo real,
+no una estadistica inventada), `recovery-practices-crunch`.
+
+2/8 MINOR ISSUES:
+
+1. **`sustainable-boundary-setting` — 0 de 26 items con `reference` o
+   `learnMore`.** El unico caso de ausencia total de ambos campos
+   (otros units del track tienen al menos uno). Tampoco tiene
+   `interactives.json`, sin razon declarada. **Sin corregir.**
+2. **`sustainable-long-term-learning-pace` — `reference` presente pero
+   `learnMore` ausente en los ~30 items.** El interactivo de esta unidad
+   es el mejor alineado del track: sus defaults (3h/semana, 30h/cosa,
+   15% churn) reproducen casi exacto el "~35% covered" que la propia
+   unidad afirma en su Scenario. **Sin corregir.**
+
+Cross-cutting: 5 de los 8 units tienen L1 sin ningun elemento visual
+propio (solo el panel de hechos del Scenario) — `early-warning-signs` es
+la excepcion que demuestra que es posible (tiene una tabla real en L1).
+
+---
+
+## Cierre de la Ronda 2 (2026-10-06)
+
+Las 18 tracks del proyecto (246/246 unidades) fueron auditadas por
+agentes en paralelo bajo el criterio estricto descrito al inicio de esta
+ronda. Resumen agregado de veredictos por track:
+
+| Track                   | SOLID   | MINOR  | NEEDS WORK | Unidades |
+| ----------------------- | ------- | ------ | ---------- | -------- |
+| web                     | 11      | 6      | 0          | 17       |
+| systems                 | 8       | 7      | 2          | 17       |
+| git-teamwork            | 9       | 6      | 1          | 16       |
+| business-communication  | 10      | 4      | 0          | 14       |
+| logic                   | 8       | 4      | 0          | 12       |
+| security                | 6       | 6      | 1          | 13       |
+| infra-delivery          | 4       | 8      | 0          | 12       |
+| applied-math            | 6       | 7      | 2          | 15       |
+| architecture            | 10      | 4      | 0          | 14       |
+| software-design         | 8       | 4      | 1          | 13       |
+| testing-quality         | 7       | 6      | 0          | 13       |
+| design                  | 8       | 6      | 0          | 14       |
+| career-craft            | 7       | 5      | 1          | 13       |
+| corporate-politics      | 5       | 9      | 0          | 14       |
+| learning-craft          | 9       | 4      | 0          | 13       |
+| people-management       | 13      | 2      | 0          | 15       |
+| product-domain          | 6       | 6      | 1          | 13       |
+| sustainable-performance | 6       | 2      | 0          | 8        |
+| **Total**               | **141** | **96** | **9**      | **246**  |
+
+**Los 9 NEEDS WORK** (los de mayor prioridad si se decide arreglar):
+
+1. `systems/domain-boundaries` — el ejemplo central de L3 se contradice
+   con su propio codigo (3 numeros distintos de los que el codigo
+   realmente produce).
+2. `systems/transactions` — gap de profundidad en Isolation + interactivo
+   con linea constante en 0.
+3. `git-teamwork/commit-conventions` — defecto de pool (fijado
+   parcialmente por el fix mecanico de `code`, persiste el lado `quiz`).
+4. `security/supply-chain-security` — 5 pools de codigo con funciones
+   distintas agrupadas (15 exercises reducidos a 5 expuestos al azar).
+5. `applied-math/combinatorics` — bug numerico real en el ejemplo central
+   de L3, con efecto cascada a exercises.
+6. `applied-math/unit-economics` — 2 charts cuyos datos no corresponden
+   a la formula que la propia unidad establece.
+7. `software-design/solid-principles` — Liskov e Interface Segregation
+   sin cobertura real en TODO el proyecto, pese al nombre de la unidad.
+8. `career-craft/structured-interviewing` — complementos aritmeticos
+   exactos en interactivo, el anti-patron ya nombrado en el proyecto.
+9. `product-domain/presales-engineering` — bug confirmado de `params.`
+   faltante, rompe el 100% de sus interactivos en navegador.
+
+**Patrones recurrentes mas importantes de toda la ronda:**
+
+- El defecto de pools (un `poolId` agrupa 2+ ejercicios/preguntas NO
+  intercambiables) aparecio en al menos 10 tracks distintos — la mitad
+  `code` ya se arreglo mecanicamente (commit `c82ffc4`), la mitad `quiz`
+  sigue pendiente de revision caso por caso.
+- El anti-patron de "2 outputs que son complementos aritmeticos exactos"
+  (ya nombrado explicitamente en CLAUDE.md como corregido una vez) **volvio
+  a aparecer** en `career-craft/goal-setting`,
+  `career-craft/structured-interviewing`, `product-domain/validation`
+  (variante de linea plana) y `learning-craft/leveling-expectations`
+  (variante de redundancia) — sugiere que vale la pena un escaneo
+  mecanico similar al de pools para detectar esto en los 246
+  `interactives.json` del proyecto.
+- El campo opcional `reference`/`learnMore` de exercises quedo sin
+  completar de forma parcial o total en decenas de units de los tracks
+  no-tecnicos (`career-craft`, `corporate-politics`, `people-management`,
+  `sustainable-performance`) — ningun bug de contenido, pero es el
+  "trabajo pendiente" mas repetido de toda la ronda.
+- Clusterizacion de elementos visuales en L2 (L1 y/o L3 sin tabla/
+  diagrama propio, dependiendo solo del panel de Scenario) aparecio en
+  la mayoria de los tracks no-tecnicos — un patron estructural, no de
+  contenido incorrecto.
+
+Esta ronda fue estrictamente de **registro de hallazgos**, no de
+correccion (salvo el fix mecanico de pools `code` ya aplicado al inicio).
+Las 246 unidades del proyecto quedan auditadas con el criterio estricto
+descrito al comienzo de este documento.
