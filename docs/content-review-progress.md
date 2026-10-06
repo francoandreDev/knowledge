@@ -699,3 +699,62 @@ estructura pedagogica (Scenario/LevelIntro/Checkpoint/extend-question) es
 consistente en los 15. Todos los hallazgos de esta ronda son errores
 numericos puntuales en prosa/charts/exercises, no errores de logica en el
 codigo de referencia (salvo el test roto de `combinatorics`).
+
+### Track `architecture` (14/14 unidades) — auditado 2026-10-06
+
+10/14 SOLID: `adr-governance`, `architecture-for-compliance`,
+`architecture-review`, `build-vs-buy`, `cost-aware-architecture`,
+`domain-driven-design`, `event-driven-architecture`,
+`hexagonal-clean-architecture`, `reference-architectures`, `tech-radar`.
+Destacan `hexagonal-clean-architecture` (se verifico explicitamente que el
+dominio no importa ningun adapter concreto — el error de autoria mas comun
+en este patron) y `event-driven-architecture` (logica de retry/dead-letter,
+fold de event-sourcing y dedup de CQRS trazados linea por linea, incluida
+la honestidad de "at-least-once, no exactly-once").
+
+4/14 MINOR ISSUES:
+
+1. **`architecture-styles` — bug real de grading.** `exercises.json`,
+   item `l1-decision-drivers-1`: `correctIndex: 0` apunta a la opcion
+   distractora ("Which style is trending in the industry right now"),
+   cuando la opcion correcta ("What's most likely to change here...") esta
+   en el indice 1 — y el propio campo `explanation` del item describe el
+   razonamiento correcto, contradiciendo el `correctIndex` con el que esta
+   empaquetado. Tal como esta, un lector que responde "la tendencia de la
+   industria" es marcado como correcto, invirtiendo la tesis anti-buzzword
+   que la propia unidad defiende. **Sin corregir.**
+2. **`multi-tenant-architecture` — prompt de exercise contradictorio.**
+   `connection-routing-silo-2` (L3 code): el prompt introduce un
+   requisito de allow-list y en la misma oracion lo desmiente ("but only
+   when tenantId itself is a known key of an unrelated allow-list; ...no
+   allow-list needed"). No es un bug funcional (tests/solution son
+   correctos) pero es confuso de leer. **Sin corregir.**
+3. **`platform-engineering` — inconsistencia real entre codigo y prosa.**
+   `validateManifest` en L3 rechaza _cualquier_ `escapeHatches` no vacio
+   para servicios tier `"critical"` y el mensaje de error los llama "sin
+   documentar" — pero `escapeHatches` esta definido explicitamente como
+   "documented deviations" en el mismo archivo, y la prosa de la Parte 1
+   promete que "el validador trata una escape hatch declarada distinto de
+   una no declarada", algo que el codigo real no hace (las banea en
+   bloque). Ademas, `exercises.json`'s `manifest-validator-3` tiene una
+   descripcion de test que no corresponde al test real (dice `'internal'
+is valid` pero el test prueba `'customer-facing'`). **Sin corregir.**
+4. **`technical-strategy-roadmapping` — bug de renderizado confirmado en
+   2 diagramas gantt.** `L2-concept.mdx` y `L3-deep-dive.mdx` usan
+   `dateFormat YYYY-Q[Q]` / `axisFormat %Y Q%q` para fechas tipo
+   `2026-Q1` — probado contra el `dayjs` que el propio proyecto empaqueta
+   (con y sin `customParseFormat`/`quarterOfYear`), `"2026-Q1"` contra ese
+   formato devuelve `INVALID` en ambos casos, y Mermaid usa la misma ruta
+   de parseo internamente. Es decir, ambos gantt probablemente renderizan
+   rotos — este patron de `dateFormat` no aparece en ningun otro archivo
+   del proyecto (`grep dateFormat src/content` solo da estos 2), sugiriendo
+   que nunca se verifico en navegador real (CLAUDE.md pide verificar
+   mermaid visualmente). Ademas, `interactives.json`'s segundo demo no
+   reproduce el numero propio de L3 ("14 engineer-weeks") en sus valores
+   default (da 10, no 14). **Sin corregir.**
+
+Ningun unit califico NEEDS WORK — el track de arquitectura es, en
+conjunto, el mas solido auditado hasta ahora (0 bugs numericos/logicos
+reales en codigo de referencia fuera del detalle puntual de
+`platform-engineering`; los demas hallazgos son de grading/prompt/render,
+no de contenido tecnico incorrecto).
