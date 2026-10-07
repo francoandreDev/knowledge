@@ -15,8 +15,8 @@ it does catch.
 <LevelIntro
   items={[
     "Building a minimal CA hierarchy with real RSA signatures",
-    "Verifying two chains that both pass legitimately",
-    "What tampering breaks, and what the check structurally can't catch",
+    "Inspecting a real handshake's negotiated cipher suite with Node's tls module",
+    "What a network observer can and can't see without the private key",
   ]}
 />
 
@@ -224,6 +224,104 @@ signature can encode.
 
 </Checkpoint>
 
+## Inspecting a real negotiated handshake with Node's `tls` module
+
+L2 described the handshake in the abstract — ClientHello, key
+exchange, cipher suite negotiation. **Is any of that actually
+inspectable, or is it all invisible plumbing once the connection is
+open?** Node's built-in `tls` module exposes exactly what got
+negotiated, from a real outbound connection, with no simulation:
+
+```js
+const tls = require("tls");
+
+function inspectHandshake(host) {
+  return new Promise((resolve, reject) => {
+    const socket = tls.connect(
+      { host, port: 443, servername: host, minVersion: "TLSv1.2" },
+      () => {
+        const result = {
+          protocol: socket.getProtocol(), // e.g. "TLSv1.3"
+          cipherSuite: socket.getCipher(), // { name, standardName, version }
+          ephemeralKeyInfo: socket.getEphemeralKeyInfo(), // key-exchange details
+          authorized: socket.authorized, // did chain-of-trust verification pass?
+        };
+        socket.end();
+        resolve(result);
+      },
+    );
+    socket.on("error", reject);
+  });
+}
+
+// inspectHandshake("example.com").then(console.log);
+// {
+//   protocol: 'TLSv1.3',
+//   cipherSuite: { name: 'TLS_AES_128_GCM_SHA256', standardName: 'TLS_AES_128_GCM_SHA256', version: 'TLSv1.3' },
+//   ephemeralKeyInfo: { type: 'ECDH', name: 'X25519', size: 253 },
+//   authorized: true
+// }
+```
+
+`getCipher()` and `getEphemeralKeyInfo()` are reporting back exactly
+the two things L2's diagram described: which cipher suite the
+negotiation settled on, and what kind of ephemeral key exchange
+produced the shared secret for this specific connection.
+`ephemeralKeyInfo.type === 'ECDH'` is the observable signal that this
+connection got forward secrecy — a connection still willing to
+negotiate plain RSA key exchange would report no ephemeral key info at
+all for that part of the handshake, because nothing ephemeral was
+generated.
+
+<Checkpoint question="Running inspectHandshake against two different servers, one returns ephemeralKeyInfo: { type: 'ECDH', name: 'X25519', size: 253 } and the other returns ephemeralKeyInfo: undefined (because it negotiated plain RSA key exchange). A year later, both servers' long-term private keys are stolen in a breach. For which server (if either) could the attacker decrypt a recording of today's handshake made at the time of this call?">
+
+Only the server that negotiated plain RSA key exchange — the one where
+`ephemeralKeyInfo` came back `undefined`. That connection's shared
+secret was the client's random value, encrypted directly with the
+server's long-term public key; anyone later holding the matching
+long-term private key can decrypt that recorded exchange and recover
+the shared secret retroactively. The ECDHE connection generated a
+fresh key pair that existed only in memory for the duration of this
+one handshake and was discarded immediately after — stealing the
+long-term certificate private key a year later gives the attacker
+nothing to apply it to, because the actual secret-deriving values no
+longer exist anywhere to be compromised. This is forward secrecy made
+concrete: it isn't that ECDHE is unbreakable, it's that there's
+nothing long-lived left to break.
+
+</Checkpoint>
+
+## What a handshake observer can and can't see without the private key
+
+**If an attacker is passively recording every packet of this
+handshake and of the encrypted traffic that follows — no
+man-in-the-middle, just watching — what do they actually learn?**
+
+| Visible to a passive network observer                                                 | NOT visible to a passive network observer                                    |
+| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| The negotiated TLS version and cipher suite (ClientHello/ServerHello are unencrypted) | The plaintext contents of any request or response after the handshake        |
+| The server's certificate chain (sent in the clear, before encryption starts)          | The session's shared symmetric key itself (derived, never transmitted whole) |
+| The destination hostname, in older TLS versions or via SNI (unless ECH is in use)     | Which specific URL path or query string the client requested                 |
+| Roughly how much data was exchanged and the approximate timing of each exchange       | Any application-layer data: form fields, headers, cookies, response bodies   |
+
+The left column is exactly why a network eavesdropper or a
+well-resourced adversary logging traffic today can still later
+identify "this client talked to this server, using this cipher suite,
+at this time" without ever breaking the encryption — traffic metadata
+is not the same guarantee as confidentiality of contents, and TLS was
+never designed to hide that metadata (that's a separate problem, the
+kind Encrypted Client Hello / ECH is starting to address for the
+hostname row specifically).
+
+**Try extending this yourself:** `inspectHandshake` currently reports
+only `protocol`, `cipherSuite`, `ephemeralKeyInfo`, and `authorized`.
+What would you add to also report whether the certificate chain
+includes a self-signed root, or how many days remain before the
+leaf certificate expires — and could you get that from `socket` without
+opening a second connection? What changes about the function's
+contract if you call it against a server that deliberately only
+supports deprecated TLS 1.0, instead of a well-configured modern one?
+
 ## What this proves and doesn't prove
 
 **Does this mean TLS/HTTPS is pointless?** No — the encryption and
@@ -244,10 +342,12 @@ system? What would change if it lived inside `verifyChain`?
 
 ## Failure modes
 
-| Failure mode                                                                                | What it gets wrong                                                                                                                                                             |
-| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Treating a passing `verifyChain` result as proof the site is legitimate                     | The function's contract only covers domain-to-key binding, not brand identity — expanding what it's trusted to mean is the actual vulnerability                                |
-| Assuming CAs manually review every domain before issuing a certificate                      | Domain-validated certificates (the vast majority in use) are issued automatically after an automated domain-control check, with no human review                                |
-| Confusing "the certificate is valid" with "the certificate is for the domain I think it is" | Both checks passed for `paypa1-secure-login.com` — validity and identity-match are separate facts a user still has to check themselves                                         |
-| Building anti-phishing logic as an afterthought instead of a first-class check              | If lookalike-domain detection isn't a deliberate, separate check, nothing in the TLS handshake will ever catch it — it's simply out of scope for what TLS verifies             |
-| Assuming tampering after issuance is undetectable                                           | A modified certificate's signature breaks immediately, as shown above — the cryptography is doing real, verifiable work, just not the specific job of judging brand legitimacy |
+| Failure mode                                                                                | What it gets wrong                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Treating a passing `verifyChain` result as proof the site is legitimate                     | The function's contract only covers domain-to-key binding, not brand identity — expanding what it's trusted to mean is the actual vulnerability                                   |
+| Assuming CAs manually review every domain before issuing a certificate                      | Domain-validated certificates (the vast majority in use) are issued automatically after an automated domain-control check, with no human review                                   |
+| Confusing "the certificate is valid" with "the certificate is for the domain I think it is" | Both checks passed for `paypa1-secure-login.com` — validity and identity-match are separate facts a user still has to check themselves                                            |
+| Building anti-phishing logic as an afterthought instead of a first-class check              | If lookalike-domain detection isn't a deliberate, separate check, nothing in the TLS handshake will ever catch it — it's simply out of scope for what TLS verifies                |
+| Assuming tampering after issuance is undetectable                                           | A modified certificate's signature breaks immediately, as shown above — the cryptography is doing real, verifiable work, just not the specific job of judging brand legitimacy    |
+| Assuming a stolen certificate private key retroactively decrypts past ECDHE sessions        | Forward secrecy means the long-term private key only authenticates handshakes — it was never the shared key, so stealing it later reveals nothing about traffic already exchanged |
+| Treating "the handshake is encrypted" as true from the first packet                         | ClientHello, ServerHello, and the certificate chain are sent in the clear, as the table above shows — encryption only begins once key exchange completes                          |

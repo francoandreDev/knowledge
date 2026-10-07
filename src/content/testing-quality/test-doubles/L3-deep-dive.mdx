@@ -6,7 +6,7 @@ import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
 
 L2 established that a seam is what makes a dependency testable, and that
-stub, fake, and mock each answer a different question about it. L3 takes
+stub, fake, and spy each answer a different question about it. L3 takes
 the trial-expiry function from L1, actually adds the seams it was missing,
 and runs it through all three kinds of double against real code.
 
@@ -14,7 +14,7 @@ and runs it through all three kinds of double against real code.
   items={[
     "Turning a direct Date.now() call into an injectable clock seam",
     "Using a fake payment gateway to test the function's result",
-    "Using a mock payment gateway to test the interaction itself",
+    "Using a spy payment gateway to test the interaction itself",
   ]}
 />
 
@@ -145,14 +145,20 @@ even though the trial expired. The fake genuinely stored the refund
 call and can be queried afterward — real behavior, just without a
 real network call or a real payment provider involved.
 
-## Using a mock instead, to test the interaction itself
+## Using a spy instead, to test the interaction itself
 
 The fake answers "does the function produce the right result." A
-**mock** answers a different question: "did the function call the
-gateway correctly?"
+**spy** answers a different question: "did the function call the
+gateway correctly?" (This kind of gateway is often called a "mock" in
+everyday conversation — but per L2's distinction, it's a spy in the
+strict sense: it just records calls for the test to inspect
+afterward, with no expectations of its own and no ability to fail
+itself mid-call. A strict mock would instead be handed its
+expectations upfront and fail on the spot if `refund` were called
+with the wrong argument or the wrong number of times.)
 
 ```js
-function createMockPaymentGateway() {
+function createPaymentGatewaySpy() {
   const calls = [];
   return {
     refund(chargeId) {
@@ -163,14 +169,14 @@ function createMockPaymentGateway() {
   };
 }
 
-const mockGateway = createMockPaymentGateway();
-refundExpiredTrials(users, fixedClock, mockGateway);
+const gatewaySpy = createPaymentGatewaySpy();
+refundExpiredTrials(users, fixedClock, gatewaySpy);
 
-console.log(mockGateway.calls);
+console.log(gatewaySpy.calls);
 // [ { method: "refund", args: [ "ch_1" ] } ]
 ```
 
-Verified: the mock's `calls` array shows exactly one `refund` call,
+Verified: the spy's `calls` array shows exactly one `refund` call,
 with exactly the argument `"ch_1"` — this is what lets a test assert
 "`refund` was called exactly once, with the correct charge ID," a
 claim about the _interaction_, not just the final list of refunded
@@ -178,18 +184,18 @@ user IDs. A stub or a fake could show the same final result, but
 neither is built to make an assertion about the call itself this
 direct.
 
-<Checkpoint question="Both fakeGateway.getRefunds() and mockGateway.calls end up showing 'ch_1' was refunded. If both doubles can show that, what would actually be lost by only ever using the fake and never reaching for the mock?">
+<Checkpoint question="Both fakeGateway.getRefunds() and gatewaySpy.calls end up showing 'ch_1' was refunded. If both doubles can show that, what would actually be lost by only ever using the fake and never reaching for the spy?">
 
 The ability to assert directly on the _shape and count_ of the call
 itself, independent of whatever the function's own return value or the
 fake's derived state happens to show. `fakeGateway.getRefunds()` proves
 the refund was recorded as far as the fake's own simplified storage is
-concerned — it's still one step removed from the call. `mockGateway.calls`
+concerned — it's still one step removed from the call. `gatewaySpy.calls`
 proves the exact call that was made: one call, one argument, no more and
 no fewer. That distinction only matters for tests where the interaction
 itself — not just an end result reachable through it — is the thing under
 test, which is why the earlier failure-mode warning about mocking out of
-habit cuts both ways: skipping the mock when the interaction really is
+habit cuts both ways: skipping the spy when the interaction really is
 the point loses a real guarantee, not just a stylistic preference.
 
 </Checkpoint>
@@ -209,16 +215,17 @@ everything regardless of whether it causes a real testing problem.
 **Try extending it yourself:** suppose `refundExpiredTrials` also
 needs to log an audit entry every time it refunds someone, via a
 third dependency (an audit logger). Would you reach for a stub, a
-fake, or a mock to test that the audit log receives exactly the right
-entries — and would your answer change if you also needed the audit
-log's _stored history_ to be readable back out during the same test?
+fake, a spy, or a strict mock to test that the audit log receives
+exactly the right entries — and would your answer change if you also
+needed the audit log's _stored history_ to be readable back out
+during the same test?
 
 ## Failure modes
 
-| Failure mode                                                                    | What it gets wrong                                                                                                                                                                           |
-| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Adding a seam for every dependency "just in case"                               | Most internal calls between a function's own collaborators don't need a seam — reach for one when a dependency is genuinely hard to control (time, randomness, network, real infrastructure) |
-| Using a mock everywhere out of habit                                            | Mocking encodes an assumption about _how_ the code calls its dependency — over-mocking makes tests brittle to harmless refactors that don't change behavior, only call order or count        |
-| Forgetting the default parameter, breaking every existing call site             | `clock = () => Date.now()` is what keeps the seam invisible to production; a required parameter with no default would force every caller to change for no functional reason                  |
-| Testing against a fake but never against anything closer to the real dependency | A fake proves the code works against fake-like behavior — a small number of integration tests against the real dependency still catch cases the fake's simplifications miss                  |
-| Asserting on a mock's call details that aren't actually the point of the test   | If the test only cares that `u1` got refunded, asserting on the exact call shape adds brittleness without adding a real guarantee — match the double to the actual question being asked      |
+| Failure mode                                                                    | What it gets wrong                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Adding a seam for every dependency "just in case"                               | Most internal calls between a function's own collaborators don't need a seam — reach for one when a dependency is genuinely hard to control (time, randomness, network, real infrastructure)                              |
+| Using a spy (or strict mock) everywhere out of habit                            | Recording (or pre-expecting) every call encodes an assumption about _how_ the code calls its dependency — overusing either makes tests brittle to harmless refactors that don't change behavior, only call order or count |
+| Forgetting the default parameter, breaking every existing call site             | `clock = () => Date.now()` is what keeps the seam invisible to production; a required parameter with no default would force every caller to change for no functional reason                                               |
+| Testing against a fake but never against anything closer to the real dependency | A fake proves the code works against fake-like behavior — a small number of integration tests against the real dependency still catch cases the fake's simplifications miss                                               |
+| Asserting on a spy's call details that aren't actually the point of the test    | If the test only cares that `u1` got refunded, asserting on the exact call shape adds brittleness without adding a real guarantee — match the double to the actual question being asked                                   |

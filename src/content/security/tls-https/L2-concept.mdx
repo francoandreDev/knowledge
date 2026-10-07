@@ -14,8 +14,8 @@ precisely what each check does and doesn't confirm.
 <LevelIntro
   items={[
     "How chain-of-trust verification works, step by step",
-    "What the padlock proves versus what people assume it proves",
-    "Why domain validation is deliberately lightweight",
+    "How the handshake turns a certificate into a shared key",
+    "Why ECDHE gives you forward secrecy and RSA key exchange doesn't",
   ]}
 />
 
@@ -109,6 +109,90 @@ dedicated anti-phishing system, not on the certificate chain itself.
 
 </Checkpoint>
 
+## How the handshake actually establishes trust and a key
+
+Everything so far verified that a certificate is genuine and names the
+right domain. **But a certificate only ever contains a _public_ key —
+and a public key alone is too slow to encrypt an entire page load of
+traffic. So where does the actual key that encrypts your traffic come
+from, and how does the certificate stop an attacker from substituting
+their own key in that process?** That's the job of the **TLS
+handshake**, a short negotiation that runs before any page data moves:
+
+```mermaid
+sequenceDiagram
+    participant C as Client (browser)
+    participant S as Server
+    Note over C,S: 1. Negotiate: which TLS version, which cipher suite?
+    C->>S: ClientHello (supported versions, cipher suites, a random value)
+    S->>C: ServerHello (chosen version, chosen cipher suite, a random value)
+    Note over C,S: 2. Prove identity: the chain-of-trust check from above
+    S->>C: Certificate (leaf + intermediate chain)
+    Note over C: Verify chain to trusted root, hostname matches
+    Note over C,S: 3. Key exchange: derive a shared secret
+    S->>C: Server's ephemeral key-exchange value, signed with the certificate's private key
+    C->>S: Client's ephemeral key-exchange value
+    Note over C,S: Both sides now independently compute the same shared secret
+    Note over C,S: 4. Switch to symmetric encryption using that shared secret
+    C->>S: Finished (encrypted)
+    S->>C: Finished (encrypted)
+```
+
+The certificate's job in this diagram is narrow but critical: the
+server signs its key-exchange value with the private key matching its
+certificate's public key. Because only the real certificate holder has
+that private key, a network attacker can swap bytes on the wire but
+can't forge a signature that verifies against the certificate — which
+is exactly the chain-of-trust check from earlier in this level, now
+put to use inside the handshake itself rather than just at page load.
+
+**Why negotiate a "cipher suite" at all — why not just hard-code one
+algorithm forever?** A **cipher suite** names the specific bundle of
+algorithms this connection will use: which key-exchange method, which
+symmetric cipher for the actual traffic, and which integrity check
+detects tampering. Negotiating it lets TLS keep working as old
+algorithms are found weak and new ones replace them, without breaking
+every server and client that hasn't upgraded yet — both sides simply
+offer the suites they support, and agree on the strongest one both
+understand.
+
+<Checkpoint question="The handshake diagram shows the server's key-exchange value as 'ephemeral' — generated fresh for this connection, then discarded. Why does it matter whether that value is ephemeral (thrown away after the session) versus derived directly and permanently from the server's long-term certificate private key?">
+
+It matters because of what happens if the server's long-term private
+key is ever stolen later — say, a year from now. If every past
+session's shared key had been derived straight from that same
+long-term private key, an attacker who later steals the key could
+retroactively decrypt every session ever recorded, including ones from
+before the theft. An ephemeral key-exchange value exists only for the
+lifetime of one handshake and is never written down or reused — so
+even total compromise of the long-term private key later on reveals
+nothing about a shared key that was only ever computed in memory,
+once, years earlier. This property is called **forward secrecy**, and
+it's the reason modern TLS treats "ephemeral" as a requirement, not an
+optimization.
+
+</Checkpoint>
+
+**Why does the key-exchange method matter for forward secrecy, and not
+just the cipher used afterward?** Older TLS configurations used plain
+**RSA key exchange**: the client picked a random secret, encrypted it
+directly with the server's long-term public key from its certificate,
+and sent it over. That secret can only be decrypted with the server's
+long-term private key — meaning anyone who later obtains that private
+key (theft, subpoena, a future cryptographic break) can decrypt a
+recording of that exact handshake, no matter how long ago it happened.
+**ECDHE** (Elliptic-Curve Diffie-Hellman, Ephemeral) instead has both
+sides generate a fresh, temporary key pair for that one handshake,
+exchange only the public halves, and each independently compute the
+same shared secret from their own ephemeral private value plus the
+other side's ephemeral public value — the shared secret itself is
+never transmitted, and the ephemeral private values are discarded the
+moment the handshake ends. That's forward secrecy: compromising the
+server's long-term certificate key later tells an attacker nothing
+about a shared secret that no longer exists anywhere to compromise.
+This is why essentially all modern TLS deployments require ECDHE (or
+its variants) and treat plain RSA key exchange as deprecated.
+
 ## Failure modes at this level
 
 - **Treating "HTTPS" as a synonym for "trustworthy."** HTTPS answers
@@ -123,3 +207,8 @@ dedicated anti-phishing system, not on the certificate chain itself.
   in the address bar — but it can't tell a human that
   `paypa1-secure-login.com` isn't `paypal.com`; that comparison is
   still the user's job.
+- **Thinking the certificate itself is the encryption key.** The
+  certificate only carries a public key used to authenticate the
+  handshake; the actual symmetric key that encrypts traffic is derived
+  fresh, during key exchange, and (with ECDHE) never exists anywhere
+  the certificate's long-term private key could later expose it.
