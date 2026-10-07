@@ -54,6 +54,13 @@ it with `node` or `ts-node`.
 // manifest.ts
 type ServiceTier = "internal" | "customer-facing" | "critical";
 
+interface EscapeHatch {
+  name: string; // e.g. "custom-ci"
+  reason: string; // why the golden path doesn't fit here
+  approvedBy: string; // who signed off on the deviation
+  expiresAt: string; // ISO date; forces a revisit instead of a permanent fork
+}
+
 interface ServiceManifest {
   name: string; // e.g. "checkout-api"
   owner: string; // team name, must match the org's team registry
@@ -61,7 +68,9 @@ interface ServiceManifest {
   goldenPathVersion: string; // semver, e.g. "2.1.0"
   language: "node" | "go" | "python";
   needsDatabase: boolean;
-  escapeHatches: string[]; // documented deviations, e.g. ["custom-ci"]
+  escapeHatches: EscapeHatch[]; // deviations — each one is "documented"
+  // only once reason/approvedBy/expiresAt are all filled in; a bare
+  // name with any of those missing is treated as undeclared below.
 }
 
 // A manifest is the entire input to everything below it — the
@@ -217,10 +226,18 @@ function validateManifest(manifest: ServiceManifest): ValidationResult {
       );
     }
   }
-  if (manifest.tier === "critical" && manifest.escapeHatches.length > 0) {
-    errors.push(
-      "critical-tier services cannot carry undocumented escape hatches from CI/security requirements",
-    );
+  if (manifest.tier === "critical") {
+    for (const hatch of manifest.escapeHatches) {
+      const isFullyDocumented =
+        Boolean(hatch.reason?.trim()) &&
+        Boolean(hatch.approvedBy?.trim()) &&
+        Boolean(hatch.expiresAt?.trim());
+      if (!isFullyDocumented) {
+        errors.push(
+          `critical-tier escape hatch "${hatch.name}" is undocumented — reason, approvedBy, and expiresAt are all required from CI/security requirements`,
+        );
+      }
+    }
   }
 
   return { ok: errors.length === 0, errors };

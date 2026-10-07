@@ -55,15 +55,32 @@ function isToday(timestampMs) {
   );
 }
 
-// On a laptop set to America/New_York, at 11pm local time:
-console.log(isToday(Date.now())); // true — correct, "now" is today
+// A background sync job recorded its last-run timestamp 5 hours before
+// a reporting job calls isToday() on it — this is real elapsed time,
+// not two clocks read at the same instant:
+const lastSyncMs = Date.parse("2024-03-14T22:00:00Z"); // stored, 5h ago
+const nowMs = Date.parse("2024-03-15T03:00:00Z"); // "now", when the report runs
 
-// The exact same code, same input, on a CI runner set to UTC
-// (11pm New_York == 3-4am UTC the *next* day):
-console.log(isToday(Date.now())); // false — the "bug" that "only happens in CI"
+// On a laptop set to America/New_York: 22:00Z is 18:00 local on Mar 14,
+// and 03:00Z (5h later) is 23:00 local — STILL Mar 14. Same local day:
+console.log(isToday(lastSyncMs)); // true
+
+// The exact same two instants, read on a CI runner set to UTC: 22:00Z
+// is Mar 14, but 03:00Z has already rolled over to Mar 15 in UTC —
+// different calendar day, same underlying timestamps:
+console.log(isToday(lastSyncMs)); // false — the "bug" that "only happens in CI"
 ```
 
-Nothing about the code changed between the two runs — `getFullYear`/`getMonth`/`getDate` all read the **system's local timezone**, which the laptop and the CI runner disagree on. This is textbook environment drift: an ambient setting (`TZ`), not a code path, determines the outcome, and no amount of staring at `isToday`'s logic finds the bug — it's not in the logic.
+Nothing about the code or the timestamps changed between the two runs — `getFullYear`/`getMonth`/`getDate` all read the **system's local timezone**, which the laptop and the CI runner disagree on. Formatting those same two instants explicitly confirms it (no need to actually flip the host's `TZ` to see this — pinning the zone per call makes the host's ambient setting explicit instead of implicit):
+
+```js
+const fmt = (ms, tz) =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(ms);
+fmt(lastSyncMs, "America/New_York") === fmt(nowMs, "America/New_York"); // "2024-03-14" === "2024-03-14" -> true
+fmt(lastSyncMs, "UTC") === fmt(nowMs, "UTC"); // "2024-03-14" === "2024-03-15" -> false
+```
+
+This is textbook environment drift: an ambient setting (`TZ`), not a code path, determines the outcome, and no amount of staring at `isToday`'s logic finds the bug — it's not in the logic.
 
 ```js
 // report-fixed.mjs — pins the comparison to an explicit, injected timezone
