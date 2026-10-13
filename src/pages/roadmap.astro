@@ -1,7 +1,6 @@
 ---
 import Layout from "../layouts/Layout.astro";
 import TrackIcon from "../components/TrackIcon.astro";
-import StatusBadge from "../components/StatusBadge.astro";
 import TopicMythModal from "../components/TopicMythModal.astro";
 import {
   Search,
@@ -34,6 +33,11 @@ const STATUSES: UnitStatus[] = ["planned", "in-progress", "done"];
 // same ring math as the homepage's track selector (index.astro).
 const GAUGE_RADIUS = 16;
 const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_RADIUS;
+
+// How many units show per track before the reader has to click "Show all" —
+// most tracks run well past this, and an un-filtered browse view doesn't
+// need every unit in view at once (see roadmap.astro's per-unit list redesign).
+const UNIT_DISPLAY_LIMIT = 6;
 
 const ALL_TAGS = Array.from(
   new Set(roadmap.tracks.flatMap((t) => t.units.flatMap((u) => u.tags))),
@@ -544,17 +548,6 @@ const progressPct = totalUnitsAll ? (inProgressCount / totalUnitsAll) * 100 : 0;
           const trackWrittenCount = track.units.filter((u) =>
             writtenKeys.has(`${track.name}/${u.slug}`),
           ).length;
-          const trackInProgressCount = track.units.filter(
-            (u) =>
-              !writtenKeys.has(`${track.name}/${u.slug}`) &&
-              u.status === "in-progress",
-          ).length;
-          const trackDonePct = track.units.length
-            ? (trackWrittenCount / track.units.length) * 100
-            : 0;
-          const trackProgressPct = track.units.length
-            ? (trackInProgressCount / track.units.length) * 100
-            : 0;
           return (
             <section
               data-track-section={track.name}
@@ -647,37 +640,49 @@ const progressPct = totalUnitsAll ? (inProgressCount / totalUnitsAll) * 100 : 0;
                   </div>
                 </div>
               </div>
-              <div class="px-3 pb-3">
-                <div class="flex h-1.5 overflow-hidden rounded-full bg-slate-500/10">
-                  <div
-                    class="h-full"
-                    style={`width: ${trackDonePct}%; background: var(--gauge-accent)`}
-                  />
-                  <div
-                    class="h-full"
-                    style={`width: ${trackProgressPct}%; background: var(--gauge-warn)`}
-                  />
-                </div>
-                <p class="mt-1.5 text-[11px] text-slate-400 dark:text-slate-600">
-                  {trackWrittenCount} of {track.units.length} written
-                  {trackInProgressCount > 0
-                    ? ` · ${trackInProgressCount} in progress`
-                    : ""}
-                </p>
+              <div
+                data-reader-filter-group
+                class="flex items-center gap-1.5 px-3 pb-2"
+              >
+                <button
+                  type="button"
+                  data-reader-filter-chip="new"
+                  aria-pressed="false"
+                  class="group rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-500 transition hover:border-slate-400 hover:text-slate-900 aria-pressed:border-transparent aria-pressed:text-white dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:text-slate-100"
+                  style="--pressed-bg: var(--gauge-warn)"
+                >
+                  <span class="group-aria-pressed:[background:var(--pressed-bg)] group-aria-pressed:text-white">
+                    New
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  data-reader-filter-chip="completed"
+                  aria-pressed="false"
+                  class="group rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-500 transition hover:border-slate-400 hover:text-slate-900 aria-pressed:border-transparent aria-pressed:text-white dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:text-slate-100"
+                  style="--pressed-bg: var(--gauge-accent)"
+                >
+                  <span class="group-aria-pressed:[background:var(--pressed-bg)] group-aria-pressed:text-white">
+                    Completed
+                  </span>
+                </button>
               </div>
               <ol data-track-body class="hidden space-y-2 px-3 pb-3">
-                {track.units.map((unit) => {
+                {track.units.map((unit, unitIndex) => {
                   const isWritten = writtenKeys.has(
                     `${track.name}/${unit.slug}`,
                   );
                   const status = isWritten ? "done" : unit.status;
                   const searchText =
                     `${unit.problem} ${unit.slug} ${track.name}`.toLowerCase();
+                  const shownTags = unit.tags.slice(0, 2);
+                  const extraTagCount = unit.tags.length - shownTags.length;
                   return (
                     <li
                       data-unit-row
                       data-track={track.name}
                       data-status={status}
+                      data-row-index={unitIndex}
                       data-search={searchText}
                       data-tags={unit.tags.join(" ")}
                       style={
@@ -708,23 +713,34 @@ const progressPct = totalUnitsAll ? (inProgressCount / totalUnitsAll) * 100 : 0;
                             {unit.problem}
                           </span>
                         )}
-                        <div class="mt-1.5 flex flex-wrap gap-1.5">
-                          {unit.tags.map((tag) => (
+                        <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          {shownTags.map((tag) => (
                             <span class="rounded-full bg-slate-500/10 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:text-slate-300">
                               {tag}
                             </span>
                           ))}
+                          {extraTagCount > 0 && (
+                            <span class="text-[10px] text-slate-400 dark:text-slate-600">
+                              +{extraTagCount}
+                            </span>
+                          )}
                         </div>
                       </div>
-                      <span class="shrink-0">
-                        <StatusBadge
-                          status={isWritten ? "written" : unit.status}
-                        />
-                      </span>
                     </li>
                   );
                 })}
               </ol>
+              {track.units.length > UNIT_DISPLAY_LIMIT && (
+                <div class="px-3 pb-3">
+                  <button
+                    type="button"
+                    data-show-more-trigger={track.name}
+                    class="text-xs font-medium text-slate-500 hover:text-slate-900 hover:underline dark:text-slate-400 dark:hover:text-slate-100"
+                  >
+                    Show all {track.units.length} units
+                  </button>
+                </div>
+              )}
             </section>
           );
         })
@@ -746,8 +762,42 @@ const progressPct = totalUnitsAll ? (inProgressCount / totalUnitsAll) * 100 : 0;
   />
 
   <script>
-    import { getActiveProfile, updateProfileInterests } from "../lib/profile";
+    import {
+      getActiveProfile,
+      updateProfileInterests,
+      pStorage,
+    } from "../lib/profile";
     import { applyTrackGauges, countDoneByTrack } from "../lib/progress-gauges";
+
+    // The reader's own completion state (distinct from a unit's *content*
+    // status — written/in-progress/planned, already covered by the Status
+    // wizard step). Read once per mount and stamped onto each row as
+    // data-reader-done so the new "New"/"Completed" chips can filter on it
+    // without touching the content-status filtering logic.
+    function markReaderDone() {
+      document
+        .querySelectorAll<HTMLElement>("[data-unit-row]")
+        .forEach((row) => {
+          const track = row.dataset.track ?? "";
+          const slug = row.querySelector("a")?.getAttribute("href");
+          const slugMatch = slug?.match(/\/([^/]+)\/$/);
+          const unitSlug = slugMatch?.[1];
+          if (!track || !unitSlug) {
+            row.dataset.readerDone = "false";
+            return;
+          }
+          const raw = pStorage.getItem(`progress:${track}/${unitSlug}`);
+          let done = false;
+          if (raw) {
+            try {
+              done = Boolean(JSON.parse(raw).done);
+            } catch {
+              // Malformed entry — treat as not done.
+            }
+          }
+          row.dataset.readerDone = String(done);
+        });
+    }
 
     // Same native <dialog> open/close pattern as the homepage's modals
     // (index.astro) and LevelsModal.astro/TopicMythModal.astro.
@@ -815,6 +865,12 @@ const progressPct = totalUnitsAll ? (inProgressCount / totalUnitsAll) * 100 : 0;
     document.addEventListener("astro:page-load", initTrackGauges);
 
     function initRoadmapFilters() {
+      // Stamps data-reader-done fresh on every page-load event (first visit
+      // or back-navigation) so the New/Completed chips reflect the reader's
+      // latest progress, independent of whether the filter listeners below
+      // get (re-)wired this time.
+      markReaderDone();
+
       const root = document.body;
       if (root.dataset.roadmapFiltersWired === "true") return;
       root.dataset.roadmapFiltersWired = "true";
@@ -849,9 +905,25 @@ const progressPct = totalUnitsAll ? (inProgressCount / totalUnitsAll) * 100 : 0;
       );
       if (!searchInput || !matchCount || !emptyState) return;
 
+      const readerFilterChips = Array.from(
+        document.querySelectorAll<HTMLButtonElement>(
+          "[data-reader-filter-chip]",
+        ),
+      );
+      const showMoreButtons = Array.from(
+        document.querySelectorAll<HTMLButtonElement>(
+          "[data-show-more-trigger]",
+        ),
+      );
+
       const activeTracks = new Set<string>();
       const activeStatuses = new Set<string>();
       const activeTags = new Set<string>();
+      const activeReaderFilters = new Set<string>();
+      const expandedTracks = new Set<string>();
+      // Kept in sync by eye with UNIT_DISPLAY_LIMIT in this file's frontmatter —
+      // the client script can't import a server-side const.
+      const UNIT_DISPLAY_LIMIT = 6;
 
       // The roadmap's tags step *is* the interests picker now (the profile
       // modal's separate one was removed) — whatever tags are active here
@@ -865,6 +937,12 @@ const progressPct = totalUnitsAll ? (inProgressCount / totalUnitsAll) * 100 : 0;
 
       function applyFilters() {
         const query = searchInput!.value.trim().toLowerCase();
+        const isFiltering =
+          query !== "" ||
+          activeTracks.size > 0 ||
+          activeStatuses.size > 0 ||
+          activeTags.size > 0 ||
+          activeReaderFilters.size > 0;
         let visible = 0;
 
         for (const row of rows) {
@@ -879,8 +957,30 @@ const progressPct = totalUnitsAll ? (inProgressCount / totalUnitsAll) * 100 : 0;
           const rowTags = (row.dataset.tags ?? "").split(" ");
           const matchesTags =
             activeTags.size === 0 || rowTags.some((t) => activeTags.has(t));
-          const show =
-            matchesQuery && matchesTrack && matchesStatus && matchesTags;
+          const readerDone = row.dataset.readerDone === "true";
+          const matchesReader =
+            activeReaderFilters.size === 0 ||
+            (activeReaderFilters.has("completed") && readerDone) ||
+            (activeReaderFilters.has("new") && !readerDone);
+          const matchesFilters =
+            matchesQuery &&
+            matchesTrack &&
+            matchesStatus &&
+            matchesTags &&
+            matchesReader;
+
+          // Outside of any active filter, a track only shows its first N
+          // units at a glance — "Show all" (per section) or any filter
+          // (which implies the reader is specifically looking for something)
+          // lifts the cap.
+          const rowIndex = Number(row.dataset.rowIndex ?? "0");
+          const track = row.dataset.track ?? "";
+          const overLimit =
+            !isFiltering &&
+            rowIndex >= UNIT_DISPLAY_LIMIT &&
+            !expandedTracks.has(track);
+
+          const show = matchesFilters && !overLimit;
           row.classList.toggle("hidden", !show);
           if (show) visible++;
         }
@@ -900,6 +1000,15 @@ const progressPct = totalUnitsAll ? (inProgressCount / totalUnitsAll) * 100 : 0;
                 ? `${visibleCount} units`
                 : `${visibleCount} of ${sectionRows.length} units`;
           }
+          const moreBtn = section.querySelector<HTMLElement>(
+            "[data-show-more-trigger]",
+          );
+          moreBtn?.classList.toggle(
+            "hidden",
+            isFiltering ||
+              expandedTracks.has(name) ||
+              sectionRows.length <= UNIT_DISPLAY_LIMIT,
+          );
         }
 
         matchCount!.textContent = `${visible} of ${rows.length} units match`;
@@ -1069,14 +1178,47 @@ const progressPct = totalUnitsAll ? (inProgressCount / totalUnitsAll) * 100 : 0;
         });
       });
 
+      // "New" and "Completed" are mutually exclusive (one reader-progress
+      // axis), unlike track/status/tags which are each multi-select — picking
+      // one deselects the other rather than stacking both into "show none".
+      readerFilterChips.forEach((chip) => {
+        chip.addEventListener("click", () => {
+          const key = chip.dataset.readerFilterChip!;
+          const nowActive = chip.getAttribute("aria-pressed") !== "true";
+          readerFilterChips.forEach((c) => {
+            if (c !== chip) {
+              c.setAttribute("aria-pressed", "false");
+              activeReaderFilters.delete(c.dataset.readerFilterChip!);
+            }
+          });
+          chip.setAttribute("aria-pressed", String(nowActive));
+          if (nowActive) activeReaderFilters.add(key);
+          else activeReaderFilters.delete(key);
+          applyFilters();
+        });
+      });
+
+      showMoreButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const track = button.dataset.showMoreTrigger!;
+          expandedTracks.add(track);
+          applyFilters();
+        });
+      });
+
       function resetWizard() {
         searchInput!.value = "";
         activeTracks.clear();
         activeStatuses.clear();
         activeTags.clear();
-        [...trackChips, ...statusChips, ...tagChips].forEach((chip) =>
-          chip.setAttribute("aria-pressed", "false"),
-        );
+        activeReaderFilters.clear();
+        expandedTracks.clear();
+        [
+          ...trackChips,
+          ...statusChips,
+          ...tagChips,
+          ...readerFilterChips,
+        ].forEach((chip) => chip.setAttribute("aria-pressed", "false"));
         applyFilters();
         filterTagOptionsByTrack();
         syncInterestsFromTags();
