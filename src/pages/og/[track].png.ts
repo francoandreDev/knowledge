@@ -10,6 +10,7 @@ export const GET: APIRoute = async ({ params }) => {
   const png = await renderOgImage({
     title: params.track!,
     eyebrow: "systems-mastery track",
+    track: params.track!,
   });
   return new Response(png, {
     headers: { "Content-Type": "image/png" },

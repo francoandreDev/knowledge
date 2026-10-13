@@ -15,6 +15,7 @@ export const GET: APIRoute = async ({ params }) => {
   const png = await renderOgImage({
     title: roadmapUnit?.problem ?? params.unit!,
     eyebrow: params.track!,
+    track: params.track!,
   });
   return new Response(png, {
     headers: { "Content-Type": "image/png" },
