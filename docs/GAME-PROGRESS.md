@@ -1152,6 +1152,178 @@ out the one piece automated testing didn't reach on its own. `bun run
 check`, the purchase flow, and the ability-card offer were all
 independently confirmed by direct observation before that point.
 
+### Phase 16 — Enemy intelligence tiers, enemy pack synergies, weapon/upgrade synergies ✅ implemented
+
+**Spec'd in one session, implemented in a later session** (per the user's
+original explicit request to only define/document first: "esto solo es
+para definir y documentar después de decidir, no lo implementamos en esta
+sesión"; the follow-up session implemented all three subsections A/B/C in
+one pass, per the user's explicit request). The user framed this as the
+point where the game stops being "just a copy of the existing genre":
+enemies should get smarter or able to improve (not just tougher numbers),
+a smarter/more dangerous enemy roster should mean _fewer_ enemies on
+screen at once rather than more, and both enemies and the player's own
+upgrades should have real interactions between their parts, not just
+isolated stat lines. Three decisions were made with the user (via
+AskUserQuestion) before writing this spec:
+
+1. Enemy intelligence reuses the existing Threat Tier system (Phase 13's
+   `computeThreatTier()`, 1-5) rather than a new separate progression axis
+   or a between-run/`powerIndex`-driven one.
+2. Weapon/upgrade synergies are a **small curated list with names**, not a
+   generic emergent-stacking system — easier to balance and to communicate
+   to the player.
+3. Enemy pack synergies are **specific cross-type combinations** (e.g.
+   "Bats near an Ogre do X"), not a generic same-type "3+ clustered" rule.
+
+#### A. Enemy intelligence tiers (reuses Threat Tier 1-5)
+
+`computeThreatTier(elapsedS)` already exists and currently only drives a
+cosmetic HUD chip/toast. This phase gives it two new real effects, both
+keyed off the same 1-5 tier so they escalate together — a lookup table by
+tier, not a continuous formula, so each tier reads as a distinct "the game
+just changed" moment (matching the existing tier-up toast):
+
+- **Spawn density drops as tier rises** — a per-tier multiplier applied to
+  `currentSpawnIntervalMs()`'s existing curve (or to the effective
+  `MAX_ALIVE_ENEMIES` cap), roughly: tier 1 unchanged, tier 5 around
+  35-40% fewer enemies alive at once than tier 1 would produce at the same
+  elapsed time. Exact multiplier per tier is an open item to tune once
+  implemented and playtested — the design constraint is "noticeably
+  sparser," not a specific number.
+- **Each tier unlocks one new behavior per base enemy kind** (not the
+  bosses — Reaper/Lich already have their own distinct kits):
+  - Tier 2 — **Zombie lunge**: a short speed burst toward the player when
+    just outside contact range and the player is moving away, on a
+    cooldown. Turns "walks straight at you" into "punishes kiting."
+  - Tier 3 — **Skeleton bone-throw**: gains a slow periodic ranged
+    projectile alongside its existing walk-approach — a melee-only enemy
+    becomes a light ranged threat too.
+  - Tier 3 — **Ghost fire-rate increase**: `GHOST_FIRE_INTERVAL_MS`
+    shortens (exact amount TBD at implementation).
+  - Tier 4 — **Bat dive**: after its usual wiggle-approach, does one fast
+    straight dash through the player's last-seen position instead of only
+    wiggling — a telegraphed but faster threat.
+  - Tier 5 — **Ogre shorter telegraph**: `OGRE_SLAM_TELEGRAPH_MS` shrinks
+    (harder to react to, same slam otherwise).
+  - Implementation shape: each behavior is gated by `currentThreatTier >=
+N` inside the existing per-kind branch of `updateEnemyBehavior()` —
+    additive to current behavior, not a rewrite of it, matching how every
+    other enemy-behavior change in this project has been layered in.
+
+#### B. Enemy pack synergies (specific cross-type pairs)
+
+A small, named, curated list — each one a periodic (throttled, not
+per-frame) proximity check between two specific kinds that applies a
+temporary buff while the condition holds:
+
+- **"Hype the Ogre"** — 2+ Bats within a radius of an Ogre halve its
+  `OGRE_SLAM_COOLDOWN_MS` while they stay nearby.
+- **"Shield Wall"** — 2+ Skeletons adjacent to each other take reduced
+  contact/weapon damage (candidate: -20%, TBD) while grouped — rewards the
+  player for using AoE/knockback (Nova Pulse, Shockwave) to break the
+  cluster apart instead of ignoring it.
+- **"Haunting Chorus"** — 2+ Ghosts within a radius of a Zombie speed the
+  Zombie up while the Ghosts stay close.
+
+Each pairing needs a visible tell (a small aura/tint on the buffed
+enemies, or a `hitSparks`-style transient effect when the synergy first
+triggers) so the player can learn to read it, not just take mystery extra
+damage — exact visual TBD at implementation, following the project's
+established "cheap primitive, no `shadowBlur` at scale" rendering
+convention.
+
+#### C. Weapon/upgrade synergies (curated named list)
+
+Candidate list (names/numbers to finalize at implementation time — this is
+the shape, not the final balance):
+
+- **"Storm Web"** — owning both Chain Lightning and Orbit Shield: orbiter
+  hits also trigger one extra chain jump.
+- **"Overcharge"** — owning both Bolt and Nova Pulse: Nova Pulse's burst
+  also fires a few Bolt projectiles outward.
+- **"Vampiric Might"** — Might (shop) at a threshold level + any weapon at
+  its Lv6 evolution: evolved-weapon kills heal a small amount of HP.
+- **"Twin Fangs"** — Bolt and Homing Dart both at Lv4+: they periodically
+  fire together as a shared volley.
+
+Needs a discovery surface — a small badge on the affected weapon icons in
+the HUD, or a one-time toast (reusing the established
+`animate-fade-slide-in` remove/reflow/re-add pattern already used for the
+threat-tier and boss-incoming toasts) the first time a synergy activates
+in a run — so a synergy is a moment the player notices, not a silent
+number change.
+
+#### Implementation notes (numbers resolved, deviations from the spec)
+
+All logic lives in `src/lib/game/engine.ts`, in a block of constants/
+functions marked `Phase 16A/B/C` throughout — see that file's own header
+comment for a full inventory. Numbers left open above were resolved as:
+
+- Spawn density: a `SPAWN_INTERVAL_TIER_MULT` lookup (tier 1 → ×1.0 through
+  tier 5 → ×1.65 on the base spawn interval, i.e. ~40% fewer enemies alive
+  at tier 5 vs tier 1 at the same elapsed time), folded into
+  `currentSpawnIntervalMs()`.
+- Zombie lunge (T2): 2.6× speed burst for 350ms, 3s cooldown, triggered
+  within 90px when the player's current velocity is moving away (dot
+  product > 0.4) — reads player velocity captured each frame in the main
+  loop (`playerVelX/playerVelY`).
+- Skeleton bone-throw (T3): reuses the `lastRangedAt` field (previously
+  unused by skeleton), 2.6s interval, a slow (100px/s) 6-damage bolt.
+- Ghost fire-rate (T3): interval shortens from 2200ms to 1400ms.
+- Bat dive (T4): a straight 260px/s dash for 450ms toward the player's
+  position at trigger time, 3.5s cooldown, direction locked for the dash's
+  duration (can't re-steer mid-dive).
+- Ogre telegraph (T5): shrinks from 700ms to 380ms.
+- Enemy pack synergies use a throttled `runSynergyScan()` (every 300ms, not
+  per-frame), as anticipated — recomputes each buff flag from scratch every
+  scan so a synergy turns off automatically once its condition no longer
+  holds. Hype the Ogre halves the slam cooldown (2+ Bats within 90px);
+  Shield Wall reduces damage taken by 20% (2+ Skeletons within 40px);
+  Haunting Chorus gives a Zombie a 1.4× speed multiplier (2+ Ghosts within
+  100px). The visible tell is a plain colored outline ring drawn around the
+  buffed enemy in `render()` — cheap (no `shadowBlur`), and deliberately
+  not gated by `reduceMotion` since it's gameplay-relevant information, not
+  decoration.
+- Weapon synergies: Storm Web triggers one extra chain jump per orbiter
+  hit (same jump-decay as Chain Lightning's own jumps); Overcharge fires 3
+  outward Bolt projectiles (at 0.6× a fresh bolt's damage) on every Nova
+  Pulse burst; Vampiric Might heals a flat 3 HP per kill once shop Might is
+  level 3+ and the killing weapon is at its Lv6 evolution (added
+  `GameOptions.mightLevel`, since the engine previously only received
+  Might's aggregated damage multiplier, not its raw level); Twin Fangs
+  fires a shared Bolt+Homing Dart volley every 2s once both are Lv4+.
+- Both B and C fire a shared `onSynergyTriggered(name)` callback the first
+  time each named synergy activates in a run, reusing the Phase 13/14
+  toast pattern (`index.astro`'s new `[data-synergy-toast]`) — one
+  mechanism for both discovery surfaces rather than two.
+- **Not done**: reweighting `EnemyDef.weight` by tier (higher tiers don't
+  currently favor tougher kinds, only fewer enemies + the per-kind
+  behavior unlocks) — left as `pickEnemyDef()`'s existing flat-weight
+  behavior per the spec's "not decided" framing; a future session's call
+  if it turns out density/tier alone doesn't read as "smarter."
+
+**Verification caveat**: `bun run check` passes clean (lint, format,
+typecheck, `validate:content`, existing tests, build). Live in-browser
+verification was attempted via `astro preview` + browser automation, but
+the automation tab reported `document.hidden === true` for its whole
+session — a real, already-documented environment limitation (see the
+"Micro-interactions and animation" section's rAF-suspension note), not
+specific to this phase — which freezes kontra's `GameLoop` entirely (it's
+driven by real `requestAnimationFrame`/`performance.now()` ticks). Two
+different in-page overrides to force-drive the loop past this were tried
+and both were ineffective, most likely because the extension's automation
+JS executes in an isolated world that doesn't see the same global
+`requestAnimationFrame`/`performance` the page's own bundled code resolves
+against. What _was_ confirmed live: the lobby (shop purchases, run
+duration from marked-done units, token consumption), run start (canvas +
+HUD render, no console errors), and clean teardown back to the lobby. The
+new tier/synergy gameplay logic itself rests on `bun run check` passing
+plus careful code review against this file's existing per-kind behavior
+patterns — **a future session with a real focused browser (or a human
+playthrough) should close out that remaining gap**, the same follow-up
+already on file for a handful of Phase 8/9/13 items below.
+
 ## Current state
 
 **All 8 originally-planned phases, plus Phase 9 (composite sprite detail),
@@ -1194,7 +1366,12 @@ four remaining feedback gaps found via a "what's still missing?" review
 (damage numbers, a low-HP warning, a boss telegraph, and a death cause on
 the results screen), and Phase 15 added the site's first shop-gated content
 unlocks — a locked 6th weapon and a locked run-time ability that swaps in
-an alternate boss, both per explicit user request.
+an alternate boss, both per explicit user request, and Phase 16
+implemented the three-part spec written up in that phase's own section
+above (all subsections A/B/C, per explicit user request to build all of
+it in one session) — enemy intelligence tiers, enemy pack synergies, and
+weapon/upgrade synergies, closing out the user's "move past just copying
+the existing genre" ask.
 
 ## Deliberate simplifications (intentional — not bugs)
 

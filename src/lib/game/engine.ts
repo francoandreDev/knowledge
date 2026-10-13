@@ -106,6 +106,28 @@
 // fireEnemyProjectile() call sites) — this made ghost-bolt and reaper-ring
 // deaths indistinguishable from each other before Phase 14 needed to tell
 // them apart for the cause string.
+// Phase 16 scope, layered on top: enemy intelligence tiers, enemy pack
+// synergies, and weapon/upgrade synergies — see docs/GAME-PROGRESS.md's
+// Phase 16 section for the full design spec this implements. (A) Reuses the
+// existing 1-5 Threat Tier readout (computeThreatTier(), Phase 13) to drive
+// two new real effects: spawn density drops as tier rises
+// (SPAWN_INTERVAL_TIER_MULT, folded into currentSpawnIntervalMs()), and each
+// base enemy kind unlocks one new behavior at a specific tier — Zombie lunge
+// (T2), Skeleton bone-throw (T3), Ghost faster fire rate (T3), Bat dive
+// (T4), Ogre shorter slam telegraph (T5) — all gated inline in
+// updateEnemyBehavior(), additive to each kind's existing approach pattern.
+// (B) A small named list of specific cross-type enemy pack synergies —
+// "Hype the Ogre" (Bats halve an Ogre's slam cooldown), "Shield Wall"
+// (grouped Skeletons take less damage), "Haunting Chorus" (Ghosts speed up a
+// nearby Zombie) — computed on a throttled proximity scan (runSynergyScan(),
+// every SYNERGY_SCAN_INTERVAL_MS, not per-frame) and given a visible tell (a
+// colored outline ring, drawn in render()). (C) A small curated list of
+// named weapon/upgrade synergies — "Storm Web" (Orbit Shield + Chain
+// Lightning), "Overcharge" (Nova Pulse + Bolt), "Vampiric Might" (shop Might
+// + any Lv6 evolution), "Twin Fangs" (Bolt + Homing Dart both Lv4+). Both B
+// and C fire a shared onSynergyTriggered(name) callback once per run the
+// first time each named synergy activates, mirroring the Phase 13/14
+// toast pattern, so a synergy is a moment the player notices.
 //
 // Spawn/collision math is kept intentionally cheap (linear scans over small
 // arrays, no quadtree) and the density ramp is floored at a minimum interval
@@ -329,6 +351,59 @@ const OGRE_SLAM_TELEGRAPH_MS = 700;
 const OGRE_SLAM_DAMAGE = 22;
 const OGRE_SLAM_COOLDOWN_MS = 2500;
 
+// --- Phase 16A: enemy intelligence tiers, reusing computeThreatTier()'s
+// existing 1-5 readout (see docs/GAME-PROGRESS.md's Phase 16 spec). Spawn
+// density drops as tier rises (a lookup, not a formula, so each tier reads
+// as a distinct step) and each base enemy kind unlocks one new behavior at
+// a specific tier — gated inline in updateEnemyBehavior() below.
+const SPAWN_INTERVAL_TIER_MULT: Record<number, number> = {
+  1: 1.0,
+  2: 1.12,
+  3: 1.25,
+  4: 1.45,
+  5: 1.65, // ~40% fewer enemies alive at once vs tier 1, at the same elapsed time
+};
+
+const ZOMBIE_LUNGE_MIN_TIER = 2;
+const ZOMBIE_LUNGE_TRIGGER_RANGE = 90; // just outside contact range
+const ZOMBIE_LUNGE_COOLDOWN_MS = 3000;
+const ZOMBIE_LUNGE_DURATION_MS = 350;
+const ZOMBIE_LUNGE_SPEED_MULT = 2.6;
+const ZOMBIE_LUNGE_AWAY_DOT_THRESHOLD = 0.4; // how "away" the player must be moving to trigger
+
+const SKELETON_BONE_MIN_TIER = 3;
+const SKELETON_BONE_INTERVAL_MS = 2600;
+const SKELETON_BONE_SPEED = 100;
+const SKELETON_BONE_DAMAGE = 6;
+
+const GHOST_FIRE_MIN_TIER = 3;
+const GHOST_FIRE_INTERVAL_TIER3_MS = 1400; // shortened from GHOST_FIRE_INTERVAL_MS
+
+const BAT_DIVE_MIN_TIER = 4;
+const BAT_DIVE_COOLDOWN_MS = 3500;
+const BAT_DIVE_DURATION_MS = 450;
+const BAT_DIVE_SPEED = 260;
+
+const OGRE_TELEGRAPH_MIN_TIER = 5;
+const OGRE_SLAM_TELEGRAPH_TIER5_MS = 380; // shortened from OGRE_SLAM_TELEGRAPH_MS
+
+// --- Phase 16B: enemy pack synergies — a small named, curated list of
+// specific cross-type proximity buffs, checked on a throttled scan pass
+// (not every frame) rather than per-pair every tick, per this project's
+// perf posture (see file header). Each has a visible tell drawn in
+// render() (a colored outline ring on the buffed enemy) and fires
+// onSynergyTriggered() once per run the first time it activates.
+const SYNERGY_SCAN_INTERVAL_MS = 300;
+const HYPE_OGRE_RADIUS = 90;
+const HYPE_OGRE_MIN_BATS = 2;
+const HYPE_OGRE_COOLDOWN_MULT = 0.5;
+const SHIELD_WALL_RADIUS = 40;
+const SHIELD_WALL_MIN_SKELETONS = 2; // including the skeleton being checked
+const SHIELD_WALL_DAMAGE_REDUCTION = 0.2;
+const HAUNTING_CHORUS_RADIUS = 100;
+const HAUNTING_CHORUS_MIN_GHOSTS = 2;
+const HAUNTING_CHORUS_SPEED_MULT = 1.4;
+
 const REAPER_RADIUS = 26;
 const REAPER_SPEED = 42;
 const REAPER_HP = 420;
@@ -467,6 +542,18 @@ const CHAIN_LIGHTNING_JUMP_RANGE = 140; // max distance to the next unhit enemy
 const CHAIN_LIGHTNING_JUMP_DECAY = 0.75; // each successive jump deals less
 const CHAIN_EFFECT_DURATION_MS = 200;
 
+// --- Phase 16C: weapon/upgrade synergies — a small curated named list
+// (not generic emergent stacking), per docs/GAME-PROGRESS.md's Phase 16
+// spec. Each fires onSynergyTriggered() once per run the first time it
+// activates, reusing the same toast mechanism as the enemy pack synergies.
+const STORM_WEB_EXTRA_JUMP_DECAY = CHAIN_LIGHTNING_JUMP_DECAY; // Chain Lightning + Orbit Shield
+const OVERCHARGE_BOLT_COUNT = 3; // Bolt + Nova Pulse
+const OVERCHARGE_BOLT_DAMAGE_MULT = 0.6;
+const VAMPIRIC_MIGHT_MIN_LEVEL = 3; // shop "Might" level, out of maxLevel 5
+const VAMPIRIC_MIGHT_HEAL = 3; // flat HP per evolved-weapon kill
+const TWIN_FANGS_MIN_LEVEL = 4; // Bolt + Homing Dart, both at Lv4+
+const TWIN_FANGS_INTERVAL_MS = 2000;
+
 // --- Phase 3: temporary (run-only) stat cards ---
 interface TempStatDef {
   id: string;
@@ -568,6 +655,10 @@ export interface GameCallbacks {
   /** Phase 14: fired once, BOSS_WARNING_LEAD_S before the boss actually
    * spawns — lets the page show a telegraph banner ahead of the drop-in. */
   onBossIncoming?: () => void;
+  /** Phase 16: fired once per named synergy (enemy pack or weapon/upgrade),
+   * the first time it activates in a run — lets the page show a discovery
+   * toast, mirroring the threat-tier/boss-incoming pattern above. */
+  onSynergyTriggered?: (name: string) => void;
 }
 
 export interface GameOptions {
@@ -588,6 +679,10 @@ export interface GameOptions {
   /** Phase 15: whether the "Embrace Necromancy" ability card can appear in
    * this run's level-up pool — gated by shop.ts's Necromancy unlock. */
   abilityUnlocked?: boolean;
+  /** Phase 16C: the shop's owned "Might" level (0-5) — drives the "Vampiric
+   * Might" weapon synergy's threshold check. See shop.ts's
+   * getUpgradeLevel("might"). */
+  mightLevel?: number;
 }
 
 interface Enemy extends GameObject {
@@ -619,6 +714,22 @@ interface Enemy extends GameObject {
   lastOrbitHitAt?: number;
   // Phase 11: brief white hit-flash, see HIT_FLASH_MS
   hitFlashUntil?: number;
+  // Phase 16A: zombie lunge (tier 2+)
+  lungeUntil?: number;
+  lastLungeAt?: number;
+  lungeDx?: number;
+  lungeDy?: number;
+  // Phase 16A: bat dive (tier 4+) — reuses wigglePhase for the wiggle-approach
+  diveUntil?: number;
+  lastDiveAt?: number;
+  diveDx?: number;
+  diveDy?: number;
+  // Phase 16B: enemy pack synergy buff flags, recomputed every
+  // SYNERGY_SCAN_INTERVAL_MS by runSynergyScan() — see the Enemy Pack
+  // Synergies section of updateEnemyBehavior()/damageEnemy().
+  hypedByBats?: boolean; // ogre: halved slam cooldown
+  shieldWalled?: boolean; // skeleton: reduced damage taken
+  chorusBuffed?: boolean; // zombie: speed boost
 }
 interface Projectile extends GameObject {
   ttl: number;
@@ -759,7 +870,10 @@ function spawnEdgePosition(canvas: HTMLCanvasElement) {
 function currentSpawnIntervalMs(elapsedS: number): number {
   const interval =
     BASE_SPAWN_INTERVAL_MS * Math.pow(0.5, elapsedS / RAMP_HALF_LIFE_S);
-  return Math.max(MIN_SPAWN_INTERVAL_MS, interval);
+  // Phase 16A: spawn density drops as threat tier rises — a smarter/more
+  // dangerous roster means fewer enemies on screen, not more of them.
+  const tierMult = SPAWN_INTERVAL_TIER_MULT[computeThreatTier(elapsedS)] ?? 1;
+  return Math.max(MIN_SPAWN_INTERVAL_MS, interval * tierMult);
 }
 
 function pickEnemyDef(elapsedS: number): EnemyDef {
@@ -806,6 +920,7 @@ const DEATH_CAUSE_BY_SOURCE: Record<string, string> = {
   ghost: "Struck by ghost fire",
   "reaper-ring": "Caught in the Reaper's ring",
   "lich-curse": "Cursed by the Lich",
+  "skeleton-bone": "Struck by a thrown bone", // Phase 16A
 };
 
 function describeDeathCause(
@@ -850,6 +965,7 @@ export function startGame(
     ...(options.unlockedWeaponIds ?? []),
   ];
   const abilityUnlocked = options.abilityUnlocked ?? false;
+  const mightLevel = options.mightLevel ?? 0;
   log.log("startGame() called", {
     width: canvas.width,
     height: canvas.height,
@@ -998,6 +1114,23 @@ export function startGame(
   // Phase 15: which boss spawnBoss() spawns — flipped to "lich" once the
   // player picks the "Embrace Necromancy" ability card mid-run.
   let bossVariant: "reaper" | "lich" = "reaper";
+  // Phase 16: player's current-frame velocity (0 while idle) — read by the
+  // zombie lunge's "is the player moving away" check, set alongside the
+  // existing movement block below.
+  let playerVelX = 0;
+  let playerVelY = 0;
+  // Phase 16B/C: which named synergies (pack or weapon) have fired at least
+  // once this run — gates the one-time discovery toast per name.
+  const triggeredSynergies = new Set<string>();
+  let lastSynergyScanAt = -Infinity;
+  let lastTwinFangsAt = -Infinity; // Phase 16C
+
+  function maybeTriggerSynergy(name: string) {
+    if (triggeredSynergies.has(name)) return;
+    triggeredSynergies.add(name);
+    callbacks.onSynergyTriggered?.(name);
+    log.log("synergy:triggered", { name });
+  }
 
   function pushHud() {
     callbacks.onHudUpdate({
@@ -1153,14 +1286,37 @@ export function startGame(
     return nearest;
   }
 
+  // Phase 16C: normalizes a damage `source` string back to the WeaponId
+  // that dealt it (where one exists) — used by Vampiric Might to check the
+  // owning weapon's level. "orbitShield-trail" is Barrier Storm's own trail
+  // hits; synergy-only sources (stormWeb/overcharge) intentionally have no
+  // single owning weapon and return null.
+  const WEAPON_ID_SOURCES = new Set<string>([
+    "bladeArc",
+    "bolt",
+    "orbitShield",
+    "novaPulse",
+    "homingDart",
+    "chainLightning",
+  ]);
+  function weaponIdForSource(source: string): WeaponId | null {
+    const normalized = source === "orbitShield-trail" ? "orbitShield" : source;
+    return WEAPON_ID_SOURCES.has(normalized) ? (normalized as WeaponId) : null;
+  }
+
   function damageEnemy(e: Enemy, amount: number, source: string) {
-    e.hp -= amount;
+    // Phase 16B: "Shield Wall" — 2+ adjacent skeletons take reduced damage
+    // while grouped, see runSynergyScan().
+    const finalAmount = e.shieldWalled
+      ? amount * (1 - SHIELD_WALL_DAMAGE_REDUCTION)
+      : amount;
+    e.hp -= finalAmount;
     e.hitFlashUntil = elapsedMs + HIT_FLASH_MS;
     hitSparks.push({ x: e.x, y: e.y, createdAt: elapsedMs });
     damageNumbers.push({
       x: e.x,
       y: e.y - e.radius,
-      amount,
+      amount: finalAmount,
       createdAt: elapsedMs,
     });
     playHit();
@@ -1173,6 +1329,102 @@ export function startGame(
       maybeSpawnCoin(e);
       if (e.kind === "reaper" || e.kind === "lich") {
         log.log("boss:defeated", { variant: e.kind });
+      }
+      // Phase 16C: "Vampiric Might" — Might at VAMPIRIC_MIGHT_MIN_LEVEL+ and
+      // the killing weapon at its Lv6 evolution heals a small flat amount.
+      const wid = weaponIdForSource(source);
+      if (wid && mightLevel >= VAMPIRIC_MIGHT_MIN_LEVEL) {
+        const killingWeapon = ownedWeapons.find((ow) => ow.id === wid);
+        if (killingWeapon && killingWeapon.level >= WEAPON_MAX_LEVEL) {
+          player.hp = Math.min(
+            effectiveMaxHp(),
+            player.hp + VAMPIRIC_MIGHT_HEAL,
+          );
+          maybeTriggerSynergy("Vampiric Might");
+        }
+      }
+    }
+  }
+
+  // Phase 16C: "Storm Web" — owning both Chain Lightning and Orbit Shield
+  // makes orbiter hits also trigger one extra chain jump to the nearest
+  // other alive enemy near the hit point, reusing chainEffects' visual.
+  function stormWebJump(from: Enemy, baseDamage: number) {
+    let next: Enemy | null = null;
+    let nextDist = CHAIN_LIGHTNING_JUMP_RANGE;
+    for (const o of enemies) {
+      if (!o.alive || o === from) continue;
+      const d = distance(from, o);
+      if (d <= nextDist) {
+        nextDist = d;
+        next = o;
+      }
+    }
+    if (!next) return;
+    maybeTriggerSynergy("Storm Web");
+    damageEnemy(next, baseDamage * STORM_WEB_EXTRA_JUMP_DECAY, "stormWeb");
+    chainEffects.push({
+      x1: from.x,
+      y1: from.y,
+      x2: next.x,
+      y2: next.y,
+      createdAt: elapsedMs,
+    });
+  }
+
+  // Phase 16B: enemy pack synergies — a throttled proximity scan (see
+  // SYNERGY_SCAN_INTERVAL_MS) rather than a per-pair check every frame, per
+  // this project's "cheap primitives, no spatial partition" perf posture.
+  // Recomputes each buff flag from scratch every scan, so a synergy turns
+  // off automatically once its trigger condition no longer holds.
+  function runSynergyScan() {
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      e.hypedByBats = false;
+      e.shieldWalled = false;
+      e.chorusBuffed = false;
+    }
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      if (e.kind === "ogre") {
+        let bats = 0;
+        for (const o of enemies) {
+          if (o.alive && o.kind === "bat" && distance(e, o) <= HYPE_OGRE_RADIUS)
+            bats += 1;
+        }
+        if (bats >= HYPE_OGRE_MIN_BATS) {
+          e.hypedByBats = true;
+          maybeTriggerSynergy("Hype the Ogre");
+        }
+      } else if (e.kind === "skeleton") {
+        let nearby = 0;
+        for (const o of enemies) {
+          if (
+            o !== e &&
+            o.alive &&
+            o.kind === "skeleton" &&
+            distance(e, o) <= SHIELD_WALL_RADIUS
+          )
+            nearby += 1;
+        }
+        if (nearby >= SHIELD_WALL_MIN_SKELETONS - 1) {
+          e.shieldWalled = true;
+          maybeTriggerSynergy("Shield Wall");
+        }
+      } else if (e.kind === "zombie") {
+        let ghosts = 0;
+        for (const o of enemies) {
+          if (
+            o.alive &&
+            o.kind === "ghost" &&
+            distance(e, o) <= HAUNTING_CHORUS_RADIUS
+          )
+            ghosts += 1;
+        }
+        if (ghosts >= HAUNTING_CHORUS_MIN_GHOSTS) {
+          e.chorusBuffed = true;
+          maybeTriggerSynergy("Haunting Chorus");
+        }
       }
     }
   }
@@ -1589,6 +1841,11 @@ export function startGame(
       }
       case "orbitShield": {
         const isEvolved = w.level >= WEAPON_MAX_LEVEL; // Barrier Storm
+        // Phase 16C: "Storm Web" — owning Chain Lightning too makes every
+        // orbiter hit also trigger one extra chain jump, see stormWebJump().
+        const hasStormWeb = ownedWeapons.some(
+          (ow) => ow.id === "chainLightning",
+        );
         w.orbitAngle = (w.orbitAngle ?? 0) + (1.5 + (w.level - 1) * 0.3) * dt;
         const count = w.level >= 3 ? 2 : 1;
         const radius = 50 + (w.level - 1) * 6;
@@ -1612,6 +1869,7 @@ export function startGame(
               ) {
                 e.lastOrbitHitAt = elapsedMs;
                 damageEnemy(e, damage, "orbitShield");
+                if (hasStormWeb) stormWebJump(e, damage);
               }
             }
           }
@@ -1635,6 +1893,7 @@ export function startGame(
                 ) {
                   e.lastOrbitHitAt = elapsedMs;
                   damageEnemy(e, damage * 0.5, "orbitShield-trail");
+                  if (hasStormWeb) stormWebJump(e, damage * 0.5);
                 }
               }
             }
@@ -1668,6 +1927,25 @@ export function startGame(
             createdAt: elapsedMs,
           });
           log.log("weapon:novaPulse:burst", { radius, isEvolved });
+          // Phase 16C: "Overcharge" — owning Bolt too makes the burst also
+          // fire a few Bolt projectiles outward in a spread.
+          if (ownedWeapons.some((ow) => ow.id === "bolt")) {
+            maybeTriggerSynergy("Overcharge");
+            const boltDamage =
+              (8 + (w.level - 1) * 3) *
+              OVERCHARGE_BOLT_DAMAGE_MULT *
+              totalDamageMult();
+            for (let i = 0; i < OVERCHARGE_BOLT_COUNT; i++) {
+              const angle = (i / OVERCHARGE_BOLT_COUNT) * Math.PI * 2;
+              spawnPlayerProjectile(
+                angle,
+                PROJECTILE_SPEED,
+                boltDamage,
+                0,
+                "overcharge",
+              );
+            }
+          }
         }
         break;
       }
@@ -1723,12 +2001,38 @@ export function startGame(
   }
 
   function updateEnemyBehavior(e: Enemy, dt: number) {
+    const currentTier = computeThreatTier(elapsedMs / 1000); // Phase 16A
     if (e.kind === "bat") {
+      const def = ENEMY_DEFS.find((d) => d.kind === "bat")!;
+      // Phase 16A, tier 4+: one fast straight dive through the player's
+      // last-seen position, instead of only wiggling — a telegraphed but
+      // faster threat once mid-dive (locked direction, can't re-steer).
+      if (e.diveUntil && elapsedMs < e.diveUntil) {
+        e.x += (e.diveDx ?? 0) * dt;
+        e.y += (e.diveDy ?? 0) * dt;
+        return;
+      }
+      if (e.diveUntil && elapsedMs >= e.diveUntil) {
+        e.diveUntil = undefined;
+      }
+      if (
+        currentTier >= BAT_DIVE_MIN_TIER &&
+        elapsedMs - (e.lastDiveAt ?? -Infinity) >= BAT_DIVE_COOLDOWN_MS
+      ) {
+        e.lastDiveAt = elapsedMs;
+        e.diveUntil = elapsedMs + BAT_DIVE_DURATION_MS;
+        const angle = Math.atan2(player.y - e.y, player.x - e.x);
+        e.diveDx = Math.cos(angle) * BAT_DIVE_SPEED;
+        e.diveDy = Math.sin(angle) * BAT_DIVE_SPEED;
+        log.log("bat:dive", { tier: currentTier });
+        e.x += e.diveDx * dt;
+        e.y += e.diveDy * dt;
+        return;
+      }
       const toPlayerAngle = Math.atan2(player.y - e.y, player.x - e.x);
       e.wigglePhase = (e.wigglePhase ?? 0) + dt * 8;
       const wiggle = Math.sin(e.wigglePhase) * 0.6;
       const angle = toPlayerAngle + wiggle;
-      const def = ENEMY_DEFS.find((d) => d.kind === "bat")!;
       e.x += Math.cos(angle) * def.speed * dt;
       e.y += Math.sin(angle) * def.speed * dt;
       return;
@@ -1741,7 +2045,12 @@ export function startGame(
         e.x += Math.cos(angle) * def.speed * dt;
         e.y += Math.sin(angle) * def.speed * dt;
       }
-      if (elapsedMs - (e.lastRangedAt ?? 0) >= GHOST_FIRE_INTERVAL_MS) {
+      // Phase 16A, tier 3+: fire rate shortens.
+      const fireInterval =
+        currentTier >= GHOST_FIRE_MIN_TIER
+          ? GHOST_FIRE_INTERVAL_TIER3_MS
+          : GHOST_FIRE_INTERVAL_MS;
+      if (elapsedMs - (e.lastRangedAt ?? 0) >= fireInterval) {
         e.lastRangedAt = elapsedMs;
         const angle = Math.atan2(player.y - e.y, player.x - e.x);
         fireEnemyProjectile(
@@ -1752,6 +2061,80 @@ export function startGame(
           "ghost",
         );
       }
+      return;
+    }
+    if (e.kind === "zombie") {
+      const def = ENEMY_DEFS.find((d) => d.kind === "zombie")!;
+      // Phase 16A, tier 2+: a short speed burst toward the player when just
+      // outside contact range and the player is moving away — punishes
+      // kiting instead of just "walks straight at you."
+      if (e.lungeUntil && elapsedMs < e.lungeUntil) {
+        e.x += (e.lungeDx ?? 0) * dt;
+        e.y += (e.lungeDy ?? 0) * dt;
+        return;
+      }
+      if (e.lungeUntil && elapsedMs >= e.lungeUntil) {
+        e.lungeUntil = undefined;
+      }
+      if (
+        currentTier >= ZOMBIE_LUNGE_MIN_TIER &&
+        elapsedMs - (e.lastLungeAt ?? -Infinity) >= ZOMBIE_LUNGE_COOLDOWN_MS
+      ) {
+        const d = distance(player, e);
+        const playerSpeed = Math.hypot(playerVelX, playerVelY);
+        if (
+          d <= ZOMBIE_LUNGE_TRIGGER_RANGE &&
+          d > e.radius + PLAYER_RADIUS &&
+          playerSpeed > 0
+        ) {
+          const toPlayerAngle = Math.atan2(player.y - e.y, player.x - e.x);
+          const awayDot =
+            (playerVelX / playerSpeed) * Math.cos(toPlayerAngle) +
+            (playerVelY / playerSpeed) * Math.sin(toPlayerAngle);
+          if (awayDot > ZOMBIE_LUNGE_AWAY_DOT_THRESHOLD) {
+            e.lastLungeAt = elapsedMs;
+            e.lungeUntil = elapsedMs + ZOMBIE_LUNGE_DURATION_MS;
+            e.lungeDx =
+              Math.cos(toPlayerAngle) * def.speed * ZOMBIE_LUNGE_SPEED_MULT;
+            e.lungeDy =
+              Math.sin(toPlayerAngle) * def.speed * ZOMBIE_LUNGE_SPEED_MULT;
+            log.log("zombie:lunge", { tier: currentTier });
+            e.x += e.lungeDx * dt;
+            e.y += e.lungeDy * dt;
+            return;
+          }
+        }
+      }
+      // Phase 16B: "Haunting Chorus" — 2+ nearby Ghosts speed the Zombie up.
+      const speedMult = e.chorusBuffed ? HAUNTING_CHORUS_SPEED_MULT : 1;
+      const angle = Math.atan2(player.y - e.y, player.x - e.x);
+      e.x += Math.cos(angle) * def.speed * speedMult * dt;
+      e.y += Math.sin(angle) * def.speed * speedMult * dt;
+      return;
+    }
+    if (e.kind === "skeleton") {
+      const def = ENEMY_DEFS.find((d) => d.kind === "skeleton")!;
+      // Phase 16A, tier 3+: gains a slow periodic ranged bone-throw
+      // alongside its existing walk-approach — a melee-only enemy becomes a
+      // light ranged threat too. Reuses lastRangedAt as its own timer field
+      // (unused by skeleton before this).
+      if (
+        currentTier >= SKELETON_BONE_MIN_TIER &&
+        elapsedMs - (e.lastRangedAt ?? 0) >= SKELETON_BONE_INTERVAL_MS
+      ) {
+        e.lastRangedAt = elapsedMs;
+        const angle = Math.atan2(player.y - e.y, player.x - e.x);
+        fireEnemyProjectile(
+          e,
+          angle,
+          SKELETON_BONE_SPEED,
+          SKELETON_BONE_DAMAGE,
+          "skeleton-bone",
+        );
+      }
+      const angle = Math.atan2(player.y - e.y, player.x - e.x);
+      e.x += Math.cos(angle) * def.speed * dt;
+      e.y += Math.sin(angle) * def.speed * dt;
       return;
     }
     if (e.kind === "ogre") {
@@ -1768,12 +2151,23 @@ export function startGame(
           } else {
             log.log("ogre:slam-miss");
           }
-          e.slamReadyAt = elapsedMs + OGRE_SLAM_COOLDOWN_MS;
+          // Phase 16B: "Hype the Ogre" — 2+ nearby Bats halve the cooldown
+          // while they stay close.
+          e.slamReadyAt =
+            elapsedMs +
+            OGRE_SLAM_COOLDOWN_MS *
+              (e.hypedByBats ? HYPE_OGRE_COOLDOWN_MULT : 1);
         }
         return; // frozen mid-telegraph
       }
       if (d <= OGRE_SLAM_RANGE && elapsedMs >= (e.slamReadyAt ?? 0)) {
-        e.chargeUntil = elapsedMs + OGRE_SLAM_TELEGRAPH_MS;
+        // Phase 16A, tier 5+: shorter telegraph — harder to react to, same
+        // slam otherwise.
+        const telegraphMs =
+          currentTier >= OGRE_TELEGRAPH_MIN_TIER
+            ? OGRE_SLAM_TELEGRAPH_TIER5_MS
+            : OGRE_SLAM_TELEGRAPH_MS;
+        e.chargeUntil = elapsedMs + telegraphMs;
         e.baseWidth = e.width;
         e.baseHeight = e.height;
         e.width *= 1.4;
@@ -1865,11 +2259,6 @@ export function startGame(
       e.y += Math.sin(angle) * LICH_SPEED * dt;
       return;
     }
-    // zombie, skeleton: straight approach
-    const def = ENEMY_DEFS.find((d) => d.kind === e.kind)!;
-    const angle = Math.atan2(player.y - e.y, player.x - e.x);
-    e.x += Math.cos(angle) * def.speed * dt;
-    e.y += Math.sin(angle) * def.speed * dt;
   }
 
   function endGame(reason: "death" | "timer") {
@@ -1962,6 +2351,17 @@ export function startGame(
           Math.max(player.y + moveY * speed * dt, PLAYER_RADIUS),
           canvas.height - PLAYER_RADIUS,
         );
+        playerVelX = moveX * speed; // Phase 16A: zombie lunge's "moving away" check
+        playerVelY = moveY * speed;
+      } else {
+        playerVelX = 0;
+        playerVelY = 0;
+      }
+
+      // --- Phase 16B: enemy pack synergies, throttled scan (not per-frame) ---
+      if (elapsedMs - lastSynergyScanAt >= SYNERGY_SCAN_INTERVAL_MS) {
+        lastSynergyScanAt = elapsedMs;
+        runSynergyScan();
       }
 
       // --- boss telegraph, then trigger (relative, near run end) ---
@@ -2001,6 +2401,42 @@ export function startGame(
       // --- weapons (Phase 3: all owned weapons act every frame) ---
       for (const w of ownedWeapons) {
         updateWeapon(w, dt);
+      }
+
+      // --- Phase 16C: "Twin Fangs" — Bolt and Homing Dart both at Lv4+
+      // periodically fire together as a shared volley, alongside their own
+      // independent per-weapon fire timers above. ---
+      const twinFangsBolt = ownedWeapons.find((w) => w.id === "bolt");
+      const twinFangsDart = ownedWeapons.find((w) => w.id === "homingDart");
+      if (
+        twinFangsBolt &&
+        twinFangsDart &&
+        twinFangsBolt.level >= TWIN_FANGS_MIN_LEVEL &&
+        twinFangsDart.level >= TWIN_FANGS_MIN_LEVEL &&
+        elapsedMs - lastTwinFangsAt >= TWIN_FANGS_INTERVAL_MS
+      ) {
+        const target = findNearestEnemy();
+        if (target) {
+          lastTwinFangsAt = elapsedMs;
+          maybeTriggerSynergy("Twin Fangs");
+          const angle = Math.atan2(target.y - player.y, target.x - player.x);
+          spawnPlayerProjectile(
+            angle,
+            PROJECTILE_SPEED,
+            (6 + (twinFangsBolt.level - 1) * 2) * totalDamageMult(),
+            twinFangsBolt.level >= 4 ? 1 : 0,
+            "bolt",
+          );
+          const dart = spawnPlayerProjectile(
+            angle,
+            HOMING_DART_SPEED,
+            (5 + (twinFangsDart.level - 1) * 2) * totalDamageMult(),
+            0,
+            "homingDart",
+          );
+          dart.homingTarget = target;
+          dart.turnRate = HOMING_DART_TURN_RATE;
+        }
       }
 
       // --- player projectiles ---
@@ -2225,6 +2661,23 @@ export function startGame(
           glowColor: isElite ? "rgba(250, 204, 21, 0.9)" : e.color,
           flashAlpha,
         });
+        // Phase 16B: enemy pack synergy tell — a plain colored outline ring
+        // (cheap, no shadowBlur) so the buff is visible while it holds, not
+        // just felt as a stat change. Not gated by reduceMotion — it's
+        // gameplay-relevant information, not decoration.
+        if (e.hypedByBats || e.shieldWalled || e.chorusBuffed) {
+          context.save();
+          context.lineWidth = 2;
+          context.strokeStyle = e.hypedByBats
+            ? "rgba(249, 115, 22, 0.85)" // Hype the Ogre — orange
+            : e.shieldWalled
+              ? "rgba(226, 232, 240, 0.85)" // Shield Wall — pale
+              : "rgba(165, 243, 252, 0.85)"; // Haunting Chorus — cyan
+          context.beginPath();
+          context.arc(e.x, e.y, e.radius + 5, 0, Math.PI * 2);
+          context.stroke();
+          context.restore();
+        }
       }
       for (const p of projectiles) {
         drawProjectile(context, p.x, p.y, p.width / 2, p.color, p.dx, p.dy);
