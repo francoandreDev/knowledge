@@ -21,6 +21,7 @@ import { roadmap, getUnit } from "../data/roadmap";
 import { getWrittenUnits } from "../lib/curriculum";
 import { groupSlugsByTrack } from "../lib/progress-gauges";
 import { TRACK_CATEGORIES, CATEGORY_LABELS } from "../lib/track-categories";
+import { TRACK_ICON_PATHS } from "../lib/track-icon-paths";
 
 const writtenUnits = await getWrittenUnits();
 const writtenByTrack = new Map<string, number>();
@@ -124,26 +125,17 @@ const trackTags = new Map<string, string[]>(
 ---
 
 <Layout title="Home" wide>
-  <section class="relative overflow-hidden text-center sm:text-left">
-    <div
-      aria-hidden="true"
-      class="pointer-events-none absolute -top-28 left-1/2 -z-10 h-72 w-72 -translate-x-1/2 rounded-full opacity-[0.15] blur-3xl sm:left-0 sm:h-80 sm:w-80 sm:translate-x-0"
-      style="background: var(--accent)"
+  <!-- Quiet/editorial hero (mocked up and picked as "Option C"): no eyebrow
+       pill, no decorative background blur — bigger, tighter headline and
+       more whitespace carry the page instead of chrome around it. -->
+  <section class="text-center sm:text-left">
+    <h1
+      class="text-5xl font-extrabold tracking-tight sm:text-6xl"
+      style="letter-spacing: -0.02em; line-height: 1.08"
     >
-    </div>
-    <p
-      class="inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-500"
-    >
-      <Sparkles class="h-3.5 w-3.5" aria-hidden="true" />
-      A self-study curriculum
-    </p>
-    <h1 class="mt-2 text-4xl font-bold tracking-tight sm:text-5xl">
-      From junior to <span style="color: var(--accent-text)">staff-level</span>,
-      one problem at a time.
+      From junior to <span style="color: var(--accent-text)">staff-level.</span>
     </h1>
-    <p
-      class="mt-4 max-w-2xl text-lg text-slate-600 sm:mx-0 dark:text-slate-400"
-    >
+    <p class="mt-5 max-w-xl text-lg text-slate-500 sm:mx-0 dark:text-slate-400">
       {roadmap.tracks.length} tracks, each a sequence of real problems to understand
       — not a pile of definitions. One unit per session, by design.
     </p>
@@ -334,14 +326,39 @@ const trackTags = new Map<string, string[]>(
         <input
           type="search"
           name="search"
-          list="search-suggestions"
+          data-search-input
+          autocomplete="off"
+          role="combobox"
+          aria-expanded="false"
+          aria-autocomplete="list"
+          aria-controls="search-results-list"
           placeholder='Search topics — e.g. "debugging", "merge conflicts", "feedback"...'
           class="w-full rounded-lg border border-slate-200 bg-white py-2.5 pr-3 pl-9 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-slate-600"
         />
-        <datalist id="search-suggestions">
-          {roadmap.tracks.map((t) => <option value={t.name} />)}
-          {unitLookup.map((u) => <option value={u.problem} />)}
-        </datalist>
+        <!-- Custom suggestion dropdown — replaces a native <datalist>, which
+             the browser renders itself and gives no way to cap to a count or
+             restyle at all. Capped to 4 results client-side; built fresh on
+             every keystroke from the same unit-lookup JSON already embedded
+             for "continue learning", plus the track list and lucide icon
+             geometry (track-icon-paths.ts, already built for OG images) so
+             each row gets its track's real icon instead of a generic one. -->
+        <div
+          data-search-dropdown
+          class="absolute inset-x-0 top-full z-20 mt-1.5 hidden overflow-hidden rounded-lg border border-slate-200 bg-white text-left shadow-lg dark:border-slate-700 dark:bg-slate-900"
+        >
+          <div data-search-results id="search-results-list" role="listbox">
+          </div>
+          <div
+            class="flex items-center justify-between border-t border-slate-200 px-3 py-1.5 dark:border-slate-800"
+          >
+            <span class="text-[11px] text-slate-400 dark:text-slate-600"
+              >↑↓ navigate · ↵ select</span
+            >
+            <span
+              data-search-total
+              class="text-[11px] text-slate-400 dark:text-slate-600"></span>
+          </div>
+        </div>
       </div>
       <button
         type="submit"
@@ -777,6 +794,16 @@ const trackTags = new Map<string, string[]>(
     type="application/json"
     id="unit-lookup"
     set:html={JSON.stringify(unitLookup)}
+  />
+  <script
+    type="application/json"
+    id="track-list"
+    set:html={JSON.stringify(roadmap.tracks.map((t) => t.name))}
+  />
+  <script
+    type="application/json"
+    id="track-icon-paths"
+    set:html={JSON.stringify(TRACK_ICON_PATHS)}
   />
   <script
     type="application/json"
@@ -1583,5 +1610,219 @@ const trackTags = new Map<string, string[]>(
     }
     initSurpriseMe();
     document.addEventListener("astro:page-load", initSurpriseMe);
+
+    // Custom search dropdown — picked as "Option 3, command-palette style"
+    // from a mockup: compact rows, first match pre-selected, arrow-key nav,
+    // capped to 4 results with a total count. Replaces a native <datalist>,
+    // which the browser renders itself (no cap, no restyling possible).
+    interface SearchUnit {
+      track: string;
+      slug: string;
+      problem: string;
+    }
+    interface SearchResult {
+      label: string;
+      track: string;
+      href: string;
+    }
+    interface IconNode {
+      type: string;
+      props: Record<string, string | number>;
+    }
+
+    function buildSearchRowIcon(
+      iconPaths: Record<string, IconNode[]>,
+      track: string,
+      selected: boolean,
+    ): SVGSVGElement {
+      const svgNS = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(svgNS, "svg");
+      svg.setAttribute("width", "13");
+      svg.setAttribute("height", "13");
+      svg.setAttribute("viewBox", "0 0 24 24");
+      svg.setAttribute("fill", "none");
+      svg.setAttribute("stroke", "currentColor");
+      svg.setAttribute("stroke-width", "2");
+      svg.setAttribute("stroke-linecap", "round");
+      svg.setAttribute("stroke-linejoin", "round");
+      svg.setAttribute("aria-hidden", "true");
+      svg.setAttribute(
+        "class",
+        `shrink-0 ${selected ? "" : "text-slate-400 dark:text-slate-600"}`,
+      );
+      if (selected) svg.style.color = "var(--accent-text)";
+      for (const node of iconPaths[track] ?? []) {
+        const el = document.createElementNS(svgNS, node.type);
+        for (const [key, value] of Object.entries(node.props)) {
+          el.setAttribute(key, String(value));
+        }
+        svg.appendChild(el);
+      }
+      return svg;
+    }
+
+    function initSearchDropdown() {
+      const input = document.querySelector<HTMLInputElement>(
+        "[data-search-input]",
+      );
+      const form = input?.closest("form");
+      const dropdown = document.querySelector<HTMLElement>(
+        "[data-search-dropdown]",
+      );
+      const resultsHost = document.querySelector<HTMLElement>(
+        "[data-search-results]",
+      );
+      const totalEl = document.querySelector<HTMLElement>(
+        "[data-search-total]",
+      );
+      const unitsEl = document.getElementById("unit-lookup");
+      const tracksEl = document.getElementById("track-list");
+      const iconsEl = document.getElementById("track-icon-paths");
+      if (
+        !input ||
+        !form ||
+        !dropdown ||
+        !resultsHost ||
+        !totalEl ||
+        !unitsEl ||
+        !tracksEl ||
+        !iconsEl
+      )
+        return;
+      if (input.dataset.searchWired === "true") return;
+      input.dataset.searchWired = "true";
+
+      let units: SearchUnit[] = [];
+      let tracks: string[] = [];
+      let iconPaths: Record<string, IconNode[]> = {};
+      try {
+        units = JSON.parse(unitsEl.textContent || "[]");
+      } catch {
+        // Malformed embed — search just finds nothing.
+      }
+      try {
+        tracks = JSON.parse(tracksEl.textContent || "[]");
+      } catch {
+        // Malformed embed — track matches just don't appear.
+      }
+      try {
+        iconPaths = JSON.parse(iconsEl.textContent || "{}");
+      } catch {
+        // Malformed embed — rows render with no icon.
+      }
+
+      const MAX_RESULTS = 4;
+      let results: SearchResult[] = [];
+      let activeIndex = 0;
+
+      function computeResults(query: string): {
+        shown: SearchResult[];
+        total: number;
+      } {
+        const q = query.trim().toLowerCase();
+        if (!q) return { shown: [], total: 0 };
+        const unitMatches: SearchResult[] = units
+          .filter((u) => u.problem.toLowerCase().includes(q))
+          .map((u) => ({
+            label: u.problem,
+            track: u.track,
+            href: `/${u.track}/${u.slug}/`,
+          }));
+        const trackMatches: SearchResult[] = tracks
+          .filter((t) => t.toLowerCase().includes(q))
+          .map((t) => ({ label: t, track: t, href: `/${t}/` }));
+        const all = [...unitMatches, ...trackMatches];
+        return { shown: all.slice(0, MAX_RESULTS), total: all.length };
+      }
+
+      function renderResults() {
+        resultsHost!.innerHTML = "";
+        results.forEach((r, i) => {
+          const selected = i === activeIndex;
+          const row = document.createElement("a");
+          row.href = r.href;
+          row.id = `search-result-${i}`;
+          row.setAttribute("role", "option");
+          row.setAttribute("aria-selected", String(selected));
+          row.className = `flex items-center gap-2 px-3 py-2 text-sm ${
+            selected ? "bg-slate-100 dark:bg-slate-800" : ""
+          }`;
+          row.appendChild(buildSearchRowIcon(iconPaths, r.track, selected));
+          const text = document.createElement("span");
+          text.className = `flex-1 truncate ${
+            selected
+              ? "text-slate-900 dark:text-slate-100"
+              : "text-slate-600 dark:text-slate-400"
+          }`;
+          text.textContent = r.label;
+          const tag = document.createElement("span");
+          tag.className = `shrink-0 text-[10px] ${
+            selected
+              ? "text-slate-500 dark:text-slate-500"
+              : "text-slate-400 dark:text-slate-600"
+          }`;
+          tag.textContent = r.track;
+          row.append(text, tag);
+          resultsHost!.appendChild(row);
+        });
+        input!.setAttribute(
+          "aria-activedescendant",
+          results.length ? `search-result-${activeIndex}` : "",
+        );
+      }
+
+      function openDropdown() {
+        dropdown!.classList.remove("hidden");
+        input!.setAttribute("aria-expanded", "true");
+      }
+      function closeDropdown() {
+        dropdown!.classList.add("hidden");
+        input!.setAttribute("aria-expanded", "false");
+      }
+
+      function update() {
+        const { shown, total } = computeResults(input!.value);
+        results = shown;
+        activeIndex = 0;
+        if (results.length === 0) {
+          closeDropdown();
+          return;
+        }
+        totalEl!.textContent = total === 1 ? "1 result" : `${total} results`;
+        renderResults();
+        openDropdown();
+      }
+
+      input.addEventListener("input", update);
+      input.addEventListener("focus", () => {
+        if (input.value.trim()) update();
+      });
+      input.addEventListener("keydown", (e) => {
+        if (dropdown!.classList.contains("hidden") || results.length === 0)
+          return;
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          activeIndex = (activeIndex + 1) % results.length;
+          renderResults();
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          activeIndex = (activeIndex - 1 + results.length) % results.length;
+          renderResults();
+        } else if (e.key === "Enter") {
+          const pick = results[activeIndex];
+          if (pick) {
+            e.preventDefault();
+            window.location.href = pick.href;
+          }
+        } else if (e.key === "Escape") {
+          closeDropdown();
+        }
+      });
+      document.addEventListener("click", (e) => {
+        if (!form.contains(e.target as Node)) closeDropdown();
+      });
+    }
+    initSearchDropdown();
+    document.addEventListener("astro:page-load", initSearchDropdown);
   </script>
 </Layout>
