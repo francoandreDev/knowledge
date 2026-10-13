@@ -7,6 +7,7 @@ import ProgressGauge from "../components/ProgressGauge.astro";
 import {
   Search,
   ArrowRight,
+  ArrowLeft,
   Sparkles,
   HelpCircle,
   Shuffle,
@@ -202,16 +203,32 @@ const CATEGORY_LABELS: Record<string, string> = {
         <div
           data-carousel-track
           data-due-review-cards
-          class="flex gap-3 overflow-x-auto pb-1"
+          class="no-scrollbar flex gap-3 overflow-x-auto pb-1"
         >
         </div>
         <div
-          data-carousel-fade
+          data-carousel-fade-start
+          aria-hidden="true"
+          class="pointer-events-none absolute inset-y-0 left-0 hidden w-12"
+          style="background: linear-gradient(to right, color-mix(in srgb, var(--gauge-warn) 10%, transparent), transparent)"
+        >
+        </div>
+        <div
+          data-carousel-fade-end
           aria-hidden="true"
           class="pointer-events-none absolute inset-y-0 right-0 hidden w-12"
           style="background: linear-gradient(to left, color-mix(in srgb, var(--gauge-warn) 10%, transparent), transparent)"
         >
         </div>
+        <button
+          type="button"
+          data-carousel-prev
+          aria-label="Show previous review cards"
+          class="absolute top-1/2 left-0 hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-white shadow"
+          style="background: var(--gauge-warn)"
+        >
+          <ArrowLeft class="h-4 w-4" aria-hidden="true" />
+        </button>
         <button
           type="button"
           data-carousel-next
@@ -549,13 +566,15 @@ const CATEGORY_LABELS: Record<string, string> = {
         </div>
       </div>
       <div
-        class="grid flex-1 grid-cols-4 gap-2 border-l border-slate-200 pl-6 sm:grid-cols-6 xl:grid-cols-9 dark:border-slate-800"
+        data-track-mini-grid
+        class="hidden flex-1 grid-cols-4 gap-2 border-l border-slate-200 pl-6 sm:grid-cols-6 xl:grid-cols-9 dark:border-slate-800"
       >
         {
           gaugeTracks.map((t) => (
             <a
               href={`/${t.name}/`}
-              class="flex flex-col items-center gap-1 rounded-lg p-1.5 text-center transition hover:bg-slate-100 dark:hover:bg-slate-800"
+              data-track={t.name}
+              class="hidden flex-col items-center gap-1 rounded-lg p-1.5 text-center transition hover:bg-slate-100 dark:hover:bg-slate-800"
               title={t.name}
             >
               <ProgressGauge
@@ -646,7 +665,7 @@ const CATEGORY_LABELS: Record<string, string> = {
             <span
               data-inprogress-badge
               class="pointer-events-none absolute top-2 left-2 z-10 hidden items-center gap-1 rounded-full px-2 py-1 text-[10px] font-semibold text-white shadow-sm"
-              style="background: var(--accent-text)"
+              style="background: var(--gauge-accent)"
             >
               In progress
             </span>
@@ -962,6 +981,32 @@ const CATEGORY_LABELS: Record<string, string> = {
         });
     }
 
+    // "Your journey" used to list all 18 tracks' mini progress rings right
+    // above the full illustrated track grid, which repeats the same
+    // per-track state twice before the reader reaches anything new. Narrow
+    // it to a "jump back into what you've started" shortcut instead — the
+    // full grid below already covers everything else, with more context per
+    // track (illustration, tags, "in progress" badge) than a tiny ring can.
+    function applyJourneyTrackGrid(trackUnits: Record<string, string[]>) {
+      const counts = countDoneByTrack(trackUnits);
+      const container = document.querySelector<HTMLElement>(
+        "[data-track-mini-grid]",
+      );
+      if (!container) return;
+      let shown = 0;
+      container
+        .querySelectorAll<HTMLElement>("[data-track]")
+        .forEach((item) => {
+          const track = item.dataset.track;
+          const started = !!track && (counts[track] ?? 0) > 0;
+          item.classList.toggle("hidden", !started);
+          item.classList.toggle("flex", started);
+          if (started) shown++;
+        });
+      container.classList.toggle("hidden", shown === 0);
+      container.classList.toggle("grid", shown > 0);
+    }
+
     function initTrackGauges() {
       const el = document.getElementById("track-unit-slugs");
       if (!el) return;
@@ -973,6 +1018,7 @@ const CATEGORY_LABELS: Record<string, string> = {
       }
       applyTrackGauges(map);
       applyTrackCardWeight(map);
+      applyJourneyTrackGrid(map);
 
       const totalWritten = Object.values(map).reduce(
         (n, arr) => n + arr.length,
@@ -1106,22 +1152,44 @@ const CATEGORY_LABELS: Record<string, string> = {
     // button, both of which disappear once there's nothing left to scroll to.
     function wireCarouselAffordance(root: HTMLElement) {
       const track = root.querySelector<HTMLElement>("[data-carousel-track]");
-      const fade = root.querySelector<HTMLElement>("[data-carousel-fade]");
+      const fadeStart = root.querySelector<HTMLElement>(
+        "[data-carousel-fade-start]",
+      );
+      const fadeEnd = root.querySelector<HTMLElement>(
+        "[data-carousel-fade-end]",
+      );
+      const prev = root.querySelector<HTMLButtonElement>(
+        "[data-carousel-prev]",
+      );
       const next = root.querySelector<HTMLButtonElement>(
         "[data-carousel-next]",
       );
-      if (!track || !fade || !next) return;
+      if (!track || !fadeStart || !fadeEnd || !prev || !next) return;
 
+      // Symmetric in both directions — the first pass only ever showed a
+      // forward arrow, so once a reader scrolled right there was no visible
+      // way back except the (now-hidden) native scrollbar or a swipe gesture.
       function update() {
         if (!track) return;
         const overflows = track.scrollWidth > track.clientWidth + 4;
+        const atStart = track.scrollLeft <= 4;
         const atEnd =
           track.scrollLeft + track.clientWidth >= track.scrollWidth - 4;
-        const show = overflows && !atEnd;
-        fade?.classList.toggle("hidden", !show);
-        next?.classList.toggle("hidden", !show);
-        next?.classList.toggle("flex", show);
+        const showPrev = overflows && !atStart;
+        const showNext = overflows && !atEnd;
+        fadeStart?.classList.toggle("hidden", !showPrev);
+        fadeEnd?.classList.toggle("hidden", !showNext);
+        prev?.classList.toggle("hidden", !showPrev);
+        prev?.classList.toggle("flex", showPrev);
+        next?.classList.toggle("hidden", !showNext);
+        next?.classList.toggle("flex", showNext);
       }
+      prev.addEventListener("click", () => {
+        track.scrollBy({
+          left: -track.clientWidth * 0.8,
+          behavior: "smooth",
+        });
+      });
       next.addEventListener("click", () => {
         track.scrollBy({ left: track.clientWidth * 0.8, behavior: "smooth" });
       });
