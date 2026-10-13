@@ -7,10 +7,10 @@
       "level": 1,
       "prompt": "Two services both write to `orders.total` inside their own valid SQL transactions, and a lost update still lets an order exceed its credit limit. What does that show?",
       "choices": [
-        "SQL transactions don't actually guarantee atomicity",
+        "SQL transactions don't actually guarantee atomicity under concurrent load at all",
         "A transaction protects one write's atomicity, but has no idea which combined states are valid for your domain",
-        "The bug means neither service was using transactions correctly",
-        "This can only happen with a database that doesn't support isolation levels"
+        "The bug means neither service was wrapping its write in a database transaction correctly",
+        "This specific failure can only happen on a database that doesn't support isolation levels"
       ],
       "correctIndex": 1,
       "explanation": "Each write was atomic on its own — that's exactly what a transaction guarantees. What was missing was a rule enforced across the writes: 'total must never exceed the credit limit.' No transaction knows your business rules; only your model does.",
@@ -24,9 +24,9 @@
       "prompt": "Request A and Request B both read an order's total as $95 at the same instant, then each independently compute and write a new total. What kind of bug is this?",
       "choices": [
         "A lost update — one writer's change is silently overwritten because neither read the other's in-flight change",
-        "A deadlock — both requests are blocked waiting on each other",
-        "A SQL injection vulnerability",
-        "A currency rounding error"
+        "A deadlock — both requests are blocked indefinitely, each waiting on a lock the other holds",
+        "A SQL injection vulnerability introduced by unsanitized user input in the request",
+        "A currency rounding error introduced somewhere in the total calculation"
       ],
       "correctIndex": 0,
       "explanation": "This is a classic lost update: both writers computed their new value from the same stale snapshot, so whichever writes last wins and the other writer's change vanishes with no error raised anywhere.",
@@ -40,9 +40,9 @@
       "prompt": "An order ships with 2 line items but a total that only reflects 1 of them, and the credit limit was never actually checked against the true total. What was the underlying design gap?",
       "choices": [
         "No single place enforced 'total plus every added line must stay under the credit limit' on every write",
-        "The credit limit itself was set too low",
-        "The two services should have used the same programming language",
-        "The order table was missing a foreign key constraint"
+        "The credit limit itself was configured too low for this customer's tier",
+        "The two services should have been written in the same programming language",
+        "The order table was missing a foreign key constraint on the customer column"
       ],
       "correctIndex": 0,
       "explanation": "The gap wasn't a missing constraint on one table — it was that no single piece of code owned checking the combined invariant (total vs. credit limit) every time something changed it.",
@@ -56,9 +56,9 @@
       "prompt": "What is an aggregate root's main job?",
       "choices": [
         "Being the single entry point for changes to the cluster of objects it owns, checking invariants on every mutation",
-        "Storing the aggregate's data in a single database table",
-        "Formatting the aggregate's fields for display in an API response",
-        "Logging every read of the aggregate for auditing"
+        "Storing all of the aggregate's data inside a single, denormalized database table",
+        "Formatting the aggregate's fields for display inside an outgoing API response",
+        "Logging every single read of the aggregate's fields for auditing purposes"
       ],
       "correctIndex": 0,
       "explanation": "The aggregate root is the gatekeeper: every change to any object inside the aggregate goes through one of its methods, and that's where invariants get checked, every time, with no other way in.",
@@ -71,10 +71,10 @@
       "level": 1,
       "prompt": "In the Order example, why can't code elsewhere in the system just call `orderLine.setQuantity(5)` directly on a line inside an order?",
       "choices": [
-        "Because OrderLine objects are read-only by the database",
+        "Because OrderLine objects are treated as read-only once persisted to the database",
         "Because that would bypass Order's invariant checks entirely — the whole point of routing changes through the root",
-        "Because OrderLine doesn't have a setQuantity method in any language",
-        "Because quantities can only be set when the order is first created"
+        "Because OrderLine simply doesn't expose a setQuantity method in any supported language",
+        "Because quantities are only allowed to be set at the moment the order is first created"
       ],
       "correctIndex": 1,
       "explanation": "If anything outside the aggregate can mutate a child object directly, the root's invariant-checking methods become optional rather than mandatory — and the shortest path through the code wins over the safe one.",
@@ -88,9 +88,9 @@
       "prompt": "Which of these best describes an 'aggregate' as DDD uses the term?",
       "choices": [
         "A cluster of objects that must be treated as one consistency unit because a business rule spans more than one of them",
-        "Any group of database tables that are joined together in a query",
-        "A cached, denormalized read model used for reporting",
-        "A microservice that owns more than one REST endpoint"
+        "Any group of database tables that happen to be joined together in a single query",
+        "A cached, denormalized read model that's only ever built for reporting purposes",
+        "A microservice that happens to own more than one REST endpoint internally"
       ],
       "correctIndex": 0,
       "explanation": "An aggregate is a modeling decision, not a database or infrastructure concept — it's about which objects have to be checked together, every time, because at least one rule depends on more than one of them at once.",
@@ -104,8 +104,8 @@
       "prompt": "`OrderLine #7`'s quantity changes from 2 to 3. Is it still considered line 7, or a new object?",
       "choices": [
         "Still line 7 — its identity persists across the change, which is what makes it an entity",
-        "A new object — any change to its fields creates a different line",
-        "It depends on whether the database assigns a new primary key",
+        "A new object entirely — any change to its fields would create a genuinely different line",
+        "It depends entirely on whether the database happens to assign it a new primary key",
         "Neither — OrderLine has no identity at all"
       ],
       "correctIndex": 0,
@@ -120,9 +120,9 @@
       "prompt": "Two separate `Money($10)` objects exist in the system. Are they 'the same one' or just equal?",
       "choices": [
         "Just equal — value objects have no identity, they're compared purely by their contents",
-        "The same one — there can only be one instance of any given amount",
+        "The same one — there can only ever be a single instance of any given amount in memory",
         "It depends on which one was created first",
-        "Neither — Money objects can't be compared at all"
+        "Neither — Money objects with different currencies can never be compared at all"
       ],
       "correctIndex": 0,
       "explanation": "Value objects are interchangeable by design: you never ask 'which $10 is this, specifically,' only 'does this amount equal that one.' That's the whole distinction from an entity.",
@@ -136,8 +136,8 @@
       "prompt": "What does a repository do in this pattern?",
       "choices": [
         "It's the only door in and out of an aggregate's storage — it loads and saves whole aggregates, never a lone child object",
-        "It's a folder in the codebase where all the domain classes live",
-        "It's a caching layer that sits in front of the database for performance",
+        "It's simply a folder in the codebase where all the domain classes happen to live",
+        "It's a caching layer that sits in front of the database purely for performance reasons",
         "It converts domain objects into HTML for rendering"
       ],
       "correctIndex": 0,
@@ -153,8 +153,8 @@
       "choices": [
         "Because giving OrderLine its own repository would let code save a line without ever going through Order's invariant checks",
         "Because OrderLine data doesn't actually need to be persisted",
-        "Because a repository can only exist for the very first class defined in a file",
-        "Because OrderLine and Order must always share a single database table"
+        "Because a repository can only ever exist for the very first class defined in a file",
+        "Because OrderLine and Order must always be mapped to a single shared database table"
       ],
       "correctIndex": 0,
       "explanation": "The absence is deliberate: exposing a repository for a child object would recreate exactly the bug from L1 — a write path that skips the aggregate root's invariant checks entirely.",
@@ -168,8 +168,8 @@
       "prompt": "What is a domain event, in this pattern?",
       "choices": [
         "A record, raised from inside the aggregate root, of something that actually happened — published for other parts of the system to react to",
-        "A log line written to a monitoring dashboard",
-        "A scheduled cron job that runs periodic maintenance",
+        "A log line that simply gets written out to an external monitoring and alerting dashboard for operators",
+        "A scheduled cron job that's configured to run periodic background maintenance tasks on a timer",
         "A validation error returned to the caller when an invariant is violated"
       ],
       "correctIndex": 0,
@@ -184,8 +184,8 @@
       "prompt": "Why doesn't `Order.placeOrder()` just call Billing's API directly instead of raising a domain event?",
       "choices": [
         "Calling Billing directly would couple Order to Billing's availability and shape — exactly what bounded contexts exist to avoid",
-        "Because Order objects aren't allowed to make network calls under any circumstances",
-        "Because Billing's API doesn't accept order data in any format",
+        "Because Order objects simply aren't allowed to make network calls under any circumstances",
+        "Because Billing's public API doesn't accept order data in any format it could call",
         "Because domain events are faster than API calls, and that's the only reason to prefer them"
       ],
       "correctIndex": 0,
@@ -216,9 +216,9 @@
       "prompt": "A single SQL transaction guarantees a write is atomic. Why isn't that enough to prevent an aggregate's invariant from being violated?",
       "choices": [
         "Atomicity only protects one write from being partially applied — it says nothing about what combination of values across multiple writes is actually valid for your domain",
-        "SQL transactions are inherently unreliable and randomly fail",
+        "SQL transactions are inherently unreliable in general and will fail at essentially random, unpredictable intervals",
         "Atomicity and consistency are the same guarantee, so this shouldn't be possible",
-        "Because transactions only work within a single table"
+        "Because database transactions, by design, only ever provide any guarantee within a single table at a time"
       ],
       "correctIndex": 0,
       "explanation": "A transaction's guarantee is narrow and mechanical: this one write either fully happens or doesn't. Nothing about that tells the database which combined states are meaningful — that has to come from code that models the rule explicitly.",
@@ -232,9 +232,9 @@
       "prompt": "Why is an aggregate boundary described as a 'modeling decision' rather than a database concept?",
       "choices": [
         "Because it's chosen based on which business rules span multiple objects at once, not based on how tables happen to be structured",
-        "Because aggregates only exist in NoSQL databases",
+        "Because aggregates, as a modeling concept, only exist when using a NoSQL database",
         "Because the database schema always dictates the aggregate boundary automatically",
-        "Because it's an arbitrary choice with no consequences either way"
+        "Because it's ultimately an arbitrary modeling choice with no real consequences either way"
       ],
       "correctIndex": 0,
       "explanation": "The boundary is drawn around 'the smallest cluster of objects that must be consistent with each other on every write' — a decision about the domain's rules, which a schema can support but doesn't determine on its own.",
@@ -248,8 +248,8 @@
       "prompt": "If `addLine`'s credit-limit check were moved to a separate validation step run just before `placeOrder`, instead of inside `addLine` itself, what would break?",
       "choices": [
         "The order could sit in an invalid state (over the limit) for however long it takes to reach that separate check, and any code reading it in between would see an impossible value",
-        "Nothing — validating at the end is equivalent to validating on every step",
-        "The order's total would be calculated incorrectly",
+        "Nothing meaningful at all — validating once at the very end turns out to be functionally equivalent to validating on every intermediate step",
+        "The order's running total would simply end up being calculated incorrectly",
         "The domain event would fire twice"
       ],
       "correctIndex": 0,
@@ -264,8 +264,8 @@
       "prompt": "Why is `Customer` modeled as a separate aggregate from `Order`, referenced only by ID, instead of nested inside it?",
       "choices": [
         "Customer has its own lifecycle and write volume; folding it into Order would mean every order write also contends for a lock on the customer record",
-        "Because Customer and Order are always owned by different teams",
-        "Because a single aggregate can never reference more than one other object",
+        "Because Customer and Order happen to always be owned by two different engineering teams",
+        "Because, by definition, a single aggregate can never reference more than one other object",
         "Because Order doesn't need any information about the customer at all"
       ],
       "correctIndex": 0,
@@ -280,9 +280,9 @@
       "prompt": "What real cost comes from modeling `Money` as an entity instead of a value object?",
       "choices": [
         "You'd end up writing identity-tracking and mutation code that nothing in the domain actually needs",
-        "Money amounts would no longer be able to support addition",
+        "Money amounts would no longer be able to support ordinary addition between two instances",
         "The application would run measurably slower due to extra database calls",
-        "There would be no cost — the two models are functionally identical"
+        "There would be no cost at all — the two modeling approaches are functionally identical here"
       ],
       "correctIndex": 0,
       "explanation": "Money never needs to answer 'which one, specifically' — only 'what does it equal.' Giving it identity means building machinery (tracking, mutation, equality-by-reference) to solve a problem the domain doesn't have.",
@@ -296,9 +296,9 @@
       "prompt": "What real cost comes from modeling `OrderLine` as a value object instead of an entity?",
       "choices": [
         "You'd lose the ability to say 'update line 7's quantity' — any change would just produce a different, unrelated value with no continuity to the original line",
-        "OrderLine would no longer be able to store a product ID",
+        "OrderLine would simply no longer be able to store a product ID on the object",
         "The order's total would be computed incorrectly",
-        "There would be no cost — OrderLine's quantity never changes in practice"
+        "There would be no real cost at all here, since OrderLine's quantity essentially never changes once an order is placed"
       ],
       "correctIndex": 0,
       "explanation": "Entities are what let you talk about 'the same thing, changed' — a value object has no such continuity. Without identity, 'change line 7's quantity' has no meaning; you'd just have two unrelated values.",
@@ -312,8 +312,8 @@
       "prompt": "Two `OrderLine` objects have identical productId, quantity, and unitPrice. Are they the same line?",
       "choices": [
         "Not necessarily — as entities, their identity (their id) is what determines sameness, not whether their other fields happen to match",
-        "Yes, always — identical fields always mean identical entities",
-        "It depends on which database column is marked UNIQUE",
+        "Yes, always — two entities with identical field values are always the same entity",
+        "It depends entirely on which database column happens to be marked UNIQUE",
         "Entities can never have identical field values"
       ],
       "correctIndex": 0,
@@ -328,8 +328,8 @@
       "prompt": "Why does `OrderRepository.save()` take an entire `Order`, rather than accepting a smaller update like 'append this OrderLine'?",
       "choices": [
         "A narrower save operation would let code persist a change to order_items without ever going through Order's invariant-checking methods",
-        "Saving a whole object is always faster than saving a partial update",
-        "TypeScript interfaces cannot express partial update methods",
+        "Saving a whole aggregate at once is always strictly faster than saving a partial update",
+        "TypeScript's interface system simply cannot express a partial-update method signature",
         "It's purely a stylistic convention with no functional consequence"
       ],
       "correctIndex": 0,
@@ -344,8 +344,8 @@
       "prompt": "An ORM makes it easy to call `.save()` directly on a single `OrderLine` row. Why is using that convenience a problem here, even if it's technically simpler code?",
       "choices": [
         "It bypasses the aggregate root's invariant checks entirely, recreating the same class of bug the aggregate boundary was introduced to prevent",
-        "ORMs are always slower than hand-written SQL",
-        "OrderLine rows cannot be represented in a relational database",
+        "ORMs are always meaningfully slower than carefully hand-written SQL in every case",
+        "OrderLine rows simply cannot be represented at all inside any relational database schema, full stop",
         "It would violate the database's foreign key constraints"
       ],
       "correctIndex": 0,
@@ -360,8 +360,8 @@
       "prompt": "Why does the sequence publish `OrderPlaced` only after `repository.save(order)` succeeds, rather than the instant the event is recorded inside `placeOrder()`?",
       "choices": [
         "If the save then failed, downstream contexts would already have been told about a change that was never actually persisted",
-        "Events recorded before a save are always lost by the runtime",
-        "Publishing early would violate TypeScript's type system",
+        "Events recorded before a save completes are always silently lost by the runtime itself",
+        "Publishing early would directly violate a rule enforced by TypeScript's type system",
         "There's no real difference — both orderings behave identically"
       ],
       "correctIndex": 0,
@@ -376,8 +376,8 @@
       "prompt": "In the sequence diagram, `pullDomainEvents()` is called by the application layer, not from inside `placeOrder()` itself. Why keep that split?",
       "choices": [
         "It lets the aggregate root record what happened without deciding when or whether it's safe to actually announce it to the rest of the system — that call belongs after persistence succeeds",
-        "Because aggregate roots aren't allowed to have private fields",
-        "Because pullDomainEvents() must always run on a separate thread",
+        "Because aggregate roots, by strict convention in this codebase, simply aren't permitted to have any private fields at all",
+        "Because the pullDomainEvents() method is required by the framework to always run on a separate background thread",
         "There's no reason — the two could be merged into one call safely"
       ],
       "correctIndex": 0,
@@ -393,8 +393,8 @@
       "choices": [
         "Customer-supplier — both answer to the same organization, so downstream's needs can feed upstream's priorities",
         "Conformist — downstream must adopt whatever upstream provides with no influence",
-        "Shared kernel — both teams jointly own a single piece of the model",
-        "Anticorruption layer — this describes a translation technique, not a relationship type"
+        "Shared kernel — both teams jointly own and co-evolve a single piece of the shared model",
+        "Anticorruption layer — this option actually describes a translation technique, not a relationship type"
       ],
       "correctIndex": 0,
       "explanation": "Customer-supplier specifically describes a relationship where the downstream team has real standing to prioritize its needs against the upstream team's backlog — something only possible when both report to the same organization.",

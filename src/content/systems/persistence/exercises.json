@@ -7,10 +7,10 @@
       "level": 1,
       "prompt": "Why does a program's data survive a crash if it was written to disk, but not if it was only sitting in a regular in-memory variable?",
       "choices": [
-        "Disk is faster than RAM, so it processes the data before the crash happens",
+        "Disk is faster than RAM for sequential writes, so the kernel finishes flushing disk-bound data before a crash can interrupt it",
         "RAM is volatile — its contents depend on continuous power and vanish immediately on crash/reboot; disk (SSD/HDD) is non-volatile and retains its contents with no power at all",
-        "There's no real difference; both survive equally well",
-        "Disk data survives because the OS automatically backs it up to the cloud"
+        "There's no real difference — RAM and disk are both volatile, they just use different voltage thresholds before the stored bit decays",
+        "Disk data survives because the OS automatically mirrors every write to a cloud backup service before the write() call returns"
       ],
       "correctIndex": 1,
       "explanation": "This is the foundational distinction the whole unit builds on: volatility. RAM (including in-process variables and the OS page cache) needs continuous power; disk doesn't. Anything that only ever touched RAM is gone the instant power is lost, regardless of how the program was designed.",
@@ -24,10 +24,10 @@
       "level": 1,
       "prompt": "A script holds a value only in a local variable and never writes it anywhere. The machine loses power. After reboot, is that value recoverable?",
       "choices": [
-        "Yes, the OS caches all variables to disk automatically",
+        "Yes, modern operating systems transparently cache every local variable's value to disk in the background",
         "No — a local variable lives only in RAM (process memory), which is volatile and depends on continuous power; nothing wrote it anywhere non-volatile",
-        "Yes, but only if the script was running as root/administrator",
-        "It depends on the programming language used"
+        "Yes, but only if the script was running with root/administrator privileges at the time of the crash",
+        "It depends entirely on which programming language the script was written in, not on where the value lived"
       ],
       "correctIndex": 1,
       "explanation": "A variable that's never written to disk exists purely in volatile memory. There is no non-volatile copy anywhere, so there is nothing for a reboot to recover — this isn't a bug or a missed setting, it's the defining property of RAM.",
@@ -41,10 +41,10 @@
       "level": 1,
       "prompt": "What makes disk (SSD/HDD) fundamentally different from RAM for the purposes of surviving a crash?",
       "choices": [
-        "Disk is simply a bigger version of RAM",
+        "Disk is simply a bigger, slower version of RAM, built internally from the same kind of volatile memory cells and controller logic",
         "Disk is non-volatile — it physically retains its stored state (magnetic orientation or trapped charge) with zero power, unlike RAM which needs continuous power to hold its contents",
-        "Disk and RAM are equally volatile, but disk has better error correction",
-        "Nothing — modern RAM is also non-volatile"
+        "Disk and RAM are equally volatile under the hood, but disk happens to ship with better built-in error correction hardware",
+        "Nothing meaningfully different anymore — modern RAM modules are effectively non-volatile once a system has been running a while"
       ],
       "correctIndex": 1,
       "explanation": "Non-volatility is a physical property of the storage medium, not a software feature. Disk encodes data as a physical state that persists with no power at all, which is the entire reason it's the tier used for anything meant to survive a crash or reboot.",
@@ -58,10 +58,10 @@
       "level": 1,
       "prompt": "A program calls write() on a file and it returns successfully with no error. Does this guarantee the data would survive a crash happening immediately afterward?",
       "choices": [
-        "Yes — a successful write() always means the data is physically on disk",
+        "Yes — a successful write() call always means the kernel has already pushed the data all the way to the physical disk",
         "No — write() typically only guarantees the data reached the OS page cache (RAM), which is still volatile; fsync() is the call that waits for actual physical durability",
-        "Yes, but only on Windows systems",
-        "No, write() calls never actually persist data under any circumstances"
+        "Yes, but this guarantee only holds on Windows systems, not on Unix-like operating systems",
+        "No — write() calls never persist data to disk under any circumstances, with or without fsync"
       ],
       "correctIndex": 1,
       "explanation": "The OS page cache is a fast, in-RAM buffer that write() typically only needs to reach to return successfully — it's a real optimization, but it means 'write() succeeded' and 'this is crash-durable' are different claims, and only fsync() closes that gap.",
@@ -75,10 +75,10 @@
       "level": 1,
       "prompt": "Why does the OS buffer writes in a page cache instead of sending every write straight to disk?",
       "choices": [
-        "It doesn't — every write() always goes directly to the physical disk immediately",
+        "It doesn't — every write() call is sent straight to the physical disk immediately, with no RAM buffering involved",
         "Because physical disk I/O is comparatively slow, so buffering in fast RAM first lets write() return quickly, deferring the slower physical flush",
-        "Because disks cannot accept data unless it arrives in RAM first, as a hardware requirement",
-        "Because page caching is only used for reads, never for writes"
+        "Because disks have a hardware requirement that data must land in RAM first before the disk controller can accept it",
+        "Because page caching only applies to reads from disk, and plain write() calls never touch the page cache at all"
       ],
       "correctIndex": 1,
       "explanation": "Page caching is a genuine performance optimization: most writes don't need to be durable the instant they're issued, so buffering in RAM lets programs avoid stalling on slow physical I/O for every call. The cost is that a crash can catch data still sitting only in that buffer.",
@@ -109,10 +109,10 @@
       "level": 1,
       "prompt": "What is the specific job of fsync(), as distinct from a plain write()?",
       "choices": [
-        "It makes the write() call itself faster",
+        "It makes the underlying write() call itself complete faster by skipping redundant kernel checks",
         "It blocks until the OS confirms the data is physically durable on disk, rather than just sitting in the fast in-RAM page cache",
-        "It compresses the data before storing it",
-        "It duplicates the write to a second, backup disk automatically"
+        "It transparently compresses the data before committing it to disk, to save physical storage space",
+        "It automatically duplicates the write to a second, geographically separate backup disk for redundancy"
       ],
       "correctIndex": 1,
       "explanation": "fsync() is the explicit durability boundary: it doesn't speed anything up (it's slower, in fact) — it waits until the disk itself has confirmed the write, converting an optimistic in-RAM write into a guaranteed durable one.",
@@ -126,10 +126,10 @@
       "level": 1,
       "prompt": "Why is fsync() typically noticeably slower than a plain write() call?",
       "choices": [
-        "It isn't slower — they cost exactly the same in practice",
+        "It isn't slower in practice — both calls cost exactly the same number of CPU cycles once the kernel caches the path",
         "Because fsync() has to wait for the actual physical disk hardware to confirm durability, instead of returning as soon as the data reaches the fast in-RAM page cache",
-        "Because fsync() also re-reads and validates the entire file before returning",
-        "Because fsync() is implemented in a slower programming language than write()"
+        "Because fsync() also re-reads and re-validates the entire contents of the file before it's allowed to return",
+        "Because the fsync() system call is implemented in a slower, higher-level language than the write() system call"
       ],
       "correctIndex": 1,
       "explanation": "The extra latency isn't overhead to be optimized away — it's the real cost of the guarantee. write() can return the moment RAM has the data; fsync() has to wait on the disk hardware itself, which is inherently slower than RAM.",
@@ -143,10 +143,10 @@
       "level": 1,
       "prompt": "Per the crash-timing logic in this unit, if a crash happens after write() but before fsync() was ever called, is the data recoverable after reboot?",
       "choices": [
-        "Yes, because write() already returned successfully",
+        "Yes, because write() already returned successfully, and a successful return is the OS's durability guarantee",
         "No — the data is still only in the volatile OS page cache at that point, so it's lost",
-        "It depends only on how large the file is",
-        "Yes, but only for text files, not binary files"
+        "It depends only on how large the file being written is, not on whether fsync() was ever called",
+        "Yes, but only for plain text files — binary files require an explicit fsync() to survive any crash"
       ],
       "correctIndex": 1,
       "explanation": "A successful write() only proves the data reached the page cache. Without a completed fsync(), nothing has confirmed the data is on the physical disk — a crash in that window loses it, no matter how confident the write() call's success made the program feel.",
@@ -160,10 +160,10 @@
       "level": 1,
       "prompt": "If fsync() has already returned successfully for a piece of data, and the machine then crashes, is that data recoverable after reboot?",
       "choices": [
-        "No — nothing is ever guaranteed to survive a crash",
+        "No — nothing a program does can ever be guaranteed to survive a crash, fsync() included",
         "Yes — a successfully-returned fsync() means the OS already confirmed the disk itself has the data, so it survives the crash",
-        "Only if the program also calls write() a second time immediately after",
-        "It depends on whether the crash was caused by a power outage or a software bug"
+        "Only if the program also calls write() a second time immediately after fsync() returns successfully",
+        "It depends on whether the crash was caused by a power outage rather than an unrelated software bug"
       ],
       "correctIndex": 1,
       "explanation": "This is the entire point of fsync(): once it returns without error, the disk has already confirmed the data is physically durable. A crash after that point cannot undo something that already happened on non-volatile storage.",
@@ -177,10 +177,10 @@
       "level": 1,
       "prompt": "Why do databases fsync a small write-ahead log entry instead of fsyncing the entire (potentially large, scattered) data file on every commit?",
       "choices": [
-        "Because data files can't be fsynced at all, only logs can",
+        "Because data files can never be fsynced directly — only append-only log files support the fsync() call",
         "Because a small, sequential log entry is cheap to fsync, so it can serve as a fast, trustworthy durability boundary while the larger data-file update is deferred safely",
-        "Because write-ahead logs don't actually need to be durable themselves",
-        "Because fsyncing a data file would corrupt it"
+        "Because write-ahead log entries don't actually need to be made durable themselves to be useful on replay",
+        "Because fsyncing a database's main data file directly would silently corrupt its on-disk structure"
       ],
       "correctIndex": 1,
       "explanation": "The log is small and appended sequentially, which is cheap to make durable quickly — that's exactly why it can serve as the real commit point, letting the larger, slower data-file update happen afterward without weakening the durability guarantee.",
@@ -194,10 +194,10 @@
       "level": 1,
       "prompt": "In a database using a write-ahead log, what backs the claim 'your transaction is committed' when the client is acknowledged?",
       "choices": [
-        "The fact that the data file has already been fully updated",
+        "The fact that the data file has already been fully updated on disk with the new committed value",
         "The write-ahead log entry describing the change having been durably fsynced — the data file can be updated later",
-        "Nothing durable — 'committed' is purely an in-memory status until the next backup",
-        "The client's own local copy of the transaction"
+        "Nothing durable at all — 'committed' is purely an in-memory status flag until the next scheduled backup runs",
+        "The client's own local copy of the transaction, which it can resend if the server never acknowledges"
       ],
       "correctIndex": 1,
       "explanation": "The log entry being fsynced is the actual durability boundary. Because it already survived being written durably, the database can defer the (larger, slower) data-file update and still honestly claim the transaction is committed.",
@@ -211,10 +211,10 @@
       "level": 1,
       "prompt": "What problem does a write-ahead log solve that a bare 'fsync the data file on every write' approach doesn't solve well?",
       "choices": [
-        "It makes fsync unnecessary entirely",
+        "It makes calling fsync() at all unnecessary, since the log itself is simply assumed to always already be durable",
         "It gives commits a fast, cheap durability boundary (a small sequential append) instead of paying the cost of a potentially large, scattered data-file fsync on every single commit",
-        "It removes the need for any disk I/O at all",
-        "It only matters for databases that don't use disks"
+        "It removes the need for any disk I/O at all, since the entire log can be kept permanently in volatile memory",
+        "It only matters for databases that run on specialized hardware without any physical disk, like a pure in-memory cache"
       ],
       "correctIndex": 1,
       "explanation": "Fsyncing a full data-file update on every commit is correct but can be slow and scattered. A write-ahead log gets the same durability guarantee cheaply, by making the durability boundary a small, sequential, fast-to-fsync append instead.",
@@ -228,10 +228,10 @@
       "level": 2,
       "prompt": "In the write path App -> OS page cache -> disk buffer -> platter, which hop is where a normal write() call's guarantee typically ends?",
       "choices": [
-        "It guarantees all the way to the physical platter",
+        "It guarantees all the way to the physical platter — write() and fsync() behave identically on this path",
         "It guarantees the data reached the OS page cache — everything after that (disk buffer, platter) is not yet confirmed by a plain write()",
-        "It guarantees nothing at all, not even reaching RAM",
-        "It guarantees the disk's own write buffer, but not the OS page cache"
+        "It guarantees nothing at all, not even that the data reached RAM, until a separate call confirms it",
+        "It guarantees the disk's own write buffer has the data, but says nothing about the OS page cache itself"
       ],
       "correctIndex": 1,
       "explanation": "A plain write() typically only needs to get the data into the OS page cache to return successfully. The disk's own buffer and the physically durable platter are further hops down the path that write() alone doesn't wait for.",
@@ -245,10 +245,10 @@
       "level": 2,
       "prompt": "Why is the OS page cache described as volatile, given that it sits 'closer' to persistent storage than a regular program variable?",
       "choices": [
-        "It isn't volatile — page cache contents survive a crash automatically",
+        "It isn't volatile — once data lands in the page cache, the kernel treats it as already safely persisted",
         "Because it's still ordinary RAM under the hood; proximity to the disk in the write path doesn't change the physical property that RAM needs continuous power",
-        "Because page cache is stored on a separate, less reliable chip than regular RAM",
-        "Because page cache only holds data for less than one second by design"
+        "Because the page cache is physically implemented on a separate, less reliable memory chip than ordinary RAM",
+        "Because the page cache is designed to hold data for less than one second before it's discarded automatically"
       ],
       "correctIndex": 1,
       "explanation": "Being conceptually 'closer' to disk in the write pipeline doesn't change what the page cache physically is — RAM. It needs continuous power exactly like any other RAM, so a crash before the OS flushes a given page loses it, regardless of how close it was to being durable.",
@@ -262,10 +262,10 @@
       "level": 2,
       "prompt": "What is the OS actually doing when fsync() is called, in terms of the write path App -> page cache -> disk buffer -> platter?",
       "choices": [
-        "Deleting the page cache entry and starting the write over",
+        "Deleting the existing page cache entry entirely and forcing the next write() to start completely over",
         "Pushing the relevant dirty page(s) all the way through the disk buffer to the physically durable platter, and only returning once that's confirmed",
-        "Copying the data to a second in-RAM cache for redundancy",
-        "Nothing different from a plain write() — it's purely a naming convention"
+        "Copying the pending data into a second, separate in-RAM cache purely for redundancy against bit flips",
+        "Nothing different from a plain write() call at all — fsync() is purely a naming convention with no extra effect"
       ],
       "correctIndex": 1,
       "explanation": "fsync() forces the pending write through every remaining hop in the path — out of the page cache, through the disk's own buffer, and onto the physically durable platter — and only returns once that full journey is confirmed complete.",
@@ -279,10 +279,10 @@
       "level": 2,
       "prompt": "Per L2's crash-timing table, what happens if a process crashes mid-write, with no fsync ever called for that write?",
       "choices": [
-        "The write is guaranteed to be either fully present or fully absent after reboot, with no other possibility",
+        "The write is guaranteed to always be either fully present or fully absent after reboot, with no other outcome possible",
         "The result is undefined — it can leave the file in a partially written, internally inconsistent state, which is a distinct and often worse failure than the update simply being missing entirely",
-        "The operating system automatically detects and repairs any partial write",
-        "This scenario cannot happen because write() is always atomic"
+        "The operating system automatically detects the partial write on the next boot and silently repairs it for you",
+        "This scenario cannot actually happen in practice, because every write() call is guaranteed atomic by the kernel"
       ],
       "correctIndex": 1,
       "explanation": "A torn/partial write is a real, distinct failure mode from data simply being missing — it's exactly the problem write-ahead logging is designed to prevent, by making the actual durability boundary a small, sequential, fsynced append rather than a potentially large in-place update.",
@@ -296,10 +296,10 @@
       "level": 2,
       "prompt": "Of the four rows in L2's crash-timing table (before write, after write before fsync, after fsync, mid-write with no fsync), which row is the ONLY one where the data is guaranteed recoverable?",
       "choices": [
-        "Before write() is called",
+        "Before write() is called at all, which the table still lists as a distinct, separately-labeled row",
         "After fsync() returns successfully",
-        "After write(), before fsync()",
-        "Mid-way through a multi-byte write with no fsync at all"
+        "After write() returns but before fsync() is called, since write() already gives some partial guarantee",
+        "Mid-way through a multi-byte write with no fsync ever called, since partial data is still better than none"
       ],
       "correctIndex": 1,
       "explanation": "Only 'after fsync() returns successfully' is a guaranteed-recoverable state. Every other row is either definitely lost (no write happened, or only page-cache-resident) or undefined/potentially worse than lost (a torn mid-write).",
@@ -313,10 +313,10 @@
       "level": 2,
       "prompt": "In the write-ahead log pattern from L2/L3, what is the actual moment a transaction becomes 'committed' and safe to acknowledge to a client?",
       "choices": [
-        "When the full data file finishes being updated with the new value",
+        "When the full data file finishes being updated on disk with the new committed value, not before",
         "When the log entry describing the change is appended AND fsynced — the data file update can happen afterward, even asynchronously",
-        "When the transaction is first received by the database, before any disk I/O",
-        "There is no single commit point; durability is probabilistic"
+        "When the transaction is first received by the database process, before any disk I/O has happened at all",
+        "There is no single commit point in this pattern; durability is treated as a probabilistic guarantee instead"
       ],
       "correctIndex": 1,
       "explanation": "The log entry being fsynced IS the commit point — it's small and sequential, so it's cheap to make durable quickly. The larger data-file update can be deferred, because if a crash happens before it completes, replaying the already-durable log reconstructs the change on restart.",
@@ -330,10 +330,10 @@
       "level": 2,
       "prompt": "If a database crashes after the write-ahead log entry for a transaction was durably fsynced, but before the corresponding data file update finished, what happens to that transaction on restart?",
       "choices": [
-        "It's permanently lost, since the data file was never updated",
+        "It's permanently and unrecoverably lost forever, since the data file itself was never actually updated before the crash hit",
         "It's reconstructed by replaying the durable log entry — the log surviving the crash is what lets the change be recovered, even though the data file itself never got updated before the crash",
-        "The database refuses to start until a human manually re-enters the transaction",
-        "The transaction silently becomes two different values depending on which replica is asked"
+        "The database refuses to finish starting back up until a human operator manually re-enters the lost transaction by hand",
+        "The transaction silently ends up holding two different values, depending on which replica node happens to be asked"
       ],
       "correctIndex": 1,
       "explanation": "This is exactly the scenario write-ahead logging is built to handle: because the log entry was already durable, replaying it on restart reconstructs the intended change, even though the (deferred) data-file update never got to run before the crash.",
@@ -347,10 +347,10 @@
       "level": 2,
       "prompt": "Why can the data-file update in a write-ahead-logged commit safely happen 'later, even asynchronously,' without weakening the durability guarantee already given to the client?",
       "choices": [
-        "Because data files are never actually needed for correctness",
+        "Because data files are never actually required for correctness once any write-ahead log exists in the system at all",
         "Because the log entry backing that commit is already durable on disk — a crash before the data-file update simply means replay-on-restart reconstructs it from the log, so the promise made to the client still holds",
-        "Because clients are expected to re-send transactions themselves if anything goes wrong",
-        "It can't — deferring the data-file update always risks silently losing the transaction"
+        "Because clients are always expected to resend their transactions themselves whenever anything goes even slightly wrong",
+        "It can't be done safely at all — deferring the data-file update always risks silently and permanently losing the transaction"
       ],
       "correctIndex": 1,
       "explanation": "The guarantee was never 'the data file is up to date' — it was 'the log entry describing this change is durable.' Since that's already true the moment fsync returns, deferring the data-file update doesn't weaken anything; replay covers the gap.",
@@ -364,10 +364,10 @@
       "level": 2,
       "prompt": "Per L2's group commit section, what is the actual trade-off of increasing the batch size (number of commits sharing one fsync)?",
       "choices": [
-        "There is no trade-off — a larger batch is strictly better in every way",
+        "There is no real trade-off here — a strictly larger batch size is always better along every dimension, with zero downside",
         "Higher throughput (the fixed fsync cost is shared across more commits) at the cost of a larger data-loss window (more unflushed commits are at risk if a crash lands before that shared fsync completes)",
-        "Lower throughput and a smaller data-loss window, simultaneously",
-        "Batch size only affects memory usage, not durability or throughput"
+        "Lower throughput and a smaller data-loss window at the same time, since batching itself adds pure scheduling overhead",
+        "Batch size only ever affects how much memory the in-process log buffer uses, not durability or throughput at all"
       ],
       "correctIndex": 1,
       "explanation": "Group commit amortizes a fixed fsync cost over more commits, which is exactly why throughput scales up with batch size — but every commit in an unflushed batch is, by definition, not yet durable, so the window of at-risk data grows too. It's a genuine dial, not a free win.",
@@ -381,10 +381,10 @@
       "level": 2,
       "prompt": "In group commit, when is an individual commit inside a batch actually considered durable?",
       "choices": [
-        "The instant that specific commit is appended to the log buffer, before any fsync",
+        "The instant that specific commit is appended to the shared log buffer, even before any fsync() runs",
         "Only once the ONE shared fsync() for the entire batch has returned successfully — every commit in the batch becomes durable at that same instant, not before",
-        "As soon as the client sends the commit request, regardless of any disk I/O",
-        "Each commit in the batch is fsynced individually; the 'batch' is purely a scheduling label"
+        "As soon as the client sends the commit request over the network, regardless of any disk I/O happening after",
+        "Each commit inside the batch is actually fsynced individually; 'batch' is purely a cosmetic scheduling label"
       ],
       "correctIndex": 1,
       "explanation": "A batch shares exactly one fsync call. Nothing in it is durable until that shared fsync returns — every commit in the batch reaches durability simultaneously, at the moment the batch's single fsync completes, not one at a time.",
@@ -398,10 +398,10 @@
       "level": 2,
       "prompt": "Why might a newly-created file's contents be perfectly durable after fsync, yet the file itself appear to not exist at all after a crash and reboot?",
       "choices": [
-        "This can never happen; fsyncing a file's contents always guarantees the file exists too",
+        "This can never actually happen — fsyncing a file's contents always automatically guarantees the file itself exists too",
         "Because the directory entry that records the file's existence at that path is separate metadata from the file's own contents, and on some filesystems it needs its own fsync to be durable",
-        "Because file contents and file existence are always stored in the exact same disk block",
-        "Because only files larger than a certain size need directory fsyncing"
+        "Because file contents and the fact that a file exists at a path are always stored together in the exact same disk block",
+        "Because directory fsyncing is only ever required for files above a certain size threshold, never for small ones"
       ],
       "correctIndex": 1,
       "explanation": "The directory entry linking a path to a file is metadata the containing directory holds, independently of the file's own bytes on some filesystems. Fsyncing only the file guarantees its contents; it says nothing about whether the directory's record of it existing is durable yet.",
@@ -415,10 +415,10 @@
       "level": 2,
       "prompt": "What's the fix for the 'file contents durable, but the file might not exist after a crash' gap described in this unit?",
       "choices": [
-        "Write the file's contents twice, to two different paths",
+        "Write the file's contents twice, to two different paths, so at least one copy survives any crash",
         "Fsync the containing directory as well, after creating the new file — not just the file's own file descriptor",
-        "There is no fix; this gap is unavoidable on every filesystem",
-        "Rename the file immediately after creating it"
+        "There is no fix for this gap at all; it's an unavoidable property of every filesystem, old or new",
+        "Rename the file to a different name immediately after creating it, before writing any of its contents"
       ],
       "correctIndex": 1,
       "explanation": "Since the directory entry is separate metadata from the file's own contents, closing this gap means explicitly fsyncing the containing directory's file descriptor too, in addition to the new file's own fsync.",
@@ -432,10 +432,10 @@
       "level": 2,
       "prompt": "Why is a checksum on each write-ahead log entry useful for crash recovery, beyond what fsync alone provides?",
       "choices": [
-        "It isn't useful — fsync alone already prevents any possibility of a torn write",
+        "It isn't actually useful at all — a successfully-returned fsync() already rules out any possibility of a torn write",
         "Because a crash mid-write (before fsync) can leave a truncated/garbled entry on disk; a checksum lets replay detect and stop at that corrupt tail entry instead of trusting or mishandling it",
-        "Because checksums make fsync unnecessary",
-        "Because checksums compress the log file to save disk space"
+        "Because adding a checksum to each entry is precisely what makes fsync() itself unnecessary for that entry going forward",
+        "Because checksums exist primarily to compress the log file and save disk space, not to catch any kind of corruption"
       ],
       "correctIndex": 1,
       "explanation": "fsync protects entries that finished being written before it was called — it says nothing about an entry a crash interrupted mid-write. A checksum gives replay a way to detect that specific torn-tail case and stop cleanly, rather than crashing on malformed data or silently accepting it.",

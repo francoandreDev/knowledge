@@ -8,8 +8,8 @@
       "prompt": "\"Illegal states unrepresentable\" means:",
       "choices": [
         "Shaping types/interfaces so an invalid combination of data cannot be constructed at all, not just checked after the fact",
-        "Writing enough runtime validation that every invalid input gets a clear error message",
-        "Adding comments to a function explaining which argument combinations are unsafe",
+        "Writing enough runtime validation that every invalid input gets a clear error message, even though the invalid value could still exist in memory for a moment first",
+        "Adding comments to a function explaining which argument combinations are unsafe, trusting future callers to read and follow that documentation",
         "Rejecting any API design that uses optional parameters"
       ],
       "correctIndex": 0,
@@ -24,9 +24,9 @@
       "level": 1,
       "prompt": "Alertly's SendAlertOptions type had emailAddress, phoneNumber, and deviceToken all marked optional, regardless of which channel was chosen. What does this represent, in terms of illegal states?",
       "choices": [
-        "It's a convenience — callers only need to fill in the field they care about",
+        "It's a convenience — callers only need to fill in the field they care about, and the unused fields are assumed to be harmlessly ignored elsewhere",
         "It's exactly the problem: the type can represent channel: 'sms' with none of the three fields set, a state that should be impossible",
-        "It's fine because the compiler still checks the field types are strings",
+        "It's fine because the compiler still checks the field types are strings, which feels like real type safety even though it isn't",
         "It's only a problem if the fields are also renamed inconsistently"
       ],
       "correctIndex": 1,
@@ -42,9 +42,9 @@
       "prompt": "A colleague says: \"We already handle this — there's an if-check deep in the SMS client that throws if phoneNumber is missing.\" Why doesn't that alone satisfy \"illegal states unrepresentable\"?",
       "choices": [
         "Because the check still allows the invalid SendAlertOptions value to be constructed and passed around before it's ever caught — the type itself doesn't prevent it",
-        "Because runtime checks are always slower than compile-time checks",
-        "Because throwing an error is worse than silently ignoring bad input",
-        "Because the SMS client shouldn't contain any validation logic at all"
+        "Because runtime checks are always slower than compile-time checks, and that performance cost outweighs the benefit of catching the bug at all",
+        "Because throwing an error is worse than silently ignoring bad input, since a crash is more visible to users than a quietly wrong result",
+        "Because the SMS client shouldn't contain any validation logic at all — that responsibility belongs entirely to the API's outermost layer"
       ],
       "correctIndex": 0,
       "explanation": "A runtime check can be bypassed, skipped, swallowed by an unrelated try/catch, or simply never reached depending on the code path — as it literally was at Alertly. Illegal-states-unrepresentable means the invalid value can never exist as a value of that type in the first place, which a scattered runtime check doesn't guarantee.",
@@ -59,8 +59,8 @@
       "prompt": "What's the key difference between \"validating\" and \"parsing\" an input, in the parse-don't-validate sense?",
       "choices": [
         "Validating checks the input and returns yes/no while the original loose type continues downstream; parsing converts the input into a new type that proves its own validity",
-        "Validating is done at runtime; parsing is only a compile-time concept",
-        "Parsing means converting a string to a number; validating means anything else",
+        "Validating is done at runtime, immediately as data arrives; parsing only matters later, once the data crosses into a different module boundary",
+        "Parsing means converting a string to a number specifically; validating means checking any other kind of rule, like a range or a required field",
         "There is no real difference — the terms are interchangeable"
       ],
       "correctIndex": 0,
@@ -76,9 +76,9 @@
       "prompt": "In parseAlertRequest(raw), why does converting untyped JSON into an AlertRequest, once, matter more than re-checking the fields inside sendAlert() again?",
       "choices": [
         "Because once parseAlertRequest succeeds, the resulting type can only hold valid data — every function after it can trust the type instead of re-inspecting the raw data",
-        "Because JSON parsing is always faster than object field access",
-        "Because sendAlert() should never contain any logic at all",
-        "It doesn't matter — checking twice is always safer than checking once"
+        "Because JSON parsing is always faster than object field access, so doing the work once up front is purely a performance optimization",
+        "Because sendAlert() should never contain any logic at all, and moving the check elsewhere just relocates where that rule lives",
+        "It doesn't matter — checking twice is always safer than checking once, since every extra validation pass can only catch more mistakes, never fewer"
       ],
       "correctIndex": 0,
       "explanation": "The whole point of parsing at the boundary is that it needs to happen exactly once — every function downstream of that single parse step receives a type that already proves its own validity, so repeating the check adds redundant code without adding safety the type doesn't already guarantee.",
@@ -93,9 +93,9 @@
       "prompt": "sendAlert(id, msg, true, false) is a call to a function with two boolean parameters. What's the specific problem this demonstrates?",
       "choices": [
         "At the call site, it's impossible to tell which boolean is which without checking the function signature separately — and any nonsensical combination (both true, both false) is silently accepted",
-        "Boolean values are slower to compare than string values at runtime",
-        "The function has too many total parameters, regardless of their type",
-        "JavaScript doesn't support boolean parameters reliably"
+        "Boolean values are slower to compare than string values at runtime, so swapping them for enums is mainly a performance improvement rather than a correctness one",
+        "The function has too many total parameters, regardless of their type — four arguments is simply more than a reader can track",
+        "JavaScript doesn't support boolean parameters reliably, so the real fix is switching the entire function to a typed language instead"
       ],
       "correctIndex": 0,
       "explanation": "This is the boolean-parameter trap: unlabeled positional booleans are unreadable at the call site (which is isUrgent, which is isSilent?) and, worse, the signature doesn't stop combinations that make no sense together — an object literal with named fields, or a union type, both fix the readability and can fix the nonsensical-combination problem.",
@@ -110,9 +110,9 @@
       "prompt": "Why is isUrgent: boolean combined with an optional scheduledFor: Date, on the same request, a boolean-trap-shaped problem even though isUrgent itself is just one flag?",
       "choices": [
         "Because the two fields can be set in a combination that contradicts itself (urgent, but also scheduled for later) and nothing in the type stops that",
-        "Because Date objects are not allowed to appear in API request types",
+        "Because Date objects are not allowed to appear in API request types, so scheduledFor needed to be represented as a string instead",
         "Because isUrgent should always default to true",
-        "Because optional fields are never allowed alongside booleans"
+        "Because optional fields are never allowed alongside booleans, since the combination always hides an implicit default somewhere"
       ],
       "correctIndex": 0,
       "explanation": "The trap isn't limited to two literal boolean parameters — any pair of fields (boolean or optional) whose combination can be nonsensical has the same shape: the type permits a state (urgent AND scheduled-for-later) that the domain doesn't actually allow, and the signature does nothing to prevent it.",
@@ -127,9 +127,9 @@
       "prompt": "A function takes channel: string instead of channel: \"email\" | \"sms\" | \"push\". What specifically does this cost?",
       "choices": [
         "A typo like channel: \"sm\" compiles cleanly and only fails (if ever) at runtime, instead of being caught immediately by the type checker",
-        "The function becomes slower because strings take more memory than enums",
+        "The function becomes slower because strings take more memory than enums, so the union type mainly matters for performance",
         "Nothing — a string can hold any of those three values just as well as a union type can",
-        "It only matters if the function is exported from a library"
+        "It only matters if the function is exported from a library, since internal callers can be trusted to pass the right value"
       ],
       "correctIndex": 0,
       "explanation": "A bare string type accepts any string at all, so a typo, an unsupported value, or a value from an entirely different vocabulary all type-check identically to a correct value — the type system simply isn't asked to help here. A union of literal strings makes the same typo a compile error instead.",
@@ -144,8 +144,8 @@
       "prompt": "Why is channel: \"email\" | \"sms\" | \"push\" alone (without also making emailAddress/phoneNumber/deviceToken required per-branch) still not a full fix for Alertly's bug?",
       "choices": [
         "Because it fixes typos in the channel value itself, but doesn't stop channel: \"sms\" from being paired with a missing phoneNumber — that requires a discriminated union tying the field to the tag",
-        "Because literal string unions aren't supported in TypeScript",
-        "Because it makes the function slower to call",
+        "Because literal string unions aren't supported in TypeScript the way enums are, so channel would need a different mechanism entirely",
+        "Because it makes the function slower to call, since the compiler has to check the literal value against three options every time it's invoked",
         "It is a full fix — no further change is needed"
       ],
       "correctIndex": 0,
@@ -161,8 +161,8 @@
       "prompt": "Why does \"minimal surface area\" matter for API misuse specifically, not just code cleanliness?",
       "choices": [
         "Every additional optional parameter or method roughly multiplies the number of combinations a caller could pass, most of which the author never actually tested",
-        "Smaller APIs always run faster than larger ones",
-        "It only matters for public libraries, not internal functions",
+        "Smaller APIs always run faster than larger ones, so trimming parameters is primarily a performance concern rather than a safety one",
+        "It only matters for public libraries, not internal functions, since internal callers can be trusted to read the source before calling",
         "It means removing all parameters and hardcoding behavior instead"
       ],
       "correctIndex": 0,
@@ -178,9 +178,9 @@
       "prompt": "SendAlertOptions exposes emailAddress, phoneNumber, AND deviceToken on every call, regardless of channel. What would a minimal-surface-area redesign change about this specifically?",
       "choices": [
         "Only the field relevant to the chosen channel would be reachable at all — the other two wouldn't exist as options a caller could even see for that call",
-        "It would rename the three fields to shorter names",
+        "It would rename the three fields to shorter names, which makes the call site easier to read without changing what's constructable",
         "It would merge all three fields into a single free-text string field",
-        "It would make all three fields required on every call instead of optional"
+        "It would make all three fields required on every call instead of optional, forcing callers to pass placeholder values they don't need"
       ],
       "correctIndex": 0,
       "explanation": "Minimal surface area doesn't mean fewer total fields across the whole API — it means each call site only exposes the options that are actually relevant to it. A discriminated union does exactly this: choosing kind: 'sms' makes phoneNumber the only field available for that branch, not a smaller list of still-optional fields.",
@@ -195,9 +195,9 @@
       "prompt": "\"Fail fast at the boundary\" means:",
       "choices": [
         "Reject invalid input immediately and loudly at the edge of the system, rather than letting it travel inward where the failure is harder to trace back to its cause",
-        "Make every function return as quickly as possible regardless of correctness",
+        "Make every function return as quickly as possible regardless of correctness, treating speed as more important than catching bad input",
         "Retry a failed operation as many times as possible before giving up",
-        "Log every function call for debugging purposes"
+        "Log every function call for debugging purposes, so a failure can at least be traced back after the fact instead of prevented"
       ],
       "correctIndex": 0,
       "explanation": "\"Fail fast\" is about where and how quickly a problem surfaces, not about performance — catching bad input at the boundary means the failure happens close to its cause (this request, this field), rather than three layers deep where it's much harder to trace back to the original bad call.",
@@ -212,9 +212,9 @@
       "prompt": "Alertly's actual check for a missing phoneNumber existed, but ran inside the SMS-sending code, several layers past where the request was first received. What does \"fail fast at the boundary\" say should have been different?",
       "choices": [
         "The check itself was fine in principle, but its location was wrong — it needed to run at the point where the request first entered the system, not deep inside a function written for a different purpose",
-        "The check should have been removed entirely",
+        "The check should have been removed entirely, since a missing phoneNumber would have surfaced as an obvious error anyway downstream",
         "The check should have retried the SMS send instead of throwing",
-        "Nothing — the check's location doesn't matter as long as it exists somewhere"
+        "Nothing — the check's location doesn't matter as long as it exists somewhere in the codebase before the alert actually gets sent to a user"
       ],
       "correctIndex": 0,
       "explanation": "This is the specific lesson from L2's diagnosis: the check's logic was correct, but by the time it ran, it was inside code wrapped by a broad try/catch meant for a different failure mode. Moving the same check to the boundary means it runs before that unrelated catch block exists anywhere in the path.",
@@ -229,9 +229,9 @@
       "prompt": "How does a discriminated union make an invalid field combination impossible, mechanically — not just \"harder\"?",
       "choices": [
         "Each tagged shape in the union only has field slots for the data valid for that tag — there is no field slot in the 'sms' shape for a value to be missing from, because that shape was never constructable without it",
-        "The union runs a validation function automatically before every use",
+        "The union runs a validation function automatically before every use, rejecting any shape that doesn't match its declared tag at the boundary",
         "TypeScript deletes any object that doesn't match at runtime",
-        "It relies on developers remembering to check the tag before using a field"
+        "It relies on developers remembering to check the tag before using a field, the same discipline a boolean-trap API already demanded of every caller"
       ],
       "correctIndex": 0,
       "explanation": "The mechanism is structural, not procedural: {kind:'sms', phoneNumber: string} simply has no representation for 'sms with no phoneNumber' — there's no field to leave empty. Compare this to an object with phoneNumber as an always-optional field, which does have a representation for that missing case.",
@@ -246,9 +246,9 @@
       "prompt": "Inside a switch (channel.kind) { case \"sms\": ... } block, TypeScript lets you access channel.phoneNumber without a non-null assertion (!). Why?",
       "choices": [
         "Because the compiler has narrowed the type of channel to exactly the 'sms' member of the union inside that branch, which is the only member that has a phoneNumber field",
-        "Because TypeScript assumes all fields exist unless told otherwise",
+        "Because TypeScript assumes all fields exist unless told otherwise, so the non-null assertion was never actually required here",
         "Because switch statements disable type checking inside their branches",
-        "Because phoneNumber was declared as a global variable"
+        "Because phoneNumber was declared as a global variable, so it's always reachable regardless of which branch of the switch runs"
       ],
       "correctIndex": 0,
       "explanation": "This is called narrowing: once the compiler sees channel.kind === \"sms\" is true in that branch, it knows channel can only be the union member tagged 'sms', and that member's type definition is the only one it needs to check field access against — which is exactly why phoneNumber is guaranteed present there, no assertion needed.",
@@ -264,8 +264,8 @@
       "choices": [
         "Because the 'sms' member of the union is defined as { kind: \"sms\"; phoneNumber: string } — it has no deviceToken field, so an object literal with deviceToken doesn't match any member of the union and fails to type-check",
         "Because deviceToken is a reserved keyword in TypeScript",
-        "Because the compiler runs the object through a validation function automatically",
-        "It doesn't fully prevent it — a runtime check is still required"
+        "Because the compiler runs the object through a validation function automatically, rejecting any literal with an unexpected field before it compiles",
+        "It doesn't fully prevent it — a runtime check is still required to catch the mismatch before the value ever reaches the SMS-sending client code"
       ],
       "correctIndex": 0,
       "explanation": "TypeScript checks an object literal for excess/mismatched properties against the union member it's structurally closest to — since kind: \"sms\" only matches the { kind: \"sms\"; phoneNumber: string } member, an object with deviceToken instead of phoneNumber doesn't satisfy that member and the whole literal fails to compile, exactly as shown in L3's @ts-expect-error example.",
@@ -280,9 +280,9 @@
       "prompt": "The principle of least astonishment, applied to API design, means:",
       "choices": [
         "A call's behavior should match what its name and shape suggest, with no hidden side effects a reader wouldn't expect from reading the signature alone",
-        "An API should surprise its users occasionally to keep documentation interesting",
+        "An API should surprise its users occasionally to keep documentation interesting, rewarding callers who actually read every page",
         "Every function should have exactly one parameter",
-        "Functions should never throw exceptions, only return error codes"
+        "Functions should never throw exceptions, only return error codes, since a thrown exception is itself a kind of astonishment"
       ],
       "correctIndex": 0,
       "explanation": "Least astonishment is about the gap between what a signature implies and what the code actually does — a function called sendAlert that silently no-ops on certain inputs, instead of throwing or documenting that behavior prominently, violates the principle even though its name is otherwise accurate.",
@@ -296,9 +296,9 @@
       "level": 2,
       "prompt": "sendAlert() silently swallowed the missing-phoneNumber error via a broad try/catch written for a different purpose. Which principle does this most directly violate?",
       "choices": [
-        "Least astonishment — a function named sendAlert that neither sends the alert nor tells the caller it failed does something no reasonable reader would predict from its name",
-        "DRY — the code repeats itself unnecessarily",
-        "Single responsibility — the function does too many unrelated things",
+        "Least astonishment — a function named sendAlert that neither sends the alert nor tells the caller it failed does something no reasonable reader would predict",
+        "DRY — the code repeats itself unnecessarily, since the same try/catch pattern for swallowing errors appears in several places",
+        "Single responsibility — the function does too many unrelated things, mixing alert-sending with unrelated error-handling concerns",
         "Encapsulation — internal details are exposed to the caller"
       ],
       "correctIndex": 0,
@@ -314,9 +314,9 @@
       "prompt": "A constructor/factory that takes 8 optional parameters (all with defaults) is convenient to call with just 1-2 arguments. What's the trade-off L2's checklist points at?",
       "choices": [
         "Convenience at the call site is bought by leaving the space of possible constructed objects huge and mostly untested, since any subset of the 8 can be combined",
-        "Optional parameters always run slower than required ones",
+        "Optional parameters always run slower than required ones, so the eight-parameter convenience comes at a measurable runtime cost",
         "There is no trade-off — more optional parameters is strictly better design",
-        "It only matters if the constructor is called more than once"
+        "It only matters if the constructor is called more than once, since a single call site can't produce an inconsistent combination"
       ],
       "correctIndex": 0,
       "explanation": "Every one of the 8 optional parameters can be present or absent independently, so the constructor can produce up to 2^8 = 256 different shapes of the resulting object — almost none of which the author individually reasoned about or tested, even though each individual call looks simple.",
@@ -331,9 +331,9 @@
       "prompt": "What's a more targeted fix than \"make every constructor parameter required\" for the optional-everything constructor trap?",
       "choices": [
         "Split the single do-everything constructor into a small number of named factory functions (or union variants), each of which only accepts the fields valid for that specific case",
-        "Remove all parameters and hardcode a single default object",
+        "Remove all parameters and hardcode a single default object, accepting that every caller gets exactly the same configuration",
         "Add a comment listing which combinations are valid",
-        "Convert every parameter to a string so any combination compiles"
+        "Convert every parameter to a string so any combination compiles, pushing the question of which combination is valid entirely to a later runtime check"
       ],
       "correctIndex": 0,
       "explanation": "Making everything required doesn't fix the underlying issue — it usually just pushes every caller to pass placeholder values for fields irrelevant to their case. Splitting into targeted factories (createEmailAlert(...), createSmsAlert(...), or a union constructed via a parse/smart-constructor function) keeps each one minimal and self-consistent instead.",
@@ -347,9 +347,9 @@
       "level": 2,
       "prompt": "According to L2's diagram, what are the three places an invalid combination like channel: 'sms' with no phoneNumber can end up being caught (or not)?",
       "choices": [
-        "Compile time (if unrepresentable in the type), runtime (if a check exists and isn't bypassed/swallowed), or production (if no check exists or the runtime check gets swallowed)",
-        "Only ever at runtime, regardless of how the type is designed",
-        "Only during code review, if a human happens to notice it",
+        "Compile time (if unrepresentable in the type), runtime (if a check exists and isn't bypassed), or production (if no check exists at all)",
+        "Only ever at runtime, regardless of how the type is designed, since TypeScript's type information disappears after compilation",
+        "Only during code review, if a human happens to notice it, since reviewers are expected to mentally trace every field combination",
         "Only in a staging environment, never in production"
       ],
       "correctIndex": 0,
@@ -365,8 +365,8 @@
       "prompt": "Why is \"caught at compile time\" strictly more reliable than \"caught by a runtime check,\" even when the runtime check's logic is written correctly?",
       "choices": [
         "A compile-time check can't be skipped, bypassed, or accidentally swallowed by unrelated code — it runs on every build, unconditionally, before the code can even be merged or deployed",
-        "Compile-time checks run faster than runtime checks",
-        "Runtime checks are always written incorrectly",
+        "Compile-time checks run faster than runtime checks, so the reliability difference between them is really just a difference in overhead cost",
+        "Runtime checks are always written incorrectly, because a human author can never anticipate every invalid combination up front",
         "There's no real difference in reliability, only in when the error message appears"
       ],
       "correctIndex": 0,
@@ -382,9 +382,9 @@
       "prompt": "In parseAlertRequest(raw), what does the function do if the raw JSON's channel.kind is \"sms\" but phoneNumber is missing?",
       "choices": [
         "Throws an InvalidAlertRequestError immediately, before any AlertRequest or AlertChannel value is ever constructed from that input",
-        "Silently defaults phoneNumber to an empty string",
+        "Silently defaults phoneNumber to an empty string, so the resulting AlertChannel still type-checks as a complete 'sms' value",
         "Constructs the AlertChannel anyway and lets sendAlert() figure it out later",
-        "Logs a warning and continues with channel set to 'push' instead"
+        "Logs a warning and continues with channel set to 'push' instead, treating the missing field as a signal to pick a safer channel"
       ],
       "correctIndex": 0,
       "explanation": "This is the whole point of a parsing boundary function: it either succeeds and returns a value of the safe, proven type, or it fails loudly right there — it never partially constructs an invalid value and lets it continue downstream, which is exactly the failure mode Alertly's original code had.",
@@ -398,10 +398,10 @@
       "level": 2,
       "prompt": "Why is it important that parseChannel is the ONLY function in the codebase that constructs an AlertChannel value?",
       "choices": [
-        "Because if any other code could also construct an AlertChannel directly, it could bypass parseChannel's checks entirely, and the type's guarantee (every 'sms' has a phoneNumber) would no longer be reliable",
-        "It isn't important — any function could construct one with the same safety",
+        "Because if any other code could construct an AlertChannel directly, it could bypass parseChannel's checks, and the type's guarantee would no longer hold",
+        "It isn't important — any function could construct one with the same safety, as long as it eventually calls parseChannel internally",
         "Because TypeScript requires exactly one constructor function per type",
-        "Because having two constructor functions would double compile time"
+        "Because having two constructor functions would double compile time, which outweighs any benefit from a second entry point"
       ],
       "correctIndex": 0,
       "explanation": "A discriminated union's safety guarantee only holds if every value of that type actually passed through validated construction — if a second, unchecked path to building an AlertChannel existed anywhere, it could reintroduce exactly the bug the union was designed to prevent, which is why concentrating construction into one smart constructor matters.",
@@ -415,10 +415,10 @@
       "level": 2,
       "prompt": "L2 says the trade-off between a permissive and a constrained API isn't automatically worth making in every case. What's the deciding factor it points to?",
       "choices": [
-        "The blast radius and risk profile of the API — a public library or a production alerting path is worth the extra ceremony far more than a script three people use once",
-        "Whichever version has fewer total lines of code",
+        "The blast radius and risk profile of the API — a public library is worth the extra ceremony far more than a script three people use once",
+        "Whichever version has fewer total lines of code, since shorter code is treated as a reliable stand-in for lower long-term risk",
         "Whichever version the original author personally prefers",
-        "Always prefer the constrained version, with no exceptions"
+        "Always prefer the constrained version, with no exceptions — the extra ceremony is worth paying regardless of what's at stake"
       ],
       "correctIndex": 0,
       "explanation": "L2 explicitly frames this as a judgment call tied to who's calling the API and what's at stake if a call goes wrong — an internal helper used by code you fully control has a very different risk profile than a public, widely-depended-on interface, which is why 'always constrain everything maximally' isn't the actual lesson.",
@@ -433,8 +433,8 @@
       "prompt": "A teammate argues every internal function, no matter how small or low-stakes, should use full discriminated-union parsing boundaries \"because it's strictly safer.\" What's the strongest counterpoint from this unit?",
       "choices": [
         "It is safer, but the ceremony has a real cost too — applying it uniformly regardless of actual risk means paying that cost even where the blast radius of a mistake is tiny and would be caught immediately anyway",
-        "Discriminated unions are only available in TypeScript, so the advice doesn't generalize",
-        "Safety and ceremony are unrelated, so there's no trade-off to weigh at all",
+        "Discriminated unions are only available in TypeScript, so the advice doesn't generalize to codebases written in other, less strictly typed languages",
+        "Safety and ceremony are unrelated, so there's no trade-off to weigh at all when deciding how strictly to constrain a given API",
         "Runtime checks are always safer than compile-time checks, so the teammate is simply wrong"
       ],
       "correctIndex": 0,
