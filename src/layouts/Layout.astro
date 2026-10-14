@@ -397,14 +397,17 @@ const headerTrackUnitSlugs = groupSlugsByTrack(headerWrittenUnits);
         button.addEventListener("click", () => {
           const goingDark =
             !document.documentElement.classList.contains("dark");
+          document.documentElement.classList.toggle("dark", goingDark);
           localStorage.setItem("theme", goingDark ? "dark" : "light");
-          // Reload rather than toggle the class live — mermaid diagrams
-          // already on the page bake their theme colors in at render time
-          // (see below), so a live class-only flip would leave every
-          // rendered diagram in the old theme's colors until the next
-          // navigation. A reload is simple and correct; this is a content
-          // site, not an app, so the reload cost is negligible.
-          location.reload();
+          // No reload: every other `dark:` utility on the page already
+          // follows the class live via CSS. Mermaid is the one exception —
+          // it bakes its theme's colors into each diagram's SVG at render
+          // time instead of reading CSS, so a bare class flip would leave
+          // already-rendered diagrams in the old theme's colors — handled
+          // below by re-initializing Mermaid and re-rendering every diagram
+          // on the page from its cached source.
+          configureMermaidTheme(goingDark);
+          rerenderAllMermaid();
         });
       }
       initThemeToggle();
@@ -609,7 +612,6 @@ const headerTrackUnitSlugs = groupSlugsByTrack(headerWrittenUnits);
       initHeaderSearch();
       document.addEventListener("astro:page-load", initHeaderSearch);
 
-      const prefersDark = document.documentElement.classList.contains("dark");
       // Mermaid measures label text (to size boxes/notes) using this font,
       // via canvas — if it doesn't match the font actually applied to
       // .mermaid (inherited from Tailwind Typography's `.prose`), the box
@@ -644,102 +646,111 @@ const headerTrackUnitSlugs = groupSlugsByTrack(headerWrittenUnits);
       // near-black gray regardless of our theme name, rendering title/axis
       // text near-invisible against our dark background. Set xyChart's text
       // colors explicitly instead of relying on that fallback chain.
-      const chartThemeVariables = prefersDark
-        ? {
-            background: "transparent",
-            pie1: "#38bdf8",
-            pie2: "#a78bfa",
-            pie3: "#34d399",
-            pie4: "#fb923c",
-            pie5: "#f472b6",
-            pie6: "#facc15",
-            pieSectionTextColor: "#020617",
-            pieStrokeColor: "#020617",
-            pieOuterStrokeColor: "#475569",
-            xyChart: {
-              backgroundColor: "transparent",
-              plotColorPalette:
-                "#38bdf8,#a78bfa,#34d399,#fb923c,#f472b6,#facc15",
-              titleColor: "#e2e8f0",
-              xAxisTitleColor: "#cbd5e1",
-              xAxisLabelColor: "#cbd5e1",
-              xAxisTickColor: "#64748b",
-              xAxisLineColor: "#64748b",
-              yAxisTitleColor: "#cbd5e1",
-              yAxisLabelColor: "#cbd5e1",
-              yAxisTickColor: "#64748b",
-              yAxisLineColor: "#64748b",
-            },
-          }
-        : {
-            background: "transparent",
-            pie1: "#0ea5e9",
-            pie2: "#8b5cf6",
-            pie3: "#10b981",
-            pie4: "#f97316",
-            pie5: "#ec4899",
-            pie6: "#eab308",
-            pieSectionTextColor: "#f8fafc",
-            pieStrokeColor: "#ffffff",
-            pieOuterStrokeColor: "#cbd5e1",
-            xyChart: {
-              backgroundColor: "transparent",
-              plotColorPalette:
-                "#0ea5e9,#8b5cf6,#10b981,#f97316,#ec4899,#eab308",
-              titleColor: "#1e293b",
-              xAxisTitleColor: "#334155",
-              xAxisLabelColor: "#334155",
-              xAxisTickColor: "#94a3b8",
-              xAxisLineColor: "#94a3b8",
-              yAxisTitleColor: "#334155",
-              yAxisLabelColor: "#334155",
-              yAxisTickColor: "#94a3b8",
-              yAxisLineColor: "#94a3b8",
-            },
-          };
+      // Builds Mermaid's init config for a given theme — called once at
+      // first load and again (with the opposite isDark) on every theme
+      // toggle, so no diagram stays baked in the old theme's colors (see
+      // initThemeToggle above and rerenderAllMermaid below).
+      function configureMermaidTheme(isDark: boolean) {
+        const chartThemeVariables = isDark
+          ? {
+              background: "transparent",
+              pie1: "#38bdf8",
+              pie2: "#a78bfa",
+              pie3: "#34d399",
+              pie4: "#fb923c",
+              pie5: "#f472b6",
+              pie6: "#facc15",
+              pieSectionTextColor: "#020617",
+              pieStrokeColor: "#020617",
+              pieOuterStrokeColor: "#475569",
+              xyChart: {
+                backgroundColor: "transparent",
+                plotColorPalette:
+                  "#38bdf8,#a78bfa,#34d399,#fb923c,#f472b6,#facc15",
+                titleColor: "#e2e8f0",
+                xAxisTitleColor: "#cbd5e1",
+                xAxisLabelColor: "#cbd5e1",
+                xAxisTickColor: "#64748b",
+                xAxisLineColor: "#64748b",
+                yAxisTitleColor: "#cbd5e1",
+                yAxisLabelColor: "#cbd5e1",
+                yAxisTickColor: "#64748b",
+                yAxisLineColor: "#64748b",
+              },
+            }
+          : {
+              background: "transparent",
+              pie1: "#0ea5e9",
+              pie2: "#8b5cf6",
+              pie3: "#10b981",
+              pie4: "#f97316",
+              pie5: "#ec4899",
+              pie6: "#eab308",
+              pieSectionTextColor: "#f8fafc",
+              pieStrokeColor: "#ffffff",
+              pieOuterStrokeColor: "#cbd5e1",
+              xyChart: {
+                backgroundColor: "transparent",
+                plotColorPalette:
+                  "#0ea5e9,#8b5cf6,#10b981,#f97316,#ec4899,#eab308",
+                titleColor: "#1e293b",
+                xAxisTitleColor: "#334155",
+                xAxisLabelColor: "#334155",
+                xAxisTickColor: "#94a3b8",
+                xAxisLineColor: "#94a3b8",
+                yAxisTitleColor: "#334155",
+                yAxisLabelColor: "#334155",
+                yAxisTickColor: "#94a3b8",
+                yAxisLineColor: "#94a3b8",
+              },
+            };
 
-      mermaid.initialize({
-        startOnLoad: false,
-        theme: prefersDark ? "dark" : "default",
-        themeVariables: chartThemeVariables,
-        fontFamily: pageFontFamily,
-        // Default sequence diagrams repeat actor boxes at the bottom
-        // ("mirrored" actors) — in our narrow content column that repeat
-        // reliably overlaps the last message/note instead of leaving room
-        // for it, so it's off rather than fought with more container width.
-        sequence: { mirrorActors: false },
-        // xychart-beta's x-axis labels default to horizontal (labelRotation:
-        // 0) with no wrapping — a handful of realistic category names (e.g.
-        // "SHA-256 (GPU cluster)") don't fit their allotted slot at that
-        // angle and get visually cut off / overlap their neighbor. Angling
-        // labels gives each one much more effective width for the same
-        // horizontal footprint, the standard fix for this class of chart;
-        // -30° reads comfortably left-to-right without needing the labels
-        // to run fully vertical.
-        //
-        // Rotating the labels adds real vertical footprint (the further a
-        // rotated label's own width, the more it hangs below the axis).
-        // Verified by transforming each <text>'s bbox through its actual
-        // getCTM() into the chart's own viewBox coordinates: rotated labels
-        // consistently landed ~12-18px past the bottom edge regardless of
-        // total chart height — silently clipped by the SVG's own overflow.
-        // Growing `height` alone doesn't fix it: mermaid reserves the axis's
-        // label space from its OWN estimated footprint
-        // (sin(rotation)*textWidth + cos(rotation)*textHeight +
-        // labelPadding*2), not as a share of total chart height, and that
-        // estimate under-shoots the real rendered bbox by a small, roughly
-        // constant amount (a measurement/render mismatch inside mermaid
-        // itself, not something this project's math). `labelPadding`, unlike
-        // `height`, feeds directly into that reserved-space calculation, so
-        // padding it out is what actually buys back the missing margin.
-        xyChart: {
-          xAxis: {
-            labelRotation: -30,
-            labelFontSize: 11,
-            labelPadding: 28,
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: isDark ? "dark" : "default",
+          themeVariables: chartThemeVariables,
+          fontFamily: pageFontFamily,
+          // Default sequence diagrams repeat actor boxes at the bottom
+          // ("mirrored" actors) — in our narrow content column that repeat
+          // reliably overlaps the last message/note instead of leaving room
+          // for it, so it's off rather than fought with more container width.
+          sequence: { mirrorActors: false },
+          // xychart-beta's x-axis labels default to horizontal (labelRotation:
+          // 0) with no wrapping — a handful of realistic category names (e.g.
+          // "SHA-256 (GPU cluster)") don't fit their allotted slot at that
+          // angle and get visually cut off / overlap their neighbor. Angling
+          // labels gives each one much more effective width for the same
+          // horizontal footprint, the standard fix for this class of chart;
+          // -30° reads comfortably left-to-right without needing the labels
+          // to run fully vertical.
+          //
+          // Rotating the labels adds real vertical footprint (the further a
+          // rotated label's own width, the more it hangs below the axis).
+          // Verified by transforming each <text>'s bbox through its actual
+          // getCTM() into the chart's own viewBox coordinates: rotated labels
+          // consistently landed ~12-18px past the bottom edge regardless of
+          // total chart height — silently clipped by the SVG's own overflow.
+          // Growing `height` alone doesn't fix it: mermaid reserves the axis's
+          // label space from its OWN estimated footprint
+          // (sin(rotation)*textWidth + cos(rotation)*textHeight +
+          // labelPadding*2), not as a share of total chart height, and that
+          // estimate under-shoots the real rendered bbox by a small, roughly
+          // constant amount (a measurement/render mismatch inside mermaid
+          // itself, not something this project's math). `labelPadding`, unlike
+          // `height`, feeds directly into that reserved-space calculation, so
+          // padding it out is what actually buys back the missing margin.
+          xyChart: {
+            xAxis: {
+              labelRotation: -30,
+              labelFontSize: 11,
+              labelPadding: 28,
+            },
           },
-        },
-      });
+        });
+      }
+      configureMermaidTheme(
+        document.documentElement.classList.contains("dark"),
+      );
 
       // Convert every fenced mermaid block to a `.mermaid` div up front —
       // cheap, no layout involved — but only RENDER (mermaid.run) the ones
@@ -763,7 +774,12 @@ const headerTrackUnitSlugs = groupSlugsByTrack(headerWrittenUnits);
         blocks.forEach((pre) => {
           const container = document.createElement("div");
           container.className = "mermaid";
-          container.textContent = pre.textContent ?? "";
+          const source = pre.textContent ?? "";
+          container.textContent = source;
+          // Cached so a theme toggle can re-render this diagram later —
+          // mermaid.run() replaces this element's content with rendered SVG,
+          // destroying the original source text it was given.
+          container.dataset.mermaidSource = source;
           pre.replaceWith(container);
         });
       }
@@ -775,6 +791,25 @@ const headerTrackUnitSlugs = groupSlugsByTrack(headerWrittenUnits);
           ),
         ).filter((el) => !isInHiddenPanel(el));
         if (nodes.length > 0) void mermaid.run({ nodes });
+      }
+
+      // Restores every already-rendered diagram to its cached source and
+      // re-runs Mermaid on the visible ones — the only way to pick up a
+      // theme change, since Mermaid bakes colors into the SVG at render
+      // time rather than reading them from CSS. A diagram currently inside
+      // a hidden LevelTabs panel is left unprocessed, same as on first
+      // load; it picks up the (by then already-reconfigured) theme the
+      // first time "mermaid:rerun" renders it for real.
+      function rerenderAllMermaid() {
+        const processed = document.querySelectorAll<HTMLElement>(
+          ".mermaid[data-processed]",
+        );
+        if (processed.length === 0) return;
+        processed.forEach((el) => {
+          el.textContent = el.dataset.mermaidSource ?? "";
+          delete el.dataset.processed;
+        });
+        renderVisibleMermaid();
       }
 
       convertFencedBlocks(document);
