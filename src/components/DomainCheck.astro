@@ -1,0 +1,196 @@
+---
+// The exam tier of the three-tier model (see CLAUDE.md "Exercises"): one
+// section per topic, reached after L1+L2+L3, open and attemptable in any
+// order (not sequentially gated, not sampled 2-of-N like ExercisePanel) —
+// every topic section renders at once. "Mark as done" gates on every
+// section passing; the 7/30/90-day reset clears this tier's pass state
+// (practice-tier chips elsewhere on the page are never touched by either).
+import { ShieldCheck } from "lucide-astro";
+import type { TopicGroup } from "../lib/curriculum";
+
+interface Props {
+  track: string;
+  unitSlug: string;
+  topics: TopicGroup[];
+}
+
+const { track, unitSlug, topics } = Astro.props;
+
+function formatTopicLabel(topicId: string): string {
+  const spaced = topicId.replace(/-/g, " ");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+---
+
+{
+  topics.length > 0 && (
+    <div
+      data-exercise-panel
+      data-domain-check="true"
+      data-track={track}
+      data-unit={unitSlug}
+      class="mt-10 space-y-6 border-t border-slate-200 pt-8 dark:border-slate-800"
+    >
+      <div>
+        <h3 class="flex items-center gap-1.5 text-sm font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-400">
+          <ShieldCheck class="h-4 w-4" aria-hidden="true" />
+          Domain check
+        </h3>
+        <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
+          The real test — edge cases, not recall. Take every topic's section, in
+          any order. This is what "Mark as done" actually gates on.
+        </p>
+      </div>
+      {topics.map((topic) => (
+        <div
+          data-exercise-pool
+          data-pool-id={topic.topicId}
+          data-track={track}
+          data-unit={unitSlug}
+          class="overflow-hidden rounded-lg border border-amber-300 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/30"
+        >
+          <div class="h-[3px] w-full" style="background: var(--gauge-warn)" />
+          <div class="p-4">
+            <div class="mb-2 flex items-center justify-between gap-2">
+              <span
+                class="text-xs font-semibold"
+                style="color: var(--gauge-warn)"
+              >
+                {formatTopicLabel(topic.topicId)}
+              </span>
+              <span
+                data-topic-status
+                class="text-xs font-semibold tracking-wide uppercase"
+              >
+                Not attempted
+              </span>
+            </div>
+            <script
+              type="application/json"
+              data-pool-variants
+              set:html={JSON.stringify(topic.variants).replace(
+                /<\/script/gi,
+                "<\\/script",
+              )}
+            />
+            <div data-pool-content />
+            {topic.reflection && (
+              <div
+                data-reflection
+                class="mt-4 hidden rounded-md border border-dashed border-slate-300 p-3 text-sm text-slate-600 italic dark:border-slate-700 dark:text-slate-400"
+              >
+                <p class="mb-1 text-xs font-semibold tracking-wide text-slate-400 uppercase not-italic dark:text-slate-500">
+                  Worth thinking about
+                </p>
+                <Fragment set:html={topic.reflection} />
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+<script>
+  import { setExerciseState, getExerciseState } from "../lib/spaced-repetition";
+  import { renderQuiz, renderCode, type Variant } from "../lib/exercise-render";
+
+  function statusLabel(state: "passed" | "failed" | null): {
+    text: string;
+    className: string;
+  } {
+    if (state === "passed") {
+      return {
+        text: "Passed",
+        className:
+          "text-xs font-semibold tracking-wide uppercase text-emerald-600 dark:text-emerald-400",
+      };
+    }
+    if (state === "failed") {
+      return {
+        text: "Try again",
+        className:
+          "text-xs font-semibold tracking-wide uppercase text-red-600 dark:text-red-400",
+      };
+    }
+    return {
+      text: "Not attempted",
+      className:
+        "text-xs font-semibold tracking-wide uppercase text-slate-400 dark:text-slate-500",
+    };
+  }
+
+  function renderTopic(poolEl: HTMLElement) {
+    const track = poolEl.dataset.track!;
+    const unitSlug = poolEl.dataset.unit!;
+    const topicId = poolEl.dataset.poolId!;
+    const content = poolEl.querySelector<HTMLElement>("[data-pool-content]")!;
+    const statusEl = poolEl.querySelector<HTMLElement>("[data-topic-status]");
+    const reflection = poolEl.querySelector<HTMLElement>("[data-reflection]");
+    const variantsJson = poolEl.querySelector<HTMLScriptElement>(
+      "[data-pool-variants]",
+    )?.textContent;
+    const variants: Variant[] = variantsJson ? JSON.parse(variantsJson) : [];
+    if (variants.length === 0) return;
+
+    const variant = variants[Math.floor(Math.random() * variants.length)];
+    content.innerHTML = "";
+
+    const reference =
+      variant.reference ?? variants.find((v) => v.reference)?.reference;
+    const learnMore =
+      variant.learnMore ?? variants.find((v) => v.learnMore)?.learnMore;
+
+    function updateStatus() {
+      const state = getExerciseState(track, unitSlug, topicId);
+      if (statusEl) {
+        const { text, className } = statusLabel(state);
+        statusEl.textContent = text;
+        statusEl.className = className;
+      }
+      if (reflection) {
+        reflection.classList.toggle("hidden", state !== "passed");
+      }
+    }
+
+    const onGraded = (passed: boolean) => {
+      setExerciseState(track, unitSlug, topicId, passed ? "passed" : "failed");
+      updateStatus();
+    };
+
+    if (variant.type === "quiz") {
+      renderQuiz(content, variant, topicId, reference, learnMore, onGraded);
+    } else {
+      renderCode(content, variant, topicId, reference, learnMore, onGraded);
+    }
+    updateStatus();
+  }
+
+  // Every topic is open from the start — no sampling, no sequential gate —
+  // so dataset.shownIds is simply every topicId, set immediately. This
+  // keeps ProgressToggle's generic getShownExerciseIds() working unchanged:
+  // it only cares that [data-exercise-panel] carries ready/shownIds.
+  function initDomainChecks() {
+    document
+      .querySelectorAll<HTMLElement>("[data-exercise-panel][data-domain-check]")
+      .forEach((panel) => {
+        const pools = Array.from(
+          panel.querySelectorAll<HTMLElement>("[data-exercise-pool]"),
+        );
+        for (const poolEl of pools) {
+          renderTopic(poolEl);
+        }
+        panel.dataset.shownIds = JSON.stringify(
+          pools.map((p) => p.dataset.poolId!),
+        );
+        panel.dataset.ready = "true";
+      });
+    document.dispatchEvent(new CustomEvent("exercises:shown"));
+  }
+
+  document.addEventListener("exercises:reset", initDomainChecks);
+
+  initDomainChecks();
+  document.addEventListener("astro:page-load", initDomainChecks);
+</script>

@@ -1,0 +1,129 @@
+---
+// The practice tier of the three-tier model (see CLAUDE.md "Exercises"):
+// a row of chips dropped right after the prose that explains one topic.
+// Easy, recall-only, self-grading, never gates anything, never resets on
+// the 7/30/90-day schedule — a different 2-3 of the topic's ~8-10 variants
+// rotate in on every page load. Used directly inside MDX, right where
+// <Checkpoint> would go, but lighter weight (no whiteboard trigger).
+import { getCollection } from "astro:content";
+import { groupExercisesByTopic } from "../lib/curriculum";
+
+interface Props {
+  track: string;
+  unitSlug: string;
+  topicId: string;
+}
+
+const { track, unitSlug, topicId } = Astro.props;
+
+const entries = await getCollection(
+  "exercises",
+  (e) => e.id === `${track}/${unitSlug}/exercises`,
+);
+const items = entries[0]?.data.items ?? [];
+const group = groupExercisesByTopic(items, "practice").find(
+  (g) => g.topicId === topicId,
+);
+const variants = group?.variants ?? [];
+---
+
+{
+  variants.length > 0 && (
+    <div
+      data-practice-check
+      class="not-prose my-6 rounded-lg border border-dashed border-slate-300 p-4 dark:border-slate-700"
+    >
+      <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase dark:text-slate-500">
+        Quick practice
+      </p>
+      <script
+        type="application/json"
+        data-practice-variants
+        set:html={JSON.stringify(variants).replace(/<\/script/gi, "<\\/script")}
+      />
+      <div data-practice-chips class="mt-2 flex flex-wrap gap-2" />
+      <div data-practice-content class="mt-1" />
+    </div>
+  )
+}
+
+<script>
+  import { renderQuiz, renderCode, type Variant } from "../lib/exercise-render";
+
+  const CHIP_LABEL_FALLBACKS = ["Quick check", "What if...?", "Try it"];
+
+  function initPracticeChecks() {
+    document
+      .querySelectorAll<HTMLElement>("[data-practice-check]")
+      .forEach((box) => {
+        if (box.dataset.wired === "true") return;
+        box.dataset.wired = "true";
+
+        const variantsJson = box.querySelector<HTMLScriptElement>(
+          "[data-practice-variants]",
+        )?.textContent;
+        const variants: Variant[] = variantsJson
+          ? JSON.parse(variantsJson)
+          : [];
+        if (variants.length === 0) {
+          box.remove();
+          return;
+        }
+
+        const chipsRow = box.querySelector<HTMLElement>(
+          "[data-practice-chips]",
+        )!;
+        const content = box.querySelector<HTMLElement>(
+          "[data-practice-content]",
+        )!;
+
+        const shuffled = [...variants].sort(() => Math.random() - 0.5);
+        const picked = shuffled.slice(0, Math.min(3, shuffled.length));
+
+        chipsRow.innerHTML = "";
+        content.innerHTML = "";
+
+        const chips: HTMLButtonElement[] = [];
+        picked.forEach((variant, i) => {
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className =
+            "rounded-full border px-3 py-1 text-xs font-medium transition";
+          chip.style.borderColor = "var(--accent-soft-border)";
+          chip.style.color = "var(--accent-text)";
+          chip.textContent =
+            variant.chipLabel ?? CHIP_LABEL_FALLBACKS[i] ?? "Quick check";
+          chip.addEventListener("click", () => {
+            chips.forEach((c) => {
+              c.style.background = c === chip ? "var(--accent-soft-bg)" : "";
+            });
+            content.innerHTML = "";
+            content.classList.remove("animate-fade-slide-in");
+            void content.offsetWidth;
+            content.classList.add("animate-fade-slide-in");
+            const onGraded = () => {}; // never gates, never persists
+            if (variant.type === "quiz") {
+              renderQuiz(
+                content,
+                variant,
+                "", // no whiteboard trigger — skipTools below
+                undefined,
+                undefined,
+                onGraded,
+                { skipTools: true },
+              );
+            } else {
+              renderCode(content, variant, "", undefined, undefined, onGraded, {
+                skipTools: true,
+              });
+            }
+          });
+          chips.push(chip);
+          chipsRow.append(chip);
+        });
+      });
+  }
+
+  initPracticeChecks();
+  document.addEventListener("astro:page-load", initPracticeChecks);
+</script>

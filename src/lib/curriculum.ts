@@ -154,6 +154,42 @@ export function groupExercisesIntoPools(items: ExerciseItem[]): ExercisePool[] {
   return [...byPool.values()];
 }
 
+export interface TopicGroup {
+  topicId: string;
+  level: 1 | 2 | 3;
+  variants: ExerciseItem[];
+  /** Set from whichever variant carries it — see content.config.ts's per-topicId agreement rule. */
+  reflection?: string;
+}
+
+/**
+ * Groups exercise items into per-topic groups for one tier ("practice" or
+ * "exam") — the new unit of measure, replacing the old flat per-level
+ * `poolId` pool (see CLAUDE.md "Exercises"). Items with no `tier`/`topicId`
+ * (older, not-yet-migrated units) are simply excluded — they keep rendering
+ * through `groupExercisesIntoPools` + `ExercisePanel` as before.
+ */
+export function groupExercisesByTopic(
+  items: ExerciseItem[],
+  tier: "practice" | "exam",
+): TopicGroup[] {
+  const byTopic = new Map<string, TopicGroup>();
+  for (const item of items) {
+    if (item.tier !== tier || !item.topicId) continue;
+    if (!byTopic.has(item.topicId)) {
+      byTopic.set(item.topicId, {
+        topicId: item.topicId,
+        level: item.level,
+        variants: [],
+      });
+    }
+    const group = byTopic.get(item.topicId)!;
+    group.variants.push(item);
+    if (item.reflection) group.reflection = item.reflection;
+  }
+  return [...byTopic.values()];
+}
+
 export async function getUnitContent(
   track: string,
   unitSlug: string,

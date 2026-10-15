@@ -21,10 +21,29 @@ const curriculum = defineCollection({
 // question: the page picks one at random per view/re-exam, so a re-take
 // after the spaced-repetition reset isn't just re-answering from memory.
 // Omitting `poolId` makes an item a singleton pool of one (its own id).
+// New in the three-tier model (see CLAUDE.md "Exercises"): `tier` splits a
+// topic's items into "practice" (easy, interleaved inline in the level
+// content, never gates, never resets) and "exam" (the end-of-unit "Domain
+// check," gates "Mark as done", resets on the 7/30/90-day schedule).
+// `topicId` plays the role `poolId` used to play — the unit of grouping is
+// now a topic, not a flat per-level pool — and `reflection` is the ungraded
+// "connect this to another domain" prompt shown once an exam-tier topic is
+// passed. Older units omitting all three keep working exactly as before
+// (ExercisePanel's flat-pool-per-level model); `poolId` stays supported for
+// those. `chipLabel` is cosmetic, practice-tier only (the short label on the
+// chip that reveals this variant — e.g. "quick check", "what if...?").
+const tierFields = {
+  tier: z.enum(["practice", "exam"]).optional(),
+  topicId: z.string().optional(),
+  chipLabel: z.string().optional(),
+  reflection: z.string().optional(),
+};
+
 const quizExercise = z.object({
   type: z.literal("quiz"),
   id: z.string(),
   poolId: z.string().optional(),
+  ...tierFields,
   level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   prompt: z.string(),
   choices: z.array(z.string()).min(2),
@@ -33,8 +52,9 @@ const quizExercise = z.object({
   // Trusted HTML (a compact visual + one-line theory statement) shown in
   // the exercise's whiteboard reference panel, below the question — the
   // link from "got it wrong" back to the concept being tested. Optional,
-  // but must be identical across every variant sharing a poolId (checked
-  // by validate-content.mjs) since only one variant renders per view.
+  // but must be identical across every variant sharing a poolId/topicId
+  // (checked by validate-content.mjs) since only one variant renders per
+  // view.
   reference: z.string().optional(),
   // Trusted HTML — a real, multi-paragraph explanation of the concept this
   // pool tests, shown in a dedicated "Learn more" modal (separate from the
@@ -47,6 +67,7 @@ const codeExercise = z.object({
   type: z.literal("code"),
   id: z.string(),
   poolId: z.string().optional(),
+  ...tierFields,
   level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   prompt: z.string(),
   starterCode: z.string(),

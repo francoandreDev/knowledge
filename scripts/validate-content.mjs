@@ -120,6 +120,9 @@ async function checkExercisesFile(track, unitSlug) {
   const seenIds = new Set();
   const poolLevelAndType = new Map();
   const poolFields = new Map();
+  const topicFields = new Map();
+  const practiceTopics = new Set();
+  const examTopics = new Set();
   for (const [i, item] of parsed.items.entries()) {
     const where = `${track}/${unitSlug}/exercises.json items[${i}]`;
     if (![1, 2, 3].includes(item.level)) {
@@ -168,6 +171,32 @@ async function checkExercisesFile(track, unitSlug) {
       }
     }
 
+    // Three-tier model fields (see CLAUDE.md "Exercises") — all optional
+    // for backward compatibility with not-yet-migrated units.
+    if (item.tier !== undefined && !["practice", "exam"].includes(item.tier)) {
+      problems.push(`${where}: "tier" must be "practice" or "exam".`);
+    }
+    if (item.tier && !item.topicId) {
+      problems.push(`${where}: has a "tier" but no "topicId".`);
+    }
+    if (item.topicId) {
+      if (item.tier === "practice") practiceTopics.add(item.topicId);
+      if (item.tier === "exam") examTopics.add(item.topicId);
+      // `reflection` renders once per topicId view (like reference/learnMore
+      // per poolId above) — every variant sharing a topicId must agree.
+      if (item.reflection) {
+        const key = `${item.topicId}:reflection`;
+        const prior = topicFields.get(key);
+        if (prior === undefined) {
+          topicFields.set(key, item.reflection);
+        } else if (prior !== item.reflection) {
+          problems.push(
+            `${where}: topicId "${item.topicId}" has a "reflection" that differs from another variant of the same topic.`,
+          );
+        }
+      }
+    }
+
     if (item.type === "quiz") {
       if (!Array.isArray(item.choices) || item.choices.length < 2) {
         problems.push(`${where}: quiz needs at least 2 "choices".`);
@@ -197,6 +226,17 @@ async function checkExercisesFile(track, unitSlug) {
     } else {
       problems.push(
         `${where}: "type" must be "quiz" or "code", got ${JSON.stringify(item.type)}.`,
+      );
+    }
+  }
+
+  // An exam-tier topic with no practice-tier counterpart has nothing easy
+  // feeding it — the reverse isn't required (some topics are too simple to
+  // examine at all).
+  for (const topicId of examTopics) {
+    if (!practiceTopics.has(topicId)) {
+      problems.push(
+        `${track}/${unitSlug}/exercises.json: exam-tier topicId "${topicId}" has no matching practice-tier topicId.`,
       );
     }
   }
