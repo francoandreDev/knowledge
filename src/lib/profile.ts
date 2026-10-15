@@ -13,6 +13,11 @@ export interface Profile {
   // Never required: an empty/missing list must leave every page behaving
   // exactly as it does with no profile personalization at all.
   interests?: string[];
+  // Last time this profile was switched to (set on create and on every
+  // `switchProfile`) — powers ProfileGate's "most recent" highlight.
+  // Missing on profiles created before this field existed; callers fall
+  // back to `createdAt` in that case rather than treating it as required.
+  lastActiveAt?: number;
 }
 
 const PROFILES_KEY = "profiles";
@@ -51,10 +56,12 @@ export function getActiveProfile(): Profile | null {
 }
 
 export function createProfile(name: string): Profile {
+  const now = Date.now();
   const profile: Profile = {
     id: generateId(),
     name: name.trim(),
-    createdAt: Date.now(),
+    createdAt: now,
+    lastActiveAt: now,
   };
   writeProfiles([...readProfiles(), profile]);
   localStorage.setItem(ACTIVE_PROFILE_KEY, profile.id);
@@ -62,7 +69,40 @@ export function createProfile(name: string): Profile {
 }
 
 export function switchProfile(id: string): void {
+  const profiles = readProfiles();
+  const profile = profiles.find((p) => p.id === id);
+  if (profile) {
+    profile.lastActiveAt = Date.now();
+    writeProfiles(profiles);
+  }
   localStorage.setItem(ACTIVE_PROFILE_KEY, id);
+}
+
+/**
+ * Units marked done for a given profile, regardless of whether it's the
+ * active one — `pStorage` only ever reads the active profile, but
+ * ProfileGate needs every profile's own progress to show on its tile.
+ * Reads raw `localStorage` directly under that profile's namespace instead.
+ */
+export function countProfileDone(
+  id: string,
+  trackUnits: Record<string, string[]>,
+): number {
+  const prefix = dataPrefix(id);
+  let done = 0;
+  for (const [track, slugs] of Object.entries(trackUnits)) {
+    for (const slug of slugs) {
+      const raw = localStorage.getItem(`${prefix}progress:${track}/${slug}`);
+      if (!raw) continue;
+      try {
+        const state = JSON.parse(raw) as { done?: boolean };
+        if (state.done) done++;
+      } catch {
+        // Malformed entry — treat as not done rather than throwing.
+      }
+    }
+  }
+  return done;
 }
 
 export function updateProfileInterests(id: string, interests: string[]): void {
