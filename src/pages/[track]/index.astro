@@ -1,5 +1,5 @@
 ---
-import { ArrowLeft, HelpCircle } from "lucide-astro";
+import { ArrowLeft, HelpCircle, Check } from "lucide-astro";
 import Layout from "../../layouts/Layout.astro";
 import TrackIcon from "../../components/TrackIcon.astro";
 import TrackIllustration from "../../components/TrackIllustration.astro";
@@ -8,6 +8,7 @@ import ProgressGauge from "../../components/ProgressGauge.astro";
 import TopicMythModal from "../../components/TopicMythModal.astro";
 import { UNIT_TEASERS } from "../../data/unit-teasers";
 import { roadmap, getTrack } from "../../data/roadmap";
+import type { RoadmapUnit } from "../../data/roadmap";
 import { getWrittenUnits } from "../../lib/curriculum";
 import { groupSlugsByTrack } from "../../lib/progress-gauges";
 
@@ -28,6 +29,30 @@ const writtenSlugs = new Set(trackWrittenUnits.map((u) => u.unitSlug));
 // *this reader's own* progress covers what's written, not just how much of
 // the track exists.
 const trackUnitSlugs = groupSlugsByTrack(trackWrittenUnits);
+
+// Groups units by their primary (first) tag instead of pure sequential
+// order — a 13-17 unit track reads as a wall of identical rows otherwise.
+// Each unit keeps its real position number (`i`, from `track.units`), so
+// "why is #7 here" is still answerable; only the *visual* order regroups
+// around the dominant theme, in the order that theme first appears.
+interface GroupedUnit {
+  unit: RoadmapUnit;
+  index: number;
+}
+const unitGroups: { label: string; items: GroupedUnit[] }[] = [];
+const groupIndexByTag = new Map<string, number>();
+track.units.forEach((unit, i) => {
+  const key = unit.tags[0] ?? "general";
+  if (!groupIndexByTag.has(key)) {
+    groupIndexByTag.set(key, unitGroups.length);
+    unitGroups.push({ label: key, items: [] });
+  }
+  unitGroups[groupIndexByTag.get(key)!].items.push({ unit, index: i });
+});
+function formatGroupLabel(tag: string): string {
+  const spaced = tag.replace(/-/g, " ");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
 ---
 
 <Layout title={track.name} ogImage={`/og/${track.name}.png`} wide>
@@ -39,7 +64,28 @@ const trackUnitSlugs = groupSlugsByTrack(trackWrittenUnits);
     all tracks
   </a>
 
+  <!-- Collapses to an icon + name + % strip once the full header below
+       scrolls out of view — a 13-17 unit track is a long scroll, and
+       without this the reader's progress is only visible at the very top. -->
   <div
+    data-track-sticky-header
+    class="sticky top-0 z-20 -mx-4 hidden items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8 dark:border-slate-800 dark:bg-slate-950/90"
+  >
+    <span class="flex min-w-0 items-center gap-2">
+      <TrackIcon track={track.name} class="h-4 w-4 shrink-0" />
+      <span class="truncate text-sm font-semibold">{track.name}/</span>
+    </span>
+    <span
+      data-track-sticky-pct
+      class="shrink-0 text-xs font-semibold tabular-nums"
+      style="color: var(--gauge-accent)"
+    >
+      {writtenSlugs.size > 0 ? "0%" : "—"}
+    </span>
+  </div>
+
+  <div
+    data-track-header-card
     class="relative mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900/50"
   >
     <div
@@ -91,74 +137,102 @@ const trackUnitSlugs = groupSlugsByTrack(trackWrittenUnits);
     </div>
   </div>
 
-  <ol class="mt-6 space-y-2">
+  <div class="mt-8 space-y-8">
     {
-      track.units.map((unit, i) => {
-        const isWritten = writtenSlugs.has(unit.slug);
-        const status = isWritten ? "done" : unit.status;
-        const hasTeaser = Boolean(UNIT_TEASERS[`${track.name}/${unit.slug}`]);
-        return (
-          <li class="relative flex items-start gap-3 rounded-lg border border-slate-200 p-3 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:hover:border-slate-700 dark:hover:bg-slate-900/50">
-            {isWritten && (
-              <a
-                href={`/${track.name}/${unit.slug}/`}
-                aria-label={unit.problem}
-                class="absolute inset-0 z-0"
-              />
-            )}
-            <span
-              aria-hidden="true"
-              class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[10px] font-semibold tabular-nums text-slate-400 dark:text-slate-600"
-            >
-              {String(i + 1).padStart(2, "0")}
-            </span>
-            <span
-              aria-hidden="true"
-              class={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
-                status === "done"
-                  ? "bg-[var(--gauge-accent)]"
-                  : status === "in-progress"
-                    ? "bg-[var(--gauge-warn)]"
-                    : "border border-slate-400 dark:border-slate-600"
-              }`}
-            />
-            <div class="pointer-events-none min-w-0 flex-1">
-              <span
-                class={
-                  isWritten
-                    ? "text-base font-medium text-slate-900 dark:text-slate-100"
-                    : "text-base text-slate-500 dark:text-slate-500"
-                }
-              >
-                {unit.problem}
-              </span>
-              <div class="mt-1.5 flex flex-wrap gap-1.5">
-                {unit.tags.map((tag) => (
-                  <span class="rounded-full bg-slate-500/10 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:text-slate-300">
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <div class="flex shrink-0 items-center gap-1.5">
-              {hasTeaser && (
-                <button
-                  type="button"
-                  data-myth-trigger={`${track.name}/${unit.slug}`}
-                  aria-label={`What is "${unit.problem}", really?`}
-                  class="relative z-10 shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-                  style="color: var(--accent-text)"
+      unitGroups.map((group) => (
+        <section>
+          <h2 class="mb-3 flex items-center gap-2 text-xs font-bold tracking-wide text-slate-400 uppercase dark:text-slate-600">
+            {formatGroupLabel(group.label)}
+            <span class="h-px flex-1 bg-slate-200 dark:bg-slate-800" />
+          </h2>
+          <ol>
+            {group.items.map(({ unit, index: i }, posInGroup) => {
+              const isWritten = writtenSlugs.has(unit.slug);
+              const status = isWritten ? "done" : unit.status;
+              const isLast = posInGroup === group.items.length - 1;
+              const hasTeaser = Boolean(
+                UNIT_TEASERS[`${track.name}/${unit.slug}`],
+              );
+              return (
+                <li
+                  class={`relative flex gap-3 pb-5 ${
+                    isLast
+                      ? ""
+                      : "before:absolute before:top-6 before:bottom-[-2px] before:left-[11px] before:w-px before:bg-slate-200 before:content-[''] dark:before:bg-slate-700"
+                  }`}
                 >
-                  <HelpCircle class="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
-              )}
-              <StatusBadge status={isWritten ? "written" : unit.status} />
-            </div>
-          </li>
-        );
-      })
+                  <span
+                    aria-hidden="true"
+                    class={`relative z-10 flex h-[23px] w-[23px] shrink-0 items-center justify-center rounded-full border text-[10px] font-bold ${
+                      status === "done"
+                        ? "border-[var(--gauge-accent)] bg-[var(--gauge-accent)] text-white"
+                        : status === "in-progress"
+                          ? "border-[var(--gauge-warn)] text-[var(--gauge-warn)]"
+                          : "border-slate-300 text-slate-400 dark:border-slate-600 dark:text-slate-600"
+                    }`}
+                  >
+                    {status === "done" ? (
+                      <Check class="h-3 w-3" aria-hidden="true" />
+                    ) : (
+                      i + 1
+                    )}
+                  </span>
+                  <div class="relative -mt-1 min-w-0 flex-1 rounded-lg p-1 transition hover:bg-slate-50 dark:hover:bg-slate-900/50">
+                    {isWritten && (
+                      <a
+                        href={`/${track.name}/${unit.slug}/`}
+                        aria-label={unit.problem}
+                        class="absolute inset-0 z-0"
+                      />
+                    )}
+                    <div class="pointer-events-none flex items-start gap-3">
+                      <div class="min-w-0 flex-1">
+                        <span
+                          class={
+                            isWritten
+                              ? "text-base font-medium text-slate-900 dark:text-slate-100"
+                              : "text-base text-slate-500 dark:text-slate-500"
+                          }
+                        >
+                          {unit.problem}
+                        </span>
+                        <div class="mt-1.5 flex flex-wrap gap-1.5">
+                          {unit.tags.map((tag) => (
+                            <span class="rounded-full bg-slate-500/10 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:text-slate-300">
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div class="pointer-events-auto flex shrink-0 items-center gap-1.5">
+                        {hasTeaser && (
+                          <button
+                            type="button"
+                            data-myth-trigger={`${track.name}/${unit.slug}`}
+                            aria-label={`What is "${unit.problem}", really?`}
+                            class="relative z-10 shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                            style="color: var(--accent-text)"
+                          >
+                            <HelpCircle
+                              class="h-3.5 w-3.5"
+                              aria-hidden="true"
+                            />
+                          </button>
+                        )}
+                        <StatusBadge
+                          status={isWritten ? "written" : unit.status}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      ))
     }
-  </ol>
+  </div>
 
   <TopicMythModal />
 
@@ -169,7 +243,10 @@ const trackUnitSlugs = groupSlugsByTrack(trackWrittenUnits);
   />
 
   <script>
-    import { applyTrackGauges } from "../../lib/progress-gauges";
+    import {
+      applyTrackGauges,
+      countDoneByTrack,
+    } from "../../lib/progress-gauges";
 
     function initTrackGauges() {
       const el = document.getElementById("track-unit-slugs");
@@ -181,8 +258,52 @@ const trackUnitSlugs = groupSlugsByTrack(trackWrittenUnits);
         return;
       }
       applyTrackGauges(map);
+
+      const stickyPct = document.querySelector<HTMLElement>(
+        "[data-track-sticky-pct]",
+      );
+      if (stickyPct) {
+        const total = Object.values(map).reduce((n, arr) => n + arr.length, 0);
+        const done = Object.values(countDoneByTrack(map)).reduce(
+          (n, c) => n + c,
+          0,
+        );
+        stickyPct.textContent =
+          total > 0 ? `${Math.round((done / total) * 100)}%` : "—";
+      }
     }
     initTrackGauges();
     document.addEventListener("astro:page-load", initTrackGauges);
+
+    // Reveals the compact icon+name+% strip only once the full header
+    // scrolls out of view, so progress stays visible through a long track
+    // without the header permanently eating vertical space.
+    function initStickyTrackHeader() {
+      const sticky = document.querySelector<HTMLElement>(
+        "[data-track-sticky-header]",
+      );
+      const headerCard = document.querySelector<HTMLElement>(
+        "[data-track-header-card]",
+      );
+      const siteHeader = document.querySelector<HTMLElement>("header");
+      if (!sticky || !headerCard) return;
+      if (sticky.dataset.wired === "true") return;
+      sticky.dataset.wired = "true";
+
+      if (siteHeader) {
+        sticky.style.top = `${siteHeader.getBoundingClientRect().height}px`;
+      }
+
+      const observer = new IntersectionObserver(
+        ([entry]) => {
+          sticky.classList.toggle("hidden", entry.isIntersecting);
+          sticky.classList.toggle("flex", !entry.isIntersecting);
+        },
+        { threshold: 0 },
+      );
+      observer.observe(headerCard);
+    }
+    initStickyTrackHeader();
+    document.addEventListener("astro:page-load", initStickyTrackHeader);
   </script>
 </Layout>
