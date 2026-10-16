@@ -128,38 +128,26 @@ This is an architectural consequence, not just a trivia fact: the same "request 
 
 ## What is a server actually doing, underneath any framework?
 
-Pseudocode for what a server is conceptually doing for every connection — this is the shape underneath every framework you'll ever use, from a raw socket server to Express to a CDN edge function:
+This is the shape underneath every framework you'll ever use, from a raw socket server to Express to a CDN edge function — not pseudocode to transcribe, just the pipeline every one of them repeats for every connection:
 
-```python
-loop forever:
-    connection = accept_next_tcp_connection()
-
-    raw_request = read_until_blank_line(connection)
-    request_line, headers = parse(raw_request)
-    method, path, version = split(request_line)
-
-    if headers contains "Content-Length":
-        body = read_exactly(connection, headers["Content-Length"])
-    else:
-        body = None
-
-    handler = route(method, path)          # e.g. GET /articles/:id -> get_article
-    response = handler(method, path, headers, body)
-
-    write(connection, response.status_line)
-    write(connection, response.headers)
-    write(connection, "\r\n")
-    write(connection, response.body)
-
-    if headers["Connection"] == "keep-alive":
-        continue on same connection
-    else:
-        close(connection)
+```mermaid
+flowchart TD
+    A["Accept a connection"] --> B["Read bytes until the blank line\n(request line + headers complete)"]
+    B --> C{"Content-Length\nor chunked?"}
+    C -->|yes| D["Keep reading until the body\narrives too"]
+    C -->|no| E["No body"]
+    D --> F["Route: method + path -> handler"]
+    E --> F
+    F --> G["Handler builds a response"]
+    G --> H["Write status line, headers,\nblank line, body"]
+    H --> I{"Connection: keep-alive?"}
+    I -->|yes| B
+    I -->|no| J["Close the connection"]
 ```
 
-Every real HTTP server — Node's `http` module, nginx, a Go `net/http` handler — is a more sophisticated, more concurrent version of exactly this loop. Nothing about `async`, routers, or middleware changes the underlying contract; they just make the "parse → route → handle → write" pipeline easier to compose.
+Every real HTTP server — Node's `http` module, nginx, a Go `net/http` handler — is a more sophisticated, more concurrent version of exactly this loop. Nothing about `async`, routers, or middleware changes the underlying contract; they just make "read → route → handle → write" easier to compose.
 
-Notice the `if headers contains "Content-Length"` branch: TCP itself is just a stream of bytes with no concept of "message boundaries," so the server has to be told explicitly how many bytes the body is, or read it in self-describing chunks (`Transfer-Encoding: chunked`) when the total size isn't known upfront. Either way, something has to say where the body ends — nothing in TCP does that for free.
+The "Content-Length or chunked?" branch exists for a simple reason: TCP itself is just a stream of bytes with no concept of "message boundaries," so the server has to be told explicitly how many bytes the body is, or read it in self-describing chunks (`Transfer-Encoding: chunked`) when the total size isn't known upfront. Either way, something has to say where the body ends — nothing in TCP does that for free.
 
 <PracticeCheck
   track={unit.track}
