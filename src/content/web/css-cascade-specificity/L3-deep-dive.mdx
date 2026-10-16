@@ -5,6 +5,12 @@ title: "L3 — A design-system rollout that silently failed, and the linter that
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "web",
+  unitSlug: "css-cascade-specificity",
+};
 
 <Scenario label="The rollout that looked done but wasn't">
   <Fragment slot="facts">
@@ -46,7 +52,7 @@ the ancestor markup the legacy selector was keyed to.
 
 <LevelIntro
   items={[
-    "Writing a real specificity-calculator function",
+    "How a specificity-counting algorithm actually resolves a selector",
     "`:where()` vs. `@layer` as concrete fixes for the incident",
     "Escalating the same failure to third-party CSS and `!important`",
   ]}
@@ -56,78 +62,52 @@ the ancestor markup the legacy selector was keyed to.
 
 **Before the incident above could even be diagnosed, someone had to manually count ids and
 classes in two selectors by eye, under pressure, while the whole team watched screenshots
-pile up in Slack. What would make that step instant instead of error-prone?** A small,
-real function — the kind a CSS linter or a build-time lint rule genuinely uses — that
-parses a selector string and returns its specificity tuple:
+pile up in Slack. What would make that step instant instead of error-prone?** Not a mental
+shortcut, but a small, deterministic algorithm — the kind a CSS linter or a build-time lint
+rule genuinely runs on every PR — that walks a selector token by token and sorts each one
+into exactly one of three buckets:
 
-```js
-// specificity.js — a minimal, correct-enough specificity calculator
-// Handles the common cases: ids, classes, attribute selectors, pseudo-classes,
-// element/type selectors, and pseudo-elements. Does not handle :is()/:where()
-// argument-list specificity resolution (a real linter would recurse into those).
-
-function calculateSpecificity(selector) {
-  // Strip out :where(...) contents entirely — they contribute zero specificity
-  // by spec, regardless of what's inside them.
-  const withoutWhere = selector.replace(/:where\([^)]*\)/g, "");
-
-  let ids = 0;
-  let classes = 0;
-  let elements = 0;
-
-  // IDs: #foo
-  ids += (withoutWhere.match(/#[\w-]+/g) || []).length;
-
-  // Classes, attribute selectors, and pseudo-classes: .foo, [href], :hover
-  // (but not pseudo-ELEMENTS, which use double colons, e.g. ::before)
-  classes += (withoutWhere.match(/\.[\w-]+/g) || []).length;
-  classes += (withoutWhere.match(/\[[^\]]+\]/g) || []).length;
-  classes += (withoutWhere.match(/(?<!:):[\w-]+(?!\()/g) || []).length;
-
-  // Pseudo-elements: ::before, ::after — these count as elements, not classes
-  const pseudoElements = (withoutWhere.match(/::[\w-]+/g) || []).length;
-  elements += pseudoElements;
-
-  // Type/element selectors: div, p, a — anything left that isn't punctuation
-  const withoutIdsClassesEtc = withoutWhere
-    .replace(/#[\w-]+/g, "")
-    .replace(/\.[\w-]+/g, "")
-    .replace(/\[[^\]]+\]/g, "")
-    .replace(/::?[\w-]+/g, "")
-    .trim();
-  elements += (withoutIdsClassesEtc.match(/[a-zA-Z][\w-]*/g) || []).length;
-
-  return { ids, classes, elements };
-}
-
-function compareSpecificity(a, b) {
-  if (a.ids !== b.ids) return a.ids - b.ids;
-  if (a.classes !== b.classes) return a.classes - b.classes;
-  return a.elements - b.elements;
-}
+```mermaid
+flowchart TD
+    A["Next token in the selector"] --> B{"Inside :where(...)?"}
+    B -- "Yes" --> Z["Discard — contributes\nzero specificity"]
+    B -- "No" --> C{"Starts with #?"}
+    C -- "Yes" --> ID["+1 id"]
+    C -- "No" --> D{"Starts with ::?"}
+    D -- "Yes" --> EL["+1 element\n(pseudo-element)"]
+    D -- "No" --> E{"Starts with . or [ or\na single :?"}
+    E -- "Yes" --> CL["+1 class\n(class / attr / pseudo-class)"]
+    E -- "No" --> EL2["+1 element\n(bare tag name)"]
 ```
 
-```js
-const legacy = calculateSpecificity("#app .toolbar .btn");
-// { ids: 1, classes: 2, elements: 0 }
+| Token                 | Bucket  | Why                                                                                    |
+| --------------------- | ------- | -------------------------------------------------------------------------------------- |
+| `#app`                | id      | Starts with `#`                                                                        |
+| `.toolbar`            | class   | Starts with `.`                                                                        |
+| `.btn`                | class   | Starts with `.`                                                                        |
+| `.ds-button--primary` | class   | Starts with `.`                                                                        |
+| `::before`            | element | `::` is checked before `:` — otherwise a pseudo-element would be miscounted as a class |
+| `[href]`              | class   | Attribute selectors weigh the same as a class                                          |
 
-const designSystem = calculateSpecificity(".ds-button--primary");
-// { ids: 0, classes: 1, elements: 0 }
+Running the two real selectors from the incident through this algorithm reproduces exactly
+what the browser did: `#app .toolbar .btn` buckets to `{ ids: 1, classes: 2, elements: 0 }`,
+`.ds-button--primary` buckets to `{ ids: 0, classes: 1, elements: 0 }` — the id column
+differs (1 vs. 0), so `legacy` wins before either selector's class count is even compared,
+matching the production incident precisely. This is the same algorithm (in spirit) that
+CSS-in-JS tooling and specificity linters run automatically on every PR to flag exactly this
+kind of silent regression before it ships.
 
-compareSpecificity(legacy, designSystem); // > 0 — legacy wins, matching the incident
-```
+<Checkpoint question="The algorithm above discards any token inside :where(...) before bucketing. If the legacy selector had instead been written as :where(#app .toolbar) .btn, what tuple would it produce, and would that match what actually renders in the browser?">
 
-Running this against the two real selectors from the incident reproduces exactly what the
-browser did — `legacy` wins because its id column (1) beats `designSystem`'s id column
-(0), before either selector's class count is even compared. This is the same function (in
-spirit) that CSS-in-JS tooling and specificity linters run automatically on every PR to
-flag exactly this kind of silent regression before it ships.
-
-<Checkpoint question="calculateSpecificity() strips out everything inside :where(...) before counting ids, classes, and elements. If the legacy selector had instead been written as :where(#app .toolbar) .btn, what would the function return, and would that match what actually renders in the browser?">
-
-It would return `{ ids: 0, classes: 1, elements: 0 }` — the `#app .toolbar` part disappears entirely once `:where(...)` is stripped out, leaving only `.btn` outside the parentheses to count. This does match what actually renders: `:where()` is defined by spec to contribute zero specificity for whatever selector is written inside it, even though that inner selector still has to match normally for the rule to apply at all. That's the whole reason `:where()` is useful as a fix — it keeps the legacy selector's structural matching intact while erasing the very id-and-class weight that let it beat the design system rule in the incident.
+It would produce `{ ids: 0, classes: 1, elements: 0 }` — the `#app .toolbar` tokens are discarded entirely once they're recognized as being inside `:where(...)`, leaving only `.btn` outside the parentheses to bucket. This does match what actually renders: `:where()` is defined by spec to contribute zero specificity for whatever selector is written inside it, even though that inner selector still has to match normally for the rule to apply at all. That's the whole reason `:where()` is useful as a fix — it keeps the legacy selector's structural matching intact while erasing the very id-and-class weight that let it beat the design system rule in the incident.
 
 </Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="specificity-calculator"
+/>
 
 ## The fix, and why it works
 
@@ -166,11 +146,29 @@ even if someone adds more ids to the legacy CSS later. This is why teams migrati
 legacy codebase onto a new design system increasingly reach for `@layer` specifically —
 it turns "hope the new selector is specific enough" into a structural guarantee.
 
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="tuple-comparison-no-carry"
+/>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="full-cascade-resolution"
+/>
+
 <Checkpoint question="Suppose a future engineer, unaware of the @layer setup, adds another nested class to the legacy selector — say #app .toolbar .btn.is-active — making its specificity even higher than before. Under Option B (the @layer fix), does the design system rule still win?">
 
 Yes, it still wins, and that's the point of choosing `@layer` over `:where()` here. Layer priority is checked before specificity is ever compared, so as long as `legacy` is still declared before `design-system` in the `@layer legacy, design-system;` statement, nothing that happens to the legacy selector's specificity afterward — adding a class, nesting deeper, anything short of `!important` — can pull it back into contention. That's a stronger guarantee than Option A's `:where()` fix, which only neutralizes the specificity of what's explicitly wrapped in `:where(...)`; a future edit that adds a new selector outside that wrapper would need to be caught and wrapped by hand each time.
 
 </Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="layer-priority-fix"
+/>
 
 ## Extend the incident: what if it isn't a design system migration?
 
@@ -193,6 +191,12 @@ specificity or layers, so the only thing that beats an `!important` rule is anot
 `!important` rule that wins the origin-and-importance comparison. This is the concrete
 reason `!important` is harder to walk back than a plain specificity mismatch: it opts a
 declaration out of every escape valve this unit just covered.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="important-escalation"
+/>
 
 ## Failure modes
 
