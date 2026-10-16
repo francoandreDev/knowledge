@@ -2983,3 +2983,23 @@ Continuing the rollout, this time with a refined process after the previous batc
 **Process note for future batches**: scripting the actual answer-and-grade flow in the browser (not just checking that boxes render) is now the standard verification step — it already paid for itself twice in one batch. Keep doing it per unit, not just spot-checking a couple.
 
 Next: continue through the rest of `web/` (`render-performance`, `xss`, `cdn`, `stateless-auth`, `rest-graphql`, `bff`, `service-boundaries`, `ssr`, `strangler-fig`), same process — content-only subagents in parallel, one serialized build/verify/commit pass per batch.
+
+## 2026-10-16 — Third batch of `web/` migrations: `render-performance`, `xss`, `cdn`, `stateless-auth`
+
+Same process as batch two: four content-only subagents in parallel (explicitly told to check topicId type-consistency and code-solution completeness themselves before handing back, per the two bugs found last batch), then one serialized build/verify/commit pass by hand.
+
+**`web/render-performance`** — 13 topics (5 L1, 4 L2, 4 L3), 137 items. L2 was already code-free; kept L3's `diffUnkeyed`/`diffKeyed` algorithms as real code (2 code-type topics, 5 practice + 3 exam each — lighter practice count than the quiz default since authoring full code variants is heavier). Verified every test's expected op-count against a Python replica of both diff algorithms rather than by hand.
+
+**`web/xss`** — 13 topics (5 L1, 4 L2, 4 L3), 140 items. Converted `escapeHtml`'s replace-chain and `buildCspHeader`'s object-iteration formatter to a table and a CSP-directive table respectively; kept the literal vulnerable-comment-injection snippet as code (showing the actual exploitable line beats describing it) and kept `escape-html` as a code-type exercise topic (writing the character-escaping logic is the understanding).
+
+**`web/cdn`** — 11 topics (3 L1, 4 L2, 4 L3), 132 items. This unit had no `exercises.json` at all before (greenfield authoring, not a migration). Converted a cache-key-collision demo and a request-coalescing demo to sequence diagrams, and a purge/retry function to a flowchart; kept one minimal `EdgeCache` class as the sole remaining code block (key derivation + freshness check is the one genuine mechanism here).
+
+**`web/stateless-auth`** — 14 topics (5 L1, 4 L2, 5 L3), 140 items, all quiz-type. Content already matched rule 9's spirit pre-migration (heavy Mermaid/table use); kept the from-scratch HS256 `jwt.mjs` implementation and the buggy-vs-correct forged-token comparison as real code (signature verification is a genuine mechanism) but converted every exercise — including four previously-code L3 topics (base64url codec, JWT structural validation, exp-claim math, token-size budget) — to quiz, since each concept is crisply testable as "predict the outcome" multiple choice without needing a full code-exercise apparatus.
+
+**No new content bugs found this batch** — the explicit self-check instructions (type-consistency per topicId, code-solution completeness) given to agents after last batch's two bugs worked; all four units passed full browser verification (quiz + code topics alike) on the first try.
+
+**Operational note**: two of the four agents reported their scratchpad script files got silently overwritten mid-task by another concurrently-running agent reusing the same generic filename (e.g. a default script name), despite each agent's scratchpad path nominally being session-scoped. Both recovered by switching to a uniquely-named file and regenerating. Not a data-loss risk (nothing committed was affected), but worth having future batch instructions tell each agent to prefix its own scratch files with the unit name to avoid the collision entirely.
+
+**Verification**: full `bun run check` green (lint, format, typecheck, `validate:content` — 246 units, test 9/9, build — 267 pages). Browser verification scripted across all 4 units exactly as the last two batches: every topic (quiz and code alike) answered and confirmed "Passed", "Mark as done" unlocks for all four.
+
+`web/` is now at 12 of 17 units migrated. Remaining: `rest-graphql`, `bff`, `service-boundaries`, `ssr`, `strangler-fig`.
