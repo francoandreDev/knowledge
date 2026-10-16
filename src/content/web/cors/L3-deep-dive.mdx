@@ -5,6 +5,9 @@ title: "L3 — Simulating the exact CORS block, then fixing the fetch() error-ha
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = { track: "web", unitSlug: "cors" };
 
 <Scenario label="Same request, misconfigured server vs. fixed server">
   <Fragment slot="facts">
@@ -15,7 +18,7 @@ import Checkpoint from "../../../components/Checkpoint.astro";
     </div>
   </Fragment>
 
-**Before running the code: `app.example.com` calling
+**Before walking through it: `app.example.com` calling
 `api.example.com` with an `Authorization` header — does this request
 need a preflight, given `GET` alone is a "simple" method? And if the
 server's CORS config is missing `app.example.com` from its allowed
@@ -26,8 +29,8 @@ before it reaches the server, or after?**
 
 <LevelIntro
   items={[
-    "Deciding programmatically whether a request needs a preflight",
-    "Simulating the exact preflight-block and simple-request-block failures",
+    "Walking a real request through the preflight decision tree",
+    "Tracing the exact preflight-block and simple-request-block failures step by step",
     "Fixing the fetch() gap that swallows HTTP error statuses",
   ]}
 />
@@ -39,157 +42,165 @@ no custom header, no preflight, real request reaches the server, then the
 browser blocks JavaScript from reading the response. Both are CORS failures;
 they happen at different checkpoints.
 
-## Determining whether a request needs a preflight
+## Walking a request through the preflight decision tree
 
-```js
-const SIMPLE_HEADERS = [
-  "accept",
-  "accept-language",
-  "content-language",
-  "content-type",
-];
-const SIMPLE_CONTENT_TYPES = [
-  "application/x-www-form-urlencoded",
-  "multipart/form-data",
-  "text/plain",
-];
-const SIMPLE_METHODS = ["GET", "HEAD", "POST"];
+**L2's table says method, headers, and `Content-Type` are each
+independently sufficient to force a preflight — but what does actually
+_applying_ that table to one real request look like, step by step?**
+Take `GET https://api.example.com/users` with an `Authorization`
+header, called from `https://app.example.com`:
 
-function needsPreflight(method, headers = {}) {
-  if (!SIMPLE_METHODS.includes(method.toUpperCase())) return true;
-  for (const key of Object.keys(headers)) {
-    if (!SIMPLE_HEADERS.includes(key.toLowerCase())) return true;
-  }
-  if (
-    headers["Content-Type"] &&
-    !SIMPLE_CONTENT_TYPES.includes(headers["Content-Type"])
-  ) {
-    return true;
-  }
-  return false;
-}
-
-console.log(needsPreflight("GET", {})); // false
-console.log(needsPreflight("GET", { Authorization: "Bearer x" })); // true
-console.log(needsPreflight("PUT", {})); // true
-console.log(needsPreflight("POST", { "Content-Type": "application/json" })); // true
+```mermaid
+flowchart TD
+    A["Request: GET /users<br/>header: Authorization"] --> B{"Cross-origin?"}
+    B -- "No, same origin" --> Z["No CORS check at all"]
+    B -- "Yes" --> C{"Method is GET/HEAD/POST?"}
+    C -- "No" --> P["Preflight required"]
+    C -- "Yes" --> D{"Only simple headers?<br/>(Accept, Accept-Language,<br/>Content-Language, Content-Type)"}
+    D -- "No — has Authorization" --> P
+    D -- "Yes" --> E{"Content-Type is form-urlencoded /<br/>multipart / text-plain (if body)?"}
+    E -- "No" --> P
+    E -- "Yes" --> S["Simple request — no preflight"]
 ```
 
-Verified: `GET` with no headers is simple, but adding `Authorization`
-alone flips `needsPreflight` to `true`. The method did not stop being simple;
-the extra header changed the request category.
+Walking this request through the tree: it's cross-origin (fails the
+first branch), its method (`GET`) passes the second check — but it
+carries an `Authorization` header, which isn't on the simple-headers
+list. That one branch alone routes it to **"Preflight required,"**
+regardless of how the remaining branches would have resolved. Drop the
+`Authorization` header and the exact same method and origin instead
+reach **"Simple request"** — the method never changed; only the header
+did.
 
-## Reproducing the exact CORS block, then fixing it
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="preflight-decision-tree"
+/>
 
-```js
-function parseOrigin(url) {
-  return new URL(url).origin;
-}
+<Checkpoint question="A teammate says: 'GET is always a simple method, so a cross-origin GET request never needs a preflight.' Using the decision tree above, what's wrong with that claim?">
 
-function isSameOrigin(pageOrigin, requestUrl) {
-  return parseOrigin(requestUrl) === pageOrigin;
-}
+The tree has four independent branches, and method is only one of
+them — passing the method check doesn't short-circuit the rest. A
+`GET` request still gets evaluated against the headers branch and the
+`Content-Type` branch; if it carries a non-simple header like
+`Authorization`, it's routed to "Preflight required" regardless of its
+method. "Simple method" is necessary but not sufficient — the request
+only reaches "Simple request" if it clears every branch, not just the
+first one.
 
-function simulateCorsCheck(
-  pageOrigin,
-  requestUrl,
-  method,
-  headers,
-  serverConfig,
-) {
-  if (isSameOrigin(pageOrigin, requestUrl)) {
-    return { allowed: true, reason: "same-origin, no CORS check needed" };
-  }
-  const originAllowed =
-    serverConfig.allowedOrigins.includes("*") ||
-    serverConfig.allowedOrigins.includes(pageOrigin);
+</Checkpoint>
 
-  if (needsPreflight(method, headers)) {
-    if (!originAllowed) {
-      return {
-        allowed: false,
-        reason: `Preflight failed: ${pageOrigin} not in Access-Control-Allow-Origin`,
-      };
-    }
-    if (!serverConfig.allowedMethods.includes(method.toUpperCase())) {
-      return {
-        allowed: false,
-        reason: `Preflight failed: method ${method} not allowed`,
-      };
-    }
-    return { allowed: true, reason: "preflight passed, actual request sent" };
-  }
+## Origin matching: when do two URLs count as "the same place"?
 
-  if (!originAllowed) {
-    return {
-      allowed: false,
-      reason: `Response blocked: ${pageOrigin} not in Access-Control-Allow-Origin (request still reached server)`,
-    };
-  }
-  return { allowed: true, reason: "simple request, origin allowed" };
-}
+**`https://app.example.com` and `https://app.example.com:8443` both
+use the same scheme and host — are they the same origin?** No. An
+origin is the exact triple of scheme, host, _and_ port, and all three
+have to match for two URLs to be considered same-origin:
 
-const pageOrigin = "https://app.example.com";
-const requestUrl = "https://api.example.com/users";
-const headers = { Authorization: "Bearer xyz" };
+| Request URL                          | Page origin               | Same origin? | Why                                 |
+| ------------------------------------ | ------------------------- | ------------ | ----------------------------------- |
+| `https://app.example.com/users`      | `https://app.example.com` | Yes          | Scheme, host, and port all match    |
+| `https://app.example.com:8443/users` | `https://app.example.com` | No           | Port differs (default 443 vs. 8443) |
+| `http://app.example.com/users`       | `https://app.example.com` | No           | Scheme differs (http vs. https)     |
+| `https://api.example.com/users`      | `https://app.example.com` | No           | Host differs (api vs. app)          |
 
-const buggyConfig = { allowedOrigins: [], allowedMethods: ["GET", "POST"] };
-console.log(
-  simulateCorsCheck(pageOrigin, requestUrl, "GET", headers, buggyConfig),
-);
-// { allowed: false, reason: 'Preflight failed: https://app.example.com not in Access-Control-Allow-Origin' }
+This is the check that runs _before_ any preflight-vs-simple question
+even applies — a same-origin request skips CORS entirely, no matter
+what method or headers it carries, because the same-origin policy only
+ever restricted _cross_-origin reads in the first place.
 
-const fixedConfig = {
-  allowedOrigins: ["https://app.example.com"],
-  allowedMethods: ["GET", "POST"],
-};
-console.log(
-  simulateCorsCheck(pageOrigin, requestUrl, "GET", headers, fixedConfig),
-);
-// { allowed: true, reason: 'preflight passed, actual request sent' }
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="origin-matching"
+/>
+
+## Tracing the exact CORS block, then fixing it
+
+**With the buggy server config below missing `app.example.com` from
+its allowed origins, does the non-simple request from the top of this
+page get rejected before or after reaching the server?**
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant Server as Server (buggy config:<br/>allowedOrigins = [])
+    Browser->>Server: OPTIONS /users (preflight)
+    Note right of Browser: Asks: is app.example.com<br/>allowed to GET with Authorization?
+    Server-->>Browser: No Access-Control-Allow-Origin<br/>for app.example.com
+    Note left of Browser: Preflight rejected
+    Note left of Browser: GET /users is never sent
 ```
 
-Verified: with `buggyConfig` (missing `app.example.com` from
-`allowedOrigins`), the check fails at the **preflight** step — the
-real `GET /users` never gets sent. This matches the browser-side failure, but
-not the server-log detail from L1; that detail belongs to the simple-request
-case below.
-Adding the correct origin to `allowedOrigins` is the entire fix; the
-check now passes and the real request proceeds.
+Tracing it step by step: the browser sends `OPTIONS /users` first
+(because the request is non-simple), the server's response doesn't
+list `app.example.com` as allowed, and the browser stops right
+there — the real `GET /users` is **never sent at all**. This matches
+the browser-side failure, but not L1's server-log detail (which showed
+the real request arriving); that detail belongs to the simple-request
+case below, where the preflight step doesn't exist to intercept
+anything.
 
-<Checkpoint question="In simulateCorsCheck above, the buggyConfig failure happens inside the 'if (needsPreflight(...))' branch. If a teammate insists CORS problems mean 'the server rejected the request', is that consistent with where this failure is actually detected in the function?">
+Fixing the server's `allowedOrigins` list to include
+`https://app.example.com` is the entire fix — same request, same
+method, same header, and the trace instead ends with the real `GET
+/users` being sent and answered, exactly like L2's successful-case
+diagram.
 
-No. The failure is detected and returned entirely inside the preflight branch
-of `simulateCorsCheck`, before any code path that would represent the real
-`GET /users` being sent — the function never reaches the "preflight passed"
-return. That models what actually happens in a browser: the `OPTIONS`
-preflight is rejected by the _browser's_ evaluation of the server's response,
-and the real request is never sent at all. The server didn't "reject" a
-request it never received during the preflight step; the browser stopped
-things before that request existed. A teammate's "the server rejected it"
-framing only fits the separate simple-request case below, where the request
-really does reach the server first.
+<Checkpoint question="A teammate insists 'CORS problems mean the server rejected the request.' Looking at the sequence diagram above, is that consistent with where this failure actually happens?">
+
+No. The rejection happens entirely inside the preflight step, before
+any point where the real `GET /users` would exist — the diagram never
+reaches a step where the server processes that request, because it's
+never sent. What actually happens is the _browser_ evaluating the
+server's preflight response and deciding not to proceed. The server
+didn't "reject" a request it never received during the preflight
+step; the browser stopped things before that request existed at all.
+A teammate's "the server rejected it" framing only fits the separate
+simple-request case next, where the request really does reach the
+server first.
 
 </Checkpoint>
 
 ## Even a "simple" request gets blocked — just one step later
 
-```js
-console.log(simulateCorsCheck(pageOrigin, requestUrl, "GET", {}, buggyConfig));
-// { allowed: false, reason: 'Response blocked: ... (request still reached server)' }
+**Drop the `Authorization` header from the same request. Now it's
+simple, so there's no preflight step to intercept anything — does the
+buggy config still block it?**
 
-console.log(simulateCorsCheck(pageOrigin, requestUrl, "GET", {}, fixedConfig));
-// { allowed: true, reason: 'simple request, origin allowed' }
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant Server as Server (buggy config:<br/>allowedOrigins = [])
+    Browser->>Server: GET /users (no preflight — simple request)
+    Server-->>Browser: 200 OK + data<br/>(no Access-Control-Allow-Origin<br/>for app.example.com)
+    Note left of Browser: Response received but blocked —<br/>JavaScript never sees it
 ```
 
-Verified: dropping the `Authorization` header makes this a simple
-request — no preflight — but the buggy config still blocks it, this
-time with the reason explicitly noting _the request still reached the
-server_. This is precisely why L1's server logs showed success: the
-request really did arrive and get handled; only the browser's decision
-to hand the response to JavaScript was ever in question.
+Yes — but the failure moves to a different checkpoint. The request
+really does reach the server this time (no preflight exists to stop
+it), the server really does process it and respond with `200 OK` —
+which is exactly why L1's server logs showed success — but the
+browser still checks `Access-Control-Allow-Origin` on that real
+response before handing it to JavaScript, and blocks it there instead.
+Same buggy config, same ultimate failure for the page's JavaScript, but
+a completely different point in the timeline where it actually happens.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="cors-check-worked-example"
+/>
 
 ## The separate bug: `fetch()` resolving on a 404
+
+L2 established that `fetch()`'s promise only rejects for network-level
+failures (including a CORS block) — a plain HTTP error status like
+`404` or `500` resolves it normally. The only way to actually see that
+distinction is to watch a `try/catch` run against both cases, because
+"resolves" and "throws" are two different runtime behaviors that look
+identical on the page until you check `response.ok`:
 
 ```js
 function mockFetch(status, networkFailure = false) {
@@ -245,17 +256,24 @@ turning the 404 into a caught error — while a genuine network failure
 versions, because that's the one case where `fetch()` actually
 rejects.
 
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="fetch-resolve-vs-throw"
+/>
+
 <Checkpoint question="getUserBuggy and getUserFixed both call the exact same mockFetch and both have a try/catch around it. Why does only getUserFixed catch the 404, if the try/catch block itself is identical in both?">
 
 Because a `try/catch` only catches what actually throws inside it, and
 `mockFetch` resolving with `{ ok: false, status: 404 }` doesn't throw —
-resolving is not the same as throwing. `getUserBuggy` reads `response.status`
-and returns it as if the call succeeded, so nothing in that function's body
-ever raises an error for `catch` to intercept. `getUserFixed` adds one line —
-`if (!response.ok) throw new Error(...)` — which manufactures the throw that
-`mockFetch` itself never produced. The `try/catch` wrapper was never the
-missing piece; the missing piece was code inside the `try` block that turns
-'resolved with a bad status' into an actual thrown error in the first place.
+resolving is not the same as throwing. `getUserBuggy` reads
+`response.status` and returns it as if the call succeeded, so nothing
+in that function's body ever raises an error for `catch` to intercept.
+`getUserFixed` adds one line — `if (!response.ok) throw new
+Error(...)` — which manufactures the throw that `mockFetch` itself
+never produced. The `try/catch` wrapper was never the missing piece;
+the missing piece was code inside the `try` block that turns 'resolved
+with a bad status' into an actual thrown error in the first place.
 
 </Checkpoint>
 
@@ -269,7 +287,7 @@ that would let calling code distinguish "not found" from "not
 authorized" — what would need to change about what the function
 throws?
 
-## Failure modes
+## Common mistakes
 
 | Failure mode                                                                 | What it gets wrong                                                                                                                      |
 | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
@@ -278,3 +296,9 @@ throws?
 | Trusting `try/catch` around `fetch()` to catch all API errors                | It only catches network-level failures and CORS blocks — HTTP error statuses resolve normally and need an explicit `response.ok` check  |
 | Testing an API only with Postman/curl before shipping a frontend integration | Those tools don't enforce CORS at all, so a same-origin-policy bug can pass every manual test and still break in the browser            |
 | Assuming a preflight happens for every cross-origin request                  | Simple requests (plain GET/POST, standard headers) skip the preflight entirely — the browser still checks the response, just later      |
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="common-mistakes"
+/>
