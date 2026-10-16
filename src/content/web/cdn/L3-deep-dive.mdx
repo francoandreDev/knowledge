@@ -4,6 +4,12 @@ title: "L3 — CDN, cache layers, and the edge"
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "web",
+  unitSlug: "cdn",
+};
 
 L1 and L2 covered the layers, the headers, and the invalidation trade-off. This level builds a real (if minimal) edge cache in code, works through the cache-key bug that leaks one user's response to another, and walks through the failure modes a real CDN has to defend against.
 
@@ -97,52 +103,48 @@ It's never stored. `isPublic` is `false` (the empty string doesn't include `"pub
 
 </Checkpoint>
 
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="edge-cache-mechanics"
+/>
+
 ## How does a wrong cache key leak one user's data to another?
 
-This is the single most common serious bug in CDN configuration, and it's worth seeing exactly how it happens. Suppose an API returns a personalized greeting based on a session cookie, but the cache key is built from the URL alone — the `varyOn` list is empty:
+This is the single most common serious bug in CDN configuration, and it's worth seeing exactly how it happens. Suppose an API returns a personalized greeting based on a session cookie, built by calling `cache.get({ method: "GET", url }, ...)` from the `EdgeCache` above — notice there's no `varyOn`, so the cookie never becomes part of the key:
 
-```ts
-// leaky-cache-key.ts — DO NOT do this for personalized responses
-import { EdgeCache } from "./edge-cache";
+```mermaid
+sequenceDiagram
+    participant Alice
+    participant Bob
+    participant E as Edge cache (key: GET:/api/me)
+    participant O as Origin
 
-const cache = new EdgeCache();
+    Alice->>E: GET /api/me, cookie=sess-alice
+    E->>O: miss -> fetch
+    O-->>E: "Welcome back, Alice!"
+    E-->>Alice: Welcome back, Alice!
+    Note over E: Stored under GET:/api/me<br/>(cookie was never part of the key)
 
-async function handleRequest(url: string, sessionCookie: string) {
-  return cache.get(
-    { method: "GET", url }, // BUG: no varyOn — cookie is ignored by the key
-    async () => ({
-      status: 200,
-      headers: { "cache-control": "public, max-age=300" },
-      body: JSON.stringify({
-        greeting: `Welcome back, ${sessionForUser(sessionCookie)}!`,
-      }),
-    }),
-  );
-}
-
-function sessionForUser(cookie: string): string {
-  const users: Record<string, string> = {
-    "sess-alice": "Alice",
-    "sess-bob": "Bob",
-  };
-  return users[cookie] ?? "Guest";
-}
+    Bob->>E: GET /api/me, cookie=sess-bob
+    Note over E: Same key as Alice's request -> HIT
+    E-->>Bob: Welcome back, Alice! ⚠️
 ```
 
-The first request — Alice's, with `sess-alice` — populates the cache under the key `GET:/api/me`. The very next request to that same URL, even with Bob's `sess-bob` cookie, hits the cache and gets **Alice's name back**, because nothing about the key distinguished them. The fix is either to include the identifying header/cookie in `varyOn` (so each user gets their own cache entry — which usually defeats the purpose of caching a personalized response at all), or, more commonly, to mark personalized responses `private` or `no-store` so a shared CDN cache never stores them in the first place, as covered in L2.
+The first request — Alice's — populates the cache under the key `GET:/api/me`. The very next request to that same URL, even with Bob's completely different cookie, hits the cache and gets **Alice's name back**, because nothing about the key distinguished them. Two real fixes exist, trading off differently:
 
-```ts
-// Correct: personalized responses opt out of shared caching entirely
-async function handleRequestFixed(url: string, sessionCookie: string) {
-  return {
-    status: 200,
-    headers: { "cache-control": "private, no-store" },
-    body: JSON.stringify({
-      greeting: `Welcome back, ${sessionForUser(sessionCookie)}!`,
-    }),
-  };
-}
-```
+| Fix                                   | Effect                                                                                            |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Add the cookie to `varyOn`            | Each user gets their own cache entry — correct, but usually defeats the point of a _shared_ cache |
+| Mark the response `private, no-store` | Opts out of shared caching entirely — simpler, and the more common real-world fix, per L2         |
+
+The second option means this response is never stored at a shared layer at all, the same `Cache-Control` discipline covered in L2 — not a new mechanism, just the direct consequence of applying it here.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="cache-key-leak"
+/>
 
 ## What happens when a popular cache entry expires under heavy load?
 
@@ -171,60 +173,54 @@ A naive edge cache (like the minimal one above) does exactly this — every conc
 - **Request coalescing**: the first miss for a key triggers the origin fetch; every other concurrent request for the _same_ key waits on that in-flight fetch instead of starting a new one, then all share the single result once it resolves.
 - **`stale-while-revalidate`**: serve the (now slightly stale) cached copy immediately to every request, while exactly one background fetch refreshes the cache for the _next_ request — visitors never wait on the origin at all, they just occasionally get a response that's a few seconds old.
 
-```ts
-// coalescing-cache.ts — collapses concurrent misses into one origin fetch
-class CoalescingEdgeCache extends EdgeCache {
-  private inFlight = new Map<string, Promise<unknown>>();
+```mermaid
+sequenceDiagram
+    participant R1 as Request 1
+    participant R2 as Request 2 (...x1000)
+    participant E as Edge cache
+    participant O as Origin
 
-  async getCoalesced(key: string, fetchFromOrigin: () => Promise<unknown>) {
-    const existing = this.inFlight.get(key);
-    if (existing) return existing; // ride the same in-flight fetch
-
-    const promise = fetchFromOrigin().finally(() => {
-      this.inFlight.delete(key);
-    });
-    this.inFlight.set(key, promise);
-    return promise;
-  }
-}
-
-export { CoalescingEdgeCache };
+    Note over E: Cached entry just expired
+    R1->>E: GET /popular-page
+    E->>O: miss -> fetch (the ONLY call made)
+    R2->>E: GET /popular-page
+    Note over E: Already fetching this key -> wait on it
+    O-->>E: fresh response
+    E-->>R1: fresh response
+    E-->>R2: same fresh response (no second fetch)
 ```
+
+Coalescing works by tracking "is a fetch already in flight for this exact key?" — the first request to notice a miss starts the one real fetch, and every later concurrent request for that key just waits on and shares that same result, instead of each independently repeating the `EdgeCache.get` miss logic from earlier. The in-flight tracking entry is removed once that one fetch resolves, so the _next_ genuinely new miss (sometime later) correctly starts a fresh fetch rather than reusing an already-finished one.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="cache-stampede"
+/>
 
 ## What can still go wrong with purge-based invalidation?
 
 A **purge race**: the origin's data changes, a purge request goes out to invalidate the stale cached copy — but purges to hundreds of globally distributed edge PoPs are not instantaneous or atomic. A request landing at a PoP that hasn't received the purge yet still gets served the old, now-incorrect content, for however long propagation takes (often sub-second, but not zero).
 
-```js
-// purge-then-verify.mjs — a defensive pattern for content that must be
-// correct immediately after a purge (e.g. a security-sensitive update)
-async function purgeAndVerify(
-  cdnClient,
-  url,
-  expectedVersion,
-  maxAttempts = 5,
-) {
-  await cdnClient.purge(url);
-
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const response = await fetch(url, {
-      headers: { "cache-control": "no-cache" },
-    });
-    const body = await response.json();
-
-    if (body.version === expectedVersion) {
-      return { verified: true, attempts: attempt + 1 };
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
-  }
-
-  return { verified: false, attempts: maxAttempts };
-}
-
-export { purgeAndVerify };
+```mermaid
+flowchart TD
+    A["Issue the purge"] --> B["Fetch the URL with\nCache-Control: no-cache\n(bypass any local cache)"]
+    B --> C{"Response version ==\nexpected version?"}
+    C -->|yes| D["Verified — done"]
+    C -->|no| E{"Attempts left?"}
+    E -->|yes| F["Wait, with increasing\nbackoff between tries"]
+    F --> B
+    E -->|no| G["Give up — report\nunverified, don't loop forever"]
 ```
 
+This is a defensive pattern for content that must be confirmed correct immediately after a purge (e.g. a security-sensitive update): purge, then actively re-check with a bypassing fetch rather than just trusting the purge call succeeded, backing off a little more on each retry to give propagation real time to catch up — and giving up with an honest "unverified" after a bounded number of attempts, rather than polling forever.
+
 This is a real trade-off, not a bug to "just fix": purge propagation delay is a property of running caches on machines physically distributed around the world, communicating over a real network with real latency. Content that truly cannot tolerate any propagation window at all (an emergency takedown, a leaked-secret redaction) generally needs a different mechanism than cache purge — for example, routing that URL through an "always ask origin" rule until the purge is confirmed everywhere.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="purge-race"
+/>
 
 Which of these failure modes matters most depends heavily on what's being served: a cache stampede on a static marketing page is mostly a performance annoyance, but the same stampede hitting an origin that also handles checkout writes can take down purchasing entirely — and a purge race on a paywalled article is a minor embarrassment, while the same race on a just-revoked API key or a takedown notice is a real incident. Worth sitting with before moving on: for a CDN in front of a genuinely high-stakes origin (payments, auth tokens, legal takedowns) rather than the read-mostly content examples above, which of these three failure modes would you defend against first, and what would change about the `Cache-Control` and purge strategy to do it?
