@@ -3003,3 +3003,21 @@ Same process as batch two: four content-only subagents in parallel (explicitly t
 **Verification**: full `bun run check` green (lint, format, typecheck, `validate:content` — 246 units, test 9/9, build — 267 pages). Browser verification scripted across all 4 units exactly as the last two batches: every topic (quiz and code alike) answered and confirmed "Passed", "Mark as done" unlocks for all four.
 
 `web/` is now at 12 of 17 units migrated. Remaining: `rest-graphql`, `bff`, `service-boundaries`, `ssr`, `strangler-fig`.
+
+## 2026-10-17 — `web/` track complete: `rest-graphql`, `bff`, `service-boundaries`, `ssr`, `strangler-fig`
+
+Final batch for `web/` — all 5 remaining units migrated in one pass (prefixed scratch filenames with the unit name per the previous batch's note, avoiding the scratchpad collision this time). The whole batch also hit the session's rate limit mid-flight (all 5 agents failed with a 429 before writing any files — confirmed via a clean `git status` afterward) and had to be relaunched from scratch once the limit reset; no partial state to reconcile.
+
+**`web/rest-graphql`** — 14 topics, 140 items, all quiz-type. Converted all 6 old L3 code pools (findRemovedFields/findTypeChanges/becameRequired/adapter handlers/resolver/semver-bump) to quiz, matching the precedent already set by the pilot and `web/stateless-auth`.
+
+**`web/bff`** — 14 topics, 159 items. Kept 4 L3 topics as code-type (`combine-results`, `field-failure-policy`, `fanout-timing`, `contract-matcher` — fan-out/aggregation and contract-matching are genuine algorithmic mechanisms). Browser verification initially showed `combine-results` failing — turned out to be a false positive in the verification script itself, not a content bug: all 4 of that topic's variants share byte-identical `starterCode` (same function signature, same TODO), so the script's "match solution to rendered variant by starterCode prefix" heuristic can't tell them apart and injected the wrong variant's solution. Confirmed by brute-forcing all 4 solutions against the rendered page until one passed — it did, immediately. **Lesson for future verification scripts**: when a code topic's variants share identical `starterCode`, don't try to match-by-prefix — just try every variant's `solution` in turn against the live DOM until one reports "Passed," since each is guaranteed self-consistent with its own tests.
+
+**`web/service-boundaries`** — 18 topics, 200 items, all quiz-type (the 5 former code items — shapeMobileProduct, isBreakingFieldChange, getPartnerPrice, checkPartnerV1Contract, mergeNonBreaking — tested incidental field-picking/diffing syntax, not the architectural concept, so converted per rule 9).
+
+**`web/ssr`** — 18 topics, 200 items, all quiz-type. Kept L3's existing code (raw streaming server, islands-hydration runtime, BAD/GOOD failure-mode snippets) untouched in the prose — already minimal and mechanism-focused — but converted every L3 exercise item to quiz.
+
+**`web/strangler-fig`** — 13 topics, 120 items. Trimmed L3's `Facade` and `ShadowRunner` classes down to two genuinely algorithmic pure functions (`stableBucket` hash, `resolveTarget` decision logic) plus diagrams/tables for everything else; kept exactly those two as code-type exercise topics, converted the rest (shadow-evidence, safe-defaults, mutating-routes — all reasoning, not algorithms) to quiz.
+
+**Verification**: full `bun run check` green (lint, format, typecheck, `validate:content` — 246 units, test 9/9, build — 267 pages, 2m30s). Browser verification scripted across all 5 units; every topic across all five (quiz and code alike, ~162 exam-tier answers total) confirmed "Passed," "Mark as done" unlocks for all five.
+
+**`web/` track is now fully migrated — all 17 units** on the three-tier exercise model and rule 9's diagram/explanation-by-default content standard. Next: move to the next track. Candidates in roadmap order: `systems/` (17 units), or any other track the user picks — this is a cross-track decision, not an automatic next step.
