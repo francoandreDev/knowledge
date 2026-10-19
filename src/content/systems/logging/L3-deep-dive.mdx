@@ -1,10 +1,16 @@
 ---
-title: "L3 — Building a structured logger, span tree, and sampler that would have caught the Scenario"
+title: "L3 — Level filtering, span trees, and sampling: keeping the signal without the bill"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "systems",
+  unitSlug: "logging",
+};
 
 <Scenario label="Even with structured logs and trace IDs, one payment endpoint is drowning the log storage bill.">
   <Fragment slot="facts">
@@ -29,127 +35,96 @@ stored?**
 
 <LevelIntro
   items={[
-    "A structured logger with real level filtering",
-    "Correlation-ID propagation and a real parent/child span tree",
-    "Sampling logic that keeps every failure but thins out the rest",
+    "Why level filtering happens before formatting",
+    "How a span tree is reconstructed from parent references",
+    "Sampling that keeps every failure but thins out the rest",
   ]}
 />
 
-## A structured logger with level filtering
+## Level filtering: drop it before you pay to format it
 
-**What does "log level filtering" actually look like in code, not
-just as a concept?** A numeric rank per level, and a logger that
-drops anything below its configured threshold before it ever gets
-formatted or written — the whole point is to avoid paying the cost of
-serializing a `debug` line that's about to be discarded anyway:
+**Why does a logger check the level first, before building the log
+record?** Because building the record (timestamp, merging fields,
+serializing to JSON) is the expensive part, and a `debug` line that is
+about to be discarded shouldn't cost any of it:
 
-```js
-const LEVELS = { debug: 10, info: 20, warn: 30, error: 40, fatal: 50 };
-
-function createLogger({ service, minLevel = "info" }) {
-  const threshold = LEVELS[minLevel];
-
-  function log(level, msg, fields = {}) {
-    if (LEVELS[level] < threshold) return null; // dropped, never formatted
-
-    const record = {
-      timestamp: new Date().toISOString(),
-      level,
-      service,
-      msg,
-      ...fields,
-    };
-    return JSON.stringify(record);
-  }
-
-  return {
-    debug: (msg, fields) => log("debug", msg, fields),
-    info: (msg, fields) => log("info", msg, fields),
-    warn: (msg, fields) => log("warn", msg, fields),
-    error: (msg, fields) => log("error", msg, fields),
-    fatal: (msg, fields) => log("fatal", msg, fields),
-  };
-}
+```mermaid
+flowchart LR
+    A["logger.debug(msg, fields)"] --> B{"level rank >= threshold?"}
+    B -- "no (10 < 20)" --> C["return immediately<br/>nothing built, nothing written"]
+    B -- "yes" --> D["build record<br/>timestamp + fields"]
+    D --> E["serialize to JSON"]
+    E --> F["write to output"]
 ```
 
-```js
-const logger = createLogger({ service: "payment-service", minLevel: "info" });
+| Level | Rank | Written when threshold is `info` (20)? |
+| ----- | ---- | -------------------------------------- |
+| debug | 10   | No, dropped at the first check         |
+| info  | 20   | Yes                                    |
+| warn  | 30   | Yes                                    |
+| error | 40   | Yes                                    |
+| fatal | 50   | Yes                                    |
 
-logger.debug("checking idempotency cache", { orderId: "8841" }); // null — dropped
-logger.error("gateway timeout on retry", { orderId: "8841", attempt: 3 });
-// '{"timestamp":"...","level":"error","service":"payment-service",
-//   "msg":"gateway timeout on retry","orderId":"8841","attempt":3}'
-```
-
-Returning `null` for a dropped line (instead of formatting it and
-then discarding the string) matters at scale — `JSON.stringify` on
-millions of would-be-debug lines that get thrown away immediately is
-wasted CPU that shows up as real, measurable overhead under load.
-
-## Correlation IDs and a real span tree
-
-L2 described trace IDs and spans conceptually. Here's what a minimal
-version actually is: not a special object type, just an ID plus a
-reference to whichever span called it, tracked explicitly and passed
-as a normal function argument (there's no framework magic making this
-implicit — something has to carry the ID across every call boundary,
-whether that's an explicit parameter, an HTTP header, or a language
-feature like Node's `AsyncLocalStorage` doing the passing for you
-behind the scenes):
+The whole mechanism is one comparison placed in front of all the work:
 
 ```js
-let spanCounter = 0;
-
-function startSpan({ traceId, parentSpanId = null, name }) {
-  return {
-    traceId,
-    spanId: `span_${++spanCounter}`,
-    parentSpanId,
-    name,
-    startedAt: Date.now(),
-    endedAt: null,
-  };
-}
-
-function endSpan(span) {
-  span.endedAt = Date.now();
-  return span;
-}
-
-function spanDuration(span) {
-  if (span.endedAt === null) return null;
-  return span.endedAt - span.startedAt;
-}
+if (LEVELS[level] < threshold) return; // before any formatting
 ```
 
-```js
-const traceId = "trace_8841";
-const gatewaySpan = startSpan({ traceId, name: "gateway.handle" });
-const paymentSpan = startSpan({
-  traceId,
-  parentSpanId: gatewaySpan.spanId,
-  name: "payment.charge",
-});
-endSpan(paymentSpan);
-endSpan(gatewaySpan);
+At millions of `debug` calls per minute, serializing then discarding is
+real CPU overhead; the early return is why leaving debug calls in the
+code is cheap while the threshold is `info`.
 
-// paymentSpan.parentSpanId === gatewaySpan.spanId — this is the whole
-// mechanism a trace viewer uses to draw the nested timeline from L2.
+<Checkpoint question="A team leaves `logger.debug(JSON.stringify(bigObject))` in a hot path with the threshold at `info`. The line never appears in the output. Is it free?">
+
+No. The logger's early return only protects work the logger does. The
+caller already ran `JSON.stringify(bigObject)` to build the argument,
+before the logger could look at the level. The filter saves the
+formatting inside the logger; it can't save work the caller did first.
+That is why hot paths pass raw fields (or a lazy callback) and let the
+logger decide whether to serialize.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="level-filtering"
+/>
+
+## Span trees: parent references are the whole mechanism
+
+**How does a trace viewer draw nested bars when each service only
+reports its own span?** Every span is a small record, and the nesting is
+rebuilt purely from the parent reference each one carries:
+
+| spanId | parentSpanId | name           | traceId    |
+| ------ | ------------ | -------------- | ---------- |
+| span_1 | _(none)_     | gateway.handle | trace_8841 |
+| span_2 | span_1       | auth.verify    | trace_8841 |
+| span_3 | span_1       | payment.charge | trace_8841 |
+| span_4 | span_3       | gateway.call   | trace_8841 |
+
+```mermaid
+flowchart TD
+    S1["span_1 gateway.handle"] --> S2["span_2 auth.verify"]
+    S1 --> S3["span_3 payment.charge"]
+    S3 --> S4["span_4 gateway.call"]
 ```
 
-A **span tree** is just this: every span but the first carries its
-parent's `spanId`, and a trace viewer reconstructs the nesting by
-following those references — the same relationship a call stack has,
-made explicit and durable instead of disappearing when the function
-returns.
+Nothing is implicit: some mechanism must carry the current span's ID
+across every call boundary, whether an explicit argument, an HTTP header
+between services, or a runtime facility like Node's `AsyncLocalStorage`
+inside one process. It is the same relationship a call stack has, made
+durable instead of vanishing when the function returns.
 
-<Checkpoint question="Two services, A and B, both call a shared database helper for the same request, each producing their own span. If both spans are given the same parentSpanId by mistake, what does the resulting trace look like — and is it wrong in a way that would mislead someone debugging?">
+<Checkpoint question="Two services, A and B, both call a shared database helper for the same request, each producing their own span. If both spans are given the same parentSpanId by mistake, what does the resulting trace look like, and is it wrong in a way that would mislead someone debugging?">
 
 It looks like both database calls happened as direct children of the
 same parent, siblings of each other, when in reality one happened
 inside service A's own span and the other inside service B's. The
 timeline would still show two database calls and roughly correct
-durations, so it's not obviously broken — but it would misrepresent
+durations, so it's not obviously broken, but it would misrepresent
 _which service_ made which call, which matters exactly when the
 debugging question is "which service is slow" or "which service made
 a redundant duplicate call." A span tree is only as trustworthy as
@@ -158,41 +133,69 @@ anything, it just quietly tells the wrong story.
 
 </Checkpoint>
 
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="span-tree"
+/>
+
 ## Sampling: keeping every failure, thinning the rest
 
 **How do you cut 40M lines/day without losing the failures that
-actually matter?** Sample: log every failed request in full, but only
-a fraction of the successful ones — the "keep everything that's
-interesting, thin out everything that's routine" idea directly:
+actually matter?** Keep everything that's interesting, thin out
+everything that's routine:
 
-```js
-function shouldSample({ isError, sampleRate, randomValue }) {
-  if (isError) return true; // never drop a failure
-  return randomValue < sampleRate;
-}
+```mermaid
+flowchart TD
+    R["request finishes<br/>(or is logged)"] --> E{"did it fail?"}
+    E -- "yes" --> K["keep in full"]
+    E -- "no" --> D{"random draw < sample rate?"}
+    D -- "yes (rare)" --> K
+    D -- "no" --> X["drop"]
 ```
 
-```js
-// randomValue would normally come from Math.random(); passed in here
-// so the decision is deterministic and testable.
-shouldSample({ isError: true, sampleRate: 0.01, randomValue: 0.999 }); // true — always keep errors
-shouldSample({ isError: false, sampleRate: 0.01, randomValue: 0.5 }); // false — thinned out
-shouldSample({ isError: false, sampleRate: 0.01, randomValue: 0.001 }); // true — the rare kept sample
-```
+This is a **hybrid**: routine requests are sampled at a fixed rate, but
+a failure is always kept, because by the time it's logged its outcome is
+already known and nothing has to be buffered to find out.
 
-This is **head sampling** — the decision is made at the start of a
-request, before its outcome is even known for certain, based on a
-fixed rate. A more advanced approach, **tail sampling**, waits until
-a request finishes and can look at the actual outcome (was it slow?
-did it error?) before deciding whether to keep the full trace — more
-accurate, at the cost of buffering every in-flight trace until it
-completes. The `shouldSample` function above is really a hybrid: it
-samples on rate for the routine case, but always keeps the case that
-tail sampling exists to catch — a failure — without needing to buffer
-anything, because failure is already known by the time it's logged.
+**Head sampling** decides at the start of a request, before its outcome
+exists, by fixed rate. **Tail sampling** waits until the request
+finishes and then decides from the real outcome (slow? errored?), which
+is more accurate but needs every in-flight trace held in memory until it
+completes.
 
 | Strategy      | Decides when                       | Keeps failures? | Cost                                              |
 | ------------- | ---------------------------------- | --------------- | ------------------------------------------------- |
-| No sampling   | n/a — logs everything              | Always          | Highest storage, simplest code                    |
+| No sampling   | n/a, logs everything               | Always          | Highest storage, simplest setup                   |
 | Head sampling | At request start, by fixed rate    | Only by luck    | Cheap, but a rate too low can lose real failures  |
 | Tail sampling | After request finishes, by outcome | Always          | Accurate, but must buffer every in-flight request |
+
+A subtlety with traces: if one service samples a request in and another
+samples it out independently, the trace has holes. The sampling decision
+is made once and propagated with the trace ID, so every service keeps or
+drops the same request together.
+
+<Checkpoint question="With a 1% head-sampling rate and no special handling for errors, roughly how likely is it that one specific failed request has its logs kept?">
+
+About 1%. Head sampling doesn't know the request will fail, so the
+failure is thinned out exactly like a success. That is why the hybrid
+always keeps errors: the failures are the entire reason logs exist, and
+a fixed rate would throw away 99 out of every 100 of them.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="sampling-strategies"
+/>
+
+## The worked example is a case, not the whole territory
+
+Everything above used one checkout, one payment service, one 2.1% error
+rate. Try changing the facts. What if the failures were 30% of traffic
+during an outage: does "always keep errors" still save money, or does the
+bill spike exactly when you can least afford it? What if the bad requests
+are not errors at all but just slow (a 5-second success)? A fixed error
+check would miss them, and that is the case tail sampling by latency
+exists for. Work out which sampling rule you'd pick for each.
