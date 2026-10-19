@@ -5,6 +5,12 @@ title: "L3 — Reproducing the partial-write bug, then fixing it with rollback a
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "systems",
+  unitSlug: "transactions",
+};
 
 <Scenario label="Same failing order, three different levels of protection">
   <Fragment slot="facts">
@@ -32,210 +38,183 @@ the two — or will both versions fail in the same way?**
 
 ## Reproducing the bug: two separate writes, no transaction
 
-The code below is a small teaching model, not how a real database is
-implemented internally. The important idea is the boundary: the naive
-version edits the real store immediately, while the transactional
-version does work off to the side and publishes it only if every check
-passes.
+**If step 1 (decrement stock) and step 2 (insert order) are just two
+ordinary statements with nothing wrapping them, does step 1's effect
+get undone when step 2 throws — or does nothing ever tell it to?**
 
-```js
-function createStore() {
-  return { stock: { widget: 10 }, orders: [] };
-}
+```mermaid
+sequenceDiagram
+    participant App
+    participant Stock as Stock table
+    participant Orders as Orders table
 
-function placeOrderNaive(store, orderId, productId, qty) {
-  store.stock[productId] -= qty; // step 1
-  if (!orderId) {
-    throw new Error("Order insert failed: missing orderId");
-  }
-  store.orders.push({ orderId, productId, qty }); // step 2
-}
-
-const store1 = createStore();
-try {
-  placeOrderNaive(store1, null, "widget", 3);
-} catch (err) {
-  console.log("caught:", err.message);
-}
-console.log(store1.stock.widget); // 7
-console.log(store1.orders.length); // 0
+    App->>Stock: decrement widget by 3 (step 1)
+    Stock-->>App: stock = 7
+    App->>Orders: insert order (step 2)
+    Orders-->>App: ❌ missing orderId — throws
+    Note over App,Orders: nothing told Stock to undo step 1 —<br/>there was no "undo" code to run
 ```
 
-Verified: stock drops to **7** but `orders` stays **empty** — the
-exact bug from L1. Step 1 already happened by the time step 2 threw,
-and nothing in `placeOrderNaive` knew to undo it.
+| State           | Before the request | After the request (step 2 failed) |
+| --------------- | ------------------ | --------------------------------- |
+| `stock.widget`  | 10                 | **7** — step 1's effect stuck     |
+| `orders.length` | 0                  | **0** — step 2 never landed       |
+
+This is the exact bug from L1, traced to the statement level: step 1
+and step 2 are two independent lines of code, so a failure on line 2
+has no automatic effect on line 1's already-applied change. Nothing
+in either line was buggy — the missing piece is a boundary that would
+have treated both lines as one unit.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="partial-write-reproduction"
+/>
 
 ## The fix: wrap both steps in a transaction with rollback
 
-The `deepClone` here stands in for the database's private transaction
-workspace. In a real database, that workspace is handled with storage
-pages, locks, logs, and visibility rules. You do not need to memorize
-the JavaScript mechanics; watch when the real `store` is touched.
+**If a transaction's whole trick is "do the work somewhere private,
+only publish it on success," what has to be true about where that
+private work happens for rollback to require zero undo code?**
+
+A transaction wrapper runs the operation against a private working
+copy of the data, not the real store — the same "private workspace"
+idea from L2's lifecycle diagram, made concrete. `deepClone` and
+`stockNeverNegative` are small helpers reused by every example below:
+a full copy of the store, and the one invariant this unit's scenario
+cares about (stock can't go negative).
 
 ```js
 function deepClone(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
 
-function runTransaction(store, operation, invariant) {
-  const working = deepClone(store);
-  try {
-    operation(working);
-    if (invariant && !invariant(working)) {
-      throw new Error("Invariant violated");
-    }
-    Object.assign(store.stock, working.stock);
-    store.orders.length = 0;
-    store.orders.push(...working.orders);
-    return { committed: true };
-  } catch (err) {
-    // working was a separate clone — store was never touched
-    return { committed: false, error: err.message };
-  }
-}
-
 function stockNeverNegative(state) {
   return Object.values(state.stock).every((qty) => qty >= 0);
 }
 
-const store2 = createStore();
-const result2 = runTransaction(
-  store2,
-  (working) => {
-    working.stock.widget -= 3;
-    if (!null) throw new Error("Order insert failed: missing orderId");
-    working.orders.push({ orderId: null, productId: "widget", qty: 3 });
-  },
-  stockNeverNegative,
-);
-
-console.log(result2); // { committed: false, error: 'Order insert failed: missing orderId' }
-console.log(store2.stock.widget); // 10
-console.log(store2.orders.length); // 0
+function runTransaction(store, operation, invariant) {
+  const working = deepClone(store); // private workspace
+  try {
+    operation(working); // all writes land here, not on `store`
+    if (invariant && !invariant(working)) {
+      throw new Error("Invariant violated");
+    }
+    Object.assign(store, working); // commit: publish all at once
+    return { committed: true };
+  } catch (err) {
+    // `store` was never touched — nothing to undo
+    return { committed: false, error: err.message };
+  }
+}
 ```
 
-Verified: with the identical failing order, the transactional
-version's stock stays at **10** — the exact same failure, but zero
-side effects instead of a silent partial write. All operations run
-against `working`, a clone; the real `store` is only ever touched by
-the commit step, which never runs if anything throws.
+The real `store` is written to in exactly one place — the line right
+after the invariant check passes. Every other path through this
+function (`operation` throwing, or the invariant returning `false`)
+falls into `catch` with `store` completely untouched. That's why
+rollback doesn't need its own undo logic per operation: there is
+nothing to undo, because nothing real was ever changed in the first
+place.
 
-<Checkpoint question="In runTransaction, the operation function mutates 'working', not 'store' directly. If operation() threw partway through — after already changing working.stock but before pushing to working.orders — would store.stock end up partially changed too?">
+<Checkpoint question="If operation() throws partway through — after already changing working.stock but before pushing to working.orders — would store.stock end up partially changed too?">
 
 No — `store` would be completely untouched, not partially changed.
 The mutation happened on `working`, a deep clone made at the top of
-`runTransaction`, and `store` is only ever written to in the success
-path: `Object.assign(store.stock, working.stock)` and the two lines
-after it, which run only after `operation` and the invariant check
-have both completed without throwing. If `operation` throws at any
-point — whether on its first line or its last — control jumps straight
-to the `catch` block, and the lines that copy `working` back onto
-`store` simply never execute. That's the whole point of doing the work
-on a clone first: partial progress inside `operation` has nowhere to
-leak into the real `store` unless the commit lines are actually
-reached.
+`runTransaction`, and `store` is only ever written to by the single
+`Object.assign(store, working)` line, which runs only after `operation`
+and the invariant check have both completed without throwing. If
+`operation` throws at any point — on its first line or its last —
+control jumps straight to `catch`, and that commit line simply never
+executes. Partial progress inside `operation` has nowhere to leak into
+the real `store` unless the commit line is actually reached.
 
 </Checkpoint>
 
-## Consistency: rejecting a commit that would break an invariant
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="rollback-mechanism"
+/>
 
-```js
-const store3 = createStore();
-const result3 = runTransaction(
-  store3,
-  (working) => {
-    working.stock.widget -= 15; // more than the 10 available
-    working.orders.push({ orderId: "order-2", productId: "widget", qty: 15 });
-  },
-  stockNeverNegative,
-);
+## Consistency and success: the same wrapper, three different orders
 
-console.log(result3); // { committed: false, error: 'Invariant violated' }
-console.log(store3.stock.widget); // 10, unchanged
-console.log(store3.orders.length); // 0
-```
+**Does `runTransaction` need a separate code path for "the operation
+itself failed" versus "the operation succeeded but broke a rule"?**
+No — both reach the wrapper the same way (a thrown error, whether
+thrown by the operation or by the invariant check), so one mechanism
+covers both:
 
-Verified: this order has no missing field and would have "worked" in
-the naive version, silently taking stock negative. The transaction's
-`invariant` check catches it _before_ commit and rolls back — this is
-consistency enforced structurally, not by hoping every caller
-remembers to check stock levels themselves.
+| Order attempt                                         | What happens inside `runTransaction`                                                           | Result                                     |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| Missing `orderId` (L1's exact bug)                    | `operation` throws before the invariant check even runs                                        | `{ committed: false }`, stock stays **10** |
+| Valid fields, but orders 15 units against 10 in stock | `operation` succeeds, but `stockNeverNegative(working)` returns `false`, so the wrapper throws | `{ committed: false }`, stock stays **10** |
+| Valid fields, orders 3 units                          | `operation` succeeds, invariant holds                                                          | `{ committed: true }`, stock becomes **7** |
 
-## A successful order still commits normally
+The middle row is the important one: that order has no missing field
+and would have "worked" in the naive version, silently taking stock
+negative. The invariant check catches it structurally, before commit —
+consistency enforced by the transaction boundary itself, not by hoping
+every caller remembers to check stock levels.
 
-```js
-const store4 = createStore();
-const result4 = runTransaction(
-  store4,
-  (working) => {
-    working.stock.widget -= 3;
-    working.orders.push({ orderId: "order-1", productId: "widget", qty: 3 });
-  },
-  stockNeverNegative,
-);
-
-console.log(result4); // { committed: true }
-console.log(store4.stock.widget); // 7
-console.log(store4.orders.length); // 1
-```
-
-Verified: a valid order commits exactly as expected — the transaction
-wrapper adds safety on the failure paths without changing the outcome
-of a normal, successful order.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="consistency-invariant-enforcement"
+/>
 
 ## Durability: surviving a crash right after "success"
 
-```js
-function durableCommit(log, entry) {
-  // in a real database this write is fsync'd to disk before acknowledging
-  log.push(JSON.stringify(entry));
-  return { acknowledged: true };
-}
+**If the in-memory `store` object is wiped out entirely (a crash), can
+an already-acknowledged order still be recovered — and from what?**
 
-function recoverFromLog(log) {
-  const state = createStore();
-  for (const entryStr of log) {
-    const entry = JSON.parse(entryStr);
-    state.stock[entry.productId] -= entry.qty;
-    state.orders.push(entry);
-  }
-  return state;
-}
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Log as Durable log
+    participant Store as In-memory store
 
-const log = [];
-durableCommit(log, { orderId: "order-1", productId: "widget", qty: 3 });
-durableCommit(log, { orderId: "order-2", productId: "widget", qty: 2 });
-
-// simulate a crash: the in-memory store object is gone entirely
-const recovered = recoverFromLog(log);
-console.log(recovered.stock.widget); // 5
-console.log(recovered.orders.length); // 2
+    Client->>Log: append "order-1: widget -3"
+    Log-->>Client: acknowledged
+    Note over Store: 💥 crash — in-memory store is gone
+    Note over Log: the log itself survived the crash
+    Log->>Store: replay every entry, in order
+    Store-->>Client: stock and orders reconstructed
 ```
 
-Verified: even with the original in-memory `store` object completely
-discarded (simulating a crash), replaying the durable log reconstructs
-the exact same state — stock at **5**, both orders present. This is
-what durability actually buys: the guarantee isn't "the process never
-crashes," it's "a crash can't erase a result that was already reported
-as successful."
+Durability works by moving the "did this really happen" question off
+the in-memory object entirely: the log is what's acknowledged as
+durable, and recovery rebuilds state by replaying it — it never needs
+the pre-crash `store` object to still exist.
 
-<Checkpoint question="durableCommit pushes to the log and returns { acknowledged: true } before recoverFromLog is ever called. If a crash happened between durableCommit returning and the in-memory store object being updated to match, would the recovered state after restart still include that order?">
+| Moment                                           | Is the order recoverable after a crash right now?                    |
+| ------------------------------------------------ | -------------------------------------------------------------------- |
+| Before the log entry is appended                 | No                                                                   |
+| After the log entry is appended and acknowledged | Yes — replay the log on restart                                      |
+| After the in-memory store is also updated        | Yes, same as above — the in-memory copy adds nothing durability-wise |
+
+<Checkpoint question="The diagram acknowledges the client right after the log append, before the in-memory store is ever touched. If a crash happened in that exact gap — log acknowledged, in-memory store not yet updated to match — would the recovered state after restart still include that order?">
 
 Yes — because durability was already satisfied the moment the log
-write completed, not when the in-memory `store` object caught up to
-it. `durableCommit` acknowledges success as soon as the entry is in
-the durable log (the comment even notes this stands in for an
-`fsync`'d disk write in a real database); everything after that,
-including ever updating an in-memory `store`, is optional bookkeeping
-that a crash is allowed to lose. `recoverFromLog` doesn't need the
-old in-memory `store` at all — it rebuilds state entirely from the log
-itself, `state.stock[entry.productId] -= entry.qty` for every entry.
-So a crash at exactly that moment changes nothing about the outcome:
-the order is in the log, the log is what recovery replays, and the
-recovered state includes it regardless of what did or didn't happen to
-any in-memory object in between.
+write completed, not when the in-memory store caught up to it. The
+log acknowledges success as soon as the entry is durable (standing in
+for an `fsync`'d disk write in a real database); everything after
+that, including ever updating an in-memory store, is optional
+bookkeeping that a crash is allowed to lose. Recovery doesn't need the
+old in-memory store at all — it rebuilds state entirely by replaying
+the log from scratch. So a crash at exactly that moment changes
+nothing about the outcome: the order is in the log, the log is what
+recovery replays, and the recovered state includes it regardless of
+what did or didn't happen to any in-memory object in between.
 
 </Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="durability-wal-recovery"
+/>
 
 ## Isolation: what goes wrong when two orders overlap
 
@@ -258,6 +237,12 @@ The bug below isn't literally any of the three — it's a close cousin
 called a **lost update**, and it's the one that matters most for the
 stock/order scenario this unit has been using throughout.
 
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="isolation-anomalies"
+/>
+
 **Before running the code: `runTransaction` has each caller clone
 `store` into its own private `working` copy before doing anything else.
 If two separate calls to `runTransaction` both start — both taking
@@ -267,7 +252,7 @@ the `stockNeverNegative` check, yet the store still end up having
 
 ```js
 // lost-update.js
-const store3 = createStore(); // { stock: { widget: 10 }, orders: [] }
+const store3 = { stock: { widget: 10 }, orders: [] };
 
 // Both transactions clone the SAME starting store — stock: 10 — before
 // either one has committed. This is what "concurrently" means here:
@@ -344,7 +329,7 @@ function runTransactionSerialized(store, operation, invariant) {
   }
 }
 
-const store4 = createStore(); // { stock: { widget: 10 }, orders: [] }
+const store4 = { stock: { widget: 10 }, orders: [] };
 
 runTransactionSerialized(
   store4,
@@ -381,6 +366,12 @@ What would change if the lock were keyed per-product instead of
 global — and is there a case where even a per-product lock still isn't
 enough (two orders for the same bundle of two different products, each
 only holding one of the two product locks)?**
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="lost-update-isolation-levels"
+/>
 
 ## Failure modes
 
