@@ -1,281 +1,183 @@
 ---
-title: "L3 — Implementing the load balancer and session store that would have kept TicketRush stateless"
+title: "L3 — The selection logic, the bookkeeping, and what a shared store really costs"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "systems",
+  unitSlug: "horizontal-scaling",
+};
 
 L2 covered the algorithms a load balancer chooses between, the
-sticky-session-vs-shared-store trade-off, and health checks. This
-level implements a round-robin balancer, a least-connections
-balancer, a health-check-aware server pool, and a stateless session
-store — the four pieces that together would have let TicketRush add
-a second server without logging anyone out.
+sticky-session-vs-shared-store trade-off, and health checks. This level
+goes underneath them: how small the selection logic really is (and where
+its edge cases hide), why least connections is only as good as its
+bookkeeping, and what TicketRush's fix still leaves unsolved.
 
 <LevelIntro
   items={[
-    "A round-robin load balancer that skips unhealthy servers",
-    "A least-connections balancer that tracks in-flight requests per server",
-    "A stateless session store any server can read and write",
+    "Selection logic that skips unhealthy servers",
+    "Bookkeeping that keeps least connections honest",
+    "What a shared store fixes, and what it creates",
   ]}
 />
 
-## A round-robin balancer, aware of server health
+## How small is the selection logic, and where do the edge cases hide?
 
-**Here's a round-robin balancer. It has to do two things: cycle
-through servers in order, and skip any server a health check has
-marked down.**
+**Round robin sounds like one line: `servers[counter % n]`. What breaks the
+moment one server is unhealthy?** The cursor has to keep advancing through
+the full list, but the pick must land on a healthy server, and the case
+where nobody is healthy has to end instead of looping forever.
 
 ```js
-class RoundRobinBalancer {
-  constructor(servers) {
-    // { id, healthy } for each backend
-    this.servers = servers.map((s) => ({ ...s, healthy: true }));
-    this.cursor = 0;
-  }
-
-  markHealth(id, healthy) {
-    const server = this.servers.find((s) => s.id === id);
-    if (server) server.healthy = healthy;
-  }
-
-  nextServer() {
-    const healthyServers = this.servers.filter((s) => s.healthy);
-    if (healthyServers.length === 0) {
-      throw new Error("no healthy servers available");
+function pickRoundRobin(servers, cursor) {
+  const n = servers.length;
+  for (let i = 0; i < n; i++) {
+    const index = (cursor + i) % n;
+    if (servers[index].healthy) {
+      return { id: servers[index].id, nextCursor: (index + 1) % n };
     }
-    // Cycle over the FULL list (so position keeps advancing predictably
-    // even as health flips), but only ever return a healthy one.
-    for (let i = 0; i < this.servers.length; i++) {
-      const candidate = this.servers[this.cursor % this.servers.length];
-      this.cursor++;
-      if (candidate.healthy) return candidate;
-    }
-    throw new Error("no healthy servers available");
   }
+  return null; // nobody healthy: report an outage, don't spin
 }
 ```
 
-```js
-const lb = new RoundRobinBalancer([{ id: "A" }, { id: "B" }, { id: "C" }]);
+Scanning at most `n` slots is the whole safety argument: the loop always
+terminates, and `null` forces the caller to deal with a total outage
+explicitly. Least connections has the same shape with a different rule: among
+the healthy servers, take the one with the fewest in-flight requests, and
+let the earliest win ties. An unhealthy server with zero connections must
+never win just because it looks idle.
 
-lb.nextServer().id; // "A"
-lb.nextServer().id; // "B"
-lb.nextServer().id; // "C"
-lb.nextServer().id; // "A" — cycled back around
+| Edge case                  | Round robin                    | Least connections              |
+| -------------------------- | ------------------------------ | ------------------------------ |
+| One server unhealthy       | Skip it, keep cursor advancing | Exclude it before comparing    |
+| Every server unhealthy     | Return nothing, surface outage | Return nothing, surface outage |
+| Tie between servers        | Not applicable (fixed order)   | Earliest in the list wins      |
+| State the balancer carries | One integer (the cursor)       | One live counter per server    |
 
-lb.markHealth("B", false);
-lb.nextServer(); // skips B entirely; only A and C are ever returned
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="server-selection"
+/>
+
+**Would this selection logic have prevented TicketRush's session bug?** No.
+Nothing here decides where session data lives; every algorithm can send a
+user's next request to a different server. The bug was an assumption about
+state, not a routing choice.
+
+## Why does least connections need careful bookkeeping?
+
+**Least connections trusts a number. What happens when the number is wrong?**
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Assigned: nextServer picks it
+    Assigned --> InFlight: start (count +1)
+    InFlight --> Done: finish (count -1, always)
+    InFlight --> Done: handler throws, finally still runs finish
+    Done --> [*]
 ```
 
-The `healthy` flag isn't decoration — it's what turns "a server
-crashed" from an outage into a reduced-capacity event. Without the
-`filter`/skip logic, a crashed server would still receive its normal
-one-third of requests, and every one of them would fail.
+The count is only as accurate as the start and finish calls that feed it.
+If a request is assigned but never reported as started, that server looks
+idler than it is and attracts even more traffic. If a request ends in an
+error and finish is skipped, the server keeps a phantom connection forever
+and is starved of traffic it could handle. Neither failure throws; the
+balancer just makes steadily worse decisions. That is why finish belongs in
+a `finally` path rather than being a call every caller has to remember, and
+why the decrement never drops below zero.
 
-**Would this balancer have caused TicketRush's session bug on its
-own?** No — nothing here decides where session data lives; that's a
-separate concern, handled below. Round robin (or any algorithm) is
-compatible with a stateless design; the bug was in assuming a session
-survived only on the server that created it, not in which algorithm
-routed the request there.
+<Checkpoint question="Two load balancer instances sit in front of the same three servers, each tracking its own connection counts. Why is least connections unreliable here?">
 
-## A least-connections balancer
-
-**Round robin ignores how busy each server currently is. Here's a
-balancer that tracks it directly.**
-
-```js
-class LeastConnectionsBalancer {
-  constructor(servers) {
-    this.servers = servers.map((s) => ({
-      ...s,
-      healthy: true,
-      activeConnections: 0,
-    }));
-  }
-
-  markHealth(id, healthy) {
-    const server = this.servers.find((s) => s.id === id);
-    if (server) server.healthy = healthy;
-  }
-
-  nextServer() {
-    const candidates = this.servers.filter((s) => s.healthy);
-    if (candidates.length === 0) {
-      throw new Error("no healthy servers available");
-    }
-    return candidates.reduce((best, s) =>
-      s.activeConnections < best.activeConnections ? s : best,
-    );
-  }
-
-  startRequest(id) {
-    const server = this.servers.find((s) => s.id === id);
-    if (server) server.activeConnections++;
-  }
-
-  finishRequest(id) {
-    const server = this.servers.find((s) => s.id === id);
-    if (server)
-      server.activeConnections = Math.max(0, server.activeConnections - 1);
-  }
-}
-```
-
-```js
-const lb = new LeastConnectionsBalancer([{ id: "A" }, { id: "B" }]);
-
-const s1 = lb.nextServer(); // "A" — tied at 0, first one wins the tie
-lb.startRequest(s1.id);
-
-const s2 = lb.nextServer(); // "B" — A now has 1 active connection, B has 0
-lb.startRequest(s2.id);
-
-lb.finishRequest("A"); // A's slow request finally completes
-
-const s3 = lb.nextServer(); // "A" again — both back to 0, tie goes to A
-```
-
-This is why `startRequest`/`finishRequest` exist as separate calls
-from `nextServer` — the balancer's picture of "who's busy" is only
-accurate if every caller correctly reports when a request starts and
-when it actually finishes, not just when it was assigned.
-
-<Checkpoint question="A caller picks a server with nextServer() but the code crashes before ever calling startRequest() — or calls startRequest() but the request handler throws and finishRequest() never runs. What happens to LeastConnectionsBalancer's future decisions?">
-
-Its `activeConnections` counts drift from reality — either a server
-never gets credited with the request it's actually handling (making
-it look falsely idle and attract more traffic on top of what it's
-already doing), or a server keeps a phantom connection counted forever
-after the real request already finished or failed (making it look
-falsely busy and get starved of new traffic it could actually handle).
-Both are silent: nothing throws, nothing crashes, the balancer just
-makes worse and worse decisions over time. This is why real
-implementations pair `startRequest`/`finishRequest` with a
-`try`/`finally` around the actual request handling, not two calls a
-caller has to remember to make correctly by hand.
+Each instance only sees the requests it routed itself. Server A may be
+saturated by traffic arriving through the other balancer while this one
+believes A is idle, so it keeps piling more on. The counts are partial views
+of one reality, and unless the balancers share state (or the servers report
+their real load), the algorithm optimizes against a picture that is wrong by
+design. It is the same lesson as statelessness one level up: state that lives
+in only one place cannot be trusted by anyone else.
 
 </Checkpoint>
 
-## A stateless session store
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="connection-bookkeeping"
+/>
 
-**L2 covered the trade-off; here's the shared store that makes a
-server actually stateless — any server can read a session any other
-server created.**
+## What does the shared store fix, and what does it leave behind?
 
-```js
-class SharedSessionStore {
-  constructor() {
-    this.sessions = new Map(); // stands in for Redis / a DB in this example
-  }
+**Here is the L1 bug and its fix side by side. What exactly changed?**
 
-  create(userId) {
-    const sessionId = `sess_${userId}_${Math.random().toString(36).slice(2)}`;
-    this.sessions.set(sessionId, { userId, createdAt: Date.now() });
-    return sessionId;
-  }
-
-  read(sessionId) {
-    return this.sessions.get(sessionId) ?? null;
-  }
-
-  destroy(sessionId) {
-    this.sessions.delete(sessionId);
-  }
-}
+```mermaid
+flowchart LR
+    subgraph Before["Stateful servers"]
+        direction TB
+        UA["Login"] --> SA["Server A\nlocal session map"]
+        UB["Next request"] --> SB["Server B\nempty local map"]
+        SB --> X["Logged out"]
+    end
+    subgraph After["Stateless servers"]
+        direction TB
+        UC["Login"] --> SC["Server A"]
+        UD["Next request"] --> SD["Server B"]
+        SC --> ST[("Shared store")]
+        SD --> ST
+        SD --> OK["Logged in"]
+    end
 ```
 
-```js
-// Simulating TicketRush's original bug, then the fix.
+Nothing about routing changed. The fix removed the assumption that the next
+request returns to the same server, so it no longer matters which server
+handles it. No server checks where a session was created, because the answer
+is always "in the store."
 
-// BUG: in-memory session, private to whichever server created it.
-class StatefulServer {
-  constructor(id) {
-    this.id = id;
-    this.localSessions = new Map(); // only this server can ever read these
-  }
-  login(userId) {
-    const sessionId = `sess_${userId}`;
-    this.localSessions.set(sessionId, { userId });
-    return sessionId;
-  }
-  checkLoggedIn(sessionId) {
-    return this.localSessions.has(sessionId); // false on any OTHER server
-  }
-}
+That does not make state free. It relocates it, and the new location carries
+its own costs:
 
-const serverA = new StatefulServer("A");
-const serverB = new StatefulServer("B");
-const sessionId = serverA.login("user-42"); // login request lands on A
-serverB.checkLoggedIn(sessionId); // false — B has never heard of this session
+| What moved                       | New cost or risk                                                       | Typical mitigation                                       |
+| -------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------- |
+| Sessions into one shared store   | Store is a shared dependency; if it is down, every server is useless   | Replication and failover for the store                   |
+| Lookup into every request        | An extra network round trip each time                                  | Keep sessions small, cache carefully                     |
+| Large state (a big cart) into it | Fetching megabytes per request is slow                                 | Store an id in the session, keep bulk data in a database |
+| Local caching of session reads   | A logout on one server is invisible to another until the cache expires | Short TTLs, or accept staleness knowingly                |
 
-// FIX: any server reads/writes the same shared store.
-class StatelessServer {
-  constructor(id, store) {
-    this.id = id;
-    this.store = store; // shared across every server instance
-  }
-  login(userId) {
-    return this.store.create(userId);
-  }
-  checkLoggedIn(sessionId) {
-    return this.store.read(sessionId) !== null;
-  }
-}
+<Checkpoint question="The shared session store goes down while every app server is healthy and well under capacity. Would adding more app servers help?">
 
-const sharedStore = new SharedSessionStore();
-const statelessA = new StatelessServer("A", sharedStore);
-const statelessB = new StatelessServer("B", sharedStore);
-const sid = statelessA.login("user-42"); // login lands on A
-statelessB.checkLoggedIn(sid); // true — B reads the same shared store
-```
+No. All the extra servers would wait on the same dead dependency, so total
+capacity is capped by the store, not by the servers. This is the same shape
+as the capacity chart in this unit's demo: adding machines scales throughput
+only until a shared resource becomes the limit, and from then on the shared
+resource is the thing to scale or protect.
 
-This is the exact mechanism from L1's Scenario, reproduced directly:
-`StatefulServer` fails the cross-server check the same way
-TicketRush's real login did; `StatelessServer` fixes it not by
-changing which server handles which request, but by making it not
-matter which server handles which request.
+</Checkpoint>
 
-## Putting the pieces together
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="shared-state-limits"
+/>
 
-**A request-handling function that uses a health-aware balancer to
-pick a server, and a shared store so the session works regardless of
-which server was picked:**
-
-```js
-async function handleCheckoutRequest(balancer, store, sessionId) {
-  const server = balancer.nextServer(); // any healthy server, by algorithm
-  balancer.startRequest(server.id);
-  try {
-    const session = store.read(sessionId); // shared store — works on any server
-    if (!session) throw new Error("not logged in");
-    return { handledBy: server.id, userId: session.userId };
-  } finally {
-    balancer.finishRequest(server.id);
-  }
-}
-```
-
-Note what's absent: nothing here checks which server originally
-created the session, and nothing needs to. That absence is the whole
-point — a genuinely stateless design doesn't route around a
-limitation, it removes it.
-
-**Try extending it yourself:** what would need to change here if,
-instead of a session lookup, the checkout request needed to read a
-shopping cart that's large enough it's expensive to fetch from the
-shared store on every single request — would you still want every
-server to be able to serve any request, or does that argument change
-once "shared state" gets bigger and more expensive to fetch than a
-small session flag?
+**Try extending it yourself:** a checkout request now needs the user's cart,
+which is large enough to be expensive to fetch on every request. Would you
+give up on interchangeable servers, shrink what the session carries, or cache
+the cart per server? What does each choice do to correctness when the cart
+changes on another server? The case above is one worked example, not the whole
+territory: the same questions apply to any state you are tempted to keep
+close to the server.
 
 ## Failure modes
 
-| Failure mode                                                                                | What it gets wrong                                                                                                                         |
-| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Filtering unhealthy servers only when picking, not when counting the cycle                  | Can cause uneven distribution or infinite loops if the cursor logic doesn't account for the pool shrinking                                 |
-| Updating `activeConnections` only on assignment, not on completion                          | The balancer's view of "who's busy" drifts from reality, sending more traffic to servers that already have work piling up                  |
-| Storing session data in one server's memory "just for now," planning to migrate later       | This is exactly TicketRush's bug — it works until the second server is added, then fails in production, not in testing on one box          |
-| Treating the shared store itself as infallible                                              | The store becomes a new single point of failure; it needs its own reliability (replication, failover) once every server depends on it      |
-| Health checks that only confirm the process is running, not that it can serve real requests | A server can pass a bare liveness check while still being unable to actually complete requests, and keep receiving traffic it can't handle |
+| Failure mode                                                    | What it gets wrong                                                                                 |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Round robin that never terminates when all servers are down     | Spins forever instead of reporting an outage                                                       |
+| Updating `activeConnections` only on assignment, not completion | Counts drift, so traffic goes to servers that already have work piling up                          |
+| Keeping session data in one server's memory "just for now"      | Works until the second server arrives, then fails in production rather than in testing on one box  |
+| Treating the shared store as infallible                         | Moves the single point of failure instead of removing it                                           |
+| Health checks that only confirm the process is running          | A server can pass while unable to serve real requests, and keep receiving traffic it cannot handle |
