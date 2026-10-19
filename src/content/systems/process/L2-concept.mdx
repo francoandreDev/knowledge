@@ -5,6 +5,9 @@ title: "L2 — What actually happens when you run a program?"
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = { track: "systems", unitSlug: "process" };
 
 L1 named the parts of a process — memory regions, PIDs, system calls. This level goes one layer deeper: how a process actually gets created, and why its isolation is structurally guaranteed rather than just conventional.
 
@@ -47,6 +50,12 @@ The stack and heap deliberately grow _toward_ each other from opposite ends of t
 The stack runs out, not the heap — each recursive call pushes a new frame (return address, arguments, locals) and nothing ever pops until a call returns, so the stack pointer keeps growing toward the free space until it either collides with the heap or runs past the region the OS reserved. That's a structurally different failure from over-allocating with `new`: excess heap allocation grows a bounded-but-large region and typically shows up as out-of-memory or GC pressure, while runaway recursion is a stack-specific exhaustion — the classic symptom is a "stack overflow" or "maximum call stack size exceeded" error rather than a generic out-of-memory failure, because the two regions are tracked and limited separately.
 
 </Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="memory-region-growth"
+/>
 
 ## How does a shell turn `node app.js` into a running process without becoming that process itself?
 
@@ -128,11 +137,37 @@ No — it couldn't, at least not without a completely different mechanism. The r
 
 </Checkpoint>
 
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="fork-exec-split"
+/>
+
+The `fork()` step's "duplicate" is cheaper than it sounds. The kernel doesn't physically copy the parent's entire heap and stack the instant `fork()` is called — it marks every page **copy-on-write**: both processes' page tables point at the same physical pages, read-only, and a real physical copy is only made for a specific page the moment either side actually writes to it. This is exactly why `fork()` stays fast even for a process with a multi-gigabyte heap, and it's also why most fork+exec sequences barely pay any copying cost at all — `exec()` discards the duplicated memory image moments later anyway.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="fork-copy-on-write"
+/>
+
 ## Why does isolation hold even when two processes use the identical pointer value?
 
 A process's pointers are all virtual addresses — numbers meaningful only through that process's own page table. When process A reads the pointer `0x7fff1000`, the MMU looks up A's page table, finds the physical RAM page it maps to, and reads that. Process B's `0x7fff1000` goes through B's own page table and lands somewhere else in physical RAM entirely — usually nowhere at all, from A's perspective. Neither process can express a pointer that reaches into the other's physical memory, because addresses are never physical from a process's point of view; they're always mediated through a private mapping only the kernel controls. This is the mechanical answer to L1's two-tabs scenario: `counter` in tab A's process and `counter` in tab B's process are two different virtual addresses (or the same virtual address mapped to two different physical pages) — there was never a shared "counter" to race over.
 
-This is also why a `NULL` pointer dereference reliably crashes instead of reading garbage: address `0x0` is deliberately left unmapped in a process's page table specifically so any access to it faults immediately, loud and fast, instead of silently reading whatever used to be at physical address zero.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="page-table-translation"
+/>
+
+This is also why a `NULL` pointer dereference reliably crashes instead of reading garbage: address `0x0` is deliberately left unmapped in a process's page table specifically so any access to it faults immediately, loud and fast, instead of silently reading whatever used to be at physical address zero. Mechanically, this is a short pipeline, not one instantaneous event: the bad access reaches the MMU, which can't find a mapping and raises a page fault, the kernel's fault handler checks for a valid mapping, finds none, and only then delivers `SIGSEGV` — the same pipeline that fires for any invalid access, not something special-cased for NULL.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="segfault-mechanism"
+/>
 
 ```mermaid
 flowchart LR

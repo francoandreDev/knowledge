@@ -3021,3 +3021,19 @@ Final batch for `web/` — all 5 remaining units migrated in one pass (prefixed 
 **Verification**: full `bun run check` green (lint, format, typecheck, `validate:content` — 246 units, test 9/9, build — 267 pages, 2m30s). Browser verification scripted across all 5 units; every topic across all five (quiz and code alike, ~162 exam-tier answers total) confirmed "Passed," "Mark as done" unlocks for all five.
 
 **`web/` track is now fully migrated — all 17 units** on the three-tier exercise model and rule 9's diagram/explanation-by-default content standard. Next: move to the next track. Candidates in roadmap order: `systems/` (17 units), or any other track the user picks — this is a cross-track decision, not an automatic next step.
+
+## 2026-10-19 — Started `systems/` track: `process`, `persistence`, `algorithmic-complexity`, `sockets`
+
+User confirmed continuing into `systems/` (17 units), roadmap order. Same process as the `web/` batches: content-only subagents in parallel, one serialized build/verify/commit pass.
+
+**`systems/process`** — 15 topics, 169 items, all quiz-type. L1/L2/L3 prose was already rule-9 compliant from an earlier pass (fork/exec and page-table Mermaid diagrams, minimal real code only where genuine — `fork_isolation.py`, `segfault.c`). Converted all 7 old L3 code pools (proc/maps string parsing, hex arithmetic, object-spread modeling) to quiz — none were genuine algorithms. Dropped one old pool (`process-tree`/orphan reparenting) that tested content the unit's prose never actually teaches.
+
+**`systems/persistence`** — 16 topics, 150 items. Kept 5 real L3 code blocks in the prose (WAL, group-commit, checksum classes — genuine mechanisms). Kept exactly one exercise topic as code-type (`wal-replay-mechanism` — a genuine fold/reduce algorithm); converted the rest, including a `checksum-torn-write` topic the agent initially considered keeping as code, to quiz to minimize type-consistency risk.
+
+**`systems/algorithmic-complexity`** — 13 topics, 144 items. This unit is a genuine rule-9 exception (Big-O needs real code to make growth-rate differences concrete) — kept the array-vs-Set benchmark and intersection-fast/slow code in the prose, and kept all 3 L3 exercise topics as code-type, since predicting/implementing real complexity-relevant code is the actual point here, not incidental syntax.
+
+**`systems/sockets`** — 14 topics, 168 items. Kept `naiveHandler`/`createLineFramer` as real code in prose (buffer-append-then-drain is a genuine mechanism) and kept all 3 L3 exercise topics as code-type to match.
+
+**Verification**: full `bun run check` green (lint, format, typecheck, `validate:content` — 246 units, test 9/9, build — 267 pages). **Browser click-through verification was NOT completed this batch** — the Claude-in-Chrome extension was disconnected (retried 4 times across ~6 minutes, never reconnected) and this was running autonomously with no user present to reconnect it. Proceeded to commit on the strength of the static pipeline alone (build/lint/typecheck/validate-content/test all green), which is weaker evidence than the live grading click-through that caught 2 real bugs in earlier batches (a broken code `solution` field, a mixed-type topic). **Flagging this explicitly: the next session should run the live answer-and-grade browser check against these 4 units (`systems/process`, `systems/persistence`, `systems/algorithmic-complexity`, `systems/sockets`) before trusting them as fully verified** — several of their code topics have variants sharing byte-identical `starterCode`/`solution` (noted by the authoring agents), which is exactly the shape that produced the `bff` false-positive and is worth confirming behaves correctly live, not just structurally.
+
+Next: run the deferred browser verification for this batch, then continue through the rest of `systems/`.
