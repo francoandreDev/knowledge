@@ -1,198 +1,212 @@
 ---
-title: "L3 — Measuring the N+1 bug, fixing it, and a real denormalization trade-off"
+title: "L3 — Counting the N+1 bug, fixing it, comparing plans, and the write cost of denormalizing"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = { track: "systems", unitSlug: "query-planning" };
 
 L2 explained why query count, not raw database speed, drives the Scenario's
 slowdown, and what normalization and denormalization each trade off. L3
-makes that mechanism directly measurable with real code: a naive version, a
-fixed version, and a worked denormalization trade-off.
+makes that measurable: how many queries each version issues, the one small
+piece of code that implements the fix, how a planner would rank candidate
+routes, and what denormalizing really costs on the write side.
 
 <LevelIntro
   items={[
-    "Measuring the N+1 pattern with a real query counter",
-    "Fixing it by fetching related data in one pass",
-    "A worked denormalization trade-off, with real code on both sides",
+    "Counting queries as the data grows",
+    "Fixing N+1 with a lookup-map join, and the one-to-many case",
+    "Comparing plans by cost, and the write cost of denormalizing",
   ]}
 />
 
-## Reproducing the Scenario's bug with a real query counter
+## Counting the Scenario's queries
 
-**Here's a simple in-memory database and query counter — enough to
-measure query count directly, without needing a real database
-server. What does the naive version of the Scenario's endpoint
-actually do?**
+**Take the endpoint from the Scenario, 500 customers and 50,000 orders. How many database round-trips does each version make, and what happens when orders quadruple?** Instead of timing anything, just count:
 
-This is a simulation of database behavior, not SQL syntax. A
-`findCustomerById` call represents "ask the database for one customer."
-A `findAllOrders` call represents "ask the database for the list of
-orders." The counter makes the hidden cost visible.
+| Version                                    | Queries at 20 orders | At 50,000 orders | At 200,000 orders | Grows with orders? |
+| ------------------------------------------ | -------------------- | ---------------- | ----------------- | ------------------ |
+| Naive: list, then one customer lookup each | 21                   | 50,001           | 200,001           | Yes, one-for-one   |
+| Joined / batched                           | 1                    | 1                | 1                 | No, constant       |
 
-```js
-let queryCount = 0;
+The naive row is the N+1 pattern itself, not a symptom of it: the number
+of queries equals `orders.length + 1` because the loop body issues one
+lookup per iteration. That is why the endpoint that felt instant at 20
+orders takes nearly a minute at 50,000 and would take about four times as
+long again at 200,000.
 
-function findCustomerById(db, id) {
-  queryCount++;
-  return db.customers.find((c) => c.id === id);
-}
+<Checkpoint question="If the order list grew from 50,000 to 200,000 and each query still took the same time, how would the naive endpoint's latency change, and would a joined version change at all?">
 
-function findAllOrders(db) {
-  queryCount++;
-  return db.orders;
-}
-
-function listOrdersWithCustomerNaive(db) {
-  const orders = findAllOrders(db);
-  return orders.map((order) => {
-    const customer = findCustomerById(db, order.customerId);
-    return { ...order, customerName: customer.name };
-  });
-}
-```
-
-```js
-const db = makeDb(500, 50000); // 500 customers, 50,000 orders
-
-queryCount = 0;
-listOrdersWithCustomerNaive(db);
-console.log(queryCount); // 50001
-```
-
-`findAllOrders` runs once, and `findCustomerById` runs once per
-order inside the `.map()` callback — for 50,000 orders, that's 50,000
-separate lookups plus the original 1, exactly matching the N+1
-pattern from L2's diagram. This is the mechanical cause of the
-Scenario's slowdown, made directly measurable rather than just
-inferred from "it got slower."
-
-<Checkpoint question="In the code above, if the Scenario's order list grew from 50,000 to 200,000 orders, what would queryCount be after calling listOrdersWithCustomerNaive, and why?">
-
-200,001 — one call to `findAllOrders`, plus exactly one call to
-`findCustomerById` per order, and the number of orders is what changed.
-`queryCount` isn't tied to some fixed overhead of the function; it's tied
-directly to `orders.length`, because the `.map()` callback calls
-`findCustomerById` once per iteration. That one-to-one relationship between
-list size and query count is the N+1 pattern itself, not just a symptom of
-it — it's exactly why the endpoint that felt instant at 20 orders takes
-nearly a minute at 50,000, and would take roughly four times as long again
-at 200,000.
+The naive version's latency would roughly quadruple, because its query
+count is tied directly to the number of orders. The joined version still
+issues one query; it does more work inside that query (more rows to
+combine), but it pays the per-query overhead once instead of 200,001
+times. The pattern, not the speed of any single query, sets how the cost
+scales.
 
 </Checkpoint>
 
-## The fix: fetch everything needed in one pass
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="query-counting"
+/>
 
-**What changes if the customer lookups happen once, up front, instead
-of once per order?**
+## The fix: fetch related data in one pass
+
+**What changes if the customers are fetched once, up front, instead of once per order?** This is one of the few places in the unit where a few lines of code are the clearest vehicle, because the idea is a small mechanism: build a lookup from id to record, then attach by lookup.
 
 ```js
-function listOrdersWithCustomerJoined(db) {
-  queryCount++;
-  const customerById = new Map(db.customers.map((c) => [c.id, c]));
-  return db.orders.map((order) => ({
+function listOrdersWithCustomer(orders, customers) {
+  const customerById = new Map(customers.map((c) => [c.id, c]));
+  return orders.map((order) => ({
     ...order,
     customerName: customerById.get(order.customerId).name,
   }));
 }
 ```
 
-```js
-queryCount = 0;
-listOrdersWithCustomerJoined(db);
-console.log(queryCount); // 1
+Fetching `customers` is one query. Building the `Map` and looking up each
+order's customer is in-memory work with no extra round-trips, however many
+orders there are. A SQL database does the same thing with a `JOIN`: "return
+each order with the customer row whose `id` equals `orders.customerId`",
+planned and executed inside one operation.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="lookup-map-join"
+/>
+
+**Try extending it yourself.** The customer lookup is one-to-one: each order has exactly one customer. What if each order also needed its list of line items, a one-to-many relationship?
+
+```mermaid
+flowchart LR
+    subgraph naive["Naive: 1 + N queries"]
+      direction TB
+      n1["list orders"] --> n2["order 1 → query its items"]
+      n1 --> n3["order 2 → query its items"]
+      n1 --> n4["... order N → query its items"]
+    end
+    subgraph batched["Batched: 2 queries"]
+      direction TB
+      b1["list orders"] --> b2["ONE query: items for all\nthose order ids"]
+      b2 --> b3["group items by orderId\nin memory"]
+    end
 ```
 
-Instead of looking up each order's customer individually, this builds
-one `Map` from every customer's id to their record — a single query —
-and then looks up each order's customer from that in-memory map,
-which costs nothing extra in query count no matter how many orders
-there are. The `.map()` over orders still runs once per order, but
-that's in-memory JavaScript work, not a separate database round-trip
-— the thing that actually scales badly. A real SQL database achieves
-the same result with a `JOIN` clause; the underlying idea (fetch
-related data together, not one row at a time) is identical.
+The single-`Map` idea still works, with one change: the map's value is a
+_list_ of items per order id (group, don't overwrite), and the fetch is one
+query for all the relevant order ids. The principle is unchanged: fetch
+together, then assemble in memory. Query count is now a small constant (2),
+not a function of N.
 
-In plain SQL words, the database version would ask: "return each order
-with the customer row whose `customers.id` equals
-`orders.customerId`." That is what a join does: it makes the database
-combine related rows inside one planned operation instead of making
-the app ask a new question for every order.
+<Checkpoint question="Why can't you reuse the one-to-one customer map as-is for line items?">
 
-**Does this fix mean query count stops mattering as the data grows?**
-No — it goes from _scaling with the number of orders_ to being
-_constant regardless of the number of orders_, which is the actual
-fix. 50,000 orders now costs the same 1 query that 20 orders does.
+Because many items share the same `orderId`. A map from id to a single record
+would keep only one item per order and silently drop the rest. The map has to
+hold a list per key, which is why one-to-many needs grouping, while the
+one-to-one customer lookup doesn't.
 
-## A real denormalization trade-off
+</Checkpoint>
 
-**Suppose this endpoint is called on every page load and customers
-almost never rename themselves. Would denormalizing the customer name
-directly onto each order make sense here?**
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="batching-shapes"
+/>
 
-```js
-function createOrderDenormalized(db, customerId, orderDetails) {
-  const customer = db.customers.find((c) => c.id === customerId);
-  const order = {
-    ...orderDetails,
-    customerId,
-    customerName: customer.name, // duplicated at write time
-  };
-  db.orders.push(order);
-  return order;
-}
+## Comparing candidate plans by estimated cost
 
-function renameCustomer(db, customerId, newName) {
-  const customer = db.customers.find((c) => c.id === customerId);
-  customer.name = newName;
-  // every order that duplicated the old name must also be updated
-  for (const order of db.orders) {
-    if (order.customerId === customerId) {
-      order.customerName = newName;
-    }
-  }
-}
+**One query is not automatically a fast query. If the planner could run the joined query three different ways, how would it choose?** It estimates work for each. With 50,000 orders and 500 customers:
+
+| Plan                                           | Rough work                          | Estimated row checks |
+| ---------------------------------------------- | ----------------------------------- | -------------------- |
+| Nested loop, scan all customers per order      | 50,000 orders x 500 customers       | about 25,000,000     |
+| Nested loop, index lookup on `customers.id`    | 50,000 orders x about 9 index steps | about 450,000        |
+| Hash join: hash 500 customers, probe per order | 500 to build + 50,000 probes        | about 50,500         |
+
+```mermaid
+xychart-beta
+    title "Estimated row checks by plan (thousands)"
+    x-axis ["Nested loop, scan", "Nested loop, index", "Hash join"]
+    y-axis "Thousand checks" 0 --> 26000
+    bar [25000, 450, 50.5]
 ```
 
-Reading an order's customer name now costs nothing extra — it's
-already on the record, no lookup needed at all, not even the
-in-memory `Map` from the joined version. The cost moved to
-`renameCustomer`, which now has to find and update every order
-belonging to that customer, not just the customer record itself. If
-renames are rare and reads happen constantly, this trade is a clear
-win; if renames were frequent, this same change would make
-`renameCustomer` the new bottleneck instead.
+The same query text spans a 500x range of cost depending on the route. The
+planner picks by _estimates_, which come from table statistics, so a stale
+row count or a missing index can steer it onto the expensive route even
+though a cheap one exists. This is the wider lesson behind the unit: N+1 is
+a bug in how _you_ ask; a bad plan is a bug in how the database _answers_,
+and fixing one does not fix the other.
+
+<Checkpoint question="A developer fixed the N+1 pattern with a single join, yet the query is still slow. Name one reason it can still be slow.">
+
+A single query can still get an expensive plan: it may scan too much, sort
+too many rows, join in a costly order, or lack the index that would narrow
+the work, perhaps because statistics are stale. Query count and plan cost
+are separate axes. Reducing round-trips solved the first; the second needs
+its own look at the plan.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="plan-choice"
+/>
+
+## The write cost of denormalizing
+
+**Customers almost never rename themselves and the endpoint runs on every page load. Should the customer name be copied onto each order?** Copying removes even the join from the read path. The price is paid at write time:
+
+```mermaid
+flowchart TB
+    subgraph norm["Normalized: rename"]
+      direction TB
+      r1["Rename customer 7"] --> r2["UPDATE 1 customer row"]
+    end
+    subgraph denorm["Denormalized: rename"]
+      direction TB
+      d1["Rename customer 7"] --> d2["UPDATE 1 customer row"]
+      d1 --> d3["UPDATE every order row\nfor customer 7 (could be thousands)"]
+    end
+```
+
+Two costs appear. The rename touches many rows, and every code path that
+creates or edits an order or a customer must keep the copies in step, or
+stale names appear silently. If renames are rare and reads constant, this
+trade is a clear win; if renames were frequent, the same change would turn
+the rename into the new bottleneck.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="denorm-write-cost"
+/>
 
 ## What generalizes and what doesn't
 
-The core lesson — a query pattern's cost scales with what it _does
-per item in a list_, not with the size of any single query — applies
-to any list-then-fetch-related-data pattern, in SQL databases, NoSQL
-databases, or even in-process code calling a remote API per item in a
-loop. What's specific to this worked example: the exact fix (build a
-lookup map, or use a SQL `JOIN`) applies to this specific
-one-list-one-related-table shape — a query needing data from three or
-four related tables needs the same _principle_ (fetch together, not
-per-item) applied to a more complex join or a differently-shaped
-batch fetch.
-
-This does not mean "one query is always good" or "joins are always
-free." A single query can still have a bad plan if it scans too much,
-sorts too much, joins in a costly order, or lacks the index that would
-narrow the work. This unit's bug is query count; the wider query
-planning lesson is that the database always has to choose a route.
-
-**Try extending it yourself:** if each order also needed
-its list of line items (a one-to-many relationship, not the
-one-to-one customer lookup used here), would the same single-`Map`
-fix still work directly, or does a one-to-many relationship need a
-different batching approach?
+The core lesson (a query pattern's cost scales with what it does _per item
+in a list_) applies to any list-then-fetch-related-data shape: SQL, NoSQL,
+or even code calling a remote API per item in a loop. What is specific here:
+the exact fix (a lookup map or a `JOIN`) fits a one-list-one-related-table
+shape; three or four related tables need the same principle applied to a
+more complex join or batch fetch. Which routes are cheap also depends on
+data size and statistics, not on the query text alone. The worked example is
+one case, not the whole territory: what changes if customers were 50 million
+rows and orders only 1,000? The cheapest plan could flip, which is exactly
+why the planner estimates rather than following a fixed recipe.
 
 ## Failure modes
 
-| Failure mode                                                                             | What it gets wrong                                                                                                                                             |
-| ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Assuming a slow endpoint means the database server needs to be upgraded                  | A faster server reduces the cost per query, but does nothing about a query count that scales with list size — the pattern itself needs fixing                  |
-| Denormalizing data without updating every place the original write path could add a copy | A duplicated field is only safe if every write path that creates or changes the original also updates the duplicate — missing one silently produces stale data |
-| Only load-testing with data volumes similar to development                               | An N+1 pattern can be invisible at small scale and severe at production scale — this unit's Scenario is exactly that gap                                       |
-| Fixing the query count but not verifying the fix actually reduces round-trips            | A rewritten query that still hides a loop of separate lookups behind different-looking code hasn't actually fixed the underlying pattern                       |
+| Failure mode                                                                | What it gets wrong                                                                                                                        |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Assuming a slow endpoint means the database server needs an upgrade         | A faster server lowers the cost per query but not a query count that scales with list size                                                |
+| Denormalizing without updating every write path that can touch the original | A duplicated field is only safe if every path that changes the original also updates the copies; missing one silently produces stale data |
+| Load-testing only at development data volumes                               | N+1 is invisible at small scale and severe at production scale; this unit's Scenario is exactly that gap                                  |
+| Fixing the query count without checking it actually dropped                 | A rewrite that still hides a loop of lookups behind different-looking code has not fixed the pattern                                      |
+| Treating "one query" as "fast query"                                        | A single query can still get a plan that scans, sorts, or joins far more rows than needed                                                 |
