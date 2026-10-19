@@ -3088,3 +3088,14 @@ Migrated the last 5 `systems/` units via 5 parallel content-only subagents. Pipe
 **New lesson — unescaped `{...}` in MDX prose breaks the build and nothing static catches it.** `domain-boundaries` L3 had `{Shipping, Fulfillment}` and `{Orders}` in running text; MDX parses those as JS expressions (`ReferenceError: Shipping is not defined` at render time). `lint`, `format`, `typecheck`, and `validate:content` all passed; only `bun run build` failed. Fix: escape as `\{...\}`. Future subagent prompts should say so, and the coordinator must not skip `build` before committing.
 
 `systems/` is now 17 of 17 migrated. Total migrated so far: 34 of 246 units (17 `web/` + 17 `systems/`). Next track in roadmap order: `git-teamwork`.
+
+## 2026-10-19 — Started `git-teamwork/` track: `snapshots-manual-copies`, `checkout`, `working-tree`, `merge`
+
+Migrated the first 4 of 16 `git-teamwork/` units via 4 parallel content-only subagents. Pipeline: `generate:roadmap` → `format` → `lint` → `validate:content` → `bun test` → `typecheck` → `build` → live `DomainCheck` click-through plus per-level Mermaid render check (first use of `gitGraph` in the project). All four units are all-`quiz`: the grading sandbox is a browser Worker and cannot run git, and the units' old code exercises were small truth-table functions that tested syntax rather than the concept (rule 9).
+
+- **`snapshots-manual-copies`**: 10 topics, 110 items. Removed the Buffer-based `hash-object.mjs` and storage-estimate Node code (now a flowchart, a table and an xychart); replaced Python `create_branch` pseudocode with a `gitGraph`. **Fixed a factual error**: L3 quoted a 39-character "SHA-1" (`ce01362…464`); the real `git hash-object` output is 40 characters (`…464a`).
+- **`checkout`**: 9 topics, 100 items. Removed fake-pseudocode `reset()` and the JS `chooseUndoStrategy`; reset modes are now a flowchart + command/branch/index/working-tree table. **Fixed a technical inaccuracy**: `git checkout -- <file>` restores from the index, not HEAD.
+- **`working-tree`**: 6 topics, 72 items. Terminal transcripts replaced by status tables and a where-does-the-edit-live flowchart; added a file-state `stateDiagram-v2` and a `gitGraph` showing a branch is only a label on a commit.
+- **`merge`**: 6 topics, 70 items. Cut ~150 lines of LCS/`threeWayMerge` code; kept one 6-line `mergeLine(base, ours, theirs)` for the per-line decision. **Fixed an inconsistency**: L1/L3 treated "ours" as Alex while L2 treated it as Sam running the merge; all levels now follow the real semantics (the halves swap depending on who runs the merge).
+
+`git-teamwork/` is at 4 of 16. Remaining: `merge-rebase`, `commit-conventions`, `branching-strategies`, `prs`, `shared-history`, `feature-flags`, `reflog`, `feedback-framing`, `rfcs`, `documentation-culture`, `ownership`, `technical-leadership`. The last five are soft-skill/workplace units (rule 9's non-technical clause applies: no fake pseudocode).
