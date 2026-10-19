@@ -4,6 +4,12 @@ title: "L2 — What `git status` is actually diffing, and what checkout really d
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "working-tree",
+};
 
 L1 showed _that_ an uncommitted edit can silently follow you across a branch switch and
 then vanish. L2 opens up the mechanism behind that: what `git status` is actually
@@ -36,6 +42,21 @@ for commit" — edits you've made but haven't `git add`ed yet), and **index vs. 
 can be in a different state in all three areas simultaneously — edited on disk, staged at
 an older version, and committed at an even older one — which is exactly why `git status`
 needs two separate diffs, not one, to describe it precisely.
+
+A common surprise is staging a file and then editing it again. The index holds the version you staged, so the same file shows up in both lists:
+
+| Step              | Working tree | Index | HEAD | `git status` says                           |
+| ----------------- | ------------ | ----- | ---- | ------------------------------------------- |
+| Edit `a.txt` (v2) | v2           | v1    | v1   | not staged                                  |
+| `git add a.txt`   | v2           | v2    | v1   | to be committed                             |
+| Edit again (v3)   | v3           | v2    | v1   | to be committed AND not staged              |
+| `git commit`      | v3           | v2    | v2   | not staged (the commit captured v2, not v3) |
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="two-diffs"
+/>
 
 ## What `checkout <branch>` actually decides, per file
 
@@ -79,64 +100,24 @@ look at it in the first place.
 
 </Checkpoint>
 
-## Reproducing the two different outcomes for real
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="checkout-per-file"
+/>
 
-**The same starting point — an uncommitted edit — leads to two very different outcomes
-depending on one fact: did the target branch's committed version of the file actually
-change?** Both transcripts below are real, run against an actual two-branch repo.
+## The same uncommitted edit, two different outcomes
 
-**Case 1 — the file is identical on both branches (silent carry-over):**
+**The starting point is identical: an uncommitted edit to `shared-config.js` on `feature-a`, then `git checkout feature-b`. What differs is a single fact: did `feature-b`'s committed version of the file change?**
 
-```
-$ git checkout feature-a
-$ echo "shared config v1 - my local tweak" > shared-config.js
-$ git status --short
- M shared-config.js
-
-$ git checkout feature-b
-Switched to branch 'feature-b'
-M	shared-config.js
-
-$ git status --short
- M shared-config.js
-$ cat shared-config.js
-shared config v1 - my local tweak
-```
-
-No warning, no conflict — the edit is now sitting on `feature-b`'s working tree, exactly
-as it was on `feature-a`, because `shared-config.js` never differed between the two
-branches' commits in the first place.
-
-**Case 2 — the file genuinely diverged between branches (refused):**
-
-```
-$ git checkout feature-a
-$ echo "feature-a uncommitted divergent edit" > shared-config.js
-$ git status --short
- M shared-config.js
-
-$ git checkout feature-b
-error: Your local changes to the following files would be overwritten by checkout:
-	shared-config.js
-Please commit your changes or stash them before you switch branches.
-Aborting
-```
-
-Here, `feature-b`'s committed version of `shared-config.js` genuinely differs from
-`feature-a`'s, and applying the uncommitted edit on top of it would conflict — so Git
-stops the entire checkout rather than risk silently discarding or corrupting the edit.
-This is the one case where Git's default behavior actively protects you; the "gone
-without warning" experience in L1 only happens in Case 1's silent-carry-over path.
+| Case                          | Does the file differ between the two branches' commits? | What checkout does                                            | What the developer sees                   |
+| ----------------------------- | ------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------- |
+| 1. Identical on both branches | No                                                      | Leaves the file alone; the edit stays in the working tree     | "Switched to branch", no warning at all   |
+| 2. Diverged, edit conflicts   | Yes                                                     | Aborts the whole switch: "local changes would be overwritten" | An error naming the file; nothing is lost |
 
 <Checkpoint question="Case 1 succeeds silently and Case 2 is refused with an error. Which of the two is actually the riskier outcome for the developer's uncommitted work, and why?">
 
-Case 1 (the silent success) is the riskier one, precisely because nothing about it looks
-risky. Case 2 stops the developer in their tracks with an explicit error naming the file
-at risk — it is impossible to lose that edit by accident, because Git will not proceed
-until the developer deals with it. Case 1 gives no such signal: the edit is carried over
-correctly this time, but nothing marks it as "still uncommitted, still fragile," so a
-later unrelated command on the new branch (as in L3's incident) can discard it without
-any indication that anything of value was even there.
+Case 1 (the silent success) is the riskier one, precisely because nothing about it looks risky. Case 2 stops the developer in their tracks with an explicit error naming the file at risk, so it is impossible to lose that edit by accident. Case 1 gives no such signal: the edit is carried over correctly this time, but nothing marks it as still uncommitted and fragile, so a later unrelated command on the new branch (as in L3's incident) can discard it without any indication that anything of value was even there.
 
 </Checkpoint>
 
