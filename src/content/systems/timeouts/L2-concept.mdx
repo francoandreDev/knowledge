@@ -4,131 +4,189 @@ title: "L2 — What each technique actually solves, and the states a circuit bre
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named four techniques and the resource-exhaustion problem they all
-respond to. This level works through what each one actually solves on
-its own, why having a timeout isn't enough by itself, and the specific
+export const unit = {
+  track: "systems",
+  unitSlug: "timeouts",
+};
+
+L1 named four techniques and the seat-exhaustion problem they all
+respond to. This level works through what each one solves on its own,
+why a timeout alone is not enough, how retries go wrong, and the
 states a circuit breaker moves through.
 
 <LevelIntro
   items={[
-    "What each of the four techniques solves, and what it doesn't",
-    "Why a timeout alone doesn't fully prevent the Scenario's outage",
-    "The three states a circuit breaker moves through, and why",
+    "Why a timeout alone doesn't prevent the outage",
+    "The three states of a circuit breaker",
+    "Retry discipline and real backpressure",
   ]}
 />
 
-## Four techniques, four different parts of the same problem
+## Why a timeout alone doesn't finish the job
 
 **If a timeout already stops a call from hanging forever, why are
-retries and circuit breakers needed too?** Because each technique
-addresses a different part of what can go wrong when a dependency
-degrades — a timeout alone doesn't decide what to do _after_ a call
-fails, or protect a dependency that's already struggling from being
-hit with the exact same failed request over and over:
+retries and circuit breakers needed too?** Because a timeout shortens
+each wait; it does not reduce the number of waits. Picture the pool
+over time with a 100ms timeout and inventory staying slow:
 
-| Technique          | What it actually solves                                                                                                                            |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Timeout            | Caps how long any single call can hold a resource, regardless of whether the dependency eventually responds                                        |
-| Retry with backoff | Recovers from a brief, transient failure without giving up on the very first attempt                                                               |
-| Circuit breaker    | Stops sending requests to a dependency that's clearly failing, protecting both the caller's resources and the struggling dependency from more load |
-| Backpressure       | Lets an overloaded system signal upstream to slow down, instead of silently queuing until it collapses                                             |
+```mermaid
+sequenceDiagram
+    participant R as Requests
+    participant O as Order service
+    participant I as Inventory (slow)
+    R->>O: request A
+    O->>I: call (seat taken)
+    Note over O,I: 100ms timeout fires, seat freed
+    R->>O: request B
+    O->>I: call (seat taken again)
+    Note over O,I: 100ms timeout fires, seat freed
+    Note over R,I: nothing ever stops new calls being attempted
+```
 
-**Would a timeout alone have fully solved the Scenario's outage?**
-Partially — a timeout would stop each individual request from waiting
-forever, freeing the resource sooner. But without a circuit breaker,
-the order service would keep sending new requests to the still-slow
-inventory service, each one still consuming a resource for the
-duration of the timeout — better than hanging forever, but still
-wasteful if the dependency is going to keep failing.
-
-A timeout shortens each wait; it does not reduce the number of tries.
-A retry adds more tries; it does not protect the dependency unless the
-tries are limited and spaced out. A circuit breaker stops a repeated
-bad pattern for a while. Backpressure is what the overloaded service
-does before collapse: reject new work, return `429` or `503`, shrink a
-queue, pause producers, or serve a cheaper degraded path.
+| Technique          | What it actually solves                                                                                   |
+| ------------------ | --------------------------------------------------------------------------------------------------------- |
+| Timeout            | Caps how long any single call holds a seat                                                                |
+| Retry with backoff | Recovers from a brief, transient failure without giving up on the first attempt                           |
+| Circuit breaker    | Stops calling a dependency that is clearly failing, protecting both the caller's seats and the dependency |
+| Backpressure       | Lets an overloaded system push back on upstream instead of silently queuing until it collapses            |
 
 <Checkpoint question="A teammate says: 'we already added a 100ms timeout on the call to inventory, so we're covered.' Are they right?">
 
-Not fully. A timeout caps how long any single call can hold a
-resource, so it does stop a request from waiting forever — that's real
-progress over the Scenario's original no-timeout setup. But it doesn't
-reduce how many calls are made. If inventory stays slow, the order
-service keeps sending new requests to it, and each one still occupies
-a connection for up to 100ms. If requests arrive faster than they time
-out, the pool can still fill up — just more slowly, and bounded
-instead of unbounded. Being "covered" against unbounded hangs is not
-the same as being covered against exhaustion under sustained load;
-that second part is what a circuit breaker adds.
+Not fully. A timeout caps how long any single call can hold a seat,
+so it does stop requests from waiting forever — real progress over the
+Scenario's original setup. But it does not reduce how many calls are
+made. If inventory stays slow, every new request still spends up to
+100ms of a seat on a doomed call, and if requests arrive faster than
+they time out, the pool can still fill — just more slowly, and bounded
+instead of unbounded. Being covered against unbounded hangs is not the
+same as being covered against exhaustion under sustained load; that
+second part is what a circuit breaker adds.
 
 </Checkpoint>
 
-## The states a circuit breaker actually moves through
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="timeout-alone-not-enough"
+/>
 
-**Does a circuit breaker just permanently stop calling a failing
-dependency once it trips?** No — it's designed to periodically check
-whether the dependency has recovered, moving through three distinct
-states:
+## The states a circuit breaker moves through
+
+**Does a circuit breaker permanently stop calling a failing dependency
+once it trips?** No — it periodically checks whether the dependency
+has recovered, moving through three states:
 
 ```mermaid
-flowchart LR
-    A["Closed\n(requests flow normally)"] -->|"failures reach threshold"| B["Open\n(calls fail instantly,\nno network attempt)"]
-    B -->|"cooldown period elapses"| C["Half-Open\n(one trial request allowed)"]
-    C -->|"trial succeeds"| A
-    C -->|"trial fails"| B
+stateDiagram-v2
+    [*] --> Closed
+    Closed --> Open: failures reach threshold
+    Open --> HalfOpen: cooldown elapses
+    HalfOpen --> Closed: trial succeeds
+    HalfOpen --> Open: trial fails (cooldown restarts)
 ```
 
-**Closed** is the normal state — requests flow through, and failures
-are counted. Once failures cross a threshold, the breaker moves to
-**Open** — no requests are sent to the dependency at all, and calls
-fail immediately without even attempting the network call, freeing
-the caller's resources instantly. After a cooldown period, the
-breaker moves to **Half-Open** — it allows exactly one trial request
-through to test whether the dependency has recovered. Success moves
-back to Closed; failure moves back to Open, and the cooldown starts
-again.
+| State     | Calls                                 | Seats spent on the dependency |
+| --------- | ------------------------------------- | ----------------------------- |
+| Closed    | Flow normally, failures are counted   | Normal                        |
+| Open      | Refused instantly, no network attempt | None                          |
+| Half-Open | Exactly one trial call is let through | One, until the trial resolves |
 
 **Why not just retry forever until the dependency comes back?**
-Because retrying forever against a dependency that's still down keeps
-consuming the caller's own resources on calls very likely to fail —
-the same resource-exhaustion problem from the Scenario, just caused
-by the caller's own retry logic instead of a single hanging call.
+Because retrying forever against a dependency that is still down
+spends the caller's own seats on calls very likely to fail — the
+Scenario's problem again, just caused by the caller's own retry logic.
 
 <Checkpoint question="Once a circuit breaker has moved to Open, does the next incoming request to the dependency still consume a connection or wait on the timeout?">
 
-No — and that's the whole point of the Open state. While Open, the
+No — and that is the whole point of the Open state. While Open, the
 breaker refuses the call before any network attempt is made, so the
-request fails immediately, in well under a millisecond, instead of
-occupying a connection for up to the timeout's full duration. This is
-what a timeout alone can't provide: a timeout bounds how long one
-wasted call takes, but it still lets that call happen. The Open state
-skips the call entirely, which is exactly why the order service's
-connection pool can stop draining even while inventory stays down —
-the breaker only allows a single trial request back through once the
-cooldown elapses and it moves to Half-Open.
+request fails immediately instead of occupying a seat for up to the
+timeout. A timeout bounds how long one wasted call takes; Open skips
+the call entirely. Only after the cooldown does the breaker move to
+Half-Open and let a single trial through.
 
 </Checkpoint>
 
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="breaker-states"
+/>
+
+## Retries: a second chance, not a multiplier
+
+**If one retry is good, why not retry immediately and many times?**
+Because a struggling dependency needs less load, not more. A healthy
+retry policy has three parts: a **cap** on attempts, a **growing
+delay** (backoff) between them, and **jitter** (a random shuffle of
+the delay) so thousands of callers do not all retry at the same
+instant.
+
+```mermaid
+sequenceDiagram
+    participant C as Caller
+    participant D as Dependency
+    C->>D: attempt 1
+    D--xC: fails
+    Note over C: wait 100ms
+    C->>D: attempt 2
+    D--xC: fails
+    Note over C: wait 200ms
+    C->>D: attempt 3
+    D-->>C: ok
+```
+
+Retries also multiply across layers. If each layer in a call chain
+retries independently, the load on the bottom dependency is the
+product, not the sum:
+
+| Layers that each retry 3 times | Calls reaching the bottom dependency |
+| ------------------------------ | ------------------------------------ |
+| 1                              | 3                                    |
+| 2                              | 9                                    |
+| 3                              | 27                                   |
+
+Retry only operations that are safe to repeat (idempotent), and only
+failures that can plausibly be transient — a timeout or `503`, not a
+`400` that will fail identically every time.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="retry-discipline"
+/>
+
+## Backpressure: saying "slow down" out loud
+
+**Logging "we are overloaded" is not backpressure — what is?** A
+signal or behavior that causes less work to arrive, or less work to be
+accepted. The unsafe default is an unbounded queue: it accepts
+everything, latency grows without limit, and the service eventually
+runs out of memory with every queued request already doomed.
+
+| Mechanism                      | What the overloaded service does                     |
+| ------------------------------ | ---------------------------------------------------- |
+| Reject with `429` / `503`      | Tells callers now, so they can back off or fail over |
+| Bounded queue                  | Refuses new work once the queue is full              |
+| Load shedding                  | Drops low-priority work to protect critical work     |
+| Pausing the producer (streams) | Stops reading until the consumer catches up          |
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="backpressure-signal"
+/>
+
 ## Failure modes at this level
 
-- **Setting a timeout so long it doesn't actually prevent resource
-  exhaustion.** A 30-second timeout on a service expected to respond
-  in milliseconds still lets a flood of slow requests exhaust a
-  connection pool — the timeout value has to reflect the dependency's
-  actual expected latency, not just be "some" timeout.
-- **Retrying without backoff.** Immediately re-attempting a failed
-  call, over and over with no delay, can actually make a struggling
-  dependency's situation worse by adding more load right when it's
-  least able to handle it.
-- **Retrying without a limit.** Three users making one request each
-  can become nine dependency calls if every request retries twice. At
-  large traffic, retries multiply load very quickly unless there is a
-  cap, backoff, and usually jitter.
-- **Treating circuit breakers as optional polish.** Without one, a
-  timeout limits how long each request waits, but the caller keeps
-  spending resources on doomed requests to an obviously-failing
-  dependency indefinitely.
-- **Calling every overload "backpressure" without changing behavior.**
-  Logging "we are overloaded" is not backpressure. The sender must get
-  a usable signal or response that causes less work to arrive.
+- **A timeout so long it does not prevent exhaustion.** A 30-second
+  timeout on a service expected to answer in milliseconds still lets a
+  flood of slow requests fill the pool.
+- **Retries without backoff, cap, or jitter.** They add load exactly
+  when the dependency can least afford it.
+- **Treating the circuit breaker as optional polish.** Without one the
+  caller keeps spending seats on a dependency that is obviously down.
+- **Naming overload without changing behavior.** If nothing causes
+  less work to arrive, it is not backpressure.

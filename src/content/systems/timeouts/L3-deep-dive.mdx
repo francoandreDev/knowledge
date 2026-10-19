@@ -1,74 +1,97 @@
 ---
-title: "L3 — Implementing the timeout and circuit breaker that would have caught the Scenario's cascade"
+title: "L3 — Building the backoff and circuit breaker that would have caught the Scenario's cascade"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "systems",
+  unitSlug: "timeouts",
+};
 
 L2 covered what each technique solves and the states a circuit
-breaker moves through. This level implements a timeout wrapper and a
-circuit breaker directly, verifies their behavior, and combines both
-against the Scenario's cascading outage.
+breaker moves through. This level shows the two mechanisms that are
+genuinely clearer as code — the backoff calculation and the breaker's
+state machine — and then replays the Scenario with everything in
+place.
 
 <LevelIntro
   items={[
-    "A working timeout wrapper built on Promise.race",
-    "A circuit breaker class with closed/open/half-open state",
-    "Combining timeout, circuit breaker, and bounded retries together",
+    "How a timeout wrapper frees the seat early",
+    "A backoff calculation and a circuit breaker state machine",
+    "Gating the call, and the full Scenario replayed",
   ]}
 />
 
-## Capping how long a call can hold a resource
+## Capping how long a call can hold a seat
 
-**Here's a timeout wrapper using `Promise.race` — the call and a
-timer race, and whichever finishes first wins.**
+**What does a timeout wrapper actually do, mechanically?** It starts
+the real call and a timer together and returns whichever finishes
+first (in JavaScript, `Promise.race([call, timer])`).
 
-```js
-function withTimeout(promise, ms) {
-  const timeout = new Promise((_, reject) => {
-    setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
-  });
-  return Promise.race([promise, timeout]);
-}
+```mermaid
+sequenceDiagram
+    participant O as Order handler
+    participant W as Timeout wrapper
+    participant I as Inventory call
+    O->>W: withTimeout(call, 100ms)
+    W->>I: start call
+    W->>W: start 100ms timer
+    Note over W: timer wins the race
+    W-->>O: reject "timed out" (seat freed)
+    I-->>W: answer arrives later, ignored
 ```
 
+One subtlety worth keeping: the wrapper returns control to the
+caller, but it does not cancel the underlying work. Real HTTP clients
+usually need an abort mechanism too. The timeout is still valuable
+because the caller stops lending its own seat to an unbounded wait.
+
+**Does this alone stop the pool from filling?** Only partially. Each
+call is now bounded at 100ms, but if inventory stays slow and
+requests keep arriving, every one still burns a seat for up to 100ms.
+
+## The backoff calculation
+
+**How long should the caller wait before attempt N+1?** Doubling the
+delay each time, up to a ceiling, is the standard shape — this is the
+one piece of the retry story where the arithmetic itself is the
+lesson.
+
 ```js
-function slowDependency(delayMs) {
-  return new Promise((resolve) => setTimeout(() => resolve("ok"), delayMs));
+function backoffDelay(attempt, { baseMs, capMs }) {
+  return Math.min(capMs, baseMs * 2 ** (attempt - 1));
 }
-
-await withTimeout(slowDependency(5000), 100);
-// rejects after 100ms: "timed out after 100ms"
-
-await withTimeout(slowDependency(10), 100);
-// resolves quickly: "ok"
+// base 100, cap 1000:  attempt 1 -> 100, 2 -> 200, 3 -> 400, 4 -> 800, 5 -> 1000
 ```
 
-`Promise.race` resolves or rejects as soon as _either_ promise
-settles — if the real call takes longer than the timeout, the timeout
-promise rejects first, and the caller gets control back at the
-100ms mark instead of waiting for however long the dependency
-actually takes. This directly addresses the Scenario's mechanism:
-instead of a stuck request holding a connection indefinitely, it's
-released back to the pool after a bounded, known maximum time.
+| Attempt | Delay (base 100ms, cap 1000ms) |
+| ------- | ------------------------------ |
+| 1       | 100ms                          |
+| 2       | 200ms                          |
+| 3       | 400ms                          |
+| 4       | 800ms                          |
+| 5       | 1000ms (capped, not 1600)      |
 
-One subtlety: this wrapper returns control to the caller, but it does
-not automatically cancel the underlying dependency work. Real HTTP
-clients often need an abort/cancellation mechanism as well. Even then,
-the timeout is still valuable because the caller stops lending its own
-resource to an unbounded wait.
+In production you would add jitter on top (a random fraction of this
+delay) so callers spread out; it is left out here so the calculation
+stays deterministic and testable.
 
-**Does this timeout alone stop the order service's connection pool
-from ever filling up?** Only partially — if the inventory service
-stays slow indefinitely, new requests keep arriving, each one still
-occupies a connection for up to 100ms, and if requests arrive faster
-than they time out, the pool can still fill up — just slower than
-without any timeout at all, and bounded instead of unbounded.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="backoff-delay"
+/>
 
-## Stopping requests to a dependency that's clearly failing
+## The circuit breaker as a state machine
 
-**A circuit breaker adds the missing piece: stop attempting calls
-entirely once failures cross a threshold.**
+**Which parts of the L2 state diagram need real logic?** Three: count
+failures and open at the threshold; while open, refuse until the
+cooldown elapses; while half-open, allow exactly one trial and let its
+result decide the next state. Time is passed in as `now` rather than
+read from a clock, which keeps the machine deterministic.
 
 ```js
 class CircuitBreaker {
@@ -76,205 +99,122 @@ class CircuitBreaker {
     this.failureThreshold = failureThreshold;
     this.cooldownMs = cooldownMs;
     this.state = "closed";
-    this.consecutiveFailures = 0;
-    this.openedAt = null;
-    this.halfOpenAttemptInFlight = false;
+    this.failures = 0;
+    this.openedAt = 0;
+    this.trialInFlight = false;
   }
 
-  canAttempt() {
+  canAttempt(now) {
+    if (this.state === "closed") return true;
     if (this.state === "open") {
-      if (Date.now() - this.openedAt >= this.cooldownMs) {
-        this.state = "half-open";
-        this.halfOpenAttemptInFlight = true;
-        return true;
-      }
-      return false;
+      if (now - this.openedAt < this.cooldownMs) return false;
+      this.state = "half-open";
     }
-    if (this.state === "half-open") {
-      // Only one trial request is allowed through at a time — a second
-      // concurrent caller must not also slip through while the first
-      // trial is still outstanding.
-      if (this.halfOpenAttemptInFlight) {
-        return false;
-      }
-      this.halfOpenAttemptInFlight = true;
-      return true;
-    }
+    if (this.trialInFlight) return false;
+    this.trialInFlight = true;
     return true;
   }
 
   recordSuccess() {
-    this.consecutiveFailures = 0;
+    this.failures = 0;
     this.state = "closed";
-    this.halfOpenAttemptInFlight = false;
+    this.trialInFlight = false;
   }
 
-  recordFailure() {
-    this.consecutiveFailures++;
-    if (this.consecutiveFailures >= this.failureThreshold) {
+  recordFailure(now) {
+    this.failures++;
+    this.trialInFlight = false;
+    if (this.state === "half-open" || this.failures >= this.failureThreshold) {
       this.state = "open";
-      this.openedAt = Date.now();
-      this.halfOpenAttemptInFlight = false;
+      this.openedAt = now;
     }
   }
 }
 ```
 
-```js
-const breaker = new CircuitBreaker({ failureThreshold: 3, cooldownMs: 50 });
+Two details carry the design. First, `trialInFlight` makes the
+half-open state admit a single probe — without it, a burst of callers
+all slip through the moment the cooldown ends. Second, a failed trial
+reopens immediately and restarts the cooldown, rather than needing the
+threshold to be reached again.
 
-breaker.canAttempt(); // true — starts closed
+<Checkpoint question="If canAttempt() were checked after starting the network call instead of before it, would the breaker still protect the connection pool?">
 
-breaker.recordFailure();
-breaker.recordFailure();
-breaker.recordFailure();
-breaker.state; // "open"
-breaker.canAttempt(); // false — refuses immediately, no network call attempted
-
-// after cooldownMs passes:
-breaker.canAttempt(); // true — moves to "half-open", allows one trial
-
-breaker.recordSuccess();
-breaker.state; // "closed" — back to normal
-```
-
-`canAttempt()` is checked _before_ making any actual call to the
-dependency — once open, it returns `false` immediately, so the caller
-never spends a connection or waits on a timeout for a call that's
-essentially guaranteed to fail. This is what a timeout alone can't
-provide: the timeout bounds how long a _single_ wasted call takes,
-while the circuit breaker prevents making the wasted call at all
-once there's clear evidence the dependency is down.
-
-<Checkpoint question="If canAttempt() were checked after starting the network call instead of before it, would the CircuitBreaker class above still protect the connection pool the way it's meant to?">
-
-No. The whole benefit of the Open state is that it lets the caller
-skip the call entirely — refusing in well under a millisecond instead
-of occupying a connection for up to the timeout's duration. If
-`canAttempt()` were checked after the call had already started, the
-connection would already be spent by the time the breaker's answer
-came back, which is exactly the resource-exhaustion pattern from the
-Scenario, just moved one layer later. Order matters here: the breaker
-has to gate the attempt, not audit it afterward.
+No. The benefit of Open is skipping the call entirely, refusing in
+well under a millisecond instead of occupying a seat for up to the
+timeout. If the breaker were consulted after the call had started, the
+seat would already be spent by the time its answer came back — the
+Scenario's exhaustion pattern, just moved one layer later. The
+breaker has to gate the attempt, not audit it afterward.
 
 </Checkpoint>
 
-## Combining both to address the Scenario directly
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="breaker-transitions"
+/>
 
-**How would the order service actually use both together for a call
-to inventory?**
+## Putting the gate in front of the call
 
-```js
-async function callInventory(breaker, requestFn) {
-  if (!breaker.canAttempt()) {
-    throw new Error("inventory circuit open — failing fast");
-  }
-  try {
-    const result = await withTimeout(requestFn(), 100);
-    breaker.recordSuccess();
-    return result;
-  } catch (err) {
-    breaker.recordFailure();
-    throw err;
-  }
-}
+**In what order do the pieces wrap a single call to inventory?** The
+breaker is asked first, the timeout bounds the call, and the outcome
+feeds back into the breaker:
+
+```mermaid
+flowchart TD
+    A["Incoming checkout"] --> B{"breaker.canAttempt?"}
+    B -->|"no (open)"| C["Fail fast: no seat spent"]
+    B -->|"yes"| D["Call inventory with timeout"]
+    D -->|"ok"| E["recordSuccess"]
+    D -->|"timed out / error"| F["recordFailure"]
+    F --> G["Maybe retry after backoff, within the cap"]
 ```
 
-Early in the degradation, the circuit is closed and calls go through
-normally, each bounded by the 100ms timeout. Once enough calls time
-out and the failure threshold is crossed, the breaker opens — every
-subsequent call fails instantly, in well under a millisecond, instead
-of tying up a connection for up to 100ms each. The order service's
-own connection pool stops draining, and it stays available for
-requests that don't depend on inventory at all — directly preventing
-the Scenario's cascading outage.
+Replaying the Scenario: early on the breaker is Closed and calls go
+through, each bounded at 100ms. Once three calls time out, the breaker
+opens; every later checkout fails instantly instead of burning a seat,
+so the pool drains and the order service stays available for routes
+that never touch inventory. After the cooldown, one trial decides
+whether inventory has recovered.
 
-<Checkpoint question="During the window before the failure threshold is crossed — while the breaker is still closed — is the connection pool already protected, or only partially?">
+<Checkpoint question="While the breaker is still Closed, before the failure threshold is crossed, is the connection pool fully protected?">
 
-Only partially, and it's worth being precise about why. While closed,
-every call to inventory still goes through `withTimeout`, so each one
-is capped at 100ms rather than hanging forever — real protection
-compared to the Scenario's original no-timeout setup. But nothing
-stops new calls from arriving and each one still occupies a connection
-for up to that 100ms while inventory stays slow. Full protection only
-kicks in once enough failures accumulate and the breaker actually
-opens — before that point, the timeout is bounding the damage, not
-preventing it.
+Only partially. Every call is capped at 100ms by the timeout, which is
+real protection compared with the original no-timeout setup, but
+nothing yet stops new calls from arriving and each still occupies a
+seat while inventory stays slow. Full protection begins when enough
+failures accumulate and the breaker opens; before that, the timeout is
+bounding the damage, not preventing it.
 
 </Checkpoint>
 
-## Adding retries without multiplying the outage
-
-A retry should be a small, bounded second chance, not an infinite loop.
-The usual shape is: try once, wait a little after a transient failure,
-try again, and stop after a known maximum number of attempts.
-
-```js
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function retryWithBackoff(operation, { attempts, baseDelayMs }) {
-  let lastError;
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    try {
-      return await operation();
-    } catch (err) {
-      lastError = err;
-      if (attempt === attempts) break;
-      await sleep(baseDelayMs * attempt);
-    }
-  }
-  throw lastError;
-}
-
-async function callInventoryWithRetries(breaker, requestFn) {
-  return retryWithBackoff(() => callInventory(breaker, requestFn), {
-    attempts: 3,
-    baseDelayMs: 50,
-  });
-}
-```
-
-For circuit-breaker counting, a practical rule is to count the whole
-retried sequence as one logical operation at the product level, while
-still recording the final failed dependency call that proves the
-dependency is unhealthy. Otherwise one user request with three attempts
-can trip the breaker as if three unrelated users failed. The exact
-policy varies, but the design question is always the same: retries
-should recover from brief blips without hiding or amplifying a real
-outage.
-
-Backpressure is the next protective layer around this. If the order
-service is already near its limit, it should stop accepting unlimited
-new work: return a clear overload response, cap the queue, or degrade
-optional behavior. That signal is what prevents "we will process it
-eventually" from becoming "we queued more work than we can survive."
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="gate-before-call"
+/>
 
 ## What generalizes and what doesn't
 
-The core lesson — bounding how long a call can hold a resource, and
-stopping attempts entirely once a dependency is clearly failing,
-together prevent one degraded dependency from exhausting an unrelated
-service's own resources — generalizes to any system with dependencies
-that can degrade: database connections, third-party APIs, internal
-microservices. What's specific to this worked example: the exact
-timeout value (100ms) and failure threshold (3) are tuned to this
-particular dependency's expected behavior — a dependency with
-naturally higher latency, or one where occasional single failures are
-expected and not alarming, needs its own, different thresholds tuned
-to its actual behavior. **Try extending it yourself:** if the order
-service retried a failed inventory call up to 2 times before giving
-up (with backoff between attempts), how would that interact with the
-circuit breaker's failure counting — should each retry count as a
-separate failure toward the threshold, or should the whole retried
-sequence count as one?
+Bounding how long a call can hold a seat, and refusing calls once a
+dependency is clearly failing, protect any system with dependencies
+that can degrade: databases, third-party APIs, internal services. The
+specific numbers (100ms timeout, threshold of 3) are tuned to this one
+dependency; a naturally slower one, or one where occasional single
+failures are normal, needs its own values. The worked example is a
+case, not the whole territory. **Try extending it yourself:** if the
+order service retried each inventory call up to 2 times with backoff,
+should every attempt count as a failure toward the breaker's
+threshold, or the whole retried sequence as one? What changes if the
+dependency were a payment provider, where a retry might double-charge?
 
 ## Failure modes
 
-| Failure mode                                                                    | What it gets wrong                                                                                                                         |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Setting a timeout much longer than the dependency's actual expected latency     | A generously long timeout still lets a flood of slow requests exhaust the connection pool, just more slowly than with no timeout at all    |
-| Checking circuit breaker state after attempting the call instead of before      | Attempting the call first defeats the purpose — the resource is already spent by the time the failure is recorded                          |
-| Setting the failure threshold so low that a single blip trips the breaker       | Opening on one transient failure can needlessly fail requests to a dependency that would have recovered on its own within the next attempt |
-| Never testing the half-open trial-request behavior, only closed and open states | A breaker that never correctly transitions back to closed after recovery leaves a fully-healthy dependency permanently blocked             |
+| Failure mode                                              | What it gets wrong                                                                     |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Timeout far longer than the dependency's expected latency | Slow requests still exhaust the pool, just more slowly                                 |
+| Checking breaker state after attempting the call          | The seat is already spent by the time the failure is recorded                          |
+| Threshold so low a single blip trips the breaker          | Needlessly fails requests to a dependency that would have recovered on its own         |
+| Letting every caller through when the cooldown ends       | A burst of probes hammers a dependency that is just starting to recover                |
+| Never testing the half-open transitions                   | A breaker that cannot return to Closed leaves a healthy dependency permanently blocked |

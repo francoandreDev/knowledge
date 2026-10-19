@@ -4,6 +4,12 @@ title: "L1 — How do we keep a service running when a dependency dies? (timeout
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "systems",
+  unitSlug: "timeouts",
+};
 
 <Scenario label="The order service's own code never changed. It went down anyway, because a dependency it called started responding slowly.">
   <Fragment slot="facts">
@@ -44,60 +50,64 @@ request sits waiting, it keeps a seat occupied. If enough requests sit
 waiting, there are no seats left for new work, even if the new work
 would have been quick.
 
+```mermaid
+sequenceDiagram
+    participant U as Users
+    participant O as Order service (50 seats)
+    participant I as Inventory (slow)
+    U->>O: checkout 1..50
+    O->>I: call (no timeout)
+    Note over O,I: every seat is now waiting
+    U->>O: checkout 51 (needs no inventory)
+    O--xU: no free seat, rejected
+```
+
 That is why a slow dependency is dangerous. The first problem is not
 only "inventory is slow." The second problem is "the order service
 keeps lending its limited seats to calls that may never come back."
-Timeouts, retries, circuit breakers, and backpressure are ways to
-protect those seats.
 
-## The shape of the problem
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="slow-dependency-cascade"
+/>
 
-- Without a **timeout**, a call to a dependency can wait indefinitely
-  — a slow dependency doesn't just slow down the specific request
-  that's calling it, it can tie up a resource (a thread, a
-  connection) for as long as the dependency stays slow.
-- A service typically has a **finite pool** of resources (worker
-  threads, connections) to handle requests. If enough requests get
-  stuck waiting on a slow dependency, the pool exhausts — and once
-  it's exhausted, the service can't process _any_ request, even ones
-  that don't touch the slow dependency at all. This is how one slow
-  dependency causes a completely unrelated outage.
-- Four techniques address different parts of this problem: a
-  **timeout** caps how long any single call can hold a resource; a
-  **retry** (with backoff) handles a transient failure without giving
-  up immediately; a **circuit breaker** stops sending requests to a
-  dependency that's clearly failing, instead of continuing to waste
-  resources on calls likely to fail anyway; **backpressure** signals
-  upstream that a system is overloaded, rather than silently queuing
-  work until it collapses.
-- Read the four techniques as four separate questions: "how long am I
-  willing to wait?", "when is it worth trying again?", "when should I
-  stop calling something broken?", and "how do I tell callers to slow
-  down before I run out of seats?"
+## The four techniques at a glance
+
+**Four separate questions, four techniques — which question does each one answer?**
+
+| Question                                         | Technique       | One-line answer                                                    |
+| ------------------------------------------------ | --------------- | ------------------------------------------------------------------ |
+| How long am I willing to wait?                   | Timeout         | Cap how long one call can hold a seat                              |
+| When is it worth trying again?                   | Retry + backoff | A few spaced-out second chances for transient failures             |
+| When should I stop calling something broken?     | Circuit breaker | After repeated failures, refuse calls instantly for a while        |
+| How do I tell callers to slow down before I jam? | Backpressure    | Reject, shed, or bound work instead of silently queuing it forever |
 
 ## Key terms
 
-- **Timeout** — a maximum duration a call to a dependency is allowed
-  to take before it's treated as failed, regardless of whether the
-  dependency eventually would have responded.
-- **Retry (with backoff)** — automatically re-attempting a failed
-  call, typically waiting progressively longer between attempts, to
-  handle brief, transient failures without giving up too early or
-  overwhelming an already-struggling dependency.
-- **Circuit breaker** — a mechanism that stops sending requests to a
-  dependency after it fails repeatedly, instead of continuing to
-  attempt (and wait on) calls that are very likely to fail, then
-  periodically checks if the dependency has recovered.
-- **Backpressure** — a signal sent upstream indicating a system can't
-  keep up with the current load, so the sender can slow down or shed
-  work, rather than the receiver silently queuing everything until it
-  runs out of resources.
+- **Timeout** — a maximum duration a call is allowed to take before it
+  is treated as failed, whether or not the dependency would eventually
+  have answered.
+- **Retry (with backoff)** — re-attempting a failed call after a
+  growing delay, to survive brief blips without hammering a struggling
+  dependency.
+- **Circuit breaker** — a gate that stops sending calls to a
+  dependency after repeated failures, then periodically probes whether
+  it has recovered.
+- **Backpressure** — a signal (such as `429`/`503`, a bounded queue, a
+  paused producer) telling upstream to send less, instead of the
+  receiver silently queuing until it collapses.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="four-techniques-roles"
+/>
 
 ## What this unit covers
 
-L2 works through how these four techniques fit together (they solve
-different parts of the resource-exhaustion problem, not the same
-part) and the states a circuit breaker actually moves through. L3
-implements a timeout wrapper and a circuit breaker, verifies their
-behavior directly, and applies both to the Scenario's cascading
-outage.
+L2 works through why a timeout alone is not enough, the three states a
+circuit breaker moves through, how retries go wrong, and what real
+backpressure looks like. L3 builds a backoff calculation and a circuit
+breaker state machine and applies the combination to the Scenario's
+cascading outage.
