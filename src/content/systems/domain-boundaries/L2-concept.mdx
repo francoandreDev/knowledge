@@ -5,12 +5,18 @@ title: "L2 — Analyzing coupling and cohesion to find a boundary"
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "systems",
+  unitSlug: "domain-boundaries",
+};
 
 <Scenario label="The problem">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
       <div class="flex items-center gap-1.5"><span>📦</span> <strong>Candidate A</strong> — Orders alone: shares <code>order_items</code> with Shipping, 3,000 calls/day from Shipping</div>
-      <div class="flex items-center gap-1.5"><span>📦</span> <strong>Candidate B</strong> — Shipping + Fulfillment together: 9,000 internal calls/day, 0 shared tables with anything outside</div>
+      <div class="flex items-center gap-1.5"><span>📦</span> <strong>Candidate B</strong> — Shipping + Fulfillment together: 15,000 internal calls/day, only 1 shared table (<code>order_items</code>) crossing the line</div>
       <div class="flex items-center gap-1.5"><span>❓</span> Same modules, two different lines drawn around them — only one holds up</div>
     </div>
     <div class="not-prose mt-3 rounded border border-amber-300 bg-amber-50 p-2 text-xs dark:border-amber-800 dark:bg-amber-950">
@@ -80,73 +86,112 @@ together, not call count alone.
 
 </Checkpoint>
 
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="call-graph-model"
+/>
+
 ## Scoring a candidate boundary
 
 A candidate boundary is a _group_ of modules you're proposing to
 extract as one service. Two numbers score it:
 
-- **Internal call ratio** — of every call touching a module in the
-  group, what fraction stays inside the group? `internal / (internal + external)`.
-  High means the group is self-contained; low means extracting it
-  drags the rest of the graph along on every request.
-- **External shared tables** — how many tables does a module inside
-  the group share with a module _outside_ the group? This should be
-  zero for a clean split. Any non-zero count is a distributed
-  transaction waiting to happen the day the group becomes its own
-  service.
+- **Internal call ratio** — of all call volume touching any module in
+  the group, the share that stays inside the group:
+  `internal / (internal + external)`. High means self-contained; low
+  means every request drags the rest of the graph along.
+- **External shared tables** — tables a module inside the group shares
+  with a module _outside_ it. This must be zero for a clean split; any
+  other count is a distributed transaction waiting to happen.
+
+Scored against the graph above:
+
+| Candidate group             | Internal call ratio | Tables shared across the line           | Reading                               |
+| --------------------------- | ------------------- | --------------------------------------- | ------------------------------------- |
+| Orders alone                | 0%                  | `order_items`, `inventory_reservations` | Blocked twice over                    |
+| Shipping alone              | 0%                  | `order_items`                           | Blocked, and chatty                   |
+| Shipping + Fulfillment      | 77%                 | `order_items`                           | Close — one table to resolve          |
+| Orders + Shipping + Fulfil. | 33%                 | `inventory_reservations`                | Worse ratio, still blocked            |
+| Every module                | 100%                | none                                    | Clean only because it is the monolith |
 
 ```mermaid
 xychart-beta
     title "Internal call ratio by candidate boundary"
-    x-axis ["Orders alone", "Shipping alone", "Shipping+Fulfillment", "Orders+Shipping"]
+    x-axis ["Orders", "Shipping", "Ship+Fulfil", "Ord+Ship+Fulfil", "Everything"]
     y-axis "Internal call ratio (%)" 0 --> 100
-    bar [35, 55, 92, 88]
+    bar [0, 0, 77, 33, 100]
 ```
 
-Read that chart against the shared-table count, not instead of it:
-"Orders+Shipping" scores well on internal ratio (88%) precisely
-_because_ it stops counting the Orders↔Shipping traffic as external —
-but it still shares `order_items` with nothing left outside the
-group to blame, so the shared table hasn't gone away, it's just been
-absorbed into a bigger, harder-to-reason-about service. "Shipping +
-Fulfillment" wins on both numbers at once: high internal ratio _and_
-zero shared tables crossing the line — that's the difference between
-gaming one metric and actually finding the seam.
+The last row is the trap: a bundle that swallows enough of the
+monolith always scores well on ratio, because "internal" grows to
+include whatever used to be external. Shipping + Fulfillment wins
+because it is the _smallest_ group with a high ratio and only one
+blocker left.
 
-<Checkpoint question="A team proposes bundling Orders, Shipping, AND Billing into one service to push the internal call ratio even higher than the two candidates above. Is a bigger bundle automatically a better boundary?">
+<Checkpoint question="A team proposes bundling every module into one 'service' because it scores 100% internal call ratio and zero shared tables. Is that the best boundary on the chart?">
 
-No — a bundle that swallows enough of the monolith will always score
-well on internal call ratio, because "internal" grows to include
-whatever used to be external. That's gaming the metric, not solving
-the coupling problem: the resulting service is really the monolith
-again, just renamed, with all its original coupling still inside it
-and none of the benefits (independent deploys, independent scaling,
-one team owning one clear thing) a real split is supposed to buy.
-The useful boundary is the _smallest_ group that gets external shared
-tables to zero — not the largest group that gets internal ratio to
-100%.
+No. It scores perfectly because it is the monolith with a new name:
+all the original coupling is still inside it, and none of the
+benefits of a split (independent deploys, independent scaling, one
+team owning one thing) are bought. The useful boundary is the
+smallest group that gets external shared tables to zero, not the
+largest group that gets the ratio to 100%.
 
 </Checkpoint>
 
-## Reading the graph to find the boundary that's already there
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="scoring-boundary"
+/>
 
-The method, end to end:
+## Resolving the shared table, then cutting
 
-1. Build the weighted call graph and mark shared-table edges.
-2. Propose a candidate group (start from whatever's causing the most
-   pain — that instinct isn't wrong, it just can't be the _only_
-   input).
-3. Score it: internal call ratio, external shared tables.
-4. If external shared tables isn't zero, the boundary is in the wrong
-   place — either grow the group to absorb the shared-table module,
-   or resolve the sharing first (give each module its own table,
-   sync via an event instead of a shared write) before extracting.
-5. Once a group scores well, that's the first strangler-fig target —
-   the mechanics of _how_ to cut it over live in `strangler-fig`; this
-   method only answers _where_ to cut.
+**Shipping + Fulfillment scored 77% but is blocked by one table. What
+does "resolving" it actually look like?**
 
-This is exactly what `web/strangler-fig` assumes has already
-happened when it talks about "one route migrated per week" — the
-route has to belong to a boundary that's actually self-contained, or
-every migrated route drags a shared-table dependency back to the
-system it just left.
+```mermaid
+flowchart LR
+    subgraph Before["Before: blocked"]
+        direction LR
+        O1["Orders"] --- T1[("order_items")]
+        S1["Shipping"] --- T1
+    end
+    subgraph After["After: cuttable"]
+        direction LR
+        O2["Orders"] --- T2[("order_items\n(owned by Orders)")]
+        O2 -->|"OrderPlaced event"| S2["Shipping"]
+        S2 --- T3[("shipment_items\n(Shipping's own copy)")]
+    end
+    Before ==> After
+```
+
+Each side keeps exactly the fields it needs in a table only it
+writes, and changes travel as events or API calls instead of shared
+writes. Only then is the line safe to cut. The full method:
+
+| Step | Do                                                                    | Stop condition                                        |
+| ---- | --------------------------------------------------------------------- | ----------------------------------------------------- |
+| 1    | Build the weighted call graph, mark shared tables                     | Every module and edge accounted for                   |
+| 2    | Propose a group (start from the pain, but not only from it)           | A named candidate                                     |
+| 3    | Score ratio and external shared tables                                | Both numbers on the page                              |
+| 4    | Tables non-zero: split the data first, or grow the group to absorb it | External shared tables = 0                            |
+| 5    | Hand the clean group to the strangler-fig cutover                     | Where to cut is settled; how is `strangler-fig`'s job |
+
+<Checkpoint question="A group scores 0 external shared tables but only a 20% internal call ratio. Is it safe to extract?">
+
+Data-wise yes, performance-wise it is risky. No shared tables means
+no distributed transactions, but 80% of the traffic touching the
+group crosses the new network line, so every request becomes several
+slow, failure-prone hops. The two numbers catch different failures:
+shared tables break correctness, a low ratio breaks latency and
+availability. A good boundary needs both.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="fixing-shared-data"
+/>

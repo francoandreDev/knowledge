@@ -1,10 +1,16 @@
 ---
-title: "L3 — Building a coupling/cohesion calculator and defending a split"
+title: "L3 — Defending a split with numbers, and the cases the numbers miss"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "systems",
+  unitSlug: "domain-boundaries",
+};
 
 <Scenario label="The problem">
   <Fragment slot="facts">
@@ -19,13 +25,12 @@ import Checkpoint from "../../../components/Checkpoint.astro";
 
   </Fragment>
 
-L2 gave the method by hand, on one small graph. A real monolith has
-dozens of modules and hundreds of edges — nobody is eyeballing that.
-This level builds the two tools that make the method run on real
-data: a coupling/cohesion calculator over a call graph, and a
-heuristic for classifying an ambiguous class that seems to belong to
-two contexts at once. Both are the kind of code you'd actually
-attach to a design-review doc, not a toy.
+L2 gave the method on one small graph. This level walks the numbers
+end to end the way a review would demand them, then handles the two
+messy cases the clean method skips: a class that seems to belong to
+two contexts at once, and a boundary that is clean by the numbers but
+cuts across your teams. No tooling is needed to follow it — the point
+is the reasoning, and every number can be re-derived by hand.
 
 **Before reading on: if you had to defend "Shipping+Fulfillment first" in a review with one sentence and one number, what would the sentence be — and could you say it without saying "it feels right"?**
 
@@ -33,275 +38,154 @@ attach to a design-review doc, not a toy.
 
 <LevelIntro
   items={[
-    "Modeling the monolith's call graph as real data structures",
-    "Computing internal call ratio and external shared tables for any candidate group",
-    "A heuristic for placing an ambiguous class in the right bounded context",
+    "Re-deriving the scores from the raw edge list",
+    "Writing the one-sentence, one-number defense",
+    "Placing an ambiguous class, and when the numbers are not enough",
   ]}
 />
 
-## The call graph as data
+## Re-deriving the scores from the edge list
 
-The graph from L2, as data a script can actually run against. Each
-edge carries a call weight and, optionally, the tables both modules
-touch — that's the field the calculator treats as the strongest
-coupling signal.
+Everything starts from the raw edges. Nothing here is hidden: the
+review can recompute any score from this table.
 
-```js
-// call-graph.js
-const monolith = {
-  modules: [
-    "Catalog",
-    "Orders",
-    "Inventory",
-    "Shipping",
-    "Fulfillment",
-    "Billing",
-    "Users",
-  ],
-  edges: [
-    { from: "Catalog", to: "Orders", callsPerDay: 20000, sharedTables: [] },
-    {
-      from: "Orders",
-      to: "Inventory",
-      callsPerDay: 12000,
-      sharedTables: ["inventory_reservations"],
-    },
-    {
-      from: "Orders",
-      to: "Shipping",
-      callsPerDay: 3000,
-      sharedTables: ["order_items"],
-    },
-    {
-      from: "Shipping",
-      to: "Orders",
-      callsPerDay: 1500,
-      sharedTables: ["order_items"],
-    },
-    { from: "Orders", to: "Billing", callsPerDay: 5000, sharedTables: [] },
-    {
-      from: "Shipping",
-      to: "Fulfillment",
-      callsPerDay: 9000,
-      sharedTables: [],
-    },
-    {
-      from: "Fulfillment",
-      to: "Shipping",
-      callsPerDay: 6000,
-      sharedTables: [],
-    },
-    { from: "Users", to: "Orders", callsPerDay: 2000, sharedTables: [] },
-  ],
-};
+| From → To              | Calls/day | Shared table             |
+| ---------------------- | --------- | ------------------------ |
+| Catalog → Orders       | 20,000    | none                     |
+| Orders → Inventory     | 12,000    | `inventory_reservations` |
+| Orders → Shipping      | 3,000     | `order_items`            |
+| Shipping → Orders      | 1,500     | `order_items`            |
+| Orders → Billing       | 5,000     | none                     |
+| Shipping → Fulfillment | 9,000     | none                     |
+| Fulfillment → Shipping | 6,000     | none                     |
+| Users → Orders         | 2,000     | none                     |
+
+For the group \{Shipping, Fulfillment\}: four edges touch it
+(3,000 + 1,500 + 9,000 + 6,000 = 19,500 calls). Two have both ends
+inside (9,000 + 6,000 = 15,000). Ratio: 15,000 / 19,500 = **77%**.
+Of the two edges that cross, both carry `order_items`, so the
+external shared table count is **1**.
+
+For \{Orders\}: every edge touching it crosses (43,500 calls, none
+internal): ratio **0%**, and two tables (`order_items`,
+`inventory_reservations`) cross.
+
+```mermaid
+flowchart LR
+    subgraph G["Candidate: Shipping + Fulfillment"]
+        S["Shipping"] <-->|"15k/day internal"| F["Fulfillment"]
+    end
+    O["Orders"] -.->|"order_items shared\n4.5k/day crossing"| S
+    style O fill:#fca5a5,stroke:#dc2626
+    style G fill:#d1fae5,stroke:#059669
 ```
 
-## Scoring a candidate boundary
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="score-derivation"
+/>
 
-Two functions, matching the two numbers from L2 exactly: internal
-call ratio, and external shared tables. Both take the graph and a
-proposed group of module names.
+## The one sentence and one number
 
-```js
-// boundary-score.js
+The review question was "why Shipping + Fulfillment first, not
+Orders?" The defense: "Orders alone keeps none of its call volume
+inside and shares two tables across the line it would cut along.
+Shipping plus Fulfillment keeps 77% of its volume internal and shares
+one table, `order_items`, inherited from its calls with Orders. It is
+far closer to extractable, but closer is not clean: Shipping first
+gets its own copy of the order-item fields it needs, synced by event,
+and only then do we cut."
 
-/** Every edge whose call weight touches at least one module in `group`. */
-function edgesTouchingGroup(graph, group) {
-  const inGroup = new Set(group);
-  return graph.edges.filter((e) => inGroup.has(e.from) || inGroup.has(e.to));
-}
+That sentence names the number, the blocker and the prerequisite
+work. It can be re-derived by someone who was not in the room, which
+is what makes it a decision instead of a guess.
 
-/**
- * Fraction of call volume touching the group that stays *inside* the
- * group. 1.0 = fully self-contained; 0.0 = every call crosses the
- * boundary.
- */
-function internalCallRatio(graph, group) {
-  const inGroup = new Set(group);
-  const touching = edgesTouchingGroup(graph, group);
-  if (touching.length === 0) return 1; // no calls at all — vacuously self-contained
+<Checkpoint question="Suppose a third module, Reporting, also reads `order_items`, but is not in the candidate group. The edge list only records pairs of modules that call each other, and Reporting never calls Shipping. Does the \{Shipping, Fulfillment\} score of '1 external shared table' still hold?">
 
-  let internal = 0;
-  let total = 0;
-  for (const edge of touching) {
-    total += edge.callsPerDay;
-    if (inGroup.has(edge.from) && inGroup.has(edge.to)) {
-      internal += edge.callsPerDay;
-    }
-  }
-  return internal / total;
-}
-
-/**
- * Tables shared between a module inside `group` and a module outside
- * it. Non-empty means: this boundary can't be cut cleanly today.
- */
-function externalSharedTables(graph, group) {
-  const inGroup = new Set(group);
-  const shared = new Set();
-  for (const edge of graph.edges) {
-    const fromIn = inGroup.has(edge.from);
-    const toIn = inGroup.has(edge.to);
-    if (fromIn !== toIn) {
-      // exactly one endpoint is inside the group — this edge crosses
-      // the proposed boundary
-      for (const table of edge.sharedTables) shared.add(table);
-    }
-  }
-  return [...shared];
-}
-
-function scoreBoundary(graph, group) {
-  const ratio = internalCallRatio(graph, group);
-  const sharedTables = externalSharedTables(graph, group);
-  return {
-    group,
-    internalCallRatio: Math.round(ratio * 100) / 100,
-    externalSharedTables: sharedTables,
-    verdict:
-      sharedTables.length === 0
-        ? "clean"
-        : "blocked — shared data crosses the line",
-  };
-}
-
-module.exports = { internalCallRatio, externalSharedTables, scoreBoundary };
-```
-
-Running it against the two candidates from L2's scenario:
-
-```js
-scoreBoundary(monolith, ["Orders"]);
-// { internalCallRatio: 0, externalSharedTables: ["order_items", "inventory_reservations"], verdict: "blocked — ..." }
-
-scoreBoundary(monolith, ["Shipping", "Fulfillment"]);
-// { internalCallRatio: 0.77, externalSharedTables: ["order_items"], verdict: "blocked — shared data crosses the line" }
-```
-
-That's the sentence for the review, with the numbers attached: "Orders
-alone shares two tables across the line it would cut along and keeps
-none of its call volume internal; Shipping plus Fulfillment keeps 77%
-of its call volume internal but still shares one table — `order_items`,
-inherited from its calls into and out of Orders. The second candidate
-is far closer to extractable, but 'closer' isn't 'clean': that
-`order_items` coupling needs a real migration — give Shipping its own
-copy of the order-item data it actually needs, synced via an event
-instead of a shared write — before the boundary is safe to cut."
-
-<Checkpoint question="externalSharedTables only counts an edge when `fromIn !== toIn` — exactly one endpoint is inside the group. Why not also count an edge where BOTH endpoints are inside the group but the shared table is also touched by a third module outside it entirely?">
-
-Because that case is real and the function above doesn't claim to
-catch it — it only inspects the two modules on each edge, not every
-module that touches a given table across the whole graph. A table
-touched by three modules, two of which land inside the proposed
-group and one outside, needs a table-centric pass (group every edge
-by `sharedTables`, not by `from`/`to`) rather than an edge-centric
-one. That's a real extension worth building before trusting this
-function on a graph with more than two modules sharing one table —
-the version here is correct for the common case (a table shared by
-exactly two modules) but not the general one.
+Not necessarily. Reading edges pair by pair only sees a table when the
+two ends of an edge both use it. Reporting touches `order_items`
+without any edge to Shipping, so the pairwise view hides it. The
+reliable method is table-centric: list every module that touches each
+table, then check whether that set straddles the proposed line. Here
+the answer for `order_items` is the same (it straddles), but the
+count of _who_ must be migrated off it grows by one. Always do the
+table-centric pass before promising a boundary is clean.
 
 </Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="defending-split"
+/>
 
 ## Classifying an ambiguous class
 
-Not every class in the monolith obviously belongs to one module. A
-`ShippingLabel` class might have started in Shipping but grown a
-method that writes to `order_items` directly, because it was
-convenient at the time. Which bounded context should own it if the
-split goes ahead?
+**A `ShippingLabel` class grew a method that writes `order_items`
+directly. Which context owns it?**
 
-The heuristic: weigh where the class's data lives against where its
-callers live, and let the larger signal win — a class isn't "half
-Orders, half Shipping" in practice, it's usually mostly one and
-accidentally touching the other.
+Neither "both" nor a coin flip. Weigh two signals, and weight the
+structural one more heavily:
 
-```js
-// classify-class.js
+| Signal                      | Evidence for `ShippingLabel`                   | Points to                   | Weight                |
+| --------------------------- | ---------------------------------------------- | --------------------------- | --------------------- |
+| Data it touches (ownership) | 40 `shipping_labels` accesses, 5 `order_items` | Shipping (40) vs Orders (5) | Full                  |
+| Who calls it                | 30 from Shipping, 2 from Orders                | Shipping (30) vs Orders (2) | Half (traffic drifts) |
 
-/**
- * usage = {
- *   tableAccess: { [table]: accessCount },
- *   callsFrom:   { [module]: callCount },
- * }
- * moduleOwnership = { [table]: ownerModule } — which module's data model
- * each table canonically belongs to, from the schema itself.
- */
-function suggestBoundary(usage, moduleOwnership) {
-  const scores = {};
-  const bump = (module, amount) => {
-    scores[module] = (scores[module] || 0) + amount;
-  };
+Scoring: Shipping = 40 + 30 × 0.5 = 55; Orders = 5 + 2 × 0.5 = 6. Shipping
+holds 55 of 61 points, about **90%**. The five `order_items` touches
+are real and worth a follow-up ticket to remove, but they do not
+override where the class's data and callers live.
 
-  for (const [table, count] of Object.entries(usage.tableAccess)) {
-    const owner = moduleOwnership[table];
-    if (owner) bump(owner, count);
-  }
-  for (const [module, count] of Object.entries(usage.callsFrom)) {
-    // caller volume counts too, but data ownership is the stronger
-    // signal — a class belongs where its data lives more than where
-    // its callers happen to be
-    bump(module, count * 0.5);
-  }
-
-  const ranked = Object.entries(scores).sort((a, b) => b[1] - a[1]);
-  if (ranked.length === 0) {
-    return { module: null, confidence: 0 };
-  }
-  const [topModule, topScore] = ranked[0];
-  const total = ranked.reduce((sum, [, score]) => sum + score, 0);
-  return {
-    module: topModule,
-    confidence: Math.round((topScore / total) * 100) / 100,
-  };
-}
-
-module.exports = { suggestBoundary };
+```mermaid
+pie title ShippingLabel ownership evidence (weighted)
+    "Shipping" : 55
+    "Orders" : 6
 ```
 
-Applied to `ShippingLabel`:
+Data ownership weighs more than callers because it is a structural
+fact about what the class needs to do its job, whereas caller counts
+reflect this quarter's wiring and drift.
 
-```js
-const moduleOwnership = { order_items: "Orders", shipping_labels: "Shipping" };
-const shippingLabelUsage = {
-  tableAccess: { order_items: 5, shipping_labels: 40 },
-  callsFrom: { Orders: 2, Shipping: 30 },
-};
+<Checkpoint question="Why weight data access fully but caller counts at half, instead of equally?">
 
-suggestBoundary(shippingLabelUsage, moduleOwnership);
-// { module: "Shipping", confidence: 0.9 }
-```
-
-90% confidence Shipping owns it — the five `order_items` touches are
-real and worth a follow-up ticket to remove, but they're not enough
-to override forty `shipping_labels` accesses and thirty Shipping
-callers. This is exactly the kind of ambiguous case a review needs an
-answer for before extraction, not after.
-
-<Checkpoint question="Why does the heuristic weight table access at full value but caller counts at 0.5x, instead of treating both signals equally?">
-
-Because the two signals answer different questions with different
-reliability. Table access reflects what data the class actually
-depends on to do its job — a structural fact that doesn't change
-based on who happens to be calling it this quarter. Caller counts
-reflect current traffic patterns, which drift: a class could get
-called mostly by Orders today simply because of how a feature was
-wired, without that meaning the class's data or purpose belongs to
-Orders. Weighting data ownership higher biases the heuristic toward
-the more stable, structural signal — the same reasoning L2 used to
-rank shared tables above call frequency when scoring a boundary.
+The two signals differ in stability. What data a class depends on
+changes only when its design changes. Who calls it can shift because
+of one feature rollout, without the class's purpose changing at all.
+Weighting the stable signal higher keeps the classification from
+flipping with traffic, and it is the same reasoning L2 used to rank
+shared tables above raw call frequency.
 
 </Checkpoint>
 
-## What this doesn't decide
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="ambiguous-class"
+/>
 
-Neither calculator makes the final call — they turn "where should we
-cut?" into numbers a review can argue about concretely instead of by
-gut feel. A group can score perfectly clean today and still be the
-wrong first target if, say, it has no product urgency behind it, or
-a team boundary doesn't match it. What changes if the org has three
-teams instead of one, and the "cleanest" boundary by these numbers
-cuts across two of them instead of aligning with either? That's a
-real constraint these functions don't see — coupling analysis narrows
-the candidates; it doesn't replace judgment about team ownership,
-urgency, or how a boundary was going to get staffed either way.
+## What the numbers don't decide
+
+Scores narrow the candidates; they do not make the final call. A group
+can score clean and still be the wrong first target.
+
+| Situation                                  | Numbers say        | What they miss                                   |
+| ------------------------------------------ | ------------------ | ------------------------------------------------ |
+| Clean group cuts across two teams          | Go                 | Neither team owns the new service end to end     |
+| Clean group has no product urgency         | Go                 | Effort with no payoff competes with real roadmap |
+| Messier group aligns with exactly one team | Resolve data first | Ownership may make the cleanup cheap             |
+
+This unit's worked example is one case, not the whole territory.
+Change the inputs and re-ask. What if the org had three teams and the
+cleanest boundary by these numbers cut across two of them? What if
+`order_items` were written by Orders but only ever _read_ by Shipping?
+What if Fulfillment were owned by a vendor and could not change its
+schema? Each changes which blocker matters most, and none of it shows
+up in a call graph.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="judgment-beyond-numbers"
+/>
