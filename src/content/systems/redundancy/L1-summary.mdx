@@ -4,6 +4,12 @@ title: "L1 — How do we design a system that survives a whole region going down
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "systems",
+  unitSlug: "redundancy",
+};
 
 <Scenario label="The checkout service had no bugs on the day it went down for six hours.">
   <Fragment slot="facts">
@@ -46,6 +52,17 @@ and onto a healthy one. **Disaster recovery (DR)** is the broader
 plan for restoring service after a large-scale failure — a full
 region loss, not just one server crashing.
 
+A copy only helps if it does not fail for the same reason as the
+original. The set of things that fail together is a **failure
+domain**, and redundancy only counts across domain boundaries:
+
+| Failure domain           | What takes it down together                  | Does a second copy here survive it?      |
+| ------------------------ | -------------------------------------------- | ---------------------------------------- |
+| Process / machine        | A crash, a bad deploy, a dead disk           | Yes, if on another machine               |
+| Rack / availability zone | A power or network fault in one facility     | Only if in another zone                  |
+| Region                   | A control-plane failure, a regional disaster | Only if in another region (the Scenario) |
+| Provider                 | An account lockout, a provider-wide outage   | Only if on another provider              |
+
 ```mermaid
 flowchart TB
     subgraph single["Single region (the Scenario)"]
@@ -60,23 +77,39 @@ flowchart TB
     end
 ```
 
-## Key terms
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="redundancy-basics"
+/>
 
-- **RTO (Recovery Time Objective)** — how long the system is allowed
-  to be down before service is restored. A 6-hour outage against a
-  5-minute RTO is a failed disaster recovery plan, even if the system
-  eventually came back.
-- **RPO (Recovery Point Objective)** — how much data the system is
-  allowed to lose, measured as a span of time. An RPO of 30 seconds
-  means: after failover, at most the last 30 seconds of writes may be
-  gone.
+## RTO and RPO: two different questions after a disaster
+
+**After the region is gone, a manager asks "how bad was it?" Is that
+one question or two?** Two: how long were we down, and how much data
+did we lose? They have separate names because they are fixed by
+separate parts of the system.
+
+|                       | RTO (Recovery Time Objective)                                                                        | RPO (Recovery Point Objective)                                                        |
+| --------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Question it answers   | How long may the service be down?                                                                    | How much recent data may be lost?                                                     |
+| Measured in           | Time until service is restored                                                                       | Time span of writes that may vanish                                                   |
+| Example target        | 5 minutes                                                                                            | 30 seconds                                                                            |
+| Failing it looks like | A 6-hour outage against a 5-minute RTO is a failed plan, even though the system eventually came back | Failing over and finding the last 2 minutes of orders missing against a 30-second RPO |
+
+<PracticeCheck track={unit.track} unitSlug={unit.unitSlug} topicId="rto-rpo" />
+
+## Active-passive vs. active-active
+
+**If a second region exists, does it serve traffic every day or wait
+for a bad one?** Both designs are common, and they trade cost against
+complexity:
+
 - **Active-passive** — one region serves all live traffic; a second
   region stands by, ready to take over, but does no work until a
   failover happens.
 - **Active-active** — more than one region serves live traffic at the
   same time; if one fails, the others simply absorb its share.
-
-## Active-passive vs. active-active
 
 |                 | Active-passive                            | Active-active                                             |
 | --------------- | ----------------------------------------- | --------------------------------------------------------- |
@@ -89,11 +122,17 @@ Redundancy is not free, and more redundancy is not automatically
 better — it's a deliberate trade against cost and complexity, sized
 to how bad an outage would actually be for that specific system.
 
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="active-modes"
+/>
+
 ## What this unit covers
 
 L2 works through how a failover actually happens mechanically — health
 checks, replication modes, and why RTO and RPO are driven by different
-parts of the system. L3 implements a health-check-driven failover
-router, an RPO exposure calculator, and a multi-region availability
-calculator, and applies all three back to the Scenario's six-hour
-outage.
+parts of the system. L3 works through quorum verdicts, why RPO is sized
+from the worst replication lag rather than the average, and the
+arithmetic of availability across independent regions, then applies
+all three back to the Scenario's six-hour outage.
