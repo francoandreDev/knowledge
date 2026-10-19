@@ -5,6 +5,12 @@ title: "L2 — How ack/redelivery actually works, and how to make 'seen twice' h
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "systems",
+  unitSlug: "queues",
+};
 
 <Scenario label="The worker crashed after charging the card, but before telling the queue it was done">
   <Fragment slot="facts">
@@ -96,6 +102,12 @@ which is strictly more information and strictly faster.
 
 </Checkpoint>
 
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="ack-visibility"
+/>
+
 ## Idempotency keys: making the duplicate a no-op
 
 **Given that redelivery is a permanent feature of at-least-once
@@ -117,45 +129,78 @@ flowchart TD
     E --> F[Ack]
 ```
 
+With the check in place, the same crash-and-redeliver timeline now ends
+differently:
+
+```mermaid
+sequenceDiagram
+    participant Q as Queue
+    participant W2 as Worker B
+    participant D as Dedupe store
+    participant G as Payment gateway
+    Note over Q,W2: Worker A already charged and crashed before ack
+    Q->>W2: redeliver "charge order #4471"
+    W2->>D: seen key for #4471?
+    D-->>W2: yes
+    W2->>G: (no call)
+    W2-->>Q: ack
+```
+
 The dedupe store has to survive exactly as long as redelivery can
-plausibly happen — if it's an in-memory `Set` that resets when the
-worker restarts, it protects against nothing, since the worker
-restarting is precisely the scenario that triggers redelivery in the
-first place. In practice this means a small database table or a
-cache like Redis, with a time-to-live comfortably longer than the
-queue's maximum redelivery window. L3 builds this as real code,
-including the race condition that shows up when two workers check the
-same key at nearly the same instant.
+plausibly happen. A store that resets when the worker restarts protects
+against nothing, since a restart is the very event that triggers
+redelivery. In practice it is a shared database table or a cache with a
+time-to-live comfortably longer than the queue's maximum redelivery
+window. L3 looks at what "atomic" and "shared" mean for that store.
 
-## Ordering, dead-letter queues, and backpressure
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="idempotency-key"
+/>
 
-Three more properties round out how a queue behaves under real load,
-each answering a different failure mode than duplication:
+## Does a queue keep messages in order?
 
-- **Ordering.** A standard queue makes no promise that messages come
-  out in the order they went in — two workers pulling concurrently
-  will naturally interleave. A FIFO (or partitioned, as in Kafka)
-  queue trades some throughput for guaranteeing order, but only
-  _within_ a given ordering key (e.g. all messages for one
-  `orderId`) — global ordering across every producer rarely scales.
-- **Dead-letter queue (DLQ).** A message that fails processing
-  repeatedly — a permanently malformed payload, a bug that throws
-  every time — would otherwise retry forever, burning worker time on
-  a message that can never succeed. After a configured number of
-  redelivery attempts, the queue routes it to a separate DLQ instead,
-  where it waits for a human or a repair job rather than looping.
-- **Backpressure.** If producers write messages faster than
-  consumers can process them, the queue's depth grows without bound.
-  A queue on its own doesn't fix this — it only buys time — so real
-  systems pair it with monitoring on queue depth/consumer lag and a
-  plan for scaling consumers or shedding load before the buffer
-  becomes the outage.
+**If two workers pull from the same queue at once, who finishes first?**
+Neither the queue nor you can say. A standard queue makes no promise that
+messages are processed in the order they went in, because concurrent
+consumers naturally interleave. A FIFO or partitioned queue (as in Kafka)
+restores order by routing every message with the same key to the same
+consumer, one at a time:
+
+```mermaid
+flowchart LR
+    P[Producer] --> R{Route by key}
+    R -- "order 17: created, paid, shipped" --> A[Partition A: one consumer, in order]
+    R -- "order 42: created, cancelled" --> B[Partition B: one consumer, in order]
+```
+
+| Queue type              | Order guaranteed                    | Cost                             |
+| ----------------------- | ----------------------------------- | -------------------------------- |
+| Standard                | None                                | Highest throughput               |
+| FIFO, one global stream | Everything                          | One consumer at a time, no scale |
+| Partitioned by key      | Within each key (for example order) | Order across different keys lost |
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="ordering-keys"
+/>
+
+## What happens to a message that always fails?
+
+**If a message can never succeed, what stops it from retrying forever?**
+Nothing, unless the queue is told to stop. A permanently malformed payload
+or a bug that throws every time would burn worker time forever. After a
+configured number of delivery attempts, the queue moves the message to a
+separate **dead-letter queue (DLQ)** where it waits for a human or a
+repair job:
 
 ```mermaid
 flowchart LR
     Q[(Main queue)] -- "attempt 1 fails" --> Q
     Q -- "attempt 2 fails" --> Q
-    Q -- "attempt 3 fails —<br/>max retries hit" --> DLQ[(Dead-letter queue)]
+    Q -- "attempt 3 fails: max attempts hit" --> DLQ[(Dead-letter queue)]
     DLQ --> H[Human review / repair job]
 ```
 
@@ -173,3 +218,34 @@ that's supposed to be reserved for messages that genuinely need human
 attention.
 
 </Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="dead-letter-flow"
+/>
+
+## What if producers outrun consumers?
+
+**A queue absorbs bursts, but what if the burst never ends?** The buffer
+simply grows. A queue buys time; it does not add consumer capacity.
+
+```mermaid
+xychart-beta
+    title "Queue depth when producers write 120/s and consumers handle 100/s"
+    x-axis ["0 min", "1", "2", "3", "4", "5"]
+    y-axis "Messages waiting" 0 --> 6000
+    line [0, 1200, 2400, 3600, 4800, 6000]
+```
+
+The depth grows by the gap (20 messages per second here) for as long as
+the gap lasts, and every waiting message is also a message that is getting
+older. Real systems watch queue depth and the age of the oldest message,
+then scale out consumers or shed load before the buffer becomes the
+outage.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="backpressure-depth"
+/>
