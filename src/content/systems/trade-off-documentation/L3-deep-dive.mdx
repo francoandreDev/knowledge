@@ -5,6 +5,12 @@ title: "L3 — Writing a real ADR, keeping the record honest, and building the t
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "systems",
+  unitSlug: "trade-off-documentation",
+};
 
 <Scenario label="Code review, but for a document: the ADR says 'Accepted,' the system says otherwise">
   <Fragment slot="facts">
@@ -36,8 +42,9 @@ staleness to get caught before it costs someone two days?**
 <LevelIntro
   items={[
     "A full ADR document, written for a reader with none of today's context",
-    "Two small tools: a weighted-score calculator and a stale-ADR flagger",
-    "Superseding instead of silently editing, and why review cadence is the actual fix for the Scenario",
+    "Stress-testing a decision matrix: how fragile is the winner?",
+    "Superseding instead of silently editing, and the ADR lifecycle",
+    "Review cadence and revisit triggers as the actual fix for the Scenario",
   ]}
 />
 
@@ -135,135 +142,43 @@ the document, or nobody knows to look for it.
 
 </Checkpoint>
 
-## Tool: scoring a decision matrix in code
+## Stress-testing the matrix: how fragile is the winner?
 
-L2's matrix was worked by hand in a markdown table. Once a team is
-comparing more than two options, or wants to try several weight
-scenarios quickly (exactly what the interactive demo below lets you
-do visually), scoring it in code removes arithmetic mistakes and
-makes "what if we weight familiarity higher" a one-line change instead
-of a re-copied table:
+**A matrix produced a winner. How much should anyone trust it?** The
+honest answer depends on how far the weights have to move before the
+winner changes. L2's matrix is a good case: RabbitMQ leads 41 to 29,
+but that lead lives almost entirely in one criterion, message-size fit.
+Re-scoring the same table with different weights shows how much the
+decision rests on it:
 
-```ts
-// decision-matrix.ts
+| Weights scenario                               | SQS total | RabbitMQ total | Winner   |
+| ---------------------------------------------- | --------- | -------------- | -------- |
+| As recorded (size fit 4, cost 3)               | 29        | 41             | RabbitMQ |
+| Size fit drops to 2 (payloads shrink)          | 25        | 31             | RabbitMQ |
+| Size fit drops to 1, cost rises to 5           | 33        | 30             | SQS      |
+| Size fit 0 (payloads no longer matter), cost 3 | 21        | 21             | tie      |
 
-interface Criterion {
-  name: string;
-  weight: number;
-}
+Reading the table: the winner survives a moderate change but flips once
+size fit stops dominating. That is the single most valuable sentence an
+ADR can contain, "this decision holds as long as message-size fit
+outweighs operational cost", because it tells a future reader exactly
+which fact to re-check. The matrix is a sensitivity probe as much as a
+scoring device; the interactive demo in this unit lets you drag those
+two weights yourself.
 
-// scores[optionName][criterionName] = a score from 1-5
-type ScoreTable = Record<string, Record<string, number>>;
+<Checkpoint question="In the stress test, why is 'what would make us revisit this' better stated as a condition on a weight (size fit outweighs cost) than as a date ('review in a year')?">
 
-interface RankedOption {
-  option: string;
-  totalScore: number;
-}
-
-function scoreDecisionMatrix(
-  criteria: Criterion[],
-  scores: ScoreTable,
-): RankedOption[] {
-  const options = Object.keys(scores);
-
-  const ranked = options.map((option) => {
-    const totalScore = criteria.reduce((sum, criterion) => {
-      const score = scores[option][criterion.name];
-      if (score === undefined) {
-        throw new Error(
-          `missing score for option "${option}", criterion "${criterion.name}"`,
-        );
-      }
-      return sum + score * criterion.weight;
-    }, 0);
-    return { option, totalScore };
-  });
-
-  // Highest weighted score first — ties keep their original order.
-  return ranked.sort((a, b) => b.totalScore - a.totalScore);
-}
-```
-
-Run against the RabbitMQ-vs-SQS numbers from L2's table, this returns
-`[{ option: "RabbitMQ", totalScore: 41 }, { option: "SQS", totalScore: 29 }]`
-— the same result as the hand-worked table, but now it's one function
-call away from re-running with different weights, which is exactly
-what a team revisiting the ADR's "what would make us revisit this"
-clause would want to do.
-
-## Tool: flagging ADRs that look stale
-
-The Scenario's actual failure — an ADR that says "Accepted" for a
-decision that's quietly been overturned in practice — isn't a writing
-problem, it's a **maintenance** problem. One partial mitigation: a
-script that flags any ADR older than some threshold that's still
-sitting in a non-terminal status, as a nudge to someone to actually
-go check whether it's still accurate:
-
-```ts
-// stale-adr-flagger.ts
-
-interface AdrRecord {
-  id: string;
-  title: string;
-  status: "Proposed" | "Accepted" | "Superseded" | "Deprecated";
-  decidedOn: Date; // the date recorded in the ADR's Status line
-}
-
-interface StaleFlag {
-  id: string;
-  title: string;
-  ageDays: number;
-}
-
-// "Superseded" and "Deprecated" are terminal — by definition someone
-// already revisited them, so they're never stale in this sense.
-// "Proposed" and "Accepted" are the two statuses that can go stale:
-// a Proposed decision nobody ever resolved, or an Accepted one nobody
-// has re-checked in a long time.
-const NON_TERMINAL_STATUSES: AdrRecord["status"][] = ["Proposed", "Accepted"];
-
-function findStaleAdrs(
-  records: AdrRecord[],
-  now: Date,
-  staleAfterDays: number,
-): StaleFlag[] {
-  const msPerDay = 24 * 60 * 60 * 1000;
-
-  return records
-    .filter((r) => NON_TERMINAL_STATUSES.includes(r.status))
-    .map((r) => {
-      const ageDays = Math.floor(
-        (now.getTime() - r.decidedOn.getTime()) / msPerDay,
-      );
-      return { id: r.id, title: r.title, ageDays };
-    })
-    .filter((flag) => flag.ageDays >= staleAfterDays)
-    .sort((a, b) => b.ageDays - a.ageDays);
-}
-```
-
-This doesn't know that RabbitMQ quietly got replaced by SQS — no
-script can infer that from a date alone — but it does guarantee
-ADR-014 surfaces on a periodic report the moment it crosses, say, 12
-months as "Accepted," prompting a human to actually check: is this
-still true? That single check, run on a schedule instead of never, is
-what would have caught the Scenario's staleness at month 12 instead
-of leaving it for a confused new engineer at month 18.
-
-<Checkpoint question="Why does findStaleAdrs exclude 'Superseded' and 'Deprecated' records from the staleness check entirely, rather than just giving them a longer staleAfterDays threshold?">
-
-Staleness, as this tool defines it, means "a decision that's
-presented as current but might not be anymore" — and a Superseded or
-Deprecated ADR isn't presented as current at all; its status already
-tells the reader outright that it no longer reflects reality, so
-there's nothing to nudge a human to check. Giving those statuses a
-longer threshold instead of excluding them would eventually start
-flagging perfectly accurate historical records as if something were
-wrong, when the actual problem the tool exists to catch — a stale
-claim wearing a "still true" status — doesn't apply to them at all.
+A date only says when to look, and says nothing about what to look
+for. A condition on the weights names the specific fact the decision
+depends on, so the reader can check it in minutes: if the oversized
+payload rate has dropped, the dominant criterion has weakened and the
+matrix may tip. The date is still useful as a backstop, but the
+condition is what turns a review from a generic meeting into a
+targeted check.
 
 </Checkpoint>
+
+<PracticeCheck track={unit.track} unitSlug={unit.unitSlug} topicId="real-adr" />
 
 ## Supersede, don't silently edit
 
@@ -292,15 +207,69 @@ stateDiagram-v2
     Deprecated --> [*]
 ```
 
-This is also the actual fix underneath the flagger script above: the
-script buys time by prompting a periodic human check, but the habit
-that prevents the Scenario for good is treating "we changed our
-minds" as itself a decision worth its own ADR — the same discipline
-L1 and L2 applied to the original choice, applied again the moment
-that choice stops holding.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="supersede-append-only"
+/>
 
-This unit's worked example covers one decision, decided once, by one
-team, with a clean two-option comparison. What changes when a
+## Catching staleness before it costs someone two days
+
+**The Scenario's ADR said "Accepted" for six months after it stopped
+being true. Why didn't anyone notice?** Because nothing forced a look.
+A date on a document is not a trigger; a status field nobody reads
+again is not a trigger either. A team needs deliberate triggers, and
+they come in two kinds:
+
+| Trigger kind   | Example                                                                                       | What it catches                           |
+| -------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Time-based     | Every Accepted ADR older than 12 months is listed at a quarterly review                       | Slow drift nobody noticed                 |
+| Event-based    | A migration, an incident, or a new dependency in the area triggers "does ADR-014 still hold?" | The sudden change that makes an ADR wrong |
+| Change-coupled | A pull request that touches the decision's code must link or update its ADR                   | The quiet migration in the Scenario       |
+
+The third row is the one that would have caught this exact failure: the
+quiet switch from RabbitMQ to SQS was a code change, and a rule that a
+change to the queueing layer needs an ADR link or a new ADR makes the
+omission visible at review time, six months earlier than anyone
+noticed. Time-based sweeps are the safety net; they cannot know that
+RabbitMQ was replaced, they can only make a human ask. The cost of that
+human check is small next to two days of misdirected work.
+
+```mermaid
+flowchart LR
+    A[Accepted ADR] --> B{Trigger fires?}
+    B -- "12 months pass" --> C[Quarterly review:<br/>still true?]
+    B -- "Code in its area changes" --> C
+    B -- "Incident or migration nearby" --> C
+    C -- "Yes" --> D[Note the review date,<br/>keep Accepted]
+    C -- "No" --> E[Write a new ADR;<br/>mark old one Superseded]
+```
+
+<Checkpoint question="Why is a rule that code changes in the decision's area must link an ADR more reliable than a yearly staleness sweep for the Scenario's failure?">
+
+The sweep only prompts a human to wonder, and the Scenario's ADR would
+have sat unnoticed until the next sweep date, possibly months after the
+migration. The change-coupled rule fires at the moment the decision is
+actually overturned, because the overturning is itself a code change
+reviewed by someone who can ask, "where is the ADR for this?" It moves
+the check from a calendar to the event that causes the staleness, so
+the gap between the system changing and the record changing shrinks
+from months to the length of a code review.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="staleness-review"
+/>
+
+This unit's worked example is a case, not the whole territory: one
+decision, decided once, by one team, with a clean two-option
+comparison. Try extending it. What changes when the audience is a
+non-technical executive instead of a future engineer? What changes if
+the news in the Consequences section were worse, for example if the
+chosen option had a known security gap? What changes when a
 decision has to be made jointly by two teams who report to different
 organizations and don't fully trust each other's numbers — does a
 weighted matrix still work when the weights themselves are the
