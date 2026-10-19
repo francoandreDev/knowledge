@@ -5,12 +5,18 @@ title: "L3 — Proving the snapshot model with real commands and a real hash"
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "snapshots-manual-copies",
+};
 
 <Scenario label="The scenario">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
       <div class="flex items-center gap-1.5"><span>1️⃣</span> Three-state model — watch <code>git status</code> change with no "undo" involved</div>
-      <div class="flex items-center gap-1.5"><span>2️⃣</span> Content-addressing — an independent hash implementation matches <code>git hash-object</code> exactly</div>
+      <div class="flex items-center gap-1.5"><span>2️⃣</span> Content-addressing — the hash recipe is just "header + bytes", and <code>git hash-object</code> shows it</div>
       <div class="flex items-center gap-1.5"><span>3️⃣</span> Storage growth — manual copies vs. Git, computed for real numbers</div>
     </div>
     <p class="not-prose mt-3 mb-1 text-xs font-semibold tracking-wide text-slate-400 uppercase">Claim being proven</p>
@@ -20,174 +26,130 @@ import Checkpoint from "../../../components/Checkpoint.astro";
 
   </Fragment>
 
-L1 and L2 described the snapshot model. This session proves it — a real
-terminal session showing the three-state model in action, an independent
-hash function that reproduces `git hash-object`'s exact output, and working
-code that quantifies how much smaller Git's storage actually is than the
-zip-file approach from L1's opening scenario, for real numbers.
+L1 and L2 described the snapshot model. This level checks it against reality: a short terminal session showing the three-state model, the exact recipe behind a stored object's hash, and real numbers for how much smaller Git's storage is than the zip-file approach from L1's opening scenario.
 
 </Scenario>
 
 <LevelIntro
   items={[
     "The three-state model, watched live in a real terminal session",
-    "Content-addressing, proven with an independent hash implementation",
-    "Storage growth, quantified with real numbers for manual copies vs. Git",
+    "Content-addressing: the hash recipe, and what changes its output",
+    "Storage growth with real numbers, and where it breaks down",
   ]}
 />
 
-## Watching the three-state model in a real session — does `git status` actually report three genuinely different things?
+## Watching the three-state model in a real session: does `git status` really report three different things?
 
-A real terminal session, captured as-is (this is literal output, not code to run yourself — reproduce it locally if you want to follow along):
+The command sequence is the point here, so this one short transcript is worth reading line by line (output trimmed to the lines that matter):
 
 ```
-$ mkdir demo && cd demo && git init
-Initialized empty Git repository in /demo/.git/
-
 $ echo "hello" > greeting.txt
-$ git status
-On branch main
-Untracked files:
-  greeting.txt
-
+$ git status            # Untracked files: greeting.txt
 $ git add greeting.txt
-$ git status
-On branch main
-Changes to be committed:
-  new file:   greeting.txt
-
+$ git status            # Changes to be committed: new file: greeting.txt
 $ git commit -m "Add greeting"
-[main (root-commit) a1b2c3d] Add greeting
- 1 file changed, 1 insertion(+)
-
 $ echo "hello again" > greeting.txt
-$ git status
-On branch main
-Changes not staged for commit:
-  modified:   greeting.txt
+$ git status            # Changes not staged for commit: modified: greeting.txt
 ```
 
-Notice `git status` reports a _different_ state after each command, even though nothing was "undone" — that's the three-state model directly: the file on disk (working directory), what's staged for the next snapshot, and what's already permanently committed are three genuinely separate pieces of state, and every git command operates on exactly one of them.
+`git status` reports a _different_ state after each command, though nothing was "undone". The file on disk, what is staged for the next snapshot, and what is permanently committed are three separate pieces of state, and every git command operates on one of them.
 
-<Checkpoint question="In the terminal session above, right after `git add greeting.txt`, the file is staged but the commit hasn't happened yet. If you ran `echo 'a third version' > greeting.txt` at that exact moment — without staging it again — which version of greeting.txt would `git commit -m '...'` actually record: the staged one, or the one now on disk?">
+```mermaid
+stateDiagram-v2
+    [*] --> Untracked: create file
+    Untracked --> Staged: git add
+    Staged --> Committed: git commit
+    Committed --> Modified: edit file
+    Modified --> Staged: git add
+```
 
-The staged one — the version that was on disk at the moment `git add` ran,
-not whatever's on disk now. Staging takes a snapshot of the file's content
-at that instant and copies it into the staging area; it doesn't keep
-watching the file for further edits. So after this sequence, `git status`
-would show the file as both "changes to be committed" (the version from
-the first edit, already staged) and "changes not staged for commit" (the
-newest edit, not yet added) at the same time — the same filename appearing
-in two different states simultaneously is exactly the kind of thing a
-manual-copy workflow has no way to represent, and it's a direct
-consequence of the staging area being a separate, deliberate snapshot
-rather than a live mirror of the working directory.
+<Checkpoint question="Right after `git add greeting.txt`, the file is staged but not committed. If you then overwrite greeting.txt on disk with a third version, without staging again, which version does the next `git commit` record: the staged one, or the one now on disk?">
+
+The staged one: the version that was on disk at the moment `git add` ran. Staging copies the file's content into the staging area at that instant; it does not keep watching the file for later edits. So `git status` would show the same filename in two states at once, "changes to be committed" for the staged version and "changes not staged" for the newer edit. A manual-copy workflow has no way to represent that, and it follows directly from staging being a deliberate snapshot rather than a live mirror of the working directory.
 
 </Checkpoint>
 
-## Proving content-addressing with a real hash — does an independent implementation, with no access to Git's source, actually reproduce Git's own output?
+## What is the hash made of, and what changes it?
 
-Git's claim in L2 was: every stored object is identified by the SHA-1 hash of its own content. This is checkable — Git computes a blob's hash as `sha1("blob " + content.length + "\0" + content)`. Here's that computation done independently in Node, and compared against what `git hash-object` actually produces:
+L2 claimed every stored object is identified by the SHA-1 hash of its own content. This is checkable, because the recipe is public and small: for a file's content (a "blob"), Git hashes the text `blob`, a space, the content's length in bytes, a zero byte, and then the content itself.
 
-```js
-// hash-object.mjs — reimplements git's blob-hashing algorithm from scratch
-// to prove it's just a hash of "blob <size>\0<content>", nothing magic.
-import { createHash } from "node:crypto";
-
-function gitBlobHash(content) {
-  const bytes = Buffer.from(content, "utf8");
-  const header = `blob ${bytes.length}\0`;
-  const store = Buffer.concat([Buffer.from(header, "utf8"), bytes]);
-  return createHash("sha1").update(store).digest("hex");
-}
-
-const content = "hello\n";
-console.log(gitBlobHash(content));
+```mermaid
+flowchart LR
+    C["file bytes: hello + newline (6 bytes)"] --> H["prepend header: blob 6, then a zero byte"]
+    H --> S["SHA-1 of header + bytes"]
+    S --> K["ce013625030ba8dba906f756967f9e9ca394464a"]
 ```
 
-Running this prints `ce013625030ba8dba906f756967f9e9ca394464` — and running `git hash-object` on a file containing exactly `hello\n` (via `echo "hello" | git hash-object --stdin`) prints the **exact same hash**, computed by completely independent code. This is the practical proof behind "identical content is stored once": the storage key isn't a filename or a timestamp, it's a pure function of the bytes.
+Running `printf 'hello\n' | git hash-object --stdin` prints exactly that hash. Nothing in the recipe mentions a filename, a timestamp, an author, or a branch, so none of them can change the key. The only input is bytes. That is the practical proof behind "identical content is stored once".
 
-<Checkpoint question="Two files in different branches both contain the exact text 'hello\n', but one was typed by hand and the other was copy-pasted from a different editor. Based on gitBlobHash above, would Git store these as one object or two, and why?">
+Bytes, not appearance, are what count. The same visible text saved with Windows line endings (`hello` followed by carriage return and newline) is seven bytes, and `git hash-object` gives it a completely different hash, `ef0493b2...`. Two files that look identical on screen are two different objects if their bytes differ.
 
-One object. `gitBlobHash` only looks at the bytes it's handed — `header +
-content`, run through SHA-1 — it has no way to know or care which editor
-produced those bytes, which branch the file lives on, or when it was
-typed. If the two files are byte-for-byte identical (same characters, same
-line ending, same encoding), they hash to the same value and Git stores
-them as a single object referenced from both places. The only thing that
-would produce two different objects is a difference in the actual bytes —
-which is exactly the trap the "beyond this one project" question below is
-pointing at: two files that look identical on screen can still be
-byte-different underneath.
+<Checkpoint question="Two files on different branches both contain the visible text 'hello'. One was typed by hand, the other pasted from a different editor. Does Git store one object or two, and what would you check if you saw two?">
+
+If the bytes are identical, one object: the hash recipe only sees the header and the bytes, so it cannot know which editor produced them, which branch they live on, or when they were typed. Seeing two objects means the bytes differ somewhere invisible, most often line endings (a carriage return before the newline), a trailing newline at the end of the file, or a byte-order mark at the start. Comparing the two hashes, or the byte lengths, is the fastest way to confirm which invisible difference you are looking at.
 
 </Checkpoint>
 
-## Why does this change what "undo" means, compared to the zip-file scenario from L1?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="hash-recipe"
+/>
 
-With manual copies, undo means "hope you kept a copy from before the mistake, and manually figure out what else changed since then." With snapshots:
+## Turning the L2 storage claim into real numbers: how much does content-addressing save?
 
-```
-$ git log --oneline
-c3d4e5f Fix typo in greeting
-b2c3d4e Add greeting v2
-a1b2c3d Add greeting
+L2's chart covered the easy case where nothing changed. Real projects change a little each commit. The model is two lines: manual copies cost `saves x project size`, while Git costs one full project for the first commit plus, for each later commit, only the slice that changed.
 
-$ git checkout a1b2c3d -- greeting.txt   # restore this one file to that snapshot
-$ git reset --hard a1b2c3d                # or: rewind the whole project to that snapshot
-```
+| Scenario (500 KB project)                      | Commits | Changed per commit | Manual copies | Git       |
+| ---------------------------------------------- | ------- | ------------------ | ------------- | --------- |
+| Typical small edits                            | 20      | 5%                 | 10,000 KB     | 975 KB    |
+| Heavy churn                                    | 20      | 50%                | 10,000 KB     | 5,250 KB  |
+| Everything rewritten each time (e.g. a binary) | 20      | 100%               | 10,000 KB     | 10,000 KB |
 
-Both commands work because every past state is a fully addressable snapshot, not a fragile chain of manual edits — "go back to exactly how things were on Tuesday" is a lookup, not an archaeology project. The second command is intentionally broad and dangerous: this unit is proving that snapshots make restore possible, not recommending `reset --hard` as a beginner habit. The `checkout` unit covers which restore commands are narrow, which ones rewrite history, and which ones can discard uncommitted work.
-
-## Turning the L2 storage claim into a real number — for a real project, how much does content-addressing actually save?
-
-L2's chart showed 10 manual copies stored 10× an unchanged file, while Git stored it once. That's the easy case (nothing changed at all). Real projects change a bit each commit — this function models storage for either strategy as a function of how much actually changes per commit, which is exactly the relationship the interactive demo on this unit's L2 section lets you drag:
-
-```js
-// storage-estimate.mjs — real, runnable comparison of manual-copy storage
-// vs. Git's content-addressed storage, as a function of how much of the
-// project actually changes between saves.
-function manualCopyStorageKB(numSaves, projectSizeKB) {
-  // Every save is a full, independent copy — no deduplication at all.
-  return numSaves * projectSizeKB;
-}
-
-function gitStorageKB(numCommits, projectSizeKB, changedFraction) {
-  if (numCommits <= 0) return 0;
-  // The first commit always stores the full project once.
-  const firstCommit = projectSizeKB;
-  // Every commit after that stores only the changed slice — the
-  // untouched remainder is already in the object store, referenced
-  // again for free.
-  const laterCommits = (numCommits - 1) * projectSizeKB * changedFraction;
-  return firstCommit + laterCommits;
-}
-
-const numCommits = 20;
-const projectSizeKB = 500;
-const changedFraction = 0.05; // 5% of the project changes, on average, per commit
-
-console.log(manualCopyStorageKB(numCommits, projectSizeKB)); // 10000
-console.log(gitStorageKB(numCommits, projectSizeKB, changedFraction)); // 975
+```mermaid
+xychart-beta
+    title "Total storage after 20 commits of a 500 KB project (KB)"
+    x-axis ["5% changed", "50% changed", "100% changed"]
+    y-axis "Storage in KB" 0 --> 10000
+    bar [975, 5250, 10000]
 ```
 
-For a 500 KB project committed 20 times with a realistic 5% of it changing each time, manual copies cost 10,000 KB while Git's content-addressed storage costs 975 KB — over 10× smaller, and the gap only widens as `numCommits` grows, because manual copies scale linearly with every save while Git scales with what actually changed.
+The 975 KB row is 500 KB for the first commit plus 19 commits x 500 KB x 5%. The last row is the important warning: the savings are not magic, they are proportional to how little changes. When every byte changes every time, Git's advantage disappears and its growth matches the zip folder's.
 
-Storage savings are only the mechanical proof. The human value is
-bigger: Git lets you know what happened, explain why it happened, return
-to a known checkpoint, and combine work that started from the same past
-state. A smaller `.git` directory is nice; a trustworthy history is the
-real product.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="storage-math"
+/>
+
+## What does "undo" become once every state is a snapshot?
+
+With manual copies, undo means "hope you kept a copy from before the mistake, then work out what else changed since". With snapshots, going back is a lookup of a past commit by its hash:
+
+```
+$ git log --oneline            # list past snapshots, newest first
+$ git checkout a1b2c3d -- greeting.txt   # restore one file from that snapshot
+```
+
+This works because every past state is fully addressable. The `checkout` unit covers which restore commands are narrow, which rewrite history, and which can discard uncommitted work; this unit only needs the point that snapshots make restoring possible.
 
 ## Failure modes
 
-- **Forgetting to `git add` a file before committing.** A very common beginner trap: the file exists and is edited, but was never staged, so `git commit` silently commits _without_ it. `git status` before every commit is the habit that prevents this — it always shows exactly what's staged vs. not.
-- **Committing generated or dependency files** (`node_modules/`, build output, `.env` with real secrets). Content-addressing means Git will happily store and diff megabytes of generated noise forever, bloating the repo permanently — a `.gitignore` has to be set up deliberately; Git doesn't infer "this doesn't belong" on its own.
-- **Treating uncommitted work as safe.** The working directory and staging area are _not_ part of the permanent history — a bad `reset`, a bad `checkout`, or just accidentally deleting a file can lose uncommitted changes with no recovery path (the safety net starts at the first commit, not before; the exact mechanics of which undo commands are recoverable and which aren't are covered in `git-teamwork/checkout`). Commit early and often; a messy history is fixable later, lost work generally isn't.
-- **Assuming a large binary file (a video, a database dump) behaves like a text file in history.** Content-addressing stores a _new full copy_ of a binary blob every time even one byte changes (there's no meaningful line-based diff for a binary), so repeatedly committing changing binaries grows the repository's size roughly linearly with every version ever committed — close to the manual-copies growth curve, not the deduplicated one — which is the reason large media/data usually lives outside Git proper (object storage, Git LFS) rather than committed directly.
+- **Forgetting to `git add` before committing.** The file is edited but never staged, so `git commit` silently leaves it out. Running `git status` before each commit shows exactly what is staged and what is not.
+- **Committing generated or dependency files** (`node_modules/`, build output, a `.env` with real secrets). Content-addressing stores them faithfully and forever, so the repository bloats permanently. A `.gitignore` has to be set up deliberately; Git does not infer what does not belong.
+- **Treating uncommitted work as safe.** The working directory and staging area are not part of permanent history. A bad reset or an accidental delete can lose uncommitted changes with no recovery path. The safety net starts at the first commit, so commit early and often; a messy history is fixable later, lost work generally is not.
+- **Expecting a large binary to behave like text.** A binary has no meaningful line-based diff, and one changed byte means a whole new blob. Repeatedly committing a changing video or database dump follows the manual-copies growth curve (the 100% row above), which is why large media usually lives outside Git proper, in object storage or Git LFS.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="working-state-risks"
+/>
 
 ## Beyond this one project
 
-The `hash-object.mjs` and `storage-estimate.mjs` examples above both used one project, one file, one changed-fraction estimate — worked cases, not the whole territory:
+Everything above used one small project, one file, and one flat "percent changed" number. That is a worked case, not the whole territory. Try extending it:
 
-- `gitStorageKB` assumes every commit changes roughly the same fraction of the project. What would you need to change about the function if, instead, the project had one enormous binary asset (say, a 400 KB video out of the 500 KB project) that gets re-exported and re-committed whole every single time, while the rest of the project barely changes — does a single flat `changedFraction` still describe that project honestly, or does the estimate need to treat that one file differently from the rest?
-- The `gitBlobHash` proof above hashed one small text file. What would you expect to happen to the hash if the file were byte-identical but saved with Windows-style line endings (`\r\n`) instead of Unix-style (`\n`) — same visible text, different bytes? Would you still expect Git to treat the two as "the same content," and what does that imply about `.gitattributes` line-ending normalization, which this unit doesn't cover but which exists specifically because of this exact edge case?
+- Suppose a 400 KB video out of the 500 KB project is re-exported and re-committed whole each time while the other 100 KB barely changes. Does one flat changed-percentage still describe the project honestly, or should the estimate treat the video separately? What would the 20-commit total look like?
+- Suppose a teammate's editor silently converts line endings on every save. From the hash recipe alone, what would you predict about the diff Git shows, and why does a feature like `.gitattributes` line-ending normalization exist?
+- Suppose Priya and Alex were not two people but two laptops of one person. Which of the three opening questions (why, which copy, when) still hurts, and which disappears?
