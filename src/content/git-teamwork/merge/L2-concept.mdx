@@ -4,141 +4,135 @@ title: "L2 — Why three-way comparison is what makes auto-merge possible"
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named the mechanics — merge base, three-way merge, conflict markers —
-without yet showing _why_ comparing three versions instead of two is what
-actually makes auto-merge possible. L2 works through that reasoning, and
-what fast-forward looks like by contrast.
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "merge",
+};
+
+L1 named the pieces — merge base, three-way merge, conflict markers —
+without showing _why_ three versions beat two. L2 works through that
+reasoning, and shows that auto-merge, conflict, and fast-forward are
+outcomes of one mechanism.
 
 <LevelIntro
   items={[
-    "Why two-way diffing can't safely auto-merge anything",
-    "The per-line decision procedure git actually runs",
-    "How auto-merge, conflict, and fast-forward are one mechanism",
+    "Why two files alone can't be merged safely",
+    "The per-line decision git makes",
+    "Auto-merge, conflict, fast-forward as one mechanism",
   ]}
 />
 
-## Why not just diff the two branches against each other?
+## Why not just compare the two branches?
 
-**If Alex's file and Sam's file are both different from each other, why
-not just compare them directly and merge whatever's different?** Because
-a direct two-way diff can't tell you _who_ changed what — it only tells
-you the two files disagree at some line. It has no way to know whether
-that disagreement means "Alex added this" or "Sam deleted this," and
-without that, it can't safely combine them. Git instead diffs each branch
-**against the shared merge base**, separately:
+**If Alex's file and Sam's file differ, why not merge whatever is
+different?** Picture two photos of the same room. One shows a new lamp,
+the other shows the sofa moved. Looking at them side by side you see two
+differences, but you cannot tell whether the lamp was _added_ in one photo
+or _removed_ in the other. You need the original photo. Git uses the
+original — the merge base — and compares each branch against it
+separately:
 
 ```mermaid
 flowchart TD
-    Base["merge base\n(TAX_RATE = 0.08)"] -->|Alex's branch| Ours["ours\n(+ null-check guard)"]
-    Base -->|Sam's branch| Theirs["theirs\n(TAX_RATE = 0.0825)"]
-    Ours --> Merge["three-way merge"]
-    Theirs --> Merge
+    Base["merge base\n(TAX_RATE = 0.08)"] -->|what Alex changed| Alex["Alex's branch\n(+ null-check guard)"]
+    Base -->|what Sam changed| Sam["Sam's branch\n(TAX_RATE = 0.0825)"]
+    Alex --> Merge["three-way merge"]
+    Sam --> Merge
+    Base --> Merge
     Merge --> Result["merged file\n(both changes applied)"]
 ```
 
-Diffing base→ours tells git exactly what Alex changed. Diffing base→theirs
-tells git exactly what Sam changed. Now git has two independent change
-lists it can compare **to each other** — and that's the actual question
-that decides auto-merge vs. conflict: do the two change lists touch the
-same lines?
+Base→Alex is Alex's change list; base→Sam is Sam's. Now git can compare
+the two change lists _to each other_, and that is the question that
+decides everything: do they touch the same lines?
 
-<Checkpoint question="Why can't a plain two-way diff between Alex's file and Sam's file tell git whether it's safe to auto-merge them?">
+<Checkpoint question="Why can't a plain two-way comparison between Alex's file and Sam's file tell git whether it is safe to merge them?">
 
-A two-way diff only reports that the two files disagree at a given line —
-it has no record of which side actually changed it and which side simply
-never touched it, because it never looked at the original. Without a
-third reference point (the merge base), git can't distinguish "Alex
-changed this and Sam left it alone" from "Sam changed this and Alex left
-it alone" from "they both changed it to different things" — and those
-three situations need three different resolutions. Comparing both sides
-independently against the same starting point is what recovers that
+A two-way comparison only shows that the files disagree at some line. It
+has no record of who changed it and who left it alone, because it never
+saw the original. Without the merge base git can't tell "Alex changed
+this and Sam didn't" from "Sam changed this and Alex didn't" from "both
+changed it differently," and those need three different outcomes.
+Comparing each side to the same starting point recovers exactly that
 missing information.
 
 </Checkpoint>
 
-## The merge procedure, as a decision per line
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="line-decision"
+/>
 
-**Walking through the base file line by line, what does git actually
-decide at each line?**
+## The decision git makes for each line
 
-Before the pseudocode, anchor the three names:
+**For one line of the base file, what does git do?** It asks two
+questions — did ours change it? did theirs change it? — and the answers
+decide everything:
 
-| Name   | Plain picture                                     | In the scenario                                    |
-| ------ | ------------------------------------------------- | -------------------------------------------------- |
-| Base   | The original photo before either person edited it | The morning commit both branches started from      |
-| Ours   | The photo from the branch you are currently on    | Sam's branch while running `git merge alex-branch` |
-| Theirs | The photo from the branch being brought in        | Alex's branch being merged into Sam's              |
-
-Git compares both edited photos against the same original. That is what
-lets it tell "only Alex touched this" from "both people disagreed here."
-
-```text
-for each line in the merge base:
-    ours_changed  = did Alex's branch change or delete this line?
-    theirs_changed = did Sam's branch change or delete this line?
-
-    if neither changed it:
-        keep the base line as-is
-    elif only ours changed it:
-        take Alex's version of this line
-    elif only theirs changed it:
-        take Sam's version of this line
-    else (both changed it):
-        if both changes are identical:
-            take that shared change (no conflict — they agreed)
-        else:
-            CONFLICT — insert both versions between markers
+```mermaid
+flowchart TD
+    Q["one line of the merge base"] --> A{"changed on\nours?"}
+    A -- no --> B{"changed on\ntheirs?"}
+    A -- yes --> C{"changed on\ntheirs?"}
+    B -- no --> K["keep the base line"]
+    B -- yes --> T["take theirs"]
+    C -- no --> O["take ours"]
+    C -- yes --> S{"same new\ncontent?"}
+    S -- yes --> Y["take it - they agreed"]
+    S -- no --> X["CONFLICT - markers"]
 ```
 
-The same logic applies to lines _inserted_ between two base lines (Alex
-adding a new line vs. Sam adding a different new line at the same spot) —
-git tracks insertions the same way, anchored to the nearest surviving base
-line, not just modifications to existing lines.
+Only one leaf of this tree needs a person. Names to keep straight:
 
-## Auto-merge vs. conflict vs. fast-forward
+| Name   | Plain picture                              | In the scenario                                    |
+| ------ | ------------------------------------------ | -------------------------------------------------- |
+| Base   | The original photo before anyone edited it | The morning commit both branches started from      |
+| Ours   | The photo from the branch you are on       | Sam's branch while running `git merge alex-branch` |
+| Theirs | The photo from the branch being brought in | Alex's branch                                      |
 
-**Are these three different mechanisms, or three outcomes of the same
-one?** The same three-way comparison produces all three outcomes — they
-differ only in what the comparison finds:
+Lines _inserted_ between two base lines are handled the same way,
+anchored to the nearest base line that survives.
 
-| Situation                                                                | What the base→ours and base→theirs diffs look like | Outcome                                                                           |
-| ------------------------------------------------------------------------ | -------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Alex adds a guard clause; Sam changes an unrelated constant              | Different lines touched on each side               | **Auto-merge** — both changes applied, no conflict                                |
-| Alex and Sam both edit `TAX_RATE`'s value, to different numbers          | Same line, different replacement content           | **Conflict** — human picks or combines                                            |
-| Alex and Sam both change `TAX_RATE` to the exact same new value          | Same line, identical replacement content           | **Auto-merge** — they agreed, nothing to ask                                      |
-| Sam's branch has made zero commits since branching; Alex has moved ahead | Sam's branch tip is literally still the merge base | **Fast-forward** — no three-way comparison even needed, branch pointer just moves |
+<Checkpoint question="Alex and Sam both independently change TAX_RATE to 0.0825 — the exact same value. Is that a conflict?">
 
-<Checkpoint question="Alex and Sam both independently change TAX_RATE to 0.0825 — the exact same value. Does git flag this as a conflict, and why or why not, given the per-line decision procedure above?">
-
-No conflict. The procedure only escalates to a human when both sides
-changed the same line to _different_ content — the last branch in the
-"both changed it" case explicitly checks whether the two changes are
-identical first. Here they are, so git treats it the same as if only one
-side had changed it: there's nothing to ask about, because there's no
-disagreement to resolve, even though two independent edits happened.
+No. The only path in the tree that reaches a human is "both changed it
+and the new content differs." When both changes are identical there is no
+disagreement to resolve, even though two independent edits happened, so
+git simply takes the shared result.
 
 </Checkpoint>
 
-## Fast-forward: the case with no comparison at all
+## One mechanism, three outcomes
 
-**If Sam's branch never actually diverged — no commits of its own — is
-there anything to merge at all?** No: if the branch being merged _into_
-hasn't moved since the two branches split, git doesn't need to combine
-anything. It just moves that branch's pointer forward to match the other
-branch's latest commit. This is why `git merge` sometimes produces a merge
-commit and sometimes doesn't — it depends entirely on whether real,
-independent history exists to reconcile. The `merge-rebase` unit goes
-deeper on fast-forward and why it is about ancestry, not about the
-absence of possible conflicts in general.
+**Are auto-merge, conflict, and fast-forward three different features?**
+No. The same comparison produces all three; only what it finds differs:
 
-## The generalizable lesson
+| Situation                                                         | What the two change lists look like | Outcome                              |
+| ----------------------------------------------------------------- | ----------------------------------- | ------------------------------------ |
+| Alex adds a guard clause; Sam changes an unrelated constant       | Different lines on each side        | **Auto-merge**: both applied         |
+| Both edit `TAX_RATE`, to different numbers                        | Same line, different content        | **Conflict**: a person decides       |
+| Both change `TAX_RATE` to the same new number                     | Same line, identical content        | **Auto-merge**: they agreed          |
+| Sam's branch has no commits since branching; Alex has moved ahead | One side's change list is empty     | **Fast-forward**: pointer just moves |
 
-**Does keeping branches short-lived actually reduce conflicts, or is that
-just conventional wisdom?** It's a direct consequence of the mechanism
-above: the more lines a branch touches, and the longer it lives before
-merging (giving other branches more time to touch the same lines too), the
-higher the odds that some line ends up in _both_ change lists with
-different content. Conflict risk isn't about how many people are working
-on a file — it's about how much line-level overlap accumulates between
-their independent change lists before either side merges.
+Fast-forward is the degenerate case: if the branch receiving the merge
+hasn't moved since the split, there is nothing to reconcile, so git slides
+its pointer forward and creates no merge commit. That is why `git merge`
+sometimes makes a merge commit and sometimes doesn't. The `merge-rebase`
+unit goes deeper.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="merge-outcomes"
+/>
+
+## Why short-lived branches conflict less
+
+**Is "keep branches short" just folklore?** It follows from the mechanism:
+the more lines a branch touches, and the longer it lives while others keep
+touching the file, the likelier some line lands in _both_ change lists
+with different content. Conflict risk comes from accumulated line-level
+overlap, not from the number of people in the repo.
