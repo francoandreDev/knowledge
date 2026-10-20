@@ -4,99 +4,147 @@ title: "L1 — How do we let many people ship to the same codebase safely? (bran
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "branching-strategies",
+};
 
 <Scenario label="Same 10-day sprint, same 6 hot files, wildly different merge day">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
       <div class="flex items-center gap-1.5"><span>🌿</span> <strong>Team Gitflow</strong> — one feature branch, open the whole 10-day sprint</div>
-      <div class="flex items-center gap-1.5"><span>🌳</span> <strong>Team Trunk</strong> — merges to trunk every single day, branch never lives past 24 hours</div>
-      <div class="flex items-center gap-1.5"><span>💥</span> <strong>Merge day</strong> — Team Gitflow hits 4 conflicting files at once; Team Trunk hit zero, all sprint</div>
+      <div class="flex items-center gap-1.5"><span>🌳</span> <strong>Team Trunk</strong> — merges to trunk every day, no branch lives past 24 hours</div>
+      <div class="flex items-center gap-1.5"><span>💥</span> <strong>Merge day</strong> — Team Gitflow hits 4 conflicting files at once; Team Trunk hit none all sprint</div>
     </div>
   </Fragment>
 
-Two teams work on the same 6 frequently-touched files — `auth.js`,
-`router.js`, `db.js`, `utils.js`, `api.js`, `types.js` — over the same
-10-day sprint. Team Gitflow opens one feature branch on day 1 and
-doesn't merge it until day 10. Team Trunk merges to the shared trunk
-every single day, so no branch ever lives more than 24 hours. On
-merge day, Team Gitflow hits 4 files that were independently modified
-on both trunk and their branch — a multi-hour conflict-resolution
-session. Team Trunk, across the entire sprint, hit **zero** conflicts.
-**Both teams wrote roughly the same amount of code, touching the same
-files. What made one team's integration painless and the other's
-genuinely difficult?**
+Two teams work on the same 6 frequently-touched files over the same
+10-day sprint. Team Gitflow opens one feature branch on day 1 and does
+not merge it until day 10. Team Trunk merges to the shared trunk every
+day. On merge day, Team Gitflow faces 4 files that were changed on both
+sides, a multi-hour conflict-resolution session. Team Trunk never hit
+one. **Both teams wrote about the same amount of code in the same files.
+What made one integration painless and the other painful?**
 
 </Scenario>
 
 <LevelIntro
   items={[
     "Trunk-based vs. gitflow, defined",
-    "Why merge conflicts track time open, not code volume",
-    "Feature flags as what makes frequent merges practical",
+    "Why conflicts track time open, not code volume",
+    "Feature flags as the enabler of frequent merges",
   ]}
 />
 
-## Before comparing strategies
+## Two ways to answer "how long may work stay apart?"
 
-- **Trunk** or **main** is the shared line of work the team treats as
-  the current integrated version.
-- A **branch** is a temporary label where someone can work without
-  immediately changing trunk.
-- A **merge** combines the branch's work back into trunk.
-- A **feature flag** is a switch in the application that can keep new
-  code inactive for users even after the code has merged.
+Trunk is the shared line everyone treats as the current integrated
+version. A branch is a temporary line of work off it. The only real
+question is how long a branch is allowed to live before it is checked
+against everyone else's work.
 
-This unit is about integration safety: how often the team brings
-separate work back together. PRs, CI, and feature flags are related
-tools, but the question here is narrower: how long does work remain
-separate before the team checks whether it still fits with everyone
-else's work?
+```mermaid
+gitGraph
+  commit id: "T1"
+  branch feat-a
+  commit id: "a1"
+  checkout main
+  commit id: "T2"
+  merge feat-a id: "day 1"
+  branch feat-b
+  commit id: "b1"
+  checkout main
+  commit id: "T3"
+  merge feat-b id: "day 2"
+```
 
-## The shape of the problem
+_Trunk-based: each branch lives about a day, so every merge is small._
 
-- Every branch that isn't merged yet is a bet that nobody else will
-  touch the same files before it lands. The longer a branch stays
-  open, the more time other people's work has to independently touch
-  the same files — and the bet gets worse the longer it's held.
-- A merge conflict isn't really about _how much_ code changed — it's
-  about how much **independent, overlapping** change accumulated
-  before anyone reconciled it. Frequent small merges reconcile
-  overlap constantly, in small pieces; infrequent large merges let
-  overlap build up and then resolve it all at once.
-- **Trunk-based development** and **gitflow** aren't just style
-  preferences — they're two different answers to "how long should
-  work stay unreconciled with everyone else's work before it gets
-  checked?" and that answer changes how much conflict resolution a
-  team actually does, in total, over a sprint.
+```mermaid
+gitGraph
+  commit id: "main"
+  branch develop
+  commit id: "dev"
+  branch feature
+  commit id: "day 1"
+  commit id: "day 4"
+  commit id: "day 7"
+  checkout develop
+  commit id: "others' work"
+  commit id: "more of others"
+  checkout feature
+  commit id: "day 10"
+  checkout develop
+  merge feature id: "merge day"
+```
 
-Strictly speaking, "both sides touched the same file" is not always a
-literal Git conflict. Git can often combine edits in different parts
-of the same file. In this unit, overlapping file touches mean
-"integration attention is more likely needed"; the `merge` unit covers
-the exact rules for when Git can and cannot combine lines
-automatically.
+_Gitflow: the feature branch lives the whole sprint, so everything
+others did on `develop` meets it in one merge. Gitflow also adds release
+and hotfix branches around `main`, which this picture leaves out._
 
-## Key terms
+|                   | Trunk-based                 | Gitflow                     |
+| ----------------- | --------------------------- | --------------------------- |
+| Branch lifetime   | Hours to a day              | Days to weeks               |
+| Conflicts surface | Early, in small pieces      | Late, all at once           |
+| Unfinished work   | Hidden behind feature flags | Hidden by the branch itself |
 
-- **Trunk-based development** — a workflow where branches are
-  extremely short-lived (often under a day), merging back to a shared
-  trunk frequently and continuously.
-- **Gitflow** — a workflow built around longer-lived branches (feature
-  branches, release branches) that stay separate from trunk for an
-  extended period before merging.
-- **Branch divergence** — how much a branch and trunk have each
-  independently changed since they last matched — this grows the
-  longer a branch stays unmerged.
-- **Feature flag** — a runtime toggle that lets incomplete or
-  in-progress code merge to trunk safely, without being active for
-  users yet — one of the tools that makes frequent trunk merges
-  practical even for work that isn't finished.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="trunk-vs-gitflow"
+/>
 
-## What this unit covers
+## Why did merge day hurt?
 
-L2 works through why merge conflict cost scales with how long a
-branch stays open, not with how much code it contains, plus what each
-strategy actually trades off. L3 implements a real simulation of both
-teams' 10-day sprint in code — the exact scenario above — and extends
-it across a range of sprint lengths to see where the two strategies'
-conflict counts actually diverge.
+Every unmerged branch is a bet that nobody else will touch the same
+files before it lands, and the bet worsens each day it is held. Branch
+divergence is how much trunk and branch have each changed independently
+since they last matched. The cost of a merge follows that divergence,
+which grows with time, not with the number of lines written.
+
+```mermaid
+xychart-beta
+    title "Overlap that can pile up (simplified)"
+    x-axis "Days a branch stays open" [1, 3, 5, 7, 10]
+    y-axis "Files touched on both sides" 0 --> 6
+    line [0.5, 1.5, 2.5, 3.5, 4]
+```
+
+Strictly, "both sides touched the same file" is not always a literal Git
+conflict, because Git can combine edits in different regions. In this
+unit it means integration attention is more likely needed; the `merge`
+unit covers the exact rules.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="branch-divergence"
+/>
+
+## How can unfinished work live on trunk?
+
+If trunk gets merges every day, half-built features land there too. A
+feature flag is a runtime switch that keeps merged code inactive for
+users. The code is integrated; the behavior is not released. Without
+flags, trunk-based just means shipping unfinished work.
+
+```mermaid
+flowchart LR
+    M["Code merged to trunk"] --> F{"Flag on?"}
+    F -->|"no"| Old["Users see current behavior"]
+    F -->|"yes"| New["Users see new behavior"]
+```
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="feature-flags"
+/>
+
+## What the next levels cover
+
+L2 works through why delayed discovery makes conflicts costly and how to
+pick a strategy for a given team. L3 compares both teams' sprints in a
+simple model and finds where the gap stops growing.

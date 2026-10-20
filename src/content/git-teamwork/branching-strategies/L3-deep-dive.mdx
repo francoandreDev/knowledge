@@ -1,178 +1,152 @@
 ---
-title: "L3 — Simulating both teams' sprint, and finding where the strategies actually diverge"
+title: "L3 — Comparing both teams' sprints, and finding where the strategies actually diverge"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "branching-strategies",
+};
 
 <Scenario label="Same file set, same sprint length, two different merge cadences">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🌳</span> <strong>Trunk-based</strong> — merges every day; each merge only risks that day's overlap</div>
-      <div class="flex items-center gap-1.5"><span>🌿</span> <strong>Gitflow</strong> — one merge at the end; risks the whole sprint's accumulated overlap at once</div>
-      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — run the identical 10-day sprint through both strategies and count conflicts</div>
+      <div class="flex items-center gap-1.5"><span>🌳</span> <strong>Trunk-based</strong> — merges daily; each merge risks only that day's overlap</div>
+      <div class="flex items-center gap-1.5"><span>🌿</span> <strong>Gitflow</strong> — one merge at the end; risks the whole sprint's overlap at once</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — run the identical sprint through both and count conflicts</div>
     </div>
   </Fragment>
 
-**Before running the simulation: both teams draw from the same 6 hot
-files, with trunk and the feature work each independently touching one
-file per day. If trunk-based merges daily and gitflow merges once at
-the end, which strategy do you expect to accumulate more _total_
-conflicted files across the 10-day sprint — and why might the answer
-depend on how long the sprint actually is?**
+Both teams draw from the same 6 hot files. Each day, trunk and the
+feature work each touch one file. If trunk-based merges daily and
+gitflow merges once at the end, **which accumulates more total
+conflicted files over 10 days, and why might the answer change with
+sprint length?**
 
 </Scenario>
 
 <LevelIntro
   items={[
     "A daily file-touch model of overlap risk",
-    "Simulating trunk-based and gitflow on the same sprint",
-    "How the conflict gap changes with sprint length",
+    "Same events, different detection windows",
+    "Where the gap stops growing",
   ]}
 />
 
-## Modeling both teams' work as daily file touches
+## What does the model count?
 
-This is not a simulator of Git's exact line-merge algorithm. It is a
-small model of overlap risk and merge cadence: "how often do both
-sides touch the same limited set of hot files before they reconcile?"
-That is enough to study why long-lived branches can make conflicts
-arrive in one large batch, even though real Git may auto-merge some
-same-file edits cleanly.
+This is not a simulator of Git's line-merge algorithm. It is a small
+model of overlap risk and merge cadence: how often do both sides touch
+the same few hot files before they reconcile? Real Git may merge some
+same-file edits cleanly, so read the counts as relative pressure, not
+predictions. The `interactives.json` demo on this unit runs the exact
+model (fixed random seed, 6 files, one touch per side per day), and
+you can drag the sprint length to reproduce every number below.
 
-```js
-function mulberry32(seed) {
-  return function () {
-    seed |= 0;
-    seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+The two teams see the identical sequence of random file touches. Only
+the detection window differs:
 
-const hotFiles = [
-  "auth.js",
-  "router.js",
-  "db.js",
-  "utils.js",
-  "api.js",
-  "types.js",
-];
-
-function pickFile(rand) {
-  return hotFiles[Math.floor(rand() * hotFiles.length)];
-}
+```mermaid
+flowchart LR
+    T["Same daily touches: trunk file, branch file"] --> D["Trunk-based: compare each day's pair, then discard"]
+    T --> G["Gitflow: collect all days into two sets, compare once at the end"]
+    D --> DC["Counts days where both picked the same file"]
+    G --> GC["Counts files touched by both sides at any time"]
 ```
 
-Each simulated day, trunk (other developers' merged work) and the
-feature work each independently touch one randomly-chosen hot file —
-this models realistic overlap risk without assuming either side
-deliberately targets the same file.
+<Checkpoint question="Both teams saw exactly the same random file touches. Why does the model give trunk-based 0 conflicts and gitflow 4 over 10 days?">
 
-## Trunk-based: merge every day, conflicts resolved immediately
-
-```js
-function simulateTrunkBased(rand, days) {
-  let conflictedMerges = 0;
-  for (let d = 0; d < days; d++) {
-    const trunkFile = pickFile(rand);
-    const branchFile = pickFile(rand);
-    if (trunkFile === branchFile) conflictedMerges++;
-  }
-  return conflictedMerges;
-}
-
-const rand1 = mulberry32(42);
-console.log(simulateTrunkBased(rand1, 10));
-// 0
-```
-
-Verified: with seed 42, trunk-based hits **zero** conflicted merges
-across the full 10-day sprint. Each day's merge only ever risks that
-single day's overlap — a 1-in-6 chance per day — so most days simply
-don't conflict at all.
-
-## Gitflow: one branch, one merge, the whole sprint's overlap at once
-
-```js
-function simulateGitflow(rand, days) {
-  const trunkTouches = new Set();
-  const branchTouches = new Set();
-  for (let d = 0; d < days; d++) {
-    trunkTouches.add(pickFile(rand));
-    branchTouches.add(pickFile(rand));
-  }
-  let conflictedFiles = 0;
-  for (const f of branchTouches) {
-    if (trunkTouches.has(f)) conflictedFiles++;
-  }
-  return conflictedFiles;
-}
-
-const rand2 = mulberry32(42);
-console.log(simulateGitflow(rand2, 10));
-// 4
-```
-
-Verified: with the identical seed and the identical 10-day file-touch
-sequence, gitflow's single end-of-sprint merge hits **4** conflicted
-files. Same underlying random draws as the trunk-based run — the only
-difference is _when_ the overlap gets checked. Checking once, after 10
-days of accumulation, surfaces conflicts that daily merges would have
-caught and resolved individually, one file at a time.
-
-<Checkpoint question="Both simulateTrunkBased and simulateGitflow ran on the exact same mulberry32(42) sequence — the same random file touches happened in both runs. Why did trunk-based get 0 conflicts and gitflow get 4, if the underlying events were identical?">
-
-Because the two functions are counting different things from the same
-raw events. `simulateTrunkBased` checks for overlap once per day, in
-isolation — each day's trunk touch and branch touch are compared only
-against each other, then discarded, so the only way to score a
-conflict is for that single day's two random picks to land on the
-same file (a 1-in-6 chance). `simulateGitflow` instead accumulates
-every file either side touched across all 10 days into two sets, then
-compares the sets at the end — so a trunk touch on day 1 and a branch
-touch on day 7 can still register as a conflict, even though they were
-never "compared" against each other on any single day. The events are
-identical; what differs is the window each strategy uses to detect
-overlap between them.
+They count different things from the same raw events. Trunk-based
+compares each day's trunk touch only with that day's branch touch, so it
+scores a conflict only when the two random picks land on the same one of
+6 files that day, a 1-in-6 chance. Gitflow pools every touch from all 10
+days into two sets and compares them at the end, so a trunk touch on day
+1 and a branch touch on day 7 can still collide even though they were
+never compared on any single day. The events are identical; the window
+used to detect overlap is what differs.
 
 </Checkpoint>
 
-## Extend it: does the gap keep widening at longer sprint lengths?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="detection-window"
+/>
 
-```js
-for (const days of [5, 10, 20, 30]) {
-  const r1 = mulberry32(42);
-  const r2 = mulberry32(42);
-  console.log(days, simulateTrunkBased(r1, days), simulateGitflow(r2, days));
-}
-// 5  -> trunk: 0, gitflow: 1
-// 10 -> trunk: 0, gitflow: 4
-// 20 -> trunk: 2, gitflow: 6
-// 30 -> trunk: 5, gitflow: 6
+## Does the gap keep widening as sprints get longer?
+
+**If longer branches are worse, should the gap grow forever?** No, and
+the reason is in how each total is built.
+
+| Sprint days | Trunk-based conflicts | Gitflow conflicts |
+| ----------- | --------------------- | ----------------- |
+| 5           | 0                     | 1                 |
+| 10          | 0                     | 4                 |
+| 20          | 2                     | 6                 |
+| 30          | 5                     | 6                 |
+
+```mermaid
+xychart-beta
+    title "Total conflicts by sprint length (model)"
+    x-axis "Sprint days" [5, 10, 20, 30]
+    y-axis "Conflicts" 0 --> 7
+    bar [1, 4, 6, 6]
+    line [0, 0, 2, 5]
 ```
 
-Verified: gitflow's conflict count is bounded by the number of hot
-files (6 total) — once the branch has touched most of them, there's
-no more room for the overlap count to grow, since `conflictedFiles`
-can never exceed `hotFiles.length`. Trunk-based has no such ceiling —
-its count is a sum across independent daily checks, so it keeps
-growing the longer the sprint runs. **At 30 days, the two strategies'
-totals are nearly equal (5 vs. 6)** — the trunk-based advantage is
-real and large at realistic sprint lengths (5–10 days), but it isn't a
-law of nature; it's a consequence of resolving conflicts in small,
-frequent pieces rather than one large one, and that advantage
-specifically shows up when branches would otherwise stay open for a
-meaningful fraction of the file set's total exposure.
+_Bars: gitflow. Line: trunk-based._
+
+Gitflow's count is capped at the number of hot files, 6, because it
+counts distinct files. Trunk-based sums independent daily checks, so it
+has no ceiling and keeps climbing. By 30 days the totals are nearly
+equal (5 vs. 6). The advantage is large at realistic sprint lengths and
+fades once a long branch has already touched nearly every hot file.
+That fade belongs to the model's simplification (a fixed small file
+set), not a law about real repositories: with hundreds of hot files the
+ceiling would sit far away.
+
+<Checkpoint question="At 30 days the model shows 5 vs. 6 conflicts. Does that mean long branches are fine?">
+
+No. The model counts conflicted files, and gitflow saturates because
+there are only 6 files to conflict on. It says nothing about how hard
+each conflict is to resolve, and a conflict from a month-old change is
+far harder to untangle than five found one day after the edit. The
+count converging while the per-conflict cost diverges is exactly the
+kind of thing a single metric hides.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="gap-ceiling"
+/>
 
 ## Failure modes
 
-| Failure mode                                                                   | What it gets wrong                                                                                                                            |
-| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Assuming trunk-based always means zero conflicts                               | It means small, frequent conflicts resolved immediately — not the absence of conflict, just a different distribution of it                    |
-| Adopting trunk-based without feature flags for incomplete work                 | Code merged to trunk before it's finished needs a way to stay inactive for users — without flags, trunk-based just means shipping broken code |
-| Assuming a longer branch is only risky because of _more code_                  | Two branches with identical code volume can have wildly different conflict risk depending on how long they stayed open, not how big they are  |
-| Treating gitflow's isolation as strictly worse in every case                   | Work that genuinely shouldn't be visible on trunk yet (security-sensitive changes, major rewrites) benefits from real isolation               |
-| Picking a strategy without considering the team's actual file-overlap patterns | A team where different people rarely touch the same files gets little benefit from either strategy's conflict-avoidance properties            |
+| Failure mode                                 | What it gets wrong                                                                                             |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Assuming trunk-based means zero conflicts    | It means small, early conflicts, a different distribution of the same overlap                                  |
+| Trunk-based without feature flags            | Unfinished code on trunk with no way to keep it inactive is just shipping broken code                          |
+| Blaming branch size alone                    | Two branches of equal size differ wildly in risk depending on how long they stayed open and where they touched |
+| Treating gitflow's isolation as always worse | Security-sensitive work or a major rewrite may need real isolation                                             |
+| Ignoring the team's actual overlap pattern   | Where people rarely touch the same files, neither strategy buys much                                           |
+
+## The worked example is a case, not the whole territory
+
+The 10-day, 6-file sprint is one point in a large space. Try extending it
+yourself:
+
+- What changes if there are 60 hot files instead of 6? Where would
+  gitflow's ceiling move, and would the trunk-based advantage last
+  longer?
+- What if the team merges every 3 days instead of daily or never? Where
+  does that land between the two extremes?
+- What if one of the files is touched by trunk every single day, such as
+  a shared config? How does that change which strategy hurts more?
+- What if the two sides' work is coordinated, so they avoid each other's
+  files? Does the model still say anything useful?
