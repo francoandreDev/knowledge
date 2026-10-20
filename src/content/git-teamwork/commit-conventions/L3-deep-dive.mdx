@@ -1,177 +1,175 @@
 ---
-title: "L3 — Implementing bisect's binary search, then breaking it with a bundled commit"
+title: "L3 — Tracing bisect on an atomic and a bundled history, and where the idea bends"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "commit-conventions",
+};
 
 <Scenario label="Same bug, two different commit histories">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
       <div class="flex items-center gap-1.5"><span>✅</span> <strong>Atomic history</strong> — 16 commits, one logical change each</div>
       <div class="flex items-center gap-1.5"><span>📦</span> <strong>Bundled history</strong> — 8 atomic commits, plus 1 mega-commit covering what should have been 8 more</div>
-      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — run real bisect logic against both, and measure the difference</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — trace bisect on both and compare what it hands back</div>
     </div>
   </Fragment>
 
-**Before reading the code below, predict: bisect on 16 atomic commits
-should take about `log2(16) = 4` tests to find the exact culprit. If 8
-of those 16 logical changes get bundled into a single mega-commit
-(leaving 9 total commits to search), roughly how many tests will
-bisect need — and will its answer still be as useful?**
+**Predict before reading on: bisect on 16 atomic commits needs about
+`log2(16) = 4` tests. If 8 of those 16 changes get bundled into one
+mega-commit (9 commits total), roughly how many tests will bisect need, and
+will its answer still be as useful?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Bisect's binary search, implemented in real code",
-    "Running it against an atomic vs. a bundled history",
-    "Where a bundled commit's step-count savings stop mattering",
+    "A step-by-step bisect trace on both histories",
+    "Why fewer steps is not a better outcome",
+    "Where the atomic rule bends or breaks",
   ]}
 />
 
-## Implementing bisect as binary search
+## What does bisect do on the atomic history?
 
-Before the code, trace the idea by hand. Suppose commits `c0` through
-`c7` are in order, `c0` is known good, and `c7` is bad:
+Commits `c0` to `c15`, with `c0` known good, `c15` bad, and the bug introduced
+at `c11`. Each step tests the middle of the remaining range:
 
-| Step | Remaining possible first-bad range | Test midpoint | If midpoint is good | If midpoint is bad |
-| ---- | ---------------------------------- | ------------- | ------------------- | ------------------ |
-| 1    | `c1` through `c7`                  | `c3`          | Search `c4..c7`     | Search `c1..c3`    |
-| 2    | Half of the previous range         | midpoint      | Keep upper half     | Keep lower half    |
+| Step | Remaining range | Commit tested | Result | Next range   |
+| ---- | --------------- | ------------- | ------ | ------------ |
+| 1    | `c0`..`c15`     | `c7`          | good   | `c8`..`c15`  |
+| 2    | `c8`..`c15`     | `c11`         | bad    | `c8`..`c11`  |
+| 3    | `c8`..`c11`     | `c9`          | good   | `c10`..`c11` |
+| 4    | `c10`..`c11`    | `c10`         | good   | `c11`        |
 
-In the code, `lo` and `hi` are array indexes marking the current
-edges of that shrinking search range. They are not commit hashes
-themselves; they are positions in the `commits` array.
+Four steps, matching `log2(16)`, and the answer is `c11`. Because every
+commit is one logical change, `c11` is not just where the bug shows up: it
+_is_ the change that caused it.
 
-```js
-// commits: an array of commit ids, oldest first
-// isBad(commitId): simulates "run tests at this commit" -> true if broken
-function bisect(commits, isBad) {
-  let lo = 0; // known good
-  let hi = commits.length - 1; // assumed bad (the current, broken state)
-  let steps = 0;
-  while (lo < hi) {
-    const mid = Math.floor((lo + hi) / 2);
-    steps++;
-    if (isBad(commits[mid])) {
-      hi = mid;
-    } else {
-      lo = mid + 1;
-    }
-  }
-  return { firstBadCommit: commits[lo], steps };
-}
-```
+<Checkpoint question="Bisect returned c11 after 4 steps. Is any further investigation needed to know what caused the bug?">
 
-This is genuinely how `git bisect` works underneath: repeatedly ask
-"good or bad?" at the midpoint of the remaining range, and narrow
-based on the answer, exactly like binary-searching a sorted array.
-
-## Atomic history: 16 commits, bug introduced at commit 11
-
-```js
-const atomicCommits = Array.from({ length: 16 }, (_, i) => `c${i}`);
-const bugIntroducedAt = 11;
-
-function isBadAtomic(commitId) {
-  return atomicCommits.indexOf(commitId) >= bugIntroducedAt;
-}
-
-console.log(bisect(atomicCommits, isBadAtomic));
-// { firstBadCommit: "c11", steps: 4 }
-```
-
-Verified: bisect finds `c11` — the exact commit that introduced the
-bug — in **4 steps**, matching `log2(16) = 4` exactly. Because each
-commit is atomic, "the commit bisect points to" and "the change that
-caused the bug" are the same thing. There's nothing left to search.
-
-<Checkpoint question="In the atomic run above, bisect returned firstBadCommit: 'c11' after 4 steps. Is any further investigation needed to know exactly what caused the bug, or is the search over?">
-
-The search is over. Because every commit in `atomicCommits` holds exactly
-one logical change, `c11` isn't just "the commit where the bug first shows
-up" — it's the actual change that caused it. There's no diff left to read
-line by line and no ambiguity about which part of `c11` is responsible,
-because `c11` doesn't contain any unrelated changes to sort through. That's
-the specific payoff atomicity buys: bisect's output and the answer to "what
-broke it" collapse into the same thing.
+No. `c11` holds exactly one logical change, so there is no diff to read line
+by line and no ambiguity about which part is responsible. Atomicity makes
+bisect's output and the answer to "what broke it" the same thing.
 
 </Checkpoint>
 
-## Bundled history: the same 16 logical changes, 8 of them merged into one commit
+## What does it do on the bundled history?
 
-```js
-const bundledCommits = [
-  "c0",
-  "c1",
-  "c2",
-  "c3",
-  "c4",
-  "c5",
-  "c6",
-  "c7",
-  "megaCommit",
-];
-// megaCommit bundles what should have been 8 separate atomic commits (logical changes 8-15)
-// the bug (originally at logical position 11) is somewhere inside it
+The same 16 changes, but changes 8 to 15 live inside one `megaCommit`. The
+history is `c0`..`c7` plus `megaCommit` (9 commits), and the bug is somewhere
+inside the mega-commit.
 
-function isBadBundled(commitId) {
-  return bundledCommits.indexOf(commitId) >= 8; // megaCommit tests "bad"
-}
+| Step | Remaining range    | Commit tested | Result | Next range         |
+| ---- | ------------------ | ------------- | ------ | ------------------ |
+| 1    | `c0`..`megaCommit` | `c4`          | good   | `c5`..`megaCommit` |
+| 2    | `c5`..`megaCommit` | `c6`          | good   | `c7`..`megaCommit` |
+| 3    | `c7`..`megaCommit` | `c7`          | good   | `megaCommit`       |
 
-console.log(bisect(bundledCommits, isBadBundled));
-// { firstBadCommit: "megaCommit", steps: 3 }
-```
+Three steps, one fewer than the atomic run, landing on `megaCommit`. Bisect
+cannot search inside a single commit, so the 8 bundled changes still have to
+be sorted out by hand.
 
-Verified: bisect correctly finds `megaCommit` in **3 steps** — bisect
-itself still works exactly as designed. But `megaCommit` bundles 8
-unrelated logical changes, and bisect has no way to search _inside_
-a single commit. Whichever of those 8 changes actually caused the bug
-still has to be found by manually reading the diff — the predicted
-outcome from the scenario above: fewer steps to find the commit,
-but the commit's answer isn't actually actionable on its own.
+<Checkpoint question="The bundled run finished in 3 steps instead of 4. Does that make it more useful? Why or why not?">
 
-<Checkpoint question="Bundled history found the culprit in 3 steps instead of the atomic history's 4 — fewer tests. Does that make the bundled history's bisect run more useful overall? Why or why not?">
-
-No — fewer steps to find the commit is a shallower win than it looks,
-because the step count only measures how fast bisect narrows the _search
-space_, not how much work is left once it stops. The bundled run's 3 steps
-land on `megaCommit`, which still contains 8 unrelated logical changes —
-exactly the manual diff-reading bisect was supposed to replace has to
-happen anyway, just starting one level later. The atomic run's 4 steps look
-"slower" but end with nothing left to do. Step count and actionability are
-different axes, and a bundled history trades a small amount on the first
-for a large loss on the second.
+No. Step count measures how fast the search space shrinks, not how much work
+is left when bisect stops. The 3 steps land on a commit that still holds 8
+unrelated changes, so the manual diff-reading bisect was meant to replace
+starts there. The atomic run's 4 steps look slower but leave nothing to do.
+Step count and actionability are different axes.
 
 </Checkpoint>
 
-## Extend it: what if the history were 64 commits instead of 16?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="steps-vs-actionability"
+/>
 
-**Using the same atomic-commit setup, how many steps would bisect need
-across 64 commits instead of 16?** Predict from the pattern first —
-`log2(64) = 6` — then verify:
+## How does the cost grow with history size?
 
-```js
-const commits64 = Array.from({ length: 64 }, (_, i) => `c${i}`);
-const bugAt64 = 50;
-console.log(bisect(commits64, (id) => commits64.indexOf(id) >= bugAt64));
-// { firstBadCommit: "c50", steps: 6 }
+**Does a longer history make bisect painful?** Not in steps. The cost is
+`ceil(log2(n))`, so even a very long history needs only a handful of tests:
+
+```mermaid
+xychart-beta
+    title "Bisect steps by number of commits"
+    x-axis ["2", "4", "8", "16", "32", "64", "128", "256"]
+    y-axis "Tests needed" 0 --> 9
+    bar [1, 2, 3, 4, 5, 6, 7, 8]
 ```
 
-Verified: **6 steps**, exactly `log2(64)`. Quadrupling the history size
-from 16 to 64 only added 2 more tests, not 4x as many — this is the
-concrete payoff of binary search that makes bisect practical even
-across years of commit history, as long as the commits stay atomic
-enough for its answer to mean something.
+Going from 16 to 64 commits adds just 2 tests. The interactive demo for
+this unit lets you drag the history size and watch the curve. What does not
+shrink with a good algorithm is the cost of each test: if running the suite
+takes 20 minutes, 8 steps is still nearly three hours, which is another
+reason the answer should be exact rather than approximate.
+
+## What breaks when a commit is atomic but not buildable?
+
+**Bisect tests whole snapshots. What if the snapshot at the midpoint does
+not even compile?** Then "good or bad?" has no honest answer, because the
+test fails for an unrelated reason. This is the flip side of atomicity:
+each commit must be a coherent, working state, not just one idea.
+
+```mermaid
+flowchart TD
+    A["Bisect checks out midpoint"] --> B{"Does the project\nbuild and run tests?"}
+    B -- yes --> C["Answer good or bad"]
+    B -- no --> D["Skip this commit\n(git bisect skip)"]
+    D --> E["Pick a neighbouring commit"]
+    E --> A
+    C --> F["Range halves"]
+```
+
+A history of half-finished atomic steps (a function added in one commit,
+the caller fixed three commits later) forces skips, and enough skips make
+bisect return a range of suspects instead of one commit.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="bisect-prerequisites"
+/>
+
+## Where the rule bends
+
+| Situation                                                          | What it teaches                                                                       |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| Atomic does not mean small: a rename across 40 files is one change | Coherence is the test, not line count                                                 |
+| A fix and its test belong together                                 | Splitting them leaves a commit that is not complete on its own                        |
+| One file holds two unrelated edits                                 | Stage hunks separately (`git add -p`) so each commit stays one idea                   |
+| Messy work in progress                                             | Tidy before sharing, so the shared history is atomic even if your private one was not |
+
+The worked example above is a case, not the whole territory. It had one bug
+and a clean split. Try extending it:
+
+- **What if the bug needs two commits to appear** (a flag added in `c8`, read
+  in `c11`)? Which commit does bisect blame, and is that fair?
+- **What if the mega-commit were a pure formatting change** that the bug never
+  touched? Would bundling still hurt?
+- **What if the team squashes every pull request into one commit?** When is
+  that atomic, and when is it a mega-commit with a nicer label?
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="atomic-boundaries"
+/>
 
 ## Failure modes
 
-| Failure mode                                                                | What it gets wrong                                                                                                         |
-| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Assuming bisect finding a commit means the investigation is done            | It's only done if that commit is atomic — a bundled commit still needs a manual search inside it                           |
-| Batching a work session into one commit for convenience                     | Feels efficient in the moment, but destroys the specificity that makes bisect's answer, code review, and revert all useful |
-| Writing a vague message because the commit already speaks for itself        | Someone reading `git log` later shouldn't have to open every diff just to know what kind of change each commit represents  |
-| Treating conventional commit types as a formatting rule with no real effect | The types are what makes scanning history fast — skipping them just moves that cost onto every future reader               |
-| Assuming atomic commits mean smaller commits, always                        | Atomic means "one logical change," which can still be large — the point is coherence, not commit size                      |
+| Failure mode                                                     | What it gets wrong                                                     |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Assuming "bisect found a commit" means the investigation is done | Only true if that commit is atomic                                     |
+| Batching a work session into one commit for convenience          | Feels efficient, destroys what makes bisect, review, and revert useful |
+| Writing a vague message because "the diff speaks for itself"     | Every future reader pays to open each diff                             |
+| Treating types as a formatting rule with no effect               | The types are what make history scannable and release notes derivable  |
+| Equating atomic with small                                       | Atomic means one logical change, which can still be large              |
+| Atomic commits that leave the build broken                       | Bisect has to skip them and loses precision                            |

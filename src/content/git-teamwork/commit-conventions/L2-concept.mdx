@@ -4,60 +4,65 @@ title: "L2 — What bisect actually finds, and why atomicity is what makes that 
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named the problem: `git bisect` correctly finds a commit, but a bundled
-commit still leaves a manual search inside it. L2 works out exactly how
-bisect's search narrows down to that commit, and precisely why atomicity is
-what turns "bisect found it" into "the investigation is done."
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "commit-conventions",
+};
+
+L1 named the problem: `git bisect` finds a commit, but a bundled commit
+leaves a manual search inside it. L2 works out how bisect narrows down to
+that commit, what a good message adds, and exactly why atomicity turns
+"bisect found it" into "the investigation is done."
 
 <LevelIntro
   items={[
     "How bisect's binary search narrows a range",
-    "What each conventional commit type signals",
-    "Why atomic commits are what makes bisect's answer actionable",
+    "What each commit type and message signals",
+    "Why atomic commits make every later task easier",
   ]}
 />
 
-## Bisect narrows the range, one test at a time
+## How many commits does bisect really have to test?
 
-**If there are 16 commits between the last known-good state and now,
-how many does `git bisect` actually have to test to find the culprit?**
-Far fewer than 16 — it eliminates half the remaining candidates at
-every step, the same binary search used to find a name in a sorted
-list.
+**If 16 commits sit between the last known-good state and now, does bisect
+test all 16?** No. It halves the remaining candidates at every step, like
+finding a name in a sorted list.
 
 ```mermaid
 flowchart TD
     A["16 candidate commits"] --> B["Test the midpoint"]
-    B -->|"Bad"| C["Culprit is in the\nfirst half — 8 commits"]
-    B -->|"Good"| D["Culprit is in the\nsecond half — 8 commits"]
+    B -->|"Bad"| C["Culprit is in the\nfirst half: 8 commits"]
+    B -->|"Good"| D["Culprit is in the\nsecond half: 8 commits"]
     C --> E["Test that half's midpoint"]
     D --> E
-    E --> F["...repeats, halving\neach time..."]
-    F --> G["Exactly 1 commit left:\nthe answer"]
+    E --> F["...halve again..."]
+    F --> G["1 commit left:\nthe answer"]
 ```
 
-Each test eliminates half the remaining commits, so the number of
-tests needed grows only logarithmically with history size — doubling
-the number of commits between good and bad adds just one more test,
-not twice as many.
+Doubling the history adds exactly one test. That is why bisect stays
+practical across years of commits.
 
-<Checkpoint question="History grows from 16 commits to 128 commits between the last known-good state and now. Roughly how many more tests does git bisect need, and why isn't it 8x as many?">
+<Checkpoint question="History grows from 16 commits to 128 between the last known-good state and now. Roughly how many more tests does bisect need, and why isn't it 8 times as many?">
 
-Only 3 more tests — 4 for 16 commits (`log2(16)`) versus 7 for 128 commits
-(`log2(128)`). Each test halves the remaining range regardless of how large
-that range currently is, so the test count grows with the _exponent_ of the
-history size, not the size itself. That's the whole point of binary search:
-an 8x larger haystack costs a fixed handful of extra tests, not a
-proportional increase in work.
+Only 3 more: 4 tests for 16 commits versus 7 for 128. Each test halves the
+remaining range no matter how large it is, so the count grows with the
+exponent of the history size, not with the size. An 8x bigger haystack costs
+a few extra tests, not 8x the work.
 
 </Checkpoint>
 
-## Conventional commit types
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="bisect-binary-search"
+/>
 
-**Once bisect points at one commit, what makes that commit fast to
-understand?** A message that states plainly what kind of change it is,
-before anyone has to open the diff:
+## What does a commit type tell you before you open the diff?
+
+**Once bisect points at one commit, what makes it fast to understand?** A
+message that states what kind of change it is:
 
 | Type       | What it means                                       |
 | ---------- | --------------------------------------------------- |
@@ -68,69 +73,88 @@ before anyone has to open the diff:
 | `test`     | Adding or changing tests, no production code change |
 | `chore`    | Tooling, dependencies, or other maintenance work    |
 
-A message like `fix: correct off-by-one in pagination` tells a reader
-exactly what to expect from the diff before they open it — a
-`chore: update eslint config` commit sitting next to it is
-unmistakably a different kind of change, at a glance.
+An optional scope narrows it (`fix(cart): handle empty total`), and a `!`
+before the colon (`feat(api)!: drop v1 endpoints`) flags a breaking change
+so release tooling can see it. The type is a promise about the diff: a
+`refactor` that changes behavior is a lie that misleads every later reader.
 
-## The team convention, not just the syntax
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="conventional-types"
+/>
 
-Conventional commit syntax helps, but the real convention is a shared
-promise about shape:
+## What separates a useful message from a vague one?
 
-| Team habit                               | Why it matters later                                                        |
-| ---------------------------------------- | --------------------------------------------------------------------------- |
-| One idea per commit                      | Bisect, review, and revert can point to one coherent change                 |
-| Specific description, not vague activity | `fix: reject expired invite token` is searchable; `updates` is not          |
-| Type matches intent                      | A behavior fix should be `fix`, not hidden in `chore` or `refactor`         |
-| Split unrelated work                     | Formatting, dependency bumps, feature logic, and bug fixes age better apart |
+**Two commits both start with `fix:`. Why is one searchable and the other
+not?**
 
-## Why atomic commits are what makes bisect's answer actionable
+| Team habit                               | Why it matters later                                                    |
+| ---------------------------------------- | ----------------------------------------------------------------------- |
+| One idea per commit                      | Bisect, review, and revert can point at one coherent change             |
+| Specific description, not vague activity | `fix: reject expired invite token` is searchable; `fix: updates` is not |
+| Type matches intent                      | A behavior fix belongs under `fix`, not hidden in `chore`               |
+| Split unrelated work                     | Formatting, dependency bumps, and logic age better apart                |
 
-**If bisect correctly points at the right commit, why isn't that
-enough on its own?** Because "the right commit" is only as useful an
-answer as what that commit actually contains. A commit bundling twelve
-unrelated changes gives bisect exactly one thing to point at, and
-finding _which one of the twelve_ actually caused the problem is a
-manual search all over again — the same manual search bisect was
-supposed to replace.
+The first line should finish the sentence "this commit will..." in the
+imperative mood, short enough to read in a one-line log. Details of _why_
+belong in the body below it.
 
-|                                 | Atomic commits                    | Bundled commits                                                           |
-| ------------------------------- | --------------------------------- | ------------------------------------------------------------------------- |
-| What bisect points to           | One logical change                | One commit containing several unrelated changes                           |
-| Work left after bisect finds it | None — the commit _is_ the change | Manually reading the whole diff to isolate the actual culprit             |
-| Commit message's usefulness     | Describes exactly what changed    | Vague ("various fixes"), because it's covering unrelated ground           |
-| Reverting just the bad change   | `git revert` on that one commit   | Not possible cleanly — the good changes in the same commit come along too |
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="message-habits"
+/>
 
-<Checkpoint question="A teammate says: 'bisect pointed straight at the commit, so we're done — the investigation is over.' Under what condition is that actually true, and under what condition is it false?">
+## Why does atomicity decide whether bisect's answer is actionable?
 
-It's true only if that commit is atomic — one logical change, so the commit
-_is_ the change bisect was looking for. It's false the moment the commit
-bundles unrelated work: bisect's job (finding which commit) and the team's
-job (finding which line inside a 14-file diff caused the bug) are two
-different searches, and bisect only ever solves the first one. "Bisect found
-a commit" and "the investigation is done" are the same statement only when
-atomicity holds — otherwise the manual diff-reading that bisect was supposed
-to replace just moves one level deeper.
+**If bisect points at the right commit, why isn't that enough?** Because
+the answer is only as useful as what the commit contains. A commit bundling
+twelve unrelated changes gives bisect one thing to point at, and finding
+which of the twelve broke things is the manual search bisect was meant to
+replace.
+
+|                                 | Atomic commits                   | Bundled commits                                       |
+| ------------------------------- | -------------------------------- | ----------------------------------------------------- |
+| What bisect points to           | One logical change               | One commit holding several unrelated changes          |
+| Work left after bisect finds it | None: the commit _is_ the change | Read the whole diff to isolate the culprit            |
+| Commit message                  | Describes exactly what changed   | Vague, because it covers unrelated ground             |
+| Reverting just the bad change   | `git revert` on that one commit  | Not cleanly possible: the good changes come along too |
+
+<Checkpoint question="A teammate says: 'bisect pointed straight at the commit, so we're done.' When is that true, and when is it false?">
+
+It is true only when that commit is atomic, so the commit _is_ the change
+bisect was looking for. It is false once the commit bundles unrelated work:
+bisect's job (which commit) and the team's job (which line inside a 14-file
+diff) are two different searches, and bisect only solves the first. The
+manual diff-reading just moves one level deeper.
 
 </Checkpoint>
 
-## The generalizable lesson
+```mermaid
+stateDiagram-v2
+    [*] --> BisectPointsAtCommit
+    BisectPointsAtCommit --> Done: commit is atomic
+    BisectPointsAtCommit --> ReadDiff: commit is a bundle
+    ReadDiff --> Done: found the guilty change
+    Done --> [*]
+```
 
-**Is this only useful for finding bugs?** No — the same shape shows up
-anywhere someone has to later understand or undo a specific change:
-code review (a reviewer can evaluate one logical change at a time
-instead of an undifferentiated pile), reverting a bad deploy, or just
-reading `git log` to understand what happened and why. Atomicity and
-clear messages aren't really about the moment of committing at all —
-they're about making every later reader's job possible.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="atomic-payoff"
+/>
 
-| Later task          | What good commits make easier                                                     |
-| ------------------- | --------------------------------------------------------------------------------- |
-| Code review         | The reviewer can ask "is this one change correct?" instead of untangling a pile   |
-| Bad deploy rollback | `git revert` can undo one bad change without dragging good changes with it        |
-| Release notes       | `feat`, `fix`, and `docs` messages can be summarized without rereading every diff |
+## Is this only about finding bugs?
 
-When this unit says "revert," it means making a new commit that undoes
-an earlier commit. The `checkout` unit covers how to inspect or move
-around history without confusing that with rewriting history.
+No. Anyone who later has to understand or undo one change benefits:
+
+| Later task          | What good commits make easier                                                |
+| ------------------- | ---------------------------------------------------------------------------- |
+| Code review         | The reviewer asks "is this one change correct?" instead of untangling a pile |
+| Bad deploy rollback | `git revert` undoes one bad change without dragging good ones with it        |
+| Release notes       | `feat`, `fix`, and `docs` messages summarize without rereading diffs         |
+
+The `checkout` unit covers moving around history without confusing that
+with rewriting it.
