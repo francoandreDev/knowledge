@@ -1,171 +1,160 @@
 ---
-title: "L2 — Where the flag check lives, and what happens if you never clean it up"
+title: "L2 — Where the flag check lives, and how a rollout decides who sees what"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 established that a feature flag separates merging from releasing.
-L2 works out the mechanics that make that possible: exactly where the
-check lives in the code, what a flag's configuration actually looks
-like, and the lifecycle a flag moves through — because a flag that's
-never removed becomes a new source of the exact risk it was meant to
-reduce.
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "feature-flags",
+};
+
+L1 established that a flag separates merging from releasing. L2 works out
+the mechanics: where the check sits in the code, what the flag's
+configuration contains beyond on and off, and how a percentage rollout
+keeps each user on one side.
 
 <LevelIntro
   items={[
-    "Branch by abstraction, not by git branch",
-    "Flag config: targeting rules, not just on/off",
-    "The lifecycle, and why stale flags are debt",
+    "One history, two code paths",
+    "Ordered targeting rules",
+    "Sticky per-user rollout",
   ]}
 />
 
-## Branching happens in the code, not in git
+## Where does the unfinished version live?
 
-**If everyone commits straight to `main`, where does the "in-progress,
-not-yet-ready" version of the code actually live?** Not in a git
-branch — inside the running code itself, gated by an `if`. This
-pattern is sometimes called **branch by abstraction**: instead of two
-divergent lines of git history that eventually have to be reconciled,
-there's one line of history containing both the old path and the new
-path, with a runtime decision choosing between them.
+**If everyone commits straight to `main`, where does the "not ready yet"
+version of checkout actually sit?** Not in a git branch. It sits in the
+running code, behind a check. There is one line of history containing
+both the old path and the new path, and a runtime decision chooses
+between them.
 
 ```mermaid
 flowchart LR
-    Req["Incoming request"] --> Check{"flag: new-checkout enabled\nfor this user?"}
-    Check -- "no (default)" --> Old["oldCheckoutFlow()"]
-    Check -- "yes" --> New["newCheckoutFlow()"]
+    Req["Incoming request"] --> Check{"Flag new-checkout on for this user?"}
+    Check -- "no (default)" --> Old["Old checkout flow"]
+    Check -- "yes" --> New["New checkout flow"]
     Old --> Resp["Response"]
     New --> Resp
 ```
 
-In pseudocode, the shape is always the same regardless of language or
-framework:
+Both flows can be merged in small PRs and deployed repeatedly long before
+the flag turns on for a real customer. Deploying stops being the risky
+moment. Flipping the flag is, and that decision can be made separately,
+scoped to a few users first, and reversed in seconds.
 
-```
-function handleCheckout(user, cart):
-    if flags.isEnabled("new-checkout", user):
-        return newCheckoutFlow(user, cart)
-    else:
-        return oldCheckoutFlow(user, cart)
-```
+<Checkpoint question="A teammate says: 'We deploy straight from main and our branches are already short-lived, so we don't need flags.' Does short-lived branching make flags unnecessary?">
 
-Both `newCheckoutFlow` and `oldCheckoutFlow` can be committed to
-`main`, reviewed in small PRs, and deployed — repeatedly, in pieces —
-long before the flag ever flips to `true` for a real customer.
-Deploying is no longer the risky moment; flipping the flag is, and
-that's a decision you can make independently, reverse instantly, and
-scope to a tiny percentage first.
-
-<Checkpoint question="A teammate says: 'We don't need feature flags, we just deploy straight from main since our branches are already short-lived.' Does having short-lived branches make flags unnecessary?">
-
-No — short branches and flags solve two different halves of the same
-problem. Short-lived branches keep _merging_ safe: small diffs are
-easy to review and rarely conflict with a fast-moving `main`. But
-merging isn't the same event as _releasing_. Even a perfectly small,
-clean PR can contain code a team isn't ready to expose to every user
-yet — half of a multi-week feature, a risky rewrite of a payment path,
-a change that needs a gradual rollout to catch problems early. Without
-a flag, "merged" and "live for everyone" happen at the same moment,
-which is exactly the coupling that makes teams keep branches open too
-long in the first place, recreating L1's nine-day PR. Short branches
-keep the git side clean; flags keep the runtime side safe. Trunk-based
-development needs both.
+No, they solve two different halves of the problem. Short branches keep
+_merging_ safe: small diffs review quickly and rarely conflict. But
+merging is not releasing. Even a tidy PR can hold half of a multi-week
+feature or a risky payment-path rewrite that you do not want live for
+everyone yet. Without a flag, "merged" and "live" happen at the same
+instant, which is the coupling that pushes teams to keep branches open
+too long, recreating the nine-day PR.
 
 </Checkpoint>
 
-## A flag is a config, not just a boolean
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="flag-check-location"
+/>
 
-**Is "on" or "off" enough to gate the checkout rollout from L1
-safely?** Not for anything with real risk attached — a flag that's
-only ever fully on or fully off forces an all-or-nothing release,
-which is the same risk as a giant PR, just moved one step later. Real
-flag systems evaluate a small set of **targeting rules** against the
-current user or request:
+## Is on/off enough to roll out checkout safely?
 
-```json
-{
-  "key": "new-checkout",
-  "default": false,
-  "rules": [
-    {
-      "type": "userIdIn",
-      "values": ["internal-qa-1", "internal-qa-2"],
-      "serve": true
-    },
-    { "type": "percentageRollout", "percent": 5, "serve": true },
-    { "type": "planTier", "values": ["enterprise"], "serve": false }
-  ]
-}
+**If a flag can only be fully on or fully off, what have you gained over
+the giant PR?** Very little: the release is still all-or-nothing, only
+one step later. Real flags carry a small set of **targeting rules**,
+evaluated against the current user, plus a **default** for everyone no
+rule matches.
+
+| Order | Rule                              | Serves | Purpose                          |
+| ----- | --------------------------------- | ------ | -------------------------------- |
+| 1     | user id is an internal QA account | on     | Staff try it first               |
+| 2     | plan tier is enterprise           | off    | Hold back until support is ready |
+| 3     | 5 percent rollout                 | on     | A small real-world slice         |
+| -     | default                           | off    | Everyone else                    |
+
+Rules are checked **top to bottom and the first match wins**. Order is
+part of the meaning: the enterprise exclusion sits above the percentage
+rule on purpose. Put it below and an enterprise account whose bucket
+falls inside the 5 percent would match the rollout first, and the
+exclusion would never run for them.
+
+```mermaid
+flowchart TB
+    S["Evaluate flag for user"] --> K{"Kill switch on?"}
+    K -- "yes" --> Off["Off"]
+    K -- "no" --> R1{"Rule 1 matches?"}
+    R1 -- "yes" --> A1["Serve rule 1 value"]
+    R1 -- "no" --> R2{"Rule 2 matches?"}
+    R2 -- "yes" --> A2["Serve rule 2 value"]
+    R2 -- "no" --> Rn{"...more rules"}
+    Rn -- "none match" --> Def["Serve the default"]
 ```
 
-Read top to bottom: internal QA accounts always see the new flow
-first; then a fixed 5% slice of remaining traffic; enterprise accounts
-are explicitly excluded until support is briefed. This is what makes a
-flag more powerful than a plain `if DEBUG`: the same deployed code
-serves different behavior to different users, without a second deploy,
-and the rollout percentage can widen — 5% → 25% → 100% — purely by
-changing config, not by shipping code again.
+The same deployed code now serves different behavior to different people,
+and widening the audience (internal, then 5 percent, then 25, then 100)
+is a config change with no new deploy.
 
-| Rollout stage | Who sees the new path         | What it's checking for                             |
-| ------------- | ----------------------------- | -------------------------------------------------- |
-| 0%            | Nobody (default off)          | Code compiles, deploys, doesn't crash the old path |
-| Internal only | QA / dogfooding accounts      | Obvious bugs, before any real customer is exposed  |
-| 5%            | A small random slice of users | Real-world edge cases, error rates, latency        |
-| 100%          | Everyone                      | Full confidence — ready to remove the flag         |
+| Stage         | Who sees the new path   | What it checks for                          |
+| ------------- | ----------------------- | ------------------------------------------- |
+| 0 percent     | Nobody                  | It deploys and the old path is unharmed     |
+| Internal only | QA and dogfooding users | Obvious bugs before any customer is exposed |
+| 5 percent     | Small slice of users    | Real error rates, latency, edge cases       |
+| 100 percent   | Everyone                | Confidence to delete the flag               |
 
-<Checkpoint question="A percentage rollout is set to 5%. If a specific user refreshes the checkout page five times in a row, should they see the new flow on some loads and the old flow on others?">
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="targeting-rules"
+/>
 
-No — a well-built rollout is _sticky per user_, not re-randomized per
-request. The percentage decides who gets bucketed into the rollout
-once (usually by hashing a stable id like the user's account id), and
-that same user gets the same answer on every subsequent evaluation.
-Flipping between old and new checkout mid-session would be confusing
-at best and could corrupt a multi-step flow like checkout at worst —
-imagine reaching the confirmation screen of one flow using cart state
-built by the other. L3 implements this stickiness directly with a hash
-function, and it's the detail that turns "5% of requests" (unsafe) into
-"5% of users, consistently" (safe).
+## Should a user flip between old and new on refresh?
+
+**A 5 percent rollout is live. A user refreshes checkout five times. Do
+they see the new flow on some loads and the old one on others?** They
+must not. Checkout is a multi-step flow, and reaching the confirmation
+screen of one version with cart state built by the other would break it.
+
+<Checkpoint question="What would have to be true of the percentage rule for the same user to get the same answer on every refresh?">
+
+The decision must depend only on stable inputs, not on chance at request
+time. The usual approach hashes a stable id (the account id, combined
+with the flag's own key) into a bucket from 0 to 99 and serves the new
+path when the bucket is below the rollout percent. Same user, same flag,
+same bucket, same answer every time. Rolling a die per request would
+give "5 percent of requests", which is a different and unsafe thing.
 
 </Checkpoint>
-
-## The lifecycle a flag actually goes through
-
-**Once the checkout rollout reaches 100%, is the flag done?** Not
-quite — the code still has two paths and an `if` checking a flag that
-will now always evaluate the same way. That's the final, easiest-to-skip
-stage of a flag's life:
 
 ```mermaid
 flowchart LR
-    Created["Created\n(default off)"] --> Partial["Partial rollout\n(%, targeting)"]
-    Partial --> Full["Full rollout\n(100%)"]
-    Full --> Cleanup["Cleanup:\nremove flag + old path"]
-    Cleanup --> Gone["Flag deleted"]
+    U["user id + flag key"] --> H["Hash"]
+    H --> B["Bucket 0-99"]
+    B --> C{"bucket below rollout percent?"}
+    C -- "yes" --> N["New path"]
+    C -- "no" --> O["Old path"]
 ```
 
-Skipping cleanup is how teams end up with what practitioners call
-**flag debt**: dozens or hundreds of flags nobody remembers the
-purpose of, each one doubling the number of code paths a change could
-possibly hit. A flag that's been at 100% for eight months but never
-removed isn't protecting anyone anymore — it's just an `if` branch and
-a dead `oldCheckoutFlow()` that every future contributor has to read,
-understand, and avoid breaking, for no remaining benefit. The fix isn't
-a policy against flags; it's treating "remove the flag and dead code"
-as part of the feature's definition of done, not an optional follow-up
-ticket that never gets prioritized.
+Two consequences fall out of this design. Widening 5 to 25 percent keeps
+every user who already had the feature, because their bucket is still
+below the larger number; nobody gets it taken away mid-rollout. And
+mixing the flag key into the hash gives each flag its own independent
+shuffle, so the same lucky users do not get every new feature first.
 
-## The trade-off, stated plainly
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="sticky-bucketing"
+/>
 
-**Does adding flags make the codebase strictly simpler?** No — every
-active flag is a second code path that has to be reasoned about, and
-two active flags gating related code create four possible combinations
-to consider, not two. Feature flags trade a small, ongoing complexity
-cost (more branches to think about, a config system to maintain) for a
-much larger risk reduction (deploys stop being release events, rollouts
-become gradual and reversible, and a bad release becomes a config flip
-instead of a rollback deploy). The trade only stays worth it if the
-cleanup stage actually happens — that's the one part of the lifecycle
-that determines whether flags stay a safety mechanism or become their
-own form of debt, which is exactly what L3's implementation and worked
-example focus on next.
+## What does a flag cost?
+
+Every active flag is a second code path to reason about. L3 puts a number
+on that, along with the rule evaluation and the staged rollout, using
+the checkout redesign from L1.

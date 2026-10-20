@@ -1,10 +1,16 @@
 ---
-title: "L3 — Building a real flag-evaluation service, and using it on the checkout rollout"
+title: "L3 — Rolling out the checkout redesign with flags, end to end"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "feature-flags",
+};
 
 <Scenario label="Rolling out the checkout redesign, with flags this time">
   <Fragment slot="facts">
@@ -19,241 +25,178 @@ import Checkpoint from "../../../components/Checkpoint.astro";
   </Fragment>
 
 L1's checkout PR sat unmerged for nine days because merging felt like
-the same thing as releasing to everyone at once. **Given the flag
-mechanics L2 laid out — targeting rules, sticky rollout percentages, a
-kill switch — what would the same nine days have looked like instead?**
-Predict it before reading on: not "the PR merges faster," but
-something more specific about _when risk is discovered and how it's
-contained_.
+releasing to everyone at once. **Given ordered targeting rules, a sticky
+rollout percentage and a kill switch, what would the same weeks have
+looked like?** Predict it before reading on. Not "the PR merges faster",
+but something more specific about _when_ risk is discovered and _how
+much of the customer base_ it can touch.
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "A real, deterministic bucketing function",
-    "A working flag-evaluation service with a kill switch",
-    "Using it end-to-end on the checkout rollout",
+    "Evaluation order, precisely",
+    "The staged rollout as a timeline",
+    "The price of flags that stay",
   ]}
 />
 
-## A deterministic bucket for each user
+## What exactly happens when the app asks "is this on for me?"
 
-**L2's checkpoint established that a rollout has to be sticky per
-user, not re-randomized per request. What actually makes that true in
-code?** A hash function: something that turns a user's id into the
-same number every time it's called, spread roughly evenly across a
-range. Here's a real one (FNV-1a, a small, well-known non-cryptographic
-hash — plenty good enough for bucketing, and fast):
+**Several things can say yes or no at once: a kill switch, a QA list, a
+plan exclusion, a rollout percentage. Which one wins?** The evaluator
+resolves them with a fixed precedence, and the whole safety story rests
+on it.
 
-```js
-// bucket.mjs — deterministic, evenly-distributed bucketing, 0-99
-function hashToBucket(key) {
-  let hash = 0x811c9dc5; // FNV-1a 32-bit offset basis
-  for (let i = 0; i < key.length; i++) {
-    hash ^= key.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193); // FNV prime
-  }
-  // Force unsigned, then compress into a 0-99 bucket
-  return (hash >>> 0) % 100;
-}
+```mermaid
+flowchart TB
+    Start["Request with user context"] --> K{"Kill switch on?"}
+    K -- "yes" --> Off["Off, reason: kill-switch"]
+    K -- "no" --> L["Walk the rules in order"]
+    L --> M{"A rule matches?"}
+    M -- "yes, first one" --> Serve["Serve that rule's value, reason: the rule"]
+    M -- "none" --> D["Serve default, reason: default"]
 ```
 
-Two calls with the same `key` always return the same bucket — that's
-the entire mechanism a "sticky 5% rollout" rests on. Note the input is
-`key`, not just a user id: salting it with the flag's own key (below)
-means the _same_ user lands in a different, independent bucket for
-every different flag, instead of always being "early adopter user" or
-always being "never gets anything new" across the whole product.
+Two properties matter. The kill switch is checked **before** any rule, so
+no targeting mistake can keep a broken path alive during an incident. And
+the evaluator returns a **reason** along with the boolean, so when
+support asks "why does this customer see the new checkout?" the answer is
+a recorded fact (QA list, rollout, default), not a guess.
 
-<Checkpoint question="If two different flags both use a 5% rollout, and this same user happens to be in the first flag's 5%, should you expect them to also be in the second flag's 5%?">
+<Checkpoint question="The config has the rollout rule above the enterprise-exclusion rule, and an enterprise customer's bucket falls inside the 5 percent. What do they see, and which rule decided it?">
 
-Not more than random chance would predict — because the bucketing key
-combines the flag's own key with the user id (`` `${flagKey}:${userId}` ``
-in the evaluator below), not the user id alone. Hashing salted this way
-scrambles the result independently per flag, so being in one flag's
-lucky 5% says nothing about the next flag. This matters in practice:
-without the salt, a fixed percentage rollout would always select the
-_same_ subset of users for every flag ever created, which defeats the
-purpose of random sampling and would mean your earliest, most patient
-beta testers get every single new feature first, forever, while
-everyone else gets none of them until 100%.
+They see the new checkout, decided by the rollout rule. First match wins,
+so the evaluator stops at the rollout and never reaches the exclusion
+that was meant to protect them. The exclusion is not wrong; it is
+unreachable for anyone the rollout catches. This is why rule order is
+reviewed like code, and why the reason field is useful: it would show
+"rollout" for an account everyone assumed was excluded.
 
 </Checkpoint>
 
-## The flag-evaluation service
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="evaluation-precedence"
+/>
 
-**Given a bucket number, how does a full flag config — default,
-targeting rules, kill switch — turn into one `enabled: true/false`
-decision?** By checking rules in order and stopping at the first one
-that matches, falling back to the default if none do:
+## What did the actual rollout look like?
 
-```js
-// flags.mjs
-function hashToBucket(key) {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < key.length; i++) {
-    hash ^= key.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0) % 100;
-}
+Each step below was possible only because merging and releasing were
+separate.
 
-function evaluateFlag(config, context) {
-  // A kill switch overrides everything else, unconditionally — this is
-  // what makes it safe to flip in an incident with no deploy in the way.
-  if (config.killSwitch) {
-    return { enabled: false, reason: "kill-switch" };
-  }
-
-  for (const rule of config.rules ?? []) {
-    if (rule.type === "userIdIn" && rule.values.includes(context.userId)) {
-      return { enabled: rule.serve, reason: "userIdIn" };
-    }
-    if (rule.type === "planTier" && rule.values.includes(context.planTier)) {
-      return { enabled: rule.serve, reason: "planTier" };
-    }
-    if (rule.type === "percentageRollout") {
-      const bucket = hashToBucket(`${config.key}:${context.userId}`);
-      if (bucket < rule.percent) {
-        return { enabled: rule.serve, reason: "percentageRollout" };
-      }
-    }
-  }
-
-  return { enabled: config.default, reason: "default" };
-}
-
-export { hashToBucket, evaluateFlag };
+```mermaid
+sequenceDiagram
+    participant Dev as Team
+    participant Main as main
+    participant Flag as Flag config
+    participant Users as Customers
+    Dev->>Main: Day 1-2: small PRs, flag off
+    Dev->>Flag: Day 3: QA list, then 5 percent
+    Flag->>Users: about 500 of 10,000 see new checkout
+    Users-->>Dev: Error rate spikes on new path
+    Dev->>Flag: Day 3, 11:42am: kill switch on
+    Flag->>Users: everyone back on old checkout
+    Dev->>Main: Days 4-9: fix merged, flag still off
+    Dev->>Flag: Day 10-13: 5, 25, then 100 percent
+    Dev->>Main: Day 21: delete flag and old path
 ```
 
-Every branch returns a `reason` alongside the boolean — a small
-addition, but it's what makes an incident like Day 3 above debuggable:
-when support asks "why does this one customer see the new checkout,"
-the answer is a fact you can look up (`userIdIn`, `percentageRollout`,
-`planTier`, or `default`), not a guess.
-
-## Simulating the actual rollout
-
-**Does a "5% rollout" really mean close to 5% of real users, or is
-that just an approximation that could be badly off for any one flag?**
-With enough users, the hash's even distribution makes it converge
-close to the configured percentage — here it is checked directly, not
-asserted:
-
-```js
-// simulate.mjs
-const config = {
-  key: "new-checkout",
-  default: false,
-  killSwitch: false,
-  rules: [
-    {
-      type: "userIdIn",
-      values: ["internal-qa-1", "internal-qa-2"],
-      serve: true,
-    },
-    { type: "percentageRollout", percent: 5, serve: true },
-    { type: "planTier", values: ["enterprise"], serve: false },
-  ],
-};
-
-let enabledCount = 0;
-const totalUsers = 10_000;
-for (let i = 0; i < totalUsers; i++) {
-  const result = evaluateFlag(config, {
-    userId: `user-${i}`,
-    planTier: "standard",
-  });
-  if (result.enabled) enabledCount++;
-}
-
-console.log(
-  `${enabledCount} / ${totalUsers} enabled (~${((enabledCount / totalUsers) * 100).toFixed(1)}%)`,
-);
-// -> 505 / 10000 enabled (~5.1%)
-```
-
-That reads within a few tenths of a percent of the configured 5% —
-close enough that a real rollout can trust "5%" to mean roughly 500
-real users out of 10,000, not "somewhere between 1% and 20%." The kill
-switch from Day 3 is the same function, one field flipped:
-
-```js
-const incidentConfig = { ...config, killSwitch: true };
-evaluateFlag(incidentConfig, { userId: "user-42", planTier: "standard" });
-// -> { enabled: false, reason: "kill-switch" }
-```
-
-No redeploy, no git operation at all — an ops dashboard flips
-`killSwitch` in the stored config, and the very next evaluation for
-every single user returns `false`, regardless of which bucket or rule
-would otherwise have matched. This is the concrete mechanism behind
-"contained in under a minute" from the scenario above.
-
-<Checkpoint question="Suppose Day 3's error spike had instead been caught by widening the rollout gradually (5% -> 25% -> 100%) with careful monitoring at each step, rather than jumping straight to 100%. What does the gradual widening actually buy you that jumping straight to 100% wouldn't?">
-
-It bounds the blast radius of a bug to whatever percentage was live
-when it's caught, and it buys detection time before the largest
-population is exposed. At 5%, a spike in errors affects roughly 500 of
-10,000 users and is far more likely to be caught by monitoring or a
-support ticket before most customers ever see it — the same bug at
-100% would have hit all 10,000 simultaneously, with no earlier warning
-step to catch it on a smaller population first. Gradual widening
-doesn't prevent bugs; it converts "a bug affecting everyone with no
-warning" into "a bug affecting a known, bounded slice, with a kill
-switch on standby" — which is exactly the difference between Day 3's
-incident being a five-minute non-event and a full outage.
-
-</Checkpoint>
-
-## The cost side: why cleanup is not optional
-
-**L2 claimed an unremoved flag becomes its own kind of debt — what
-does that cost concretely as flags accumulate?** Every _active_ flag
-doubles the number of distinct code paths a change could interact
-with, because any given request is either in or out of that flag,
-independently of every other active flag:
+The bug was found at 5 percent, so roughly 500 of 10,000 users saw it,
+for minutes. The nine-day PR would have shipped the same bug to all
+10,000, with a rollback deploy as the only remedy. Because rollout
+buckets are sticky and nested, the 500 affected users were a fixed group,
+which also made the incident easy to scope and follow up on.
 
 ```mermaid
 xychart-beta
-    title "Code paths to reason about, by number of simultaneously active flags"
+    title "Users exposed to a bug, by rollout stage (10,000 users)"
+    x-axis "Rollout percent when the bug is caught" [1, 5, 25, 50, 100]
+    y-axis "Users exposed" 0 --> 10000
+    bar [100, 500, 2500, 5000, 10000]
+```
+
+Exposure is just percent times user base, which the interactive demo on
+this unit lets you drag. The percentage is not a guarantee of safety, it
+is a dial on how much a bug can cost before someone notices.
+
+<Checkpoint question="The team could have gone 0 to 100 percent on Day 3 and relied on the kill switch alone. What does the intermediate 5 and 25 percent stages add that the kill switch does not?">
+
+The kill switch limits how _long_ a bug lives; gradual stages limit how
+_many people_ it touches while it lives. Detection is never instant, so
+the damage equals exposure times detection delay. A kill switch shortens
+the second factor, staging shrinks the first. You want both, and staging
+also gives monitoring a small, comparable population before the big one
+arrives.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="gradual-rollout"
+/>
+
+## Why was Day 21 as important as Day 3?
+
+**Once the flag is at 100 percent and stable, what is it still doing?**
+Nothing useful, but it still costs. Each active flag is a place where a
+request can go one of two ways, independently of every other flag, so
+the number of combinations a change could meet grows as 2 to the power of
+the number of flags.
+
+```mermaid
+xychart-beta
+    title "Possible path combinations by number of active flags"
     x-axis "Active flags" [1, 2, 3, 4, 5, 6]
-    y-axis "Possible path combinations" 0 --> 70
+    y-axis "Combinations" 0 --> 70
     bar [2, 4, 8, 16, 32, 64]
 ```
 
-| Active flags | Combinations | What that means in practice                                    |
-| ------------ | ------------ | -------------------------------------------------------------- |
-| 1            | 2            | Trivial — test old path, test new path                         |
-| 3            | 8            | Still testable by hand, but easy to miss a combination         |
-| 6            | 64           | No team manually verifies 64 combinations before every release |
+| Active flags | Combinations | In practice                                      |
+| ------------ | ------------ | ------------------------------------------------ |
+| 1            | 2            | Test the old path, test the new one              |
+| 3            | 8            | Testable by hand, easy to miss one               |
+| 6            | 64           | Nobody verifies all of them before every release |
 
-That growth is exactly why the lifecycle's last stage — delete the
-flag and the dead path once it's fully rolled out — isn't cleanup for
-its own sake. It's the step that keeps this table from ever reaching
-row three. A flag sitting at 100% for months isn't reducing risk
-anymore; it's pure multiplication with none of the rollout benefit
-left, which is why Day 21 in this unit's scenario — flag and old path
-both deleted — is as load-bearing a step as Day 3's kill switch.
+Not every combination is reachable or meaningful, because many flags
+guard unrelated code. Treat 2 to the n as the ceiling that interacting
+flags approach, and as the reason to delete release toggles when they
+finish. Kill switches and permission toggles are the deliberate
+exceptions: they are kept on purpose, with an owner.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Created: default off
+    Created --> Partial: QA list, percent rollout
+    Partial --> Full: 100 percent
+    Full --> Removed: delete flag and old path
+    Removed --> [*]
+```
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="flag-lifecycle"
+/>
 
 ## Extend it yourself
 
-The worked example above rolls out to a random 5% of _all_ users. **What
-would you change in `evaluateFlag`'s rule list if the team instead
-wanted to offer the new checkout first to enterprise customers who
-opted into a beta program — and only fall back to random-percentage
-rollout for everyone else once the beta feedback looks good?** Sketch
-the rule order and `serve` values before checking your answer: does
-`planTier` need to move earlier or later in the `rules` array compared
-to the config above, and does its `serve` value need to flip?
+This rollout is one case, not the whole territory. It had a single flag, a
+bug found within minutes and a team that deleted the flag on schedule.
+**What changes if the bug is subtle and only visible in a revenue report
+two days later? What if the new checkout writes data in a new format that
+the old path cannot read, so flipping the kill switch off leaves orphaned
+records?** Think about which of the safety properties above still hold
+(sticky buckets, instant off, small exposure) and which quietly stop
+applying.
 
-The mechanism doesn't change — only the rule _order and values_ do.
-Moving a `planTier` rule with `serve: true` ahead of the percentage
-rule (rather than the excluding `serve: false` version used above)
-means enterprise beta users get matched and return `enabled: true`
-before the function ever reaches the percentage check, while every
-other request falls through to the same 5% random rollout as before.
-This is the same lesson as L2's "config, not just a boolean" section,
-just exercised directly: the rules are a small ordered program, and
-reordering or flipping one line changes who gets which experience
-without touching `evaluateFlag` itself at all.
+One way to think about it: a flag reverses _which code runs_, not _what
+that code already wrote_. A kill switch is instant for behavior and does
+nothing for data. Changes that alter stored data usually need a
+compatible-read step first, so both paths can understand both formats,
+and only then a flag. The same idea applies to the beta variation: to
+offer checkout first to enterprise accounts that opted in, you would add a
+rule that serves "on" for them _above_ the percentage rule, and the
+evaluator itself would not change at all.
