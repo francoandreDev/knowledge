@@ -3162,3 +3162,13 @@ Migrated 4 more `business-communication/` units via 4 parallel content-only suba
 - **`conflict-resolution`**: 7 topics, 84 items. L1 housemates scenario (L2/L3 keep the Platform/Growth case); removed an invented "90% / 10%"; failure-mode bullets became a table; no `interactives.json` (relationships are qualitative).
 
 `business-communication/` is at 8 of 14. Total migrated: 58 of 246. Remaining here: `visibility-self-promotion`, `informal-authority`, `upward-disagreement`, `change-management`, `translating-technical-risk-business-risk`, `org-level-influence`.
+
+## 2026-10-20 — `business-communication/` batch 3: `visibility-self-promotion`, `informal-authority`, `upward-disagreement`
+
+Migrated 3 more `business-communication/` units via 3 parallel content-only subagents. Same pipeline; `build` 267 pages, `typecheck` 0 errors; live click-through passed all 28 `DomainCheck` topics, 0 Mermaid errors, sliders present. All quiz. Answer-length tell now tracked in both directions (strictly longest / strictly shortest, each ≤ ~35%): 11–33% longest, 15–36% shortest across the batch.
+
+- **`visibility-self-promotion`**: 8 topics, 96 items. Unified inconsistent figures ("3/quarter → 0/quarter" vs "3 in Q1, 0 in Q2") into "3 outages in the six months before the fix, 0 in the three months since"; removed an unsourced "research on self-presentation consistently finds…"; stripped engineering jargon. Kept the Priya/Elena/Marcus running example (the demo is built on it). Agent balanced answer lengths with bulk string replacements, so a few answers read terse.
+- **`informal-authority`**: 9 topics, 108 items. **Fixed an L3 timeline contradiction** (Sana's favor "day 3 offer, a week later raise it" clashed with Miguel on day 5 and the "month-early" reciprocity lesson; now the favor was two months earlier and the ask is day 3). Odds chart labelled illustrative (10/25/40/80/92 match the demo); L1 opens with a school-trip analogy.
+- **`upward-disagreement`**: 11 topics, 121 items. Removed an invented "Black Friday peaks 4x" claim; **fixed a reasoning error** (peak is ~1.7× the tested ceiling, 12,000 / 7,200, not "60% into" it); L1 and L2 listed different "four moves", now consistent; L2 receptiveness chart aligned to the demo formula ([86, 75, 58, 36, 25]); "senior" labels removed (rule 3); TPM/p99 jargon replaced.
+
+`business-communication/` is at 11 of 14. Total migrated: 61 of 246. Remaining here: `change-management`, `translating-technical-risk-business-risk`, `org-level-influence`.
