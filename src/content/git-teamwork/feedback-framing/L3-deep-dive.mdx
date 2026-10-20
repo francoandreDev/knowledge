@@ -3,74 +3,104 @@ title: "L3 — Rewriting real review comments, and where the technique breaks"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
-import Checkpoint from "../../../components/Checkpoint.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "feedback-framing",
+};
 
 <Scenario label="The thread that shouldn't have taken three rounds">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
       <div class="flex items-center gap-1.5"><span>1️⃣</span> <strong>Round 1</strong> — "This is wrong, just use a hashmap." No line reference.</div>
-      <div class="flex items-center gap-1.5"><span>2️⃣</span> <strong>Round 2</strong> — Author pushes back defensively, explains original reasoning, no code changes.</div>
-      <div class="flex items-center gap-1.5"><span>3️⃣</span> <strong>Round 3</strong> — Reviewer restates the same point more forcefully. Two days pass before anyone touches the diff.</div>
+      <div class="flex items-center gap-1.5"><span>2️⃣</span> <strong>Round 2</strong> — Author pushes back defensively, no code changes.</div>
+      <div class="flex items-center gap-1.5"><span>3️⃣</span> <strong>Round 3</strong> — Reviewer restates the same point more forcefully. Two days pass with the diff untouched.</div>
     </div>
   </Fragment>
 
-Here's a real shape of thread this unit is trying to prevent, reconstructed from the kind of exchange that shows up on almost every team at some point. Round 1: a comment with no line reference and no mechanism, just a verdict. Round 2: the author, reading a verdict rather than a diagnosis, explains why they made the choice instead of touching the code. Round 3: the reviewer, frustrated that the "obvious" fix hasn't landed, restates the same point more forcefully. Two full days pass and the diff hasn't changed at all — not because the reviewer was wrong about the bug, but because **nothing in the first comment let the author act on it directly.** The rest of L3 rebuilds this exact exchange comment-by-comment, using the levers from L2, and then asks where those levers stop being the right tool.
+Round 1: a comment with no line reference and no mechanism, just a verdict.
+Round 2: the author, handed a verdict instead of a diagnosis, explains why they
+chose what they chose and doesn't touch the code. Round 3: the reviewer,
+annoyed that the "obvious" fix hasn't landed, says the same thing louder. Two
+days pass and the diff hasn't changed. The reviewer was right about the bug;
+**nothing in the first comment let the author act on it directly.** So how do
+you rebuild that comment, and when is rebuilding it the wrong response?
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "A full comment rewrite, applied line by line",
-    "Where softened framing is the wrong call",
-    "Escalating out of a stuck async thread",
+    "A comment rewritten lever by lever",
+    "Where soft framing is the wrong call",
+    "Leaving a stuck async thread",
   ]}
 />
 
-## The diff everyone is arguing about
+## What is actually under review?
 
-Here's the actual code under review — a lookup used inside a loop that processes an incoming batch of orders:
+The diff behind the thread is a discount lookup inside a loop over incoming
+orders:
 
 ```python
 def apply_discounts(orders, discount_codes):
-    results = []
     for order in orders:
-        # discount_codes is a list of {"code": str, "percent": float}
         match = None
-        for dc in discount_codes:
+        for dc in discount_codes:      # line 4: full scan per order
             if dc["code"] == order.code:
                 match = dc
                 break
         if match:
             order.total *= 1 - match["percent"] / 100
-        results.append(order)
-    return results
 ```
 
-`discount_codes` is scanned in full for every single order — O(orders × codes). It works fine in the demo environment with eight test orders and three discount codes. It will not work fine once a real batch has thousands of orders checked against dozens of active codes.
+`discount_codes` is scanned in full for every order, so the work is orders
+times codes. With eight test orders and three codes nobody notices. With
+thousands of orders and dozens of active codes, it matters.
 
-## Rewriting the comment, lever by lever
+## How does the rewrite improve step by step?
 
-Reviewer A's actual comment was: **"This is wrong, use a hashmap."** Applying L2's three levers one at a time to see exactly what each one fixes:
+Reviewer A wrote: **"This is wrong, use a hashmap."** Applying the L2 levers
+one at a time shows what each one buys:
 
-| Step                        | Comment                                                                                                                                                                                       | What's still missing                                       |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| Original                    | "This is wrong, use a hashmap."                                                                                                                                                               | No location, no mechanism, person-directed, an instruction |
-| + Subject: code, not person | "This inner loop is wrong — use a hashmap."                                                                                                                                                   | Still no location, still a bare instruction                |
-| + Specificity               | "The inner loop over `discount_codes` on line 6 re-scans the full list for every order — that's O(orders × codes)."                                                                           | Still an unsoftened statement, no invitation to respond    |
-| + Framing as a question     | "The inner loop over `discount_codes` on line 6 re-scans the full list for every order — O(orders × codes). Worth building a `{code: dc}` dict once before the loop, so each lookup is O(1)?" | Nothing — all three levers applied                         |
+| Step                | Comment                                                                                                                                                                                   | What is still missing                               |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Original            | "This is wrong, use a hashmap."                                                                                                                                                           | No location, no mechanism, aimed at the person      |
+| + Subject: the code | "This inner loop is the problem, use a hashmap."                                                                                                                                          | Still no location, still a bare instruction         |
+| + Specificity       | "The inner loop over `discount_codes` (line 4) rescans the whole list for every order, so work grows as orders times codes."                                                              | An unsoftened statement with no invitation to reply |
+| + Question framing  | "The inner loop over `discount_codes` (line 4) rescans the whole list for every order, so work grows as orders times codes. Worth building a lookup keyed by code once, before the loop?" | Nothing: all three levers applied                   |
 
-The fully rewritten version is longer than the original in character count, but it's _cheaper_ for the author to act on: it names the exact line, the exact mechanism, the exact complexity class, and a concrete fix, phrased so the author can say "yes, doing that" and push a commit in the same sitting — which is what actually happened in L1's Reviewer B example. Length was never the problem with the original comment; missing information was.
+The final version is longer than the original but cheaper to act on. It names
+the line, the mechanism and a concrete fix, and it is phrased so the author can
+say "yes, doing that" and push in the same sitting. Length was never the
+problem; missing information was.
 
-<Checkpoint question="The rewritten comment above ends with a question — 'Worth building a dict once before the loop?' Suppose the author has a real reason not to do that (say, `discount_codes` is mutated mid-loop by another part of the function you haven't seen). Does the question framing still do its job in that case, or does it just delay the same instruction by one round-trip?">
+<Checkpoint question="The rewritten comment ends with a question. Suppose the author has a real reason not to build the lookup (the code list is changed in the middle of the loop by a promo-stacking rule the reviewer hasn't seen). Does the question still do its job, or does it just postpone the same instruction by a round-trip?">
 
-It still does its job, and this is exactly the case the question framing is for. A bare instruction ("use a hashmap") gives the author nothing to push back against except the reviewer's authority — disagreeing feels like defying a directive. A question gives the author a legitimate opening to answer with the information the reviewer didn't have: "can't cache it — `discount_codes` gets mutated on line 11 by a promo-stacking rule, so it has to be re-read each time." That response resolves the thread in one round-trip with a better outcome (the reviewer now knows about the mutation) rather than two rounds of "do it" / "no" that a flat instruction would have produced. The question isn't slower when the author is right; it's exactly as fast, and it's the only form that doesn't waste a round-trip when the reviewer turns out to be missing context.
+It does its job, and this is the case the question exists for. A bare
+instruction gives the author nothing to push back with except the reviewer's
+authority, and disagreeing feels like defying a directive. A question opens a
+legitimate slot for the information the reviewer lacked: "can't cache it, the
+list is changed on line 11 by the stacking rule." That settles the thread in
+one reply and leaves the reviewer better informed, where two rounds of "do it"
+and "no" would have settled nothing. When the author is right, the question is
+no slower than the instruction. When the reviewer is the one missing context,
+it is the only form that doesn't waste a round-trip.
 
 </Checkpoint>
 
-## Where softened framing is the wrong tool
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="comment-rewrite"
+/>
 
-Every example so far has been a case where softening was the right move — but the three levers are not "always phrase everything as a gentle question." Take this diff, from the same codebase, a few files over:
+## When is soft framing the wrong tool?
+
+The levers don't mean "phrase everything as a gentle question." Consider a
+different diff:
 
 ```python
 def load_user_preferences(user_id):
@@ -78,50 +108,89 @@ def load_user_preferences(user_id):
     return db.execute(query)
 ```
 
-This is a SQL injection vulnerability — `user_id` is interpolated directly into the query string. Applying the same three-lever rewrite mechanically produces something like: **"Worth using a parameterized query here, in case `user_id` isn't always trustworthy?"** That sentence is a mistake, not because it's poorly worded, but because it frames a must-fix security defect as an optional consideration the author can decline. A reader skimming a batch of comments has every reason to read "worth considering" as low-priority.
+`user_id` is pasted straight into the query text, which is a SQL injection
+hole. Applying the same rewrite mechanically yields "Worth using a
+parameterized query here, in case `user_id` isn't always trustworthy?" The
+wording is fine; the _framing_ is the mistake. It presents a must-fix security
+defect as an option the author may decline, and a reader skimming a batch has
+every reason to treat "worth considering" as low priority.
 
-The fix isn't to abandon the levers — subject and specificity still apply — it's to drop the soft framing on the third lever and mark severity explicitly instead: **"`blocking:` this interpolates `user_id` directly into the query — SQL injection. Needs a parameterized query (`db.execute(query, [user_id])`) before merge."** Still code-directed, still specific about the mechanism and the fix, but stated as a fact with an explicit severity marker, not offered as a question. The technique in this unit is about removing _unnecessary_ friction from feedback, not about removing all directness from feedback that genuinely needs it.
+The fix keeps the first two levers and swaps the third for an explicit
+severity: **"`blocking:` this interpolates `user_id` directly into the query,
+which allows SQL injection. It needs a parameterized query before merge."**
+Still aimed at the code, still specific, but stated as a fact with a marker. The
+technique removes _unnecessary_ friction. It does not remove directness from
+feedback that genuinely needs it.
 
-| Situation                                           | Right framing                              | Why                                                                     |
-| --------------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------- |
-| Style/performance improvement, not urgent           | Question, `nit:` if truly optional         | Author may have context the reviewer doesn't; low cost either way       |
-| Design disagreement, reasonable people could differ | Question, invites the author's reasoning   | The "right" answer isn't settled; framing as fact would overclaim       |
-| Security defect, data loss, correctness bug         | Statement, `blocking:` label, no softening | Not a matter of opinion; softening reads as "optional" and gets skipped |
+| Situation                                          | Right framing                                | Why                                                                 |
+| -------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------- |
+| Style or performance polish, not urgent            | Question, `nit:` if truly optional           | Author may know something you don't; low cost either way            |
+| Design disagreement where reasonable people differ | Question that invites the author's reasoning | The answer isn't settled, so stating it as fact overclaims          |
+| Security defect, data loss, correctness bug        | Statement, `blocking:`, no softening         | Not a matter of opinion; softening reads as optional and is skipped |
 
-```mermaid
-pie title Comments on a typical mid-size PR, by severity
-    "Optional nit" : 45
-    "Should fix, not blocking" : 30
-    "Blocking" : 15
-    "Question / clarification" : 10
-```
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="softening-limits"
+/>
 
-The pie chart above is illustrative, not universal — a security-focused review or a first-time contributor's PR will skew the proportions differently (more blocking, more clarification). What it's meant to show is that most comments on most PRs _are_ optional or non-blocking, which is exactly why a batch with no severity marking is so costly: the reader has no way to tell the small "blocking" slice apart from the much larger "optional" one without the label doing that work explicitly.
+## What if the thread is stuck anyway?
 
-## When the thread is stuck anyway
+Better wording fixes the _first_ round-trip. It cannot fix a thread where
+both sides already understand each other and still disagree. **What tells you a
+comment should leave the thread instead of being rewritten once more?**
 
-Reviewer A's actual thread from the opening scenario didn't stop at one badly-framed comment — round 2 and round 3 kept going with no code changes, because restating the same point, however well-framed, doesn't fix a thread that's already stuck. What signal tells a reviewer or author that a comment needs to leave the async thread entirely, rather than get rewritten one more time?
-
-The signal isn't "the author disagreed once" — reasonable disagreement is normal and often resolves in the next reply. It's **two full round-trips with no new information on either side** — the same positions restated, not refined. At that point, the async medium itself is the obstacle: text strips out the tone-of-voice and immediate back-and-forth that would resolve a live disagreement in thirty seconds, and each additional async round costs a full response-latency cycle (hours, sometimes a full day across time zones) for zero new information.
+Not a single disagreement; that is normal and often ends with the next reply.
+The signal is **two round-trips with no new information on either side**: the
+same positions restated, not refined. At that point the medium is the
+obstacle. Text strips out the real-time back-and-forth that would settle the
+question in a minute of talking, and each extra round costs a response cycle
+(hours, or a day across time zones) for nothing new.
 
 ```mermaid
 flowchart TD
-    C1["Comment: mechanism + suggestion"] --> R1{"Author responds\nwith new info?"}
-    R1 -->|Yes| Resolve["Resolved — fix or reviewer stands down"]
-    R1 -->|No, restates position| C2["Reviewer clarifies once more"]
-    C2 --> R2{"New info this round?"}
-    R2 -->|Yes| Resolve
-    R2 -->|No| Escalate["Move to a sync call or pair session —\nstop restating in text"]
+    C1["Comment: mechanism + suggestion"] --> R1{"Reply adds\nnew information?"}
+    R1 -->|"Yes"| Resolve["Resolved: fix, or reviewer stands down"]
+    R1 -->|"No, restates position"| C2["Reviewer clarifies once"]
+    C2 --> R2{"New information\nthis round?"}
+    R2 -->|"Yes"| Resolve
+    R2 -->|"No"| Escalate["Move to a call or pairing session.\nStop restating in text."]
 ```
 
-Escalating isn't a failure of the framing technique — it's the technique correctly recognizing its own limit. A well-framed comment fixes the _first_ round-trip's cost; it doesn't manufacture information that doesn't yet exist in text form. When two rounds produce no new information, the fastest path to resolution stops being "write an even better comment" and becomes a five-minute call where both sides can ask follow-ups in real time instead of waiting a business day per exchange.
+Escalating isn't the technique failing. It is the technique recognizing its own
+limit: wording cannot create information that has not yet been exchanged.
 
-<Checkpoint question="A reviewer and author have gone two rounds on a design disagreement (should this be one function or two) with no new information either time. The reviewer's instinct is to write one more, even more carefully worded comment explaining their reasoning a third way. Based on the flowchart above, is that the right next move?">
+<Checkpoint question="A reviewer and author have gone two rounds on a design disagreement (one function or two) with no new information either time. The reviewer wants to write one more, even more carefully worded comment. Based on the flowchart, is that the right move?">
 
-No — the flowchart's signal has already been met (two rounds, no new information), so the right move is to escalate out of text, not refine the text further. A third comment assumes the problem is that the first two weren't clear enough, but the diagnosis here is different: both sides already understand the other's position and still disagree, which means the medium — not the wording — is the bottleneck. A quick call lets both people ask real-time follow-up questions and often resolves in minutes what a third async comment would spend another full day-long round-trip trying to do, with no guarantee it lands any better than the first two.
+No. The flowchart's condition is already met, so the move is out of text, not
+more polish inside it. A third comment assumes the first two weren't clear
+enough, but here both sides understand each other's position and still
+disagree. The bottleneck is the medium, not the wording. A short call lets
+each person ask a follow-up at once, often settling in minutes what another
+async round would spend a day on, with no guarantee it lands better than the
+first two.
 
 </Checkpoint>
 
-## Extending past this example
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="stuck-thread"
+/>
 
-Every rewrite in this unit assumed a two-person exchange: one reviewer, one author, one comment thread. What would change about the severity-labeling and response-norm etiquette from the "batch" section if the PR had **three reviewers** commenting independently on overlapping parts of the same diff, each unaware of what the others already said? Consider specifically: does "two round-trips with no new information" still mean the same thing when the author is fielding three separate threads at once, and what batch-level etiquette (beyond severity labels) would you want a team to adopt so the author isn't the one who has to reconcile three reviewers' opinions by hand?
+## This worked example is a case, not the whole territory
+
+Everything above assumed one reviewer, one author and one thread. Real reviews
+are messier. Try extending it yourself:
+
+- **What if there were three reviewers** commenting independently on
+  overlapping lines, each unaware of the others? Does "two rounds with no new
+  information" mean the same thing when the author is juggling three threads?
+  What batch-level habit, beyond severity labels, would stop the author from
+  having to reconcile three opinions by hand?
+- **What if the news were worse**, for example a design that must be reworked
+  from scratch? Which of the three levers still apply, and which severity label
+  would you use?
+- **What if the author were brand new to the team**, or you were new and
+  reviewing a long-standing owner's code? What would change about how much
+  context to include, and what would stay the same?
