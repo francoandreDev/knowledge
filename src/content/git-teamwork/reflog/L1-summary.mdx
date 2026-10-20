@@ -4,94 +4,134 @@ title: "L1 — Your teammate just ran git reset --hard and lost two days of work
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "reflog",
+};
 
 <Scenario label="Reset --hard, then panic">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>💻</span> <strong>The command</strong> — `git reset --hard origin/main`, meant to "clean up" a messy branch</div>
-      <div class="flex items-center gap-1.5"><span>📉</span> <strong>What it did</strong> — moved the branch pointer back, dropping 3 commits, 2 days of unpushed work</div>
-      <div class="flex items-center gap-1.5"><span>😰</span> <strong>The assumption</strong> — "reset --hard" sounds permanent, so the work must be gone</div>
+      <div class="flex items-center gap-1.5"><span>💻</span> <strong>The command</strong>: <code>git reset --hard origin/main</code>, meant to clean up a messy branch</div>
+      <div class="flex items-center gap-1.5"><span>📉</span> <strong>What it did</strong>: moved the branch pointer back, hiding 3 commits (2 days of unpushed work)</div>
+      <div class="flex items-center gap-1.5"><span>😰</span> <strong>The assumption</strong>: "hard" sounds permanent, so the work must be gone</div>
+    </div>
+    <p class="not-prose mt-3 mb-1 text-xs font-semibold tracking-wide text-slate-400 uppercase">What git log shows now</p>
+    <div class="not-prose grid grid-cols-2 gap-2 text-xs">
+      <div class="rounded border border-slate-300 p-1.5 dark:border-slate-700"><p class="font-semibold">Before</p>A, B, C, D, E (HEAD)</div>
+      <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950"><p class="font-semibold text-rose-600 dark:text-rose-400">After</p>A, B (HEAD). C, D, E have vanished from view.</div>
     </div>
   </Fragment>
 
-A teammate wanted to discard a few messy local commits and start clean,
-so they ran `git reset --hard origin/main`. It worked — a little too
-well. Three commits and two days of unpushed work vanished from
-`git log` instantly. They assume it's gone for good and start
-rewriting from memory. **Is "reset --hard" actually as permanent as it
-sounds, or is there something git kept around that `git log` just
-isn't showing anymore?**
+A teammate wanted to discard a few messy local commits, so they ran
+`git reset --hard origin/main`. Three commits and two days of unpushed work
+vanished from `git log` instantly. They assume the work is gone for good and
+start rewriting it from memory. **Is `reset --hard` as permanent as it
+sounds, or did git keep something around that `git log` simply stopped
+showing?**
 
 </Scenario>
 
+The commits are still there. `git log` only shows what you can reach by
+walking backward from where a branch points _right now_. After the reset, the
+branch points somewhere older, so the three commits are no longer on the walk,
+but git did not erase them. A second record, the **reflog**, remembers every
+place a ref has pointed.
+
 <LevelIntro
   items={[
-    "What git reflog actually records",
-    "Why 'lost' commits aren't deleted immediately",
-    "What git bisect is for (a different problem)",
+    "Reachable vs. merely stored commits",
+    "What the reflog records, and its limits",
+    "Bisect: a different tool for a different question",
   ]}
 />
 
-## The minimum map
+## What is the difference between what git log shows and what git still stores?
 
-- **HEAD** — the commit your current branch is pointing at right now.
-- **A ref** — any named pointer to a commit: a branch, a tag, or `HEAD`
-  itself.
-- **`git log`** — shows the history you can reach by walking backward
-  from where a ref points _right now_. If a ref moves, `git log` only
-  ever shows what's reachable from its new position.
-- **`git reflog`** — a separate, local record of every position a ref
-  has ever pointed to, most recent first. It doesn't care what's
-  currently reachable — it remembers where you _were_.
-- **A dangling commit** — a commit that still physically exists in
-  git's object store but that no branch or tag currently points to.
+Think of a library catalogue. `git log` is the catalogue: it lists only what is
+filed under the shelf you are standing at. The reflog is the librarian's
+checkout diary, a record of every shelf you have ever stood at.
 
-The distinction that resolves the scenario above: `git log` describes
-the graph as it looks _now_. `git reflog` describes how you _got_
-here — every move, including the one that just orphaned three commits.
+```mermaid
+flowchart LR
+    A["A"] --> B["B (origin/main)"]
+    B --> C["C"] --> D["D"] --> E["E"]
+    HEAD(["HEAD / branch after reset"]) ==> B
+    E -. "old tip: unreachable, but still stored" .-> LOST["found via reflog"]
+    style C stroke-dasharray: 5 5
+    style D stroke-dasharray: 5 5
+    style E stroke-dasharray: 5 5
+```
 
-## The shape of the problem
+- **Ref**: a named pointer to a commit (a branch, a tag, `HEAD`).
+- **Reachable**: you can get to a commit by following parent links from some ref.
+- **Dangling (unreachable) commit**: stored in the object store, but no ref leads to it.
+- **Reflog**: a local, per-ref diary of where that ref pointed, newest first.
 
-- `git reset --hard` doesn't delete commit objects — it only moves the
-  branch pointer (and updates the working tree to match). The three
-  "lost" commits are still sitting in `.git/objects`, just no longer
-  reachable from any branch.
-- Git only actually deletes unreachable objects during garbage
-  collection (`git gc`, which also runs automatically sometimes), and
-  even then, only after they've aged past a retention window —
-  by default, weeks, not seconds.
-- `git reflog` is what makes those still-present-but-unreachable
-  commits findable again: every command that moves a ref (`reset`,
-  `checkout`, `commit`, `merge`, `rebase`, `pull`) leaves an entry.
+`git reset --hard` moves the branch pointer and rewrites your files to match.
+It does not delete commit objects. That is why a mistaken reset is usually
+recoverable, as long as the work was ever committed.
 
-| Command that "loses" history            | Does it delete commit objects right away?   | Recoverable via reflog?               |
-| --------------------------------------- | ------------------------------------------- | ------------------------------------- |
-| `git reset --hard <ref>`                | No — only moves the branch pointer          | Yes, until reflog/gc expiry           |
-| `git checkout <other-branch>`           | No — nothing was removed at all             | Not needed; original branch untouched |
-| `git branch -D <branch>`                | No — only deletes the branch label          | Yes, via `HEAD`/branch reflog entries |
-| `git push --force` (overwriting remote) | No, locally — but rewrites the remote ref   | Yes, on your machine; not on remote   |
-| `git gc` running after objects expired  | Yes — this is the step that actually prunes | No — this is the point of no return   |
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="log-vs-reflog"
+/>
 
-## Key terms
+## Which "lost history" commands are really recoverable?
 
-- **Reflog** — per-ref, local-only log of where that ref has pointed
-  over time, entries named `HEAD@{0}`, `HEAD@{1}`, `HEAD@{2}`, ... with
-  `{0}` always the most recent position.
-- **`ORIG_HEAD`** — a special ref git updates automatically before
-  operations that move `HEAD` in a big way (`reset`, `merge`, `rebase`)
-  — a one-step "undo" pointer, distinct from the full reflog.
-- **Dangling commit** — a commit object with no ref pointing to it;
-  still on disk, still recoverable, until garbage collection prunes it.
-- **`git bisect`** — a completely different tool from reflog, for a
-  completely different problem: not "recover something I lost," but
-  "find which of many past commits first introduced a bug," using
-  binary search over the commit history.
+| What you ran                         | Commit objects deleted?     | Recoverable?                                                  |
+| ------------------------------------ | --------------------------- | ------------------------------------------------------------- |
+| `git reset --hard <ref>`             | No, only the pointer moved  | Yes, via the `HEAD` reflog                                    |
+| `git branch -D <branch>`             | No, only the label          | Yes if `HEAD` ever sat on it; the branch's own reflog is gone |
+| `git rebase` that went wrong         | No, the old commits remain  | Yes, via `ORIG_HEAD` or the reflog                            |
+| `git push --force` over a remote     | Not locally                 | Yes on your machine; the remote's copy is rewritten           |
+| Uncommitted edits wiped by `--hard`  | They were never stored      | No: the reflog tracks commits, not file edits                 |
+| `git gc` after the retention expired | Yes, this is the real prune | No, this is the point of no return                            |
 
-## What this unit covers
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="reset-keeps-objects"
+/>
 
-L2 works through exactly what a reflog entry means, why the dropped
-commits survive long enough to matter, and how bisect's binary search
-converges on a bad commit in a handful of steps instead of a linear
-scan. L3 walks a real recovery from an actual `reset --hard` accident
-and a real bisect session end to end, plus the parsing and search logic
-underneath both, as runnable code.
+## How long does the safety net last?
+
+Not forever. Reflog entries expire (about 90 days by default, 30 for entries
+whose commit is otherwise unreachable), and only after that can `git gc`
+remove the objects. The reflog is also **local**: it lives in your own `.git`
+folder, is never pushed, and does not exist in a fresh clone.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="expiry-and-gc"
+/>
+
+## A different question: which commit broke it?
+
+Reflog answers "where was my ref before?" It cannot answer "which of the last
+500 commits introduced this bug?" That is `git bisect`, which binary-searches
+the history: test the middle commit, discard the half that cannot contain the
+culprit, repeat. Five hundred commits take about nine tests.
+
+```mermaid
+flowchart LR
+    Q1{"Question"} -->|"Where did my branch or HEAD point before?"| R["git reflog"]
+    Q1 -->|"Which commit first introduced a bug?"| BI["git bisect"]
+    Q1 -->|"What led up to this commit?"| LG["git log"]
+```
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="bisect-binary-search"
+/>
+
+## What the next levels cover
+
+L2 reads a reflog entry piece by piece, explains the two expiry clocks, and
+walks bisect's halving step by step. L3 is a full recovery and a full bisect
+session, with the failure modes that catch people out.

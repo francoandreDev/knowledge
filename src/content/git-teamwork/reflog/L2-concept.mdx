@@ -4,134 +4,209 @@ title: "L2 — How reflog tracks where HEAD has been, and how bisect finds when 
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 established that `reset --hard` doesn't delete commit objects, and
-that `git reflog` is what remembers where a ref used to point. L2 works
-out exactly what a reflog entry records, why the dropped commits stay
-recoverable for a real window of time and not forever, and then turns
-to a second, unrelated tool that gets confused with reflog constantly:
-`git bisect`, for finding _which_ past commit broke something.
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "reflog",
+};
+
+L1 established that `reset --hard` leaves commit objects in place and that the
+reflog remembers where a ref used to point. L2 reads a reflog entry piece by
+piece, shows how the same history looks to `git log` and to the reflog, and
+works out why the safety net has an expiry date. It then turns to bisect, which
+gets confused with reflog constantly because both are "find the old thing"
+tools.
 
 <LevelIntro
   items={[
-    "The exact structure of a reflog entry",
-    "Why 'still recoverable' has an expiry date",
-    "Bisect's binary search, step by step",
+    "Reading a reflog entry and its notation",
+    "Expiry clocks, gc, and the limits of reflog",
+    "Bisect's halving, step by step",
   ]}
 />
 
-## What a reflog entry actually records
+## If git log already shows history, what does the reflog add?
 
-**If `git log` already shows commit history, what does `git reflog`
-add that `git log` doesn't have?** `git log` shows the graph reachable
-from a ref's _current_ position — parent-child relationships between
-commits. `git reflog` shows something orthogonal: a timeline of every
-position `HEAD` (or a branch) has occupied, in the order it moved
-there, regardless of whether that position is still reachable now.
+`git log` shows the graph reachable from where a ref points now. The reflog
+shows a timeline of positions, in the order the ref moved there, whether or
+not they are still reachable. Same repository, two different views:
 
 ```mermaid
-flowchart TB
-    subgraph before["Before the reset"]
-        direction LR
-        A1["A"] --> B1["B"] --> C1["C: add tests"] --> D1["D: fix bug (HEAD)"]
-    end
-    subgraph reflog["What reflog remembers, most recent first"]
-        direction TB
-        R0["HEAD@{0}: reset: moving to B"]
-        R1["HEAD@{1}: commit: fix bug"]
-        R2["HEAD@{2}: commit: add tests"]
-        R0 -.-> R1 -.-> R2
-    end
-    D1 -. "reset --hard B" .-> R0
+gitGraph
+    commit id: "A"
+    commit id: "B"
+    branch unreachable-after-reset
+    checkout unreachable-after-reset
+    commit id: "C"
+    commit id: "D (old tip)"
+    checkout main
 ```
 
-Each entry pairs a **commit id** with a **reason** (`commit`, `reset`,
-`checkout`, `pull: Fast-forward`, `merge`, `rebase`, ...) and a
-relative index — `HEAD@{0}` is always "where HEAD is right this
-second," `HEAD@{1}` is "where it was one move before that." After
-`reset --hard B`, `git log` shows only `A → B`; `git reflog` still
-shows that `C` and `D` existed and exactly when HEAD left them behind.
+Here `main` was reset from `D` back to `B`. The second branch in the picture is
+only a drawing aid: in a real repository, nothing names `C` and `D`, and only
+the reflog still records that `HEAD` stood on `D`.
 
-| What you're asking                                     | Reach for    |
-| ------------------------------------------------------ | ------------ |
-| "What led up to this commit?"                          | `git log`    |
-| "Where has this ref pointed to before, and when?"      | `git reflog` |
-| "What did HEAD point to immediately before this move?" | `ORIG_HEAD`  |
+| After the reset              | `git log` shows | The `HEAD` reflog shows            |
+| ---------------------------- | --------------- | ---------------------------------- |
+| Commits `A`, `B`             | Yes             | Yes                                |
+| Commits `C`, `D`             | No              | Yes, as earlier positions of HEAD  |
+| The reset itself as an event | No              | Yes, as the newest entry           |
+| Why each move happened       | No              | Yes (`commit`, `reset`, `pull`...) |
 
-<Checkpoint question="After git reset --hard B, does git log show commit D (the dropped 'fix bug' commit) anywhere in its output?">
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="log-vs-reflog"
+/>
 
-No. `git log` only walks backward from wherever the ref currently points, and after the reset, `HEAD` points at `B` — `C` and `D` are no longer in that chain at all, even though the objects still physically exist on disk. That's exactly the gap `git reflog` fills: it's the only one of the two that still lists `D` as `HEAD@{1}`, because it records _moves_, not just the current graph.
+## How do you read one reflog line?
+
+Each line is a position, a numbered label for that position, and a reason.
+
+```text
+b3f2a91 HEAD@{0}: reset: moving to b3f2a91
+e7c9d14 HEAD@{1}: commit: add integration tests
+a48f0c2 HEAD@{2}: commit: fix off-by-one in refill
+```
+
+| Part                           | Meaning                                                      |
+| ------------------------------ | ------------------------------------------------------------ |
+| `e7c9d14`                      | The (abbreviated) commit id HEAD pointed to at that moment   |
+| `HEAD@{1}`                     | "Where HEAD was one move ago"; `HEAD@{0}` is where it is now |
+| `commit:` / `reset:` / `pull:` | The kind of operation that moved HEAD there                  |
+| text after the colon           | Detail: the commit message, or the target of the reset       |
+
+Two notations look alike and mean different things, and mixing them up is the
+classic recovery mistake.
+
+| Notation            | Follows              | Means                                            |
+| ------------------- | -------------------- | ------------------------------------------------ |
+| `HEAD~1`            | Parent links (graph) | The first parent of the current commit           |
+| `HEAD@{1}`          | Reflog (timeline)    | Wherever HEAD pointed one move ago               |
+| `main@{2}`          | The `main` reflog    | Where the branch `main` pointed two moves ago    |
+| `HEAD@{2.days.ago}` | Reflog timestamps    | Where HEAD pointed two days ago, on this machine |
+
+After the reset above, `HEAD~1` is the parent of `B` (that is, `A`), while
+`HEAD@{1}` is `D`, the commit you want back. Also remember that `HEAD@{1}` is
+relative: every new move shifts all the numbers by one.
+
+<Checkpoint question="After a reset, you run git commit again. Does the reflog entry you called HEAD at-one (the lost tip) keep that same number?">
+
+No. The index is positional, counting back from the newest move. Making one more commit adds a new entry at position zero, so the lost tip slides from position one to position two. That is why you should read the output of `git reflog` right before you use an index, and why writing down the commit id is safer than remembering the number.
 
 </Checkpoint>
 
-## Why "still recoverable" has an expiry date
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="reading-entries"
+/>
 
-**If commit objects aren't deleted by `reset`, are they recoverable
-forever?** No — two separate clocks are running against them. First,
-each reflog entry itself expires (default: 90 days for entries still
-reachable some other way, 30 days for entries that are the _only_
-thing referencing an otherwise-unreachable commit). Second, `git gc`
-— run manually or automatically — prunes any object that's both
-unreachable from a live ref _and_ past its reflog-expiry window. Until
-both conditions are true, the commit sits untouched.
+## Why does "still recoverable" have an expiry date?
 
-| Setting                             | Default | What it governs                                                    |
-| ----------------------------------- | ------- | ------------------------------------------------------------------ |
-| `gc.reflogExpire`                   | 90 days | Reflog entries for commits still reachable some other way          |
-| `gc.reflogExpireUnreachable`        | 30 days | Reflog entries whose commit has no other ref pointing to it at all |
-| `git gc` (auto-triggered or manual) | —       | The step that actually prunes objects past both expiry windows     |
+If objects survive a reset, can you wait forever? Two clocks run against them.
 
-So the teammate from L1's scenario isn't racing a clock measured in
-minutes — a `reset --hard` from two days ago is nowhere near either
-expiry window. The urgency is about not running more history-rewriting
-commands on top of the mistake, not about the reflog entry vanishing
-imminently.
+```mermaid
+stateDiagram-v2
+    [*] --> Reachable: commit created
+    Reachable --> Orphaned: reset, branch -D, rebase
+    Orphaned --> Orphaned: reflog entry still alive (recoverable)
+    Orphaned --> Prunable: reflog entry expired
+    Prunable --> Deleted: git gc prunes the object
+    Orphaned --> Reachable: you branch from it
+    Deleted --> [*]
+```
+
+| Setting                      | Default | What it governs                                                 |
+| ---------------------------- | ------- | --------------------------------------------------------------- |
+| `gc.reflogExpire`            | 90 days | Reflog entries whose commit is still reachable from the ref     |
+| `gc.reflogExpireUnreachable` | 30 days | Reflog entries whose commit is no longer reachable from the ref |
+| `gc.pruneExpire`             | 2 weeks | Grace period before `gc` deletes unreachable loose objects      |
+
+The 30-day clock is the one that matters after a reset, because the lost
+commits are, by definition, no longer reachable from the branch. A reset from
+two days ago is nowhere near it. The real urgency is different: do not pile
+more history-rewriting commands on top of the mistake.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="expiry-and-gc"
+/>
+
+## What is the reflog not able to save?
+
+| Situation                                       | Why the reflog cannot help                                  |
+| ----------------------------------------------- | ----------------------------------------------------------- |
+| Edits never staged or committed, then `--hard`  | No commit or blob was ever created for them                 |
+| A teammate's lost commits on their machine      | The reflog is local; yours has no record of their moves     |
+| A fresh clone                                   | Reflogs are not cloned; the new repo's log starts empty     |
+| `git branch -D feature` (the branch's own log)  | The branch's reflog is deleted with it; `HEAD`'s may remain |
+| Commits older than the expiry window, then `gc` | The objects are gone                                        |
+
+A staged-but-never-committed file is an interesting middle case: `git add`
+writes the file contents into the object store, so they may be dug out with
+`git fsck --lost-found`, but no reflog entry points to them.
+
+<Checkpoint question="Your coworker force-pushed over main and asks you to recover their lost commits from your reflog. When will that work?">
+
+Only if those commits passed through your own repository, for example because you fetched or pulled them before the overwrite. Then your remote-tracking ref (`origin/main`) has a local reflog that still records the old tip. The reflog never travels between machines, so if you never fetched them, your copy has nothing to offer.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="reflog-limits"
+/>
 
 ## Bisect: a different problem, a different mechanism
 
-**Reflog answers "where has this ref been." A teammate now asks a
-completely different question: "somewhere in the last 500 commits, a
-regression got introduced — which one?" Can reflog answer that?** No —
-reflog only knows about ref _movements_ on your machine, not about
-which of 500 already-merged commits introduced a bug. That's what
-`git bisect` is for: a binary search over a linear range of commits,
-using "good" and "bad" markers you supply by actually testing each
-candidate.
+Reflog answers "where has this ref been." A bug report now says "something in
+the last 500 commits broke the rate limiter." Reflog cannot help: those commits
+were merged normally, no ref movement went wrong. That is a search problem, and
+`git bisect` solves it by binary search. You supply one known-good and one
+known-bad commit, and git checks out the midpoint for you to test.
 
 ```mermaid
-flowchart LR
-    G["good\ncommit #1"] --- M1["commit #250\n(midpoint, test it)"] --- B["bad\ncommit #500"]
-    M1 -- "still bad" --> M2["commit #125\n(new midpoint)"]
-    M1 -- "now good" --> M3["commit #375\n(new midpoint)"]
+flowchart TD
+    S["good: commit 1\nbad: commit 500"] --> M1["test commit 250"]
+    M1 -->|"bad: culprit is 250 or earlier"| M2["test commit 125"]
+    M1 -->|"good: culprit is after 250"| M3["test commit 375"]
+    M2 --> N["...keep halving"]
+    M3 --> N
+    N --> D["one commit left: first bad commit"]
 ```
 
-Each test halves the remaining range: mark the midpoint good or bad,
-and bisect throws away the half that can't contain the first bad
-commit. Over `n` commits, that converges in roughly `log2(n)` tests —
-for 500 commits, about 9 tests, not 500 one-by-one checks.
+Each test halves the remaining range, so n commits need about log base 2 of n
+tests: 500 commits take roughly nine tests, not 500. The interactive demo for
+this unit lets you push the range up to 2000 commits to see how slowly the
+test count grows.
 
-<Checkpoint question="Bisect tests commit #250 out of 500 and it's bad. Does that mean the culprit is commit #250 itself?">
+<Checkpoint question="Bisect tests commit 250 of 500 and finds it bad. Is commit 250 therefore the culprit?">
 
-Not necessarily — it means the culprit is commit #250 _or earlier_: somewhere in commits #1 through #250. Bisect only narrows the remaining range on each step; it doesn't claim the midpoint itself is the answer until the range narrows all the way down to one commit with no more room to split. The next test picks a new midpoint inside that narrowed half, #125, and continues.
+Not necessarily. A bad midpoint means the first bad commit is at 250 or earlier, so bisect keeps the lower half, including 250, and tests the middle of it next. The answer is only declared when the range has shrunk to a single commit whose parent was good.
 
 </Checkpoint>
 
-## Reflog vs. bisect: two tools for two different failure shapes
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="bisect-binary-search"
+/>
 
-|                        | `git reflog`                                     | `git bisect`                                        |
-| ---------------------- | ------------------------------------------------ | --------------------------------------------------- |
-| Question it answers    | "Where did this ref used to point?"              | "Which commit, among many, first introduced a bug?" |
-| What it needs from you | Nothing — git records it automatically           | You test candidate commits and mark good/bad        |
-| Scope                  | Local only — never shared or pushed              | Works over any range of commits, local or shared    |
-| Typical trigger        | Recovering after a reset/rebase/checkout mistake | Investigating a regression report                   |
+## Which tool for which failure?
 
-## The generalizable lesson
+|                   | `git reflog`                             | `git bisect`                                          |
+| ----------------- | ---------------------------------------- | ----------------------------------------------------- |
+| Question          | "Where did this ref point before?"       | "Which commit first introduced this bug?"             |
+| Needs from you    | Nothing; git records moves automatically | A test per candidate: good or bad                     |
+| Scope             | Local, per-ref                           | Any linear-ish range of commits                       |
+| Typical trigger   | Recovering after reset, rebase, checkout | A regression report                                   |
+| Changes anything? | No, it is read-only                      | Moves HEAD to candidates until you run `bisect reset` |
 
-**Does either tool "undo" anything by itself?** No — both are
-_information_ tools, not undo buttons. Reflog tells you where to point
-a ref back to; you still issue the `reset`/`checkout`/`branch` command
-to actually get there. Bisect tells you which commit is the culprit;
-fixing the regression is a separate step after that. The shared idea
-underneath both: git rarely deletes anything immediately, and rarely
-tells you exactly what you need to know without you asking the right
-question — reflog and bisect are two different ways of asking.
+Neither is an undo button. The reflog tells you where to point a ref; you
+still run the `branch` or `reset`. Bisect names the culprit; fixing it is a
+separate step. The shared idea: git rarely deletes anything immediately, and
+rarely tells you what you need unless you ask the right question.
