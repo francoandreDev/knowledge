@@ -1,172 +1,199 @@
 ---
-title: "L3 — A real ancestor check, and a real rebase, on an actual commit graph"
+title: "L3 — How git decides, and what a multi-commit rebase really does"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Monday vs. Tuesday, modeled as real data">
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "merge-rebase",
+};
+
+<Scenario label="Three local commits, one new remote commit">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>📅</span> <strong>Monday</strong> — local made zero commits since last sync</div>
-      <div class="flex items-center gap-1.5"><span>📅</span> <strong>Tuesday</strong> — local made one commit locally before pulling again</div>
-      <div class="flex items-center gap-1.5"><span>🌳</span> <strong>Both days</strong> — remote had moved forward with its own new commit</div>
+      <div class="flex items-center gap-1.5"><span>🌳</span> <strong>Last sync</strong> — both sides agree up to <code>B</code></div>
+      <div class="flex items-center gap-1.5"><span>☁️</span> <strong>Remote</strong> — one new commit <code>C</code> touching <code>config.json</code></div>
+      <div class="flex items-center gap-1.5"><span>💻</span> <strong>Local</strong> — three commits <code>D</code>, <code>E</code>, <code>F</code>; only <code>E</code> also touches <code>config.json</code></div>
+      <div class="flex items-center gap-1.5"><span>🔁</span> <strong>Plan</strong> — <code>git pull --rebase</code></div>
     </div>
   </Fragment>
 
-**Before reading further, predict: given only "local made a commit
-before pulling" as the one difference between Monday and Tuesday, is
-that alone enough to explain why Tuesday needed a merge commit and
-Monday didn't?**
+Before reading further, predict. Rebase will replay `D`, `E`, `F` on top of
+`C`. **Where will it stop, what will it ask of you, and what will the
+history look like when you finish?** Also: while it is stopped, which
+side does git call "ours"?
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "A commit graph as real data",
-    "A working ancestor check",
-    "A working rebase replay",
+    "How git walks history to decide",
+    "A rebase replay, step by step",
+    "Conflicts mid-rebase and ours vs. theirs",
   ]}
 />
 
-## Modeling commits as real data
+## How does git know whether a fast-forward is possible?
 
-Read `parent` as "the commit that came immediately before this one."
-So `A <- B <- C` means `C` points back to `B`, and `B` points back to
-`A`. Git walks those parent pointers whenever it needs to answer
-questions like "is this commit already in that branch's history?"
+**There is no "pull mode" flag. How does git decide?** It follows parent
+pointers. Every commit records its parent (a merge commit records two),
+so "is X an ancestor of Y" means "can I reach X by walking back from Y."
+The question git really asks is about the **merge base**, the best common
+ancestor of the two tips.
 
-```js
-// commits.mjs — a commit graph as a plain object: id -> { id, parent, message }
-const commits = {
-  A: { id: "A", parent: null, message: "init" },
-  B: { id: "B", parent: "A", message: "setup project" },
-  C: { id: "C", parent: "B", message: "remote: add logging" }, // remote's new commit
-};
+```mermaid
+flowchart TD
+    S["Find merge base of local tip and remote tip"] --> Q1{"merge base equals\nlocal tip?"}
+    Q1 -- yes --> FF["Local is behind: fast-forward\nmove the label, done"]
+    Q1 -- no --> Q2{"merge base equals\nremote tip?"}
+    Q2 -- yes --> UP["Remote is behind: already up to date\nnothing to do"]
+    Q2 -- no --> DV["Diverged: both sides have unique commits\nmerge, rebase, or stop and ask"]
 ```
 
-This is genuinely how git's history works underneath — every commit
-points at exactly one parent (ignoring merge commits, which have two),
-forming a chain back to the first commit.
+This also explains the two counters `git status` reports after a fetch:
+commits only you have (ahead) and commits only the remote has (behind).
+Fast-forward is "ahead is zero." Divergence is "both are non-zero," and
+git literally says "have diverged, and have 1 and 1 different commits
+each."
 
-## A real ancestor check
+| Ahead | Behind | State           | Pull behaves as                           |
+| ----- | ------ | --------------- | ----------------------------------------- |
+| 0     | 0      | Up to date      | Nothing to do                             |
+| 0     | 3      | Strictly behind | Fast-forward                              |
+| 2     | 0      | Strictly ahead  | Nothing to pull (you may push)            |
+| 2     | 3      | Diverged        | Merge commit, rebase, or refusal to guess |
 
-```js
-// isAncestor.mjs
-function isAncestor(commits, ancestorId, descendantId) {
-  let cur = descendantId;
-  while (cur !== null && cur !== undefined) {
-    if (cur === ancestorId) return true;
-    cur = commits[cur].parent;
-  }
-  return false;
-}
+<Checkpoint question="Local is 2 commits ahead and 0 behind. Would git pull create a merge commit?">
 
-function canFastForward(commits, localHead, remoteHead) {
-  return isAncestor(commits, localHead, remoteHead);
-}
-```
-
-`isAncestor` walks backwards from `descendantId` through parent
-pointers, checking at each step whether it's reached `ancestorId`. A
-fast-forward is possible exactly when local's current position is
-found somewhere in remote's ancestry — meaning local never diverged.
-
-## Monday: no local commits, fast-forward is possible
-
-```js
-const mondayCommits = {
-  A: { id: "A", parent: null, message: "init" },
-  B: { id: "B", parent: "A", message: "setup project" },
-  C: { id: "C", parent: "B", message: "remote: add logging" },
-};
-
-console.log(canFastForward(mondayCommits, "B", "C"));
-// true — local's HEAD (B) is a direct ancestor of remote's HEAD (C)
-```
-
-Local's `B` sits directly in `C`'s ancestry — nothing to reconcile,
-just move the pointer. This is exactly why Monday's pull stayed clean.
-
-## Tuesday: one local commit is enough to force divergence
-
-```js
-const tuesdayCommits = {
-  A: { id: "A", parent: null, message: "init" },
-  B: { id: "B", parent: "A", message: "setup project" },
-  C: { id: "C", parent: "B", message: "remote: add logging" }, // remote's new commit
-  D: { id: "D", parent: "B", message: "local: fix button color" }, // local's own new commit
-};
-
-console.log(canFastForward(tuesdayCommits, "D", "C"));
-// false — local's HEAD (D) is NOT an ancestor of remote's HEAD (C)
-```
-
-The single local commit `D` is what breaks the ancestor relationship —
-`B` now has two children (`C` and `D`), and neither is an ancestor of
-the other. This one structural fact, not anything about the size or
-content of the commit, is what forces git to create a merge commit on
-Tuesday.
-
-<Checkpoint question="canFastForward(tuesdayCommits, 'D', 'C') returns false. If you swap the arguments — canFastForward(tuesdayCommits, 'C', 'D') — does it return true instead?">
-
-No — it's still `false`. `C` and `D` are siblings, both children of `B`, and neither one is an ancestor of the other. Genuine divergence is symmetric: swapping the direction doesn't suddenly make one side "ahead" of the other. Compare that to Monday's graph, where swapping the arguments _would_ flip the answer, because `B` really is an ancestor of `C` in one direction only — that asymmetry is exactly what "fast-forward possible" depends on.
+No. Zero behind means the remote has nothing local lacks, so the remote
+tip is already an ancestor of local. The merge base equals the remote
+tip, and git reports "Already up to date." A merge commit needs unique
+commits on both sides. The same symmetry shows that "ahead only" is a
+push situation, not a pull one.
 
 </Checkpoint>
 
-## A real rebase, replaying Tuesday's commit onto the new base
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="reachability-walk"
+/>
 
-```js
-// rebase.mjs
-function rebase(commits, localCommitIds, newBaseId) {
-  let newParent = newBaseId;
-  const rebased = [];
-  for (const oldId of localCommitIds) {
-    const old = commits[oldId];
-    const newId = old.id + "'"; // a real rebase gives each replayed commit a new hash
-    rebased.push({ id: newId, parent: newParent, message: old.message });
-    newParent = newId;
-  }
-  return rebased;
-}
+## What does a multi-commit rebase actually do?
 
-console.log(rebase(tuesdayCommits, ["D"], "C"));
-// [ { id: "D'", parent: "C", message: "local: fix button color" } ]
+**What happens to three commits instead of one?** Git first sets your
+branch aside, moves to the new base (`C`), then replays your commits
+**oldest first**, each on top of the previous replayed one.
+
+```mermaid
+sequenceDiagram
+    participant Git
+    participant Tree as Working tree on C
+    Git->>Tree: check out C (the new base)
+    Git->>Tree: apply D's patch
+    Tree-->>Git: clean, commit as D-new (parent C)
+    Git->>Tree: apply E's patch
+    Tree-->>Git: CONFLICT in config.json
+    Note over Git,Tree: rebase pauses, you resolve and run git rebase --continue
+    Tree-->>Git: commit as E-new (parent D-new)
+    Git->>Tree: apply F's patch
+    Tree-->>Git: clean, commit as F-new (parent E-new)
+    Git->>Git: move the branch label to F-new
 ```
 
-Instead of a merge commit, rebase produces a **new** commit (`D'`)
-with the same message and change, but a new parent (`C`) and a new id
-— `D` itself is never modified, a fresh commit is created that
-replays its content on top of the new base. Chaining this after `C`
-produces `A → B → C → D'`, a straight line with no branching visible
-at all.
+Three things matter here. Only `E` collides because only `E` touched the
+same lines as `C`, so git stops exactly there. `F-new` is parented on
+`E-new`, so every commit after the first rewrite also gets a new hash,
+even if it was clean. And the branch label only moves once the whole
+replay succeeds, which is why `git rebase --abort` can put you back
+exactly where you were.
 
-<Checkpoint question="rebase() creates a new commit D' with parent C. Does it delete or modify commit D itself anywhere in the process?">
+```mermaid
+stateDiagram-v2
+    [*] --> Replaying
+    Replaying --> Paused: patch conflicts
+    Paused --> Replaying: resolve, git add, rebase --continue
+    Paused --> Aborted: git rebase --abort
+    Replaying --> Done: all commits replayed
+    Aborted --> [*]: branch restored
+    Done --> [*]: branch moved to last new commit
+```
 
-No — `D` is left completely untouched; it still exists in `commits` with its original id, parent, and message. `rebase()` only ever pushes new objects onto the `rebased` array. That "never mutate, always create a new commit" behavior is exactly what lets the loop below chain multiple replayed commits without disturbing the originals it's replaying.
+<Checkpoint question="E conflicts and you resolve it. Does D-new, the commit already replayed before the conflict, get redone?">
+
+No. `D-new` is already committed on top of `C` and stays as it is. The
+rebase resumes from `E` with your resolution and continues to `F`. But
+`F-new` will be parented on your resolved `E-new`, which is why a conflict
+in the middle changes the hashes of everything after it, not before it.
 
 </Checkpoint>
 
-## Extend it: what if two local commits both needed rebasing?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="rebase-in-practice"
+/>
 
-**Everything above rebased a single commit. What changes if local had
-made two commits, `D` and then `E` (with `E`'s parent being `D`),
-before pulling?** `rebase` already handles this — pass `["D", "E"]`
-as `localCommitIds` and it chains the replay: `D` gets replayed onto
-`C` as `D'`, then `E` gets replayed onto `D'` as `E'`, since
-`newParent` is updated after each step. Try
-`rebase(commits, ["D", "E"], "C")` and confirm it produces
-`[{ id: "D'", parent: "C", ... }, { id: "E'", parent: "D'", ... }]` —
-the exact same "one at a time, each on top of the last" process git
-performs, just made explicit here as a loop over an array.
+## Which side is "ours" while you resolve a rebase conflict?
+
+**Surprise: it is reversed.** In a merge, "ours" (the `HEAD` side of the
+markers) is your branch. In a rebase, git builds the new history on top of
+the upstream commit, so `HEAD` is the base you are replaying onto, and
+the commit being applied is "theirs."
+
+| Operation             | "ours" / `HEAD` side of markers         | "theirs" side of markers          |
+| --------------------- | --------------------------------------- | --------------------------------- |
+| `git merge other`     | Your branch                             | `other`                           |
+| `git rebase upstream` | `upstream` plus commits replayed so far | The commit being replayed (yours) |
+
+So in the pulled-rebase scenario above, the half of the marker block
+labelled `HEAD` holds the remote's content from `C`, and the lower half
+holds your commit `E`. Picking "ours" in a rebase means keeping the
+remote's version, which is the opposite of what most people mean.
+
+## This example is a case, not the whole territory
+
+The scenario had one new remote commit and one conflicting local commit.
+Stretch it:
+
+- **What changes if the remote had five new commits and all three of yours
+  conflicted?** You would resolve up to three times, once per replayed
+  commit, where a merge would have asked once. A very conflict-heavy
+  branch can make merge the lower-effort choice.
+- **What changes if you had already pushed D, E, F before rebasing?** The
+  new hashes diverge from the pushed ones. Updating the remote needs a
+  force push (preferably with a lease check), and anyone who fetched the
+  old commits has to recover.
+- **What changes if a commit in the middle became empty because the remote
+  already contained the same change?** Rebase notices the patch is
+  already applied and drops it or asks you, so the replayed count can be
+  smaller than the original.
+- **What changes if your branch contains a merge commit?** Plain rebase
+  flattens it away by default, which can silently change history shape.
+
+<Checkpoint question="You rebased commits you had already pushed, then plain git push is rejected. Is git broken?">
+
+No, git is protecting the remote. Your new commits are not descendants of
+the pushed ones, so the push would not be a fast-forward of the remote
+branch and git refuses it. Forcing it with a lease check (which fails if
+someone else pushed meanwhile) is the deliberate, narrower alternative to
+a blind force push, and it should only be done on a branch nobody else
+builds on.
+
+</Checkpoint>
 
 ## Failure modes
 
-| Failure mode                                                              | What it gets wrong                                                                                                                             |
-| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Assuming a merge commit means something went wrong                        | A merge commit is git's correct, honest record that real divergence happened — it isn't an error                                               |
-| Rebasing commits that have already been pushed and pulled by someone else | Rewrites hashes, leaving anyone who already has the old commits with history that diverges from the new one                                    |
-| Treating merge vs. rebase as purely aesthetic                             | Rebase's rewritten hashes carry real risk on shared history that merge structurally avoids                                                     |
-| Assuming fast-forward depends on how big or risky the local change was    | It depends entirely on the ancestor relationship — one trivial local commit forces the same divergence as ten large ones                       |
-| Confusing "no merge commit" with "nothing was reconciled"                 | Rebase still reconciles content (and can still hit conflicts while replaying) — it just records the result differently, without a merge commit |
+| Failure mode                                                  | What it gets wrong                                                                       |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Assuming a merge commit means something went wrong            | It is the correct record that real divergence happened                                   |
+| Rebasing commits already pushed and pulled by someone else    | Rewrites hashes, leaving others with history that diverges from the new one              |
+| Treating merge vs. rebase as purely aesthetic                 | Rewritten hashes carry real risk on shared history that merge structurally avoids        |
+| Assuming fast-forward depends on how big the local change was | It depends only on the ancestor relationship; one trivial local commit forces divergence |
+| Confusing "no merge commit" with "nothing was reconciled"     | Rebase still reconciles content and can hit conflicts at every replayed commit           |
+| Choosing "ours" mid-rebase thinking it means your own work    | During rebase, "ours" is the upstream you replay onto; your commit is "theirs"           |
+| Resolving a mid-rebase conflict and forgetting to continue    | The rebase stays paused; the branch label has not moved yet                              |

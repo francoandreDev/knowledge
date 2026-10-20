@@ -4,6 +4,12 @@ title: "L1 — Why does git pull sometimes leave a weird extra commit nobody wro
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "merge-rebase",
+};
 
 <Scenario label="One command, two very different outcomes">
   <Fragment slot="facts">
@@ -14,7 +20,7 @@ import LevelIntro from "../../../components/LevelIntro.astro";
     </div>
   </Fragment>
 
-An engineer runs `git pull` on Monday — it finishes cleanly, no extra
+An engineer runs `git pull` on Monday. It finishes cleanly, no extra
 commits, history stays a straight line. On Tuesday, the exact same
 command on the exact same branch adds a new commit nobody wrote:
 "Merge branch 'main' of ...". **Same command, same person, same repo.
@@ -25,37 +31,53 @@ commit was needed this time?**
 
 <LevelIntro
   items={[
-    "Local vs. remote vocabulary",
-    "Fast-forward vs. merge commit",
-    "What rebase replays differently",
+    "Local, remote, and divergence",
+    "The four things a pull can do",
+    "Merge vs. rebase at a glance",
   ]}
 />
 
-## The minimum map
+## What does it mean for two copies of history to diverge?
+
+Start with the picture. Monday and Tuesday differ by exactly one thing:
+whether the engineer committed something locally before pulling.
+
+```mermaid
+gitGraph
+  commit id: "A"
+  commit id: "B (last sync)"
+  branch origin-main
+  checkout origin-main
+  commit id: "C (remote only)"
+  checkout main
+  commit id: "D (local only)"
+```
+
+On Monday the `D` commit does not exist, so remote is simply further
+along the same line. On Tuesday both sides moved on from `B` and now
+each has a commit the other lacks. That state is called **divergence**.
 
 - **Local** is your copy of the repository on your machine.
-- **Remote** is the shared copy, usually the one hosted on GitHub,
-  GitLab, or another server.
-- A **commit** is one saved snapshot in the history.
+- **Remote** is the shared copy, usually hosted on GitHub, GitLab, or
+  another server.
+- A **commit** is one saved snapshot, identified by a 40-character hash.
 - A **branch** is a movable label pointing at one commit.
-- **HEAD** means "the commit my current branch is pointing at right
-  now."
+- **HEAD** is the commit your current branch points at right now.
+- **Divergence** means each side has at least one commit the other does
+  not, counted from their last common commit.
 
-So when this unit says "local and remote diverged," it means: your
-branch label and the remote branch label no longer point along the
-same simple line of commits. Each side has at least one commit the
-other side does not have yet.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="divergence-vocab"
+/>
 
-## The shape of the problem
+## What can a pull actually do?
 
-- `git pull` is really two steps combined: fetch the remote's latest
-  commits, then reconcile them with local history — and _how_ it
-  reconciles depends entirely on whether local history has moved since
-  the two last agreed on a common point.
-- When local and remote have both added commits since they diverged,
-  git can't just "add the new stuff" — it has to decide how to combine
-  two different, real sequences of change, and a merge commit is one
-  specific way of recording that decision, not the only one.
+`git pull` is two steps glued together: **fetch** the remote's new
+commits, then **reconcile** them with your local branch. Which
+reconciliation happens depends on the shape of history, and that shape
+is what you can read off the result:
 
 | What you see after `git pull`                   | What it usually means                                                                | What to do next                                                               |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
@@ -64,29 +86,45 @@ other side does not have yet.
 | Git reports conflicts                           | Both histories touched overlapping content that git could not combine automatically  | Edit the files, choose the correct combined result, then complete the merge   |
 | You pulled with rebase and see replay messages  | Git is copying your local commits on top of remote's latest commit                   | Check each replayed commit; conflicts can still happen one commit at a time   |
 
-## Key terms
+One caution about the table: recent git versions refuse to guess when
+history has diverged and you have configured nothing. They stop and ask
+you to choose merge, rebase, or fast-forward-only. The merge commit on
+Tuesday means merging was the configured (or chosen) behavior.
 
-- **Fast-forward** — when the local branch's current commit is a
-  direct ancestor of the remote's commit, so incorporating the remote's
-  changes just means moving the local pointer forward — no new commit
-  needed, no reconciliation required.
-- **Merge commit** — when local history has diverged from remote (both
-  sides added commits since the common point), git creates a new
-  commit with two parents to record that both histories are now
-  combined.
-- **Rebase** — instead of creating a merge commit, replaying local
-  commits one by one on top of the remote's latest commit, producing a
-  straight-line history as if the local work had started from there in
-  the first place.
-- **Divergence** — the state where local and remote both have commits
-  the other doesn't, counted from their last common ancestor — this is
-  exactly the condition that makes a fast-forward impossible.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="pull-outcomes"
+/>
 
-## What this unit covers
+## Merge or rebase: the one-line difference
 
-L2 works through exactly when a fast-forward is possible versus when
-divergence forces a real reconciliation, and what merge and rebase each
-actually do differently with the same diverged history. L3 implements
-both a real ancestor-check function and a real rebase operation on an
-actual commit graph, to show precisely why Monday's pull stayed clean
-and Tuesday's didn't.
+Once histories have diverged there are two ways to combine them:
+
+```mermaid
+flowchart LR
+    subgraph M["Merge"]
+        direction LR
+        mB["B"] --> mC["C"] --> mM["M (two parents)"]
+        mB --> mD["D"] --> mM
+    end
+    subgraph R["Rebase"]
+        direction LR
+        rB["B"] --> rC["C"] --> rD["D-new (copy of D)"]
+    end
+```
+
+- **Fast-forward** is when your branch's tip is an ancestor of the
+  remote's tip. Git only slides the label forward. No new commit.
+- **Merge commit** is a new commit with two parents that records "these
+  two histories were joined here." Existing commits are untouched.
+- **Rebase** replays your commits one by one on top of the remote's
+  latest commit. The copies get new hashes, and the old ones are
+  abandoned.
+
+## What the next levels cover
+
+L2 pins down the exact condition for a fast-forward and what merge and
+rebase each do to the commit graph, including why rewriting hashes is
+risky on shared history. L3 shows how git actually decides (walking
+parent pointers) and follows a multi-commit rebase through conflicts.
