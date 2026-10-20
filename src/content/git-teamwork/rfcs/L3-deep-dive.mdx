@@ -1,187 +1,179 @@
 ---
-title: "L3 — A real RFC, a real blocking objection, and how it actually resolved"
+title: "L3 — One RFC, one blocking objection, and how it resolved"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="The RFC, start to finish">
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "rfcs",
+};
+
+<Scenario label="RFC-014, start to finish">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>📄</span> RFC-014: Redis queue → SQS</div>
-      <div class="flex items-center gap-1.5"><span>👤</span> Owner: Priya (author + decision owner)</div>
+      <div class="flex items-center gap-1.5"><span>📄</span> RFC-014: move the job queue from Redis to SQS</div>
+      <div class="flex items-center gap-1.5"><span>👤</span> Owner: Priya (author and decision owner)</div>
       <div class="flex items-center gap-1.5"><span>🗓️</span> 5-day review window</div>
-      <div class="flex items-center gap-1.5"><span>🚧</span> 1 blocking objection, day 4</div>
-      <div class="flex items-center gap-1.5"><span>✅</span> Amended, then accepted, day 5</div>
+      <div class="flex items-center gap-1.5"><span>🚧</span> Day 4: Marco raises one blocking objection</div>
+      <div class="flex items-center gap-1.5"><span>✅</span> Day 5: amended, objection withdrawn, accepted</div>
     </div>
   </Fragment>
 
-L2 described the RFC lifecycle in the abstract. This level walks through
-one real document end-to-end — the actual sections Priya wrote, the
-actual objection Marco raised, and the actual line in the decision log
-that closed it. Not a summary of what an RFC contains, but what one
-genuinely reads like, objection and all.
-
-**L1's version of this disagreement went nowhere after 40 messages. What
-specifically does putting it in this format change about the outcome?**
+L1's three-day thread produced nothing. Priya now takes the same proposal
+through the process from L2: she writes it up, names herself owner, opens a
+five-day window, and waits. **What exactly does the written format change
+about how Marco's concern gets handled?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "The RFC document, section by section",
-    "The actual objection thread and how it resolved",
-    "Anti-patterns that quietly break the process",
+    "The document, section by section",
+    "The objection and its resolution",
+    "Ways the process quietly breaks",
   ]}
 />
 
-## The document Priya actually wrote
+## What did Priya actually write?
 
-```md
-# RFC-014: Migrate background job queue from Redis to SQS
+Priya's RFC, condensed to its load-bearing parts:
 
-Status: Accepted (amended) — 2026-02-13
-Owner: Priya Nair
+| Section        | Content                                                                                                                                                                 |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Context        | The Redis-backed queue has lost in-flight jobs twice after Redis restarts, because it has no built-in redelivery. Both times a person noticed and re-ran them by hand.  |
+| Options        | A: move to SQS. B: keep Redis and build a durability layer on top (record jobs in the database, detect lost ones, requeue). C: do nothing and rely on manual detection. |
+| Recommendation | Option A. Migration cost is real but bounded; B means building and maintaining the very class of bug being removed; C only postpones the next incident.                 |
+| Non-goals      | Scheduled (cron-style) jobs are a separate queue with different needs, covered elsewhere.                                                                               |
+| Owner          | Priya, named before review opened.                                                                                                                                      |
 
-## Context
+Her trade-off table treats all three options the same way:
 
-Our Redis-based job queue has lost jobs twice in the last quarter during
-Redis restarts — jobs mid-flight when Redis went down were never
-retried, because Redis itself has no durable at-least-once delivery
-guarantee without extra work we haven't built. Both incidents were
-low-severity (retried manually, no customer impact) but the second one
-took 40 minutes to notice.
+| Option                  | Cost                                               | Risk                                                                 | What is given up                               |
+| ----------------------- | -------------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------- |
+| A: SQS                  | A few engineer-weeks, plus ongoing AWS cost        | Nobody on the team has run a managed queue in production             | Easy local development (needs an emulator)     |
+| B: Redis plus own layer | Somewhat more engineer-time, no new infrastructure | Homegrown durability code is easy to get subtly wrong and under-test | Time, plus a permanent maintenance burden      |
+| C: do nothing           | Almost none now                                    | The third incident is a matter of when, and may be worse             | Nothing now; the risk is deferred, not removed |
 
-## Options considered
+**Why does the recommended option get a risk and a "given up" column like
+the others?** A table that scrutinizes only the rejected options is a sales
+pitch in the shape of a comparison. Rating Option A as harshly as the rest
+is what lets Marco judge the options himself instead of reacting to Priya's
+conclusion.
 
-**Option A — Move the queue to Amazon SQS.**
-SQS gives at-least-once delivery, a visibility timeout with automatic
-redelivery, and a built-in dead-letter queue for jobs that fail
-repeatedly, all managed by AWS.
-
-**Option B — Keep Redis, add our own durability layer.**
-Write jobs to Postgres before enqueueing, poll Postgres to detect
-lost jobs, and requeue them. Keeps our current tooling.
-
-**Option C — Do nothing, rely on manual detection.**
-Accept the current risk; the two incidents so far were low-severity.
-
-## Trade-offs
-
-| Option                         | Cost                                                                   | Risk                                                                                                   | What we give up                                              |
-| ------------------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
-| A: SQS                         | ~~2 eng-weeks migration, ongoing AWS cost (~~$40/mo at current volume) | Team has zero production AWS queue experience                                                          | Local dev parity — needs a local SQS emulator                |
-| B: Redis + Postgres durability | ~3 eng-weeks, no new infra cost                                        | Homegrown durability code is exactly the kind of thing that's hard to get right and easy to under-test | Team time better spent elsewhere; ongoing maintenance burden |
-| C: Do nothing                  | ~0                                                                     | Third incident is a when, not an if, and it may not stay low-severity                                  | Nothing given up now; risk deferred, not removed             |
-
-## Recommendation
-
-Option A (SQS). The migration cost is real but bounded; Option B asks
-us to build and maintain the exact class of durability bug we're
-trying to eliminate. Option C only postpones the failure.
-
-## Non-goals
-
-This RFC does not cover migrating the _scheduled_ (cron-style) jobs
-system — that's a separate queue with different durability needs,
-tracked in RFC-015.
-```
-
-**Why does the trade-off table include a column for Option A — the
-option Priya is actually recommending — instead of only listing
-downsides for B and C?** Because a table that only lists costs for the
-options being rejected isn't a trade-off table, it's a sales pitch
-wearing one — a reviewer can't trust the comparison if the author's own
-preferred option gets a pass on scrutiny. Rating every option, including
-your own, the same way is what lets a reader like Marco (below) form an
-independent judgment instead of just reacting to Priya's conclusion.
-
-## The blocking objection, and how it actually resolved
+## How did the blocking objection play out?
 
 ```mermaid
 sequenceDiagram
-    participant P as Priya (author/owner)
+    participant P as Priya (author, owner)
     participant M as Marco (reviewer)
-    participant T as Rest of team
-    P->>T: Day 1 — RFC-014 posted, 5-day review window opens
-    T->>P: Day 1-3 — non-blocking comments (naming, one typo)
-    M->>P: Day 4 — blocking objection: visibility timeout vs. 90s job runtime
-    P->>M: Day 4 — investigates, confirms the gap is real
-    P->>T: Day 4 — RFC amended: visibilityTimeout raised to 180s, heartbeat extension added
-    M->>P: Day 5 — objection withdrawn, amendment addresses it
-    P->>T: Day 5 — Decision recorded: Accepted (amended)
+    participant T as Rest of the team
+    P->>T: Day 1 - RFC posted, five-day window opens
+    T->>P: Days 1-3 - non-blocking notes (naming, a typo)
+    M->>P: Day 4 - blocking: redelivery timeout shorter than job runtime
+    P->>M: Day 4 - checks the docs, confirms the gap is real
+    P->>T: Day 4 - RFC amended with a longer timeout and a heartbeat
+    M->>P: Day 5 - withdraws the objection
+    P->>T: Day 5 - decision recorded: accepted, amended
 ```
 
-Marco's actual comment, inline on the "Trade-offs" section:
+Marco's comment, left inline on the trade-offs section, read in substance:
+"Blocking. This queue's default visibility timeout is 30 seconds: if the
+worker has not deleted the message by then, the queue assumes the worker
+died and hands the message to another one. Our image-processing jobs run
+60 to 90 seconds. As written, every image job would be picked up a second
+time while the first worker is still running. This is in the SQS
+documentation under visibility timeout, and the RFC does not address it."
 
-> **Blocking.** SQS's default visibility timeout is 30 seconds — after
-> that, if the consumer hasn't deleted the message, SQS assumes it
-> failed and makes it visible to another consumer again. Our image-
-> processing jobs run 60–90 seconds. As written, this migration would
-> cause every image job to be picked up _twice_, because the first
-> worker is still running when the message becomes visible again.
-> Source: AWS SQS docs, "Visibility Timeout." This isn't addressed
-> anywhere in the RFC.
+Priya replied within hours. She confirmed the gap, then amended the RFC with
+two changes: a longer timeout set well above the slowest normal job, and a
+heartbeat in which a running worker keeps extending the message's timeout so
+slow jobs are never silently duplicated. She marked the thread resolved once
+the document reflected it. The decision line, "Accepted (amended)", went into
+the document the next day.
 
-Priya's reply, six hours later:
+Notice what made this work. Marco's comment named a mechanism, quoted a
+number, cited a source, and pointed at the exact section. Priya could verify
+it in minutes instead of defending against a mood.
 
-> Confirmed, good catch — I hadn't accounted for the default. Two
-> fixes are possible: (1) set `VisibilityTimeout` to 180s statically,
-> or (2) call `ChangeMessageVisibility` as a heartbeat every 30s while
-> a job is still running, so slow jobs never get silently duplicated.
-> Going with both — a 180s floor plus a heartbeat extension for jobs
-> that occasionally run longer than that. Updating the RFC now.
-> Marking this resolved once the doc reflects it — flag me if it
-> still doesn't cover your concern.
+<Checkpoint question="The objection delayed acceptance by a day, and the final design is close to the original. Was raising it still worth the cost?">
 
-<Checkpoint question="Marco's objection was blocking and it delayed acceptance by a full day. Was raising it still worth the cost, given the RFC eventually got accepted almost exactly as originally proposed?">
-
-Yes — and the fact that the final shape is close to the original proposal doesn't mean the objection didn't matter, it means the objection got fixed cheaply because it was caught before implementation. If Marco had stayed quiet (or only said "I'm not sure about this" without the specifics), the same gap would have surfaced in production instead: every image job silently double-processed, discovered only after customers noticed duplicate results. One day of review delay against a production incident and a rollback isn't a close call. The objection's value isn't measured by how much it changed the final document — it's measured by where the bug got caught.
+Yes, and the small size of the change is the point rather than a mark against it. The objection was cheap to fix because it was caught before anything was built. Had Marco stayed quiet, the same gap would have appeared after launch as image jobs processed twice, found only when customers noticed duplicates, and fixed under pressure with a rollback. A day of review set against a production incident is not a close call. The value of an objection is measured by where the bug gets caught, not by how much the document changed.
 
 </Checkpoint>
 
-**What would have happened if Priya, as the decision owner, had
-disagreed with Marco's math instead of confirming it?** She still could
-have proceeded — an owner can overrule a blocking objection — but
-disagree-and-commit would then have required her to write the reasoning
-into the document ("timeout mismatch confirmed, but our jobs already
-have idempotent writes, so double-processing is a performance cost, not
-a correctness bug — accepting that trade-off") rather than simply
-outvoting Marco by staying silent on his point. The objection has to be
-answered on the record, even when the answer is "acknowledged, and
-overruled, for this specific reason."
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="objection-worked"
+/>
 
-## Anti-patterns that quietly break the process
+## What if the owner had disagreed with Marco?
 
-| Anti-pattern                    | Looks like                                                                                            | Why it breaks the process                                                                                                             |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Silent disagreement             | Reviewer has real doubts, says nothing, then criticizes the decision after it ships                   | The objection never existed on the record, so nobody could weigh or address it — this is worse than a loud objection, not more polite |
-| Relitigating after commit       | Bringing the same rejected argument back up in an unrelated meeting weeks later, with no new evidence | Disagree-and-commit specifically requires new evidence to reopen a decision — otherwise every decision stays permanently provisional  |
-| Vague objection, no alternative | "I don't think this is right" with no specific failure named                                          | Gives the author nothing to investigate or respond to — indistinguishable from a mood, not a finding                                  |
-| Approval theater                | Reviewer skims, leaves a 👍, never actually checks the trade-off table                                | Defeats the point of async review — the document gets a stamp without getting the scrutiny that catches a Marco-style bug             |
-| No named owner                  | RFC posted to a channel with no explicit decision-maker                                               | Decision defaults to "whoever argues longest," which is the live-thread failure mode in a document's clothes (see L2)                 |
+Priya could still have proceeded: an owner may overrule a blocking
+objection. Disagree-and-commit then requires her to answer it on the record,
+for example: "timeout mismatch confirmed, but these jobs already write
+idempotently, so double-processing costs compute and is not a correctness
+bug; accepting that." The objection is not allowed to disappear by silence.
 
-<Checkpoint question="A teammate approves an RFC with a 'looks good to me!' comment, but later says in a retro that they'd actually had doubts about the SQS cost estimate the whole time. What specifically went wrong here, separate from whether the cost estimate turns out to be accurate?">
+Overruling and conflict also have a limit. If the objection comes from outside
+the team, or two reviewers raise conflicting blocking objections that no
+single design can satisfy, the author should not settle it alone.
 
-The process broke at the review step, regardless of whether the cost estimate turns out right or wrong. An approval is supposed to mean the reviewer actually weighed the trade-offs and found no blocking issue — "approval theater" from the table above is exactly a stamp with no scrutiny behind it. The teammate's silence didn't just fail to help; it actively misinformed the process, because their approval was read as "I checked this and it's fine" when it actually meant "I didn't want to raise it." A wrong-but-stated objection is recoverable — someone can check the math. An unstated one is invisible until it resurfaces as after-the-fact blame, which is worse for the team than the disagreement itself would have been.
+| Situation                                        | Who resolves it                                   | What gets written down                    |
+| ------------------------------------------------ | ------------------------------------------------- | ----------------------------------------- |
+| Owner agrees the objection is valid              | Owner amends the document                         | The change and the thread marked resolved |
+| Owner disagrees, objection stays inside the team | Owner overrules                                   | The reasoning for overruling              |
+| Reviewers' blocking objections conflict          | A decision-maker above both                       | Which objection prevailed and why         |
+| Objection from another team the proposal affects | The named escalation path, with that team's input | The concern, the ruling, and who made it  |
+
+<Checkpoint question="An owner reads a blocking objection, privately decides it is wrong, and simply proceeds without replying. Is that disagree-and-commit?">
+
+No. Disagree-and-commit assumes the objection was weighed and answered where everyone can see it. Proceeding in silence leaves the reviewer unable to tell whether the concern was understood, rejected, or ignored, and it leaves the record with an unanswered blocker. A reasoned overrule keeps the owner's authority intact while keeping the document trustworthy; a silent one is the outvote-by-stamina pattern the process was meant to replace.
 
 </Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="overrule-escalate"
+/>
+
+## How does the process quietly break?
+
+| Failure                       | Looks like                                                                      | Why it breaks the process                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Silent disagreement           | A reviewer has doubts, says nothing, and criticizes the decision after it ships | The objection was never on the record, so nobody could weigh or answer it  |
+| Relitigating without evidence | The same rejected argument returns in an unrelated meeting weeks later          | Without a new-evidence rule every decision stays provisional               |
+| Vague objection               | "I don't think this is right," with no failure named                            | Nothing to verify or answer                                                |
+| Approval theater              | A thumbs-up seconds after posting, with the trade-offs unread                   | The document gets a stamp instead of scrutiny, and a Marco-style gap ships |
+| No named owner                | The RFC is posted to a channel with no decision-maker                           | The decision defaults to whoever argues longest                            |
+
+<Checkpoint question="A teammate approved an RFC with 'looks good to me' but says in the retro that they doubted the cost estimate all along. What went wrong, separately from whether the estimate was right?">
+
+The process failed at review. An approval is read as "I checked the trade-offs and found no blocking issue." This teammate's approval actually meant "I did not want to raise it," so it misinformed everyone relying on it. A stated objection that turns out wrong is recoverable, because someone can check the numbers. An unstated one stays invisible until it resurfaces as after-the-fact blame, which costs the team more than the disagreement would have.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="process-failures"
+/>
 
 ## Beyond this one example
 
-Priya and Marco's exchange resolved cleanly: one blocking objection,
-one round of investigation, one amendment, done. **What would need to
-change about this same process if the objection had come from someone
-outside the immediate team — say, a security reviewer flagging that
-SQS queue contents aren't encrypted at rest by default — and Priya
-disagreed that it mattered for this data?** Or, differently: what
-changes if two reviewers raise _conflicting_ blocking objections, each
-with solid evidence, that can't both be satisfied by the same design?
-Neither case is answered by anything shown above — the mechanics here
-(name the objection, investigate, amend or overrule with reasoning) are
-the same, but a cross-team or conflicting-objection case usually needs
-the escalation path from L2 (a named decision-maker above both
-reviewers) rather than the author resolving it alone. The worked
-example above is one instance of the process, not the whole shape of
-what it has to handle.
+RFC-014 is a case, not the whole territory. It had a cooperative author, one
+objection, and a fact that could be checked in an afternoon. **What changes
+if the objection concerns data handling, such as whether queued messages are
+encrypted at rest, and Priya believes it does not matter for this data? What
+changes if two reviewers raise blocking objections, each with solid evidence,
+that no single design can satisfy?** Neither is answered by what happened
+above. The basics still hold (name it, check it, amend or overrule with
+reasons), but both cases need the escalation path from L2 rather than the
+author deciding alone, and both raise a further question the example never
+tested: how does the team decide that a disagreement has stopped producing
+new information?
