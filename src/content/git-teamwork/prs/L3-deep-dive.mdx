@@ -2,58 +2,66 @@
 title: "L3 — Reproducing both directions: a bug review catches, and a bug only CI catches"
 ---
 
+import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L2 established that CI and review catch different categories of mistake,
-in the abstract. L3 makes both categories concrete in real code — building
-the exact discount-stacking bug review catches, and a separate rename bug
-only CI's full suite catches.
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "prs",
+};
+
+<Scenario label="Two PRs, two different safety nets, two different misses">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>💸</span> <strong>PR 1</strong> — new discount path; CI green, reviewer catches it</div>
+      <div class="flex items-center gap-1.5"><span>🏷️</span> <strong>PR 2</strong> — tidy rename; reviewer approves, CI catches it</div>
+      <div class="flex items-center gap-1.5"><span>❓</span> <strong>Question</strong> — what does each safety net structurally see?</div>
+    </div>
+  </Fragment>
+
+The same team, the same week, two PRs. The first adds a discount path that
+CI is happy with and a reviewer stops. The second is a rename so small and
+clean that a reviewer approves it in seconds, and only CI stops it.
+**If both safety nets are competent in both cases, what is it about the
+_shape_ of each bug that decides which net catches it?**
+
+</Scenario>
 
 <LevelIntro
   items={[
-    "The discount bug review catches, in real code",
+    "The discount bug only review catches",
     "The rename bug only CI's full suite catches",
-    "What generalizes beyond these two examples",
+    "What neither net catches before merge",
   ]}
 />
 
 ## The discount function, and the tests that all pass
 
-**Before anything changes — what does `applyDiscount` do, and what
-does its existing test suite actually verify?**
+**Before anything changes: what does the existing suite actually verify?**
+A discount subtracts a percentage from a price. Added together, two
+discounts of 60% and 50% make 110%, which would charge the customer a
+negative amount:
 
-In arithmetic first: a price of `100` with a `10%` discount becomes
-`90`, because the customer pays `100 - 10`. But if one discount is
-`60%` and another is `50%`, adding them gives `110%`. A `110%`
-discount on a price of `100` means `100 - 110 = -10`, which is not a
-valid price.
-
-```js
-function round2(n) {
-  return Math.round(n * 100) / 100;
-}
-
-function applyDiscount(price, discountPercent) {
-  return round2(price * (1 - discountPercent / 100));
-}
+```mermaid
+xychart-beta
+    title "Final price for a 100 item as the combined discount grows"
+    x-axis "Combined discount (%)" [0, 25, 50, 75, 100, 125, 150]
+    y-axis "Final price" -50 --> 100
+    line [100, 75, 50, 25, 0, -25, -50]
+    line [100, 75, 50, 25, 0, 0, 0]
 ```
 
-```js
-// The existing test suite — every single one passes on this version
-applyDiscount(100, 10); // 90
-applyDiscount(100, 0); // 100
-```
+The first line is the unclamped function; the second clamps the discount
+into the 0 to 100 range. They agree everywhere the existing tests look
+(10% and 0%) and diverge only past 100%. The interactive demo for this unit
+lets you drag across that boundary.
 
-Both tests pass. Both are correct, real tests of real behavior. The
-function has never been asked to handle a discount over 100% because,
-until this PR, nothing in the codebase ever combined two discounts —
-there was no scenario to test, so nobody wrote one.
+## Why does CI have nothing to say about the new PR?
 
-## The PR that makes a new scenario possible — and CI's blind spot
-
-**What does the new PR actually add, and why does CI have nothing to
-say about it?**
+**What does the PR add, and why does an all-green suite not contradict the
+bug?**
 
 ```js
 function computeCombinedDiscount(memberPercent, couponPercent) {
@@ -61,155 +69,124 @@ function computeCombinedDiscount(memberPercent, couponPercent) {
 }
 ```
 
-```js
-const combined = computeCombinedDiscount(60, 50); // 110
-applyDiscount(100, combined); // -10 — a negative price
-```
+Before this PR, nothing in the codebase combined two discounts, so a
+combined value over 100 was unreachable. The suite re-runs `applyDiscount`
+at 10% and 0%, both still correct. **CI is not malfunctioning.** It checks
+exactly what it was told to check, and this PR is what makes the new
+scenario reachable for the first time.
 
-CI runs the full existing suite against this PR. `applyDiscount(100, 10)`
-still returns `90`. `applyDiscount(100, 0)` still returns `100`. Both
-pass — nothing regressed. **CI is not wrong, and it's not
-malfunctioning.** It's checking exactly what it was told to check,
-and the 110%-combined-discount scenario simply isn't in that set —
-this PR is what makes that scenario reachable for the first time.
+<Checkpoint question="CI ran the full existing suite against the PR that adds computeCombinedDiscount and every test passed. Was CI wrong to report green?">
 
-<Checkpoint question="CI ran the full existing test suite against the PR that adds computeCombinedDiscount, and every test passed. Given what L2 established about what CI structurally can and can't catch, was CI wrong to report green here?">
-
-No. CI did exactly its job — it exhaustively re-ran every check that
-already existed and confirmed none of them regressed, which is true. What
-CI can't do is invent a check for a scenario nobody encoded yet: the
-110%-combined-discount case didn't exist as a reachable path through the
-codebase before this PR, so no test covers it, and CI has no way to know
-it should. A green CI run here means "nothing that was already tested
-broke," not "this PR is safe" — those are different claims, and the gap
-between them is precisely the territory a human reviewer has to cover.
+No. CI re-ran every check that existed and confirmed none regressed, which
+is true. It cannot invent a check for a scenario nobody encoded, and the
+110% case did not exist as a reachable path before this PR. Green here means
+"nothing already tested broke," not "this PR is safe." The gap between those
+two claims is exactly the territory a human reviewer has to cover.
 
 </Checkpoint>
 
-## The question a diff-only reviewer asks
+## What did the reviewer do that CI couldn't?
 
-**What did the reviewer actually do that CI structurally couldn't?**
-Not re-run the tests — read the _new_ function and asked what its
-output range implies when combined with the existing one:
+The reviewer did not re-run anything. They read the new function and asked
+what its output range implies when it feeds the existing one:
 
-> Reviewer: "`computeCombinedDiscount` doesn't cap anywhere — what
-> happens if `applyDiscount` gets called with something over 100
-> from this?"
+> "`computeCombinedDiscount` doesn't cap anywhere. What happens if
+> `applyDiscount` gets something over 100 from this?"
 
-Verifying the concern directly:
-
-```js
-applyDiscount(100, computeCombinedDiscount(60, 50)); // -10
-```
-
-**The fix**, and its own verification:
+That one question turned an untested scenario into a bounded one. The fix
+is a clamp on the discount before it is applied, and it is exactly the kind
+of behavior a test can protect from now on:
 
 ```js
-function applyDiscountFixed(price, discountPercent) {
-  const clamped = Math.min(100, Math.max(0, discountPercent));
-  return round2(price * (1 - clamped / 100));
-}
+const clamped = Math.min(100, Math.max(0, discountPercent));
 ```
 
-```js
-applyDiscountFixed(100, computeCombinedDiscount(60, 50)); // 0, not -10
-applyDiscountFixed(100, 10); // 90 — normal case still correct
-applyDiscountFixed(50, -20); // 50 — a negative discount doesn't inflate the price either
+The lasting win is not only the fix. The reviewer's insight becomes new
+automated protection once someone adds a test for a combined discount over 100.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="review-catches-ci-misses"
+/>
+
+## The reverse: what CI catches that a diff-only review misses
+
+**Is review simply better than CI, then?** No. A later PR renames a shared
+helper from `formatCurrency` to `formatPrice` in `utils.js` and updates the
+one call site in the same file. The diff is small, clean, and
+self-consistent. What it does not show is `invoicing.js`, which still calls
+the old name:
+
+```mermaid
+flowchart LR
+    subgraph Diff["What the reviewer sees"]
+      U["utils.js: formatCurrency renamed to formatPrice"]
+    end
+    subgraph Hidden["Not in the diff"]
+      I["invoicing.js still calls formatCurrency"]
+    end
+    U -. "breaks" .-> I
+    CI["CI runs the whole suite"] --> I
+    I --> F["invoicing test fails: formatCurrency is not defined"]
 ```
 
-The reviewer's question turned an untested scenario into a bounded,
-verified one — and the fix (`Math.min`/`Math.max` clamping) is exactly
-the kind of thing a test suite can now also verify, once someone
-thought to ask the question that revealed it needed testing.
+A reviewer can only reason about what the diff shows. CI does not read the
+diff at all. It re-runs the entire codebase's tests, so `invoicing.js`
+fails on contact. A very strong reviewer might search for call sites by
+habit, but that depends on human attention, while CI makes the broader
+check systematic for every PR.
 
-## The reverse case: what CI catches that a diff-only review misses
+<Checkpoint question="Why did review catch the discount bug and miss the rename, while CI did the opposite?">
 
-**Is review strictly better than CI, then?** No — here's the opposite
-failure, from the same codebase. A later PR renames a shared helper:
-
-```js
-// Before this PR, in utils.js:
-function formatCurrency(amount) {
-  return "$" + amount.toFixed(2);
-}
-
-// This PR renames it, in the same file:
-function formatPrice(amount) {
-  return "$" + amount.toFixed(2);
-}
-```
-
-**The diff the reviewer sees** is small and clean — one function
-renamed, its one obvious call site in the same file updated to match.
-**What the diff doesn't show:** a completely different file,
-`invoicing.js`, still calls the old name:
-
-```js
-// invoicing.js — not touched by this PR, not shown in the diff
-function invoiceTotal(amount) {
-  return formatCurrency(amount); // still the old name
-}
-```
-
-A reviewer reading only the changed lines in the PR's diff has no
-reason to know `invoicing.js` exists, let alone that it calls the
-function being renamed — **but CI's full test suite runs the entire
-codebase, including `invoicing.js`'s tests, and `formatCurrency is
-not defined` fails immediately.** This is precisely the territory
-where CI's advantage over review is real: exhaustively re-checking
-everything, every time, including files the diff never shows.
-
-A very strong reviewer might search for call sites and notice
-`invoicing.js` manually. The point is that review depends on human
-attention and habits, while CI can make that broader check systematic
-for every PR.
-
-<Checkpoint question="Compare the two bugs in this level: the discount-stacking bug and the formatCurrency rename. Why did review catch one and miss the other, and why did CI catch the other and miss the first?">
-
-The discount bug was invisible to CI because no existing test encoded the
-110%-combined scenario — CI can only re-check what's already written, and
-this was a genuinely new path through the code that a human had to reason
-about by reading `computeCombinedDiscount`'s output range. The rename bug
-was invisible to review for the opposite reason: the diff itself was small,
-clean, and self-consistent — nothing in the changed lines hinted that a
-completely different, untouched file still depended on the old name, and a
-reviewer can only reason about what the diff shows them. CI caught it
-because it doesn't read the diff at all — it re-runs the entire codebase's
-tests regardless of which files changed, so `invoicing.js`'s test failed on
-contact with the renamed function even though no reviewer had reason to
-look there.
+The discount bug was invisible to CI because no test encoded the 110% case.
+CI can only re-check what is already written, and this was a new path a
+human had to reason about by reading the function. The rename bug was
+invisible to review because the changed lines were clean and self-consistent
+and hinted at nothing in an untouched file. CI caught it because it ignores
+the diff and exercises everything, so the untouched caller failed anyway.
 
 </Checkpoint>
 
-## What generalizes and what doesn't
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="ci-catches-review-misses"
+/>
 
-The core division — automated checks are exhaustive but blind to
-anything untested, human review can catch new scenarios but only as
-carefully as someone actually looks — generalizes to any codebase
-with both CI and review. What's specific to this worked example: a
-discount-stacking bug and a cross-file rename are two particular
-instances of "review catches what CI can't" and "CI catches what
-review can't" — the same two failure directions show up as different
-concrete bugs in every codebase (an off-by-one only visible by
-reasoning through the logic; a broken import only visible by actually
-building the whole project). **Try extending it yourself:** what
-category of bug would neither CI _nor_ a normal diff-focused review
-catch — something that only shows up once the change is actually
-running in production, under real traffic or real data? What would a
-team need beyond PRs and CI to catch that category too?
+## This example is a case, not the whole territory
 
-Common answers include timing races, slow database queries that only
-appear with production-sized data, flaky third-party dependencies,
-rollout mistakes, and behavior that depends on real user traffic. PRs
-and CI help before merge; those categories also need observability,
-alerts, progressive rollout, feature flags, and incident learning after
-the change is running.
+Two bugs, two safety nets: that is a case, not a law covering every defect.
+The division generalizes (automated checks are exhaustive but blind to
+anything unwritten; review can spot new scenarios but only as carefully as
+someone looks). The specific bugs do not.
+
+**Try extending it yourself.** What category of bug would neither CI nor a
+normal diff-focused review catch, because it only shows up once the change
+is running under real traffic or real data? What would a team need beyond
+PRs and CI to catch it?
+
+| Escapes pre-merge checks because...                      | What a team adds after merge                 |
+| -------------------------------------------------------- | -------------------------------------------- |
+| Timing races that only appear under real concurrency     | Observability, alerts                        |
+| Slow queries that only appear with production-sized data | Monitoring, load testing                     |
+| Flaky or changed third-party behavior                    | Alerts, graceful degradation                 |
+| A correct change that is wrong to release to everyone    | Feature flags, progressive rollout, rollback |
+
+PRs and CI reduce risk before merge; these categories need a second layer
+that watches the change once it is running.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="beyond-pre-merge"
+/>
 
 ## Failure modes
 
-| Failure mode                                                                      | What it gets wrong                                                                                                                                                                                    |
-| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Assuming a green CI run means the reviewer can skim and approve                   | CI's coverage and review's coverage are different territory — a passing suite says nothing about the untested scenario a new PR just made reachable                                                   |
-| A reviewer re-checking things CI already verified instead of asking new questions | Spends the reviewer's limited attention on already-covered territory instead of the genuinely new scenarios only a human can notice                                                                   |
-| Assuming a small, clean-looking diff can't have broken something elsewhere        | A rename, a removed field, or a changed return type can break call sites the diff never shows — this is exactly what CI's full-suite run is for                                                       |
-| Treating this unit's two examples as the only two categories of catchable bug     | Some bugs (real production load, real user data, timing-dependent races) aren't reliably caught by either CI or review — the extend-it question above is a real, open gap in this two-mechanism model |
+| Failure mode                                                                    | What it gets wrong                                                                                        |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Assuming a green CI run means the reviewer can skim and approve                 | Coverage differs: a passing suite says nothing about the untested scenario the PR just made reachable     |
+| A reviewer re-checking what CI already verified instead of asking new questions | Spends scarce attention on covered territory                                                              |
+| Assuming a small, clean-looking diff cannot have broken something elsewhere     | Renames, removed fields, and changed return types can break callers the diff never shows                  |
+| Treating these two examples as the only categories of catchable bug             | Some defects need production signals; the extension question above is a real gap in a two-mechanism model |
