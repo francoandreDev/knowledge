@@ -1,5 +1,5 @@
 ---
-import { ArrowLeft, HelpCircle, Check } from "lucide-astro";
+import { ArrowLeft, HelpCircle, Check, Lock } from "lucide-astro";
 import Layout from "../../layouts/Layout.astro";
 import TrackIcon from "../../components/TrackIcon.astro";
 import TrackIllustration from "../../components/TrackIllustration.astro";
@@ -29,6 +29,12 @@ const writtenSlugs = new Set(trackWrittenUnits.map((u) => u.unitSlug));
 // *this reader's own* progress covers what's written, not just how much of
 // the track exists.
 const trackUnitSlugs = groupSlugsByTrack(trackWrittenUnits);
+
+// Written units in curriculum order — the sequence the unlock rule walks
+// (the visual grouping below regroups by tag, so it can't be used for this).
+const orderedWrittenSlugs = track.units
+  .filter((u) => writtenSlugs.has(u.slug))
+  .map((u) => u.slug);
 
 // Groups units by their primary (first) tag instead of pure sequential
 // order — a 13-17 unit track reads as a wall of identical rows otherwise.
@@ -155,6 +161,15 @@ function formatGroupLabel(tag: string): string {
               );
               return (
                 <li
+                  data-unit-row
+                  data-slug={unit.slug}
+                  data-state={
+                    !isWritten
+                      ? "planned"
+                      : unit.slug === orderedWrittenSlugs[0]
+                        ? "next"
+                        : "locked"
+                  }
                   class={`relative flex gap-3 pb-5 ${
                     isLast
                       ? ""
@@ -163,19 +178,13 @@ function formatGroupLabel(tag: string): string {
                 >
                   <span
                     aria-hidden="true"
-                    class={`relative z-10 flex h-[23px] w-[23px] shrink-0 items-center justify-center rounded-full border text-[10px] font-bold ${
-                      status === "done"
-                        ? "border-[var(--gauge-accent)] bg-[var(--gauge-accent)] text-white"
-                        : status === "in-progress"
-                          ? "border-[var(--gauge-warn)] text-[var(--gauge-warn)]"
-                          : "border-slate-300 text-slate-400 dark:border-slate-600 dark:text-slate-600"
-                    }`}
+                    data-row-circle
+                    data-status={status}
+                    class="row-circle relative z-10 flex h-[23px] w-[23px] shrink-0 items-center justify-center rounded-full border text-[10px] font-bold"
                   >
-                    {status === "done" ? (
-                      <Check class="h-3 w-3" aria-hidden="true" />
-                    ) : (
-                      i + 1
-                    )}
+                    <Check data-ic="done" class="h-3 w-3" aria-hidden="true" />
+                    <Lock data-ic="locked" class="h-3 w-3" aria-hidden="true" />
+                    <span data-ic="num">{i + 1}</span>
                   </span>
                   <div class="relative -mt-1 min-w-0 flex-1 rounded-lg p-1 transition hover:bg-slate-50 dark:hover:bg-slate-900/50">
                     {isWritten && (
@@ -188,6 +197,7 @@ function formatGroupLabel(tag: string): string {
                     <div class="pointer-events-none flex items-start gap-3">
                       <div class="min-w-0 flex-1">
                         <span
+                          data-row-title
                           class={
                             isWritten
                               ? "text-base font-medium text-slate-900 dark:text-slate-100"
@@ -219,9 +229,15 @@ function formatGroupLabel(tag: string): string {
                             />
                           </button>
                         )}
-                        <StatusBadge
-                          status={isWritten ? "written" : unit.status}
-                        />
+                        {isWritten ? (
+                          <span data-state-chip class="state-chip">
+                            {unit.slug === orderedWrittenSlugs[0]
+                              ? "Up next"
+                              : "Locked"}
+                          </span>
+                        ) : (
+                          <StatusBadge status={unit.status} />
+                        )}
                       </div>
                     </div>
                   </div>
@@ -238,6 +254,11 @@ function formatGroupLabel(tag: string): string {
 
   <script
     type="application/json"
+    id="ordered-written-slugs"
+    set:html={JSON.stringify(orderedWrittenSlugs)}
+  />
+  <script
+    type="application/json"
     id="track-unit-slugs"
     set:html={JSON.stringify(trackUnitSlugs)}
   />
@@ -247,6 +268,39 @@ function formatGroupLabel(tag: string): string {
       applyTrackGauges,
       countDoneByTrack,
     } from "../../lib/progress-gauges";
+    import { unitStates } from "../../lib/unlock";
+
+    const CHIP_LABEL: Record<string, string> = {
+      done: "Done",
+      next: "Up next",
+      locked: "Locked",
+    };
+
+    // Stamps each written unit's row from the active profile's progress, so
+    // the list shows the same done / up next / locked states as the roadmap.
+    function stampUnitStates() {
+      const orderEl = document.getElementById("ordered-written-slugs");
+      const rows = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-unit-row]"),
+      );
+      const track = window.location.pathname.split("/").filter(Boolean)[0];
+      if (!orderEl || !track) return;
+      let order: string[];
+      try {
+        order = JSON.parse(orderEl.textContent || "[]");
+      } catch {
+        return;
+      }
+      const states = unitStates(track, order);
+      const stateBySlug = new Map(order.map((slug, i) => [slug, states[i]]));
+      for (const row of rows) {
+        const state = stateBySlug.get(row.dataset.slug ?? "");
+        if (!state) continue;
+        row.dataset.state = state;
+        const chip = row.querySelector<HTMLElement>("[data-state-chip]");
+        if (chip) chip.textContent = CHIP_LABEL[state];
+      }
+    }
 
     function initTrackGauges() {
       const el = document.getElementById("track-unit-slugs");
@@ -258,6 +312,7 @@ function formatGroupLabel(tag: string): string {
         return;
       }
       applyTrackGauges(map);
+      stampUnitStates();
 
       const stickyPct = document.querySelector<HTMLElement>(
         "[data-track-sticky-pct]",
@@ -307,3 +362,68 @@ function formatGroupLabel(tag: string): string {
     document.addEventListener("astro:page-load", initStickyTrackHeader);
   </script>
 </Layout>
+
+<style>
+  .row-circle {
+    border-color: #cbd5e1;
+    color: #94a3b8;
+  }
+  :global(.dark) .row-circle {
+    border-color: #475569;
+    color: #64748b;
+  }
+  .row-circle :global([data-ic]) {
+    display: none;
+  }
+  [data-unit-row][data-state="done"] .row-circle {
+    border-color: var(--gauge-accent);
+    background: var(--gauge-accent);
+    color: #fff;
+  }
+  [data-unit-row][data-state="next"] .row-circle {
+    border-color: var(--accent-text);
+    color: var(--accent-text);
+    box-shadow: 0 0 0 3px var(--accent-soft-bg);
+  }
+  [data-unit-row][data-state="locked"] .row-circle {
+    background: #f1f5f9;
+  }
+  :global(.dark) [data-unit-row][data-state="locked"] .row-circle {
+    background: #1e293b;
+  }
+  [data-unit-row][data-state="planned"] .row-circle {
+    border-style: dashed;
+  }
+  [data-unit-row][data-state="done"] .row-circle :global([data-ic="done"]),
+  [data-unit-row][data-state="locked"] .row-circle :global([data-ic="locked"]) {
+    display: block;
+  }
+  [data-unit-row][data-state="next"] .row-circle :global([data-ic="num"]),
+  [data-unit-row][data-state="planned"] .row-circle :global([data-ic="num"]) {
+    display: block;
+  }
+  [data-unit-row][data-state="locked"] [data-row-title] {
+    color: #64748b;
+    font-weight: 400;
+  }
+  .state-chip {
+    border-radius: 9999px;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    background: #e2e8f0;
+    color: #475569;
+  }
+  :global(.dark) .state-chip {
+    background: #334155;
+    color: #cbd5e1;
+  }
+  [data-unit-row][data-state="done"] .state-chip {
+    background: #d1fae5;
+    color: #065f46;
+  }
+  [data-unit-row][data-state="next"] .state-chip {
+    background: var(--accent-text);
+    color: #fff;
+  }
+</style>
