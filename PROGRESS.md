@@ -3099,3 +3099,16 @@ Migrated the first 4 of 16 `git-teamwork/` units via 4 parallel content-only sub
 - **`merge`**: 6 topics, 70 items. Cut ~150 lines of LCS/`threeWayMerge` code; kept one 6-line `mergeLine(base, ours, theirs)` for the per-line decision. **Fixed an inconsistency**: L1/L3 treated "ours" as Alex while L2 treated it as Sam running the merge; all levels now follow the real semantics (the halves swap depending on who runs the merge).
 
 `git-teamwork/` is at 4 of 16. Remaining: `merge-rebase`, `commit-conventions`, `branching-strategies`, `prs`, `shared-history`, `feature-flags`, `reflog`, `feedback-framing`, `rfcs`, `documentation-culture`, `ownership`, `technical-leadership`. The last five are soft-skill/workplace units (rule 9's non-technical clause applies: no fake pseudocode).
+
+## 2026-10-20 — `git-teamwork/` batch 2: `merge-rebase`, `commit-conventions`, `branching-strategies`, `prs`
+
+Migrated 4 more `git-teamwork/` units via 4 parallel content-only subagents, same pipeline as batch 1 (`generate:roadmap` → `format` → `lint` → `validate:content` → `bun test` → `typecheck` → `build` → live click-through of every `DomainCheck` topic plus per-level Mermaid render check; 0 diagram errors, all 32 topics pass). All four units are all-`quiz`.
+
+- **`merge-rebase`**: 8 topics, 88 items. Dropped the `is-ancestor` / `rebase-fn` code exercises and L3's JS. **Added**: rebase rewrites every replayed commit's hash, ours/theirs flip during rebase, modern `pull` refuses to guess on diverged history, `--abort` safety, lease-checked force push, 40-char hashes.
+- **`commit-conventions`**: 8 topics, 88 items. Bisect function and its runs replaced by step-trace tables (16 commits → 4 steps, 64 → 6, matching `interactives.json`). **Added**: optional scope and `!` breaking marker, bisect needs buildable commits and `git bisect skip`, a squash-merge is not automatically atomic.
+- **`branching-strategies`**: 8 topics, 96 items. JS simulation dropped; its numbers (0 vs 4 overlaps at 10 days) kept. **Fixed**: classic gitflow feature branches merge into `develop`, not `main`; flagged that "same file" is a simplified conflict proxy.
+- **`prs`**: 8 topics, 88 items. Fake-pseudocode style removed; xychart uses the same numbers as `interactives.json` (110% combined discount → -10 unclamped, 0 clamped). No factual errors found.
+
+**Verification-script lesson:** when matching the displayed quiz variant, read `[data-pool-content]`, not the pool's `textContent` (it includes the embedded JSON of every variant, so the first variant always "matched"), and match the correct choice by exact text, not substring (`"0"` matched `"-50"` and produced a false failure).
+
+`git-teamwork/` is at 8 of 16. Total migrated: 42 of 246. Remaining: `shared-history`, `feature-flags`, `reflog`, `feedback-framing`, `rfcs`, `documentation-culture`, `ownership`, `technical-leadership`.
