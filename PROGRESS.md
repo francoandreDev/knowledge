@@ -3112,3 +3112,14 @@ Migrated 4 more `git-teamwork/` units via 4 parallel content-only subagents, sam
 **Verification-script lesson:** when matching the displayed quiz variant, read `[data-pool-content]`, not the pool's `textContent` (it includes the embedded JSON of every variant, so the first variant always "matched"), and match the correct choice by exact text, not substring (`"0"` matched `"-50"` and produced a false failure).
 
 `git-teamwork/` is at 8 of 16. Total migrated: 42 of 246. Remaining: `shared-history`, `feature-flags`, `reflog`, `feedback-framing`, `rfcs`, `documentation-culture`, `ownership`, `technical-leadership`.
+
+## 2026-10-20 — `git-teamwork/` batch 3: `shared-history`, `feature-flags`, `reflog`, `feedback-framing`
+
+Migrated 4 more `git-teamwork/` units via 4 parallel content-only subagents, same pipeline as batches 1–2 (plus a Node sandbox check of the one code topic). `build` 267 pages, `typecheck` 0 errors; live click-through passed all 34 `DomainCheck` topics (quiz by exact-text match, code by injecting the solution) with 0 Mermaid errors.
+
+- **`shared-history`**: 7 topics, 84 items, all quiz. **Fixed/added**: force-push moves a pointer and does not delete objects; `--force-with-lease` compares against the remote-tracking ref, with the IDE-background-fetch blind spot and `--force-if-includes`; a message-only amend changes every descendant hash; the force-pusher's reflog never held an unfetched teammate commit.
+- **`feature-flags`**: 8 topics, 89 items; 1 code topic (`evaluation-precedence`: ordered rules + kill switch, 7 items, sandbox-checked 0 failures). **Fixed**: old config put the enterprise exclusion below the percentage rule, which under first-match-wins still let enterprise users in the 5% bucket; dropped the "branch by abstraction" mislabel and an invented pie chart and an unverified "505 / 10000" simulation; added nested rollout buckets and that a kill switch cannot undo data already written.
+- **`reflog`**: 8 topics, 88 items, all quiz. **Fixed**: `branch -D` deletes the branch's own reflog (old table said otherwise); expiry clocks stated precisely (90/30 days plus `gc.pruneExpire`); added `HEAD~1` vs `HEAD@{1}`, uncommitted work is unrecoverable, `bisect run` exit codes (0 good, 125 skip). Correct choice is still longest in 37/88 items.
+- **`feedback-framing`**: 11 topics, 121 items, all quiz (soft-skill unit: no fake pseudocode). Removed an invented-percentage pie chart, fixed a wrong line reference and an inconsistent SQL-injection fix, added `async-medium` and `response-norms` topics.
+
+`git-teamwork/` is at 12 of 16. Total migrated: 46 of 246. Remaining: `rfcs`, `documentation-culture`, `ownership`, `technical-leadership` (all soft-skill/workplace units).
