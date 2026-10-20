@@ -3123,3 +3123,16 @@ Migrated 4 more `git-teamwork/` units via 4 parallel content-only subagents, sam
 - **`feedback-framing`**: 11 topics, 121 items, all quiz (soft-skill unit: no fake pseudocode). Removed an invented-percentage pie chart, fixed a wrong line reference and an inconsistent SQL-injection fix, added `async-medium` and `response-norms` topics.
 
 `git-teamwork/` is at 12 of 16. Total migrated: 46 of 246. Remaining: `rfcs`, `documentation-culture`, `ownership`, `technical-leadership` (all soft-skill/workplace units).
+
+## 2026-10-20 — `git-teamwork/` batch 4 (final): `rfcs`, `documentation-culture`, `ownership`, `technical-leadership` — `git-teamwork/` complete
+
+Migrated the last 4 `git-teamwork/` units (all soft-skill/workplace: no fake pseudocode) via 4 parallel content-only subagents. `build` 267 pages, `typecheck` 0 errors; live click-through passed all 36 `DomainCheck` topics with 0 Mermaid errors. All four units are all-`quiz`.
+
+- **`rfcs`**: 10 topics, 120 items. Removed invented figures (~$40/mo, 40+ replies, 40 minutes to notice) and a `~~` strikethrough artifact; the RFC code block became tables; senior/junior framing dropped; added that an owner silently overruling a blocking objection is not disagree-and-commit; SQS visibility-timeout mechanism stated accurately.
+- **`documentation-culture`**: 9 topics, 99 items. Removed an invented "minutes to reconstruct" xychart and a made-up incident ("41 double-charged customers"). **Fixed a reasoning error**: capping retries at 3 only shortens the overlap window; only an idempotency key removes duplicate charges.
+- **`ownership`**: 6 topics, 66 items. Timeline corrected to "nearly 3 hours" (02:14→04:54 = 160 min); removed an invented "10-minute fix"; a feature-flag mitigation only stops new duplicates; CODEOWNERS listing helps only once the new owner has context. Chart uses the `interactives.json` formula and is labelled illustrative.
+- **`technical-leadership`**: 11 topics, 132 items. Python `with_retry` replaced by a decision flowchart; invented adoption-per-hour xychart replaced by a qualitative table; "staff-level"/"senior engineer" labels removed (rule 3); L1 "five teams" corrected to three; the "adoption as evidence" topic that L1 listed but never wrote now exists; idempotency gap applies to payments, not only search indexing.
+
+**Known residual tell:** the correct quiz choice is still the longest in many short-answer practice items (≈26/66 in `ownership`, 78/120 in `rfcs`, mostly practice with 1–4-word choices); exam items were rebalanced. Automatic padding was tried and reverted because it read awkwardly; `documentation-culture` padded distractors with neutral tails, a few of which read slightly stilted.
+
+`git-teamwork/` is now 16 of 16. Total migrated: 50 of 246 (17 `web/` + 17 `systems/` + 16 `git-teamwork/`). Next track in roadmap order: `business-communication`.
