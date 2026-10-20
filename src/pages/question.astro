@@ -1,0 +1,234 @@
+---
+import Layout from "../layouts/Layout.astro";
+import HubHeader from "../components/HubHeader.astro";
+import { ArrowRight, Lightbulb } from "lucide-astro";
+import { loadHomeData } from "../lib/home-data";
+
+const { previewPool } = await loadHomeData();
+---
+
+<Layout title="Try a real question">
+  <HubHeader
+    title="Try a real question"
+    subtitle="One quiz from the curriculum. No grade, no pressure — see what you already know."
+  />
+
+  <div
+    data-content-preview
+    class="mt-8 max-w-xl overflow-hidden rounded-xl border border-slate-200 bg-white p-5 text-left shadow-sm dark:border-slate-800 dark:bg-slate-900"
+  >
+    <p
+      class="inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase"
+    >
+      <span
+        class="flex h-5 w-5 items-center justify-center rounded-full"
+        style="background: var(--accent-soft-bg); color: var(--accent-text)"
+      >
+        <Lightbulb class="h-3 w-3" aria-hidden="true" />
+      </span>
+      Question
+    </p>
+    <p
+      data-preview-prompt
+      class="mt-3 text-base font-medium text-slate-900 dark:text-slate-100"
+    >
+      What does an HTTP 429 response mean?
+    </p>
+    <div data-preview-choices class="mt-4 grid gap-2">
+      <button
+        type="button"
+        data-preview-choice
+        class="rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition hover:border-slate-400 disabled:cursor-default dark:border-slate-800 dark:hover:border-slate-600"
+      >
+        A server-side error — try again later
+      </button>
+      <button
+        type="button"
+        data-preview-choice
+        data-correct="true"
+        class="rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition hover:border-slate-400 disabled:cursor-default dark:border-slate-800 dark:hover:border-slate-600"
+      >
+        Too many requests — the client should back off
+      </button>
+      <button
+        type="button"
+        data-preview-choice
+        class="rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition hover:border-slate-400 disabled:cursor-default dark:border-slate-800 dark:hover:border-slate-600"
+      >
+        The resource moved permanently
+      </button>
+    </div>
+    <a
+      data-preview-followup
+      href="/web/http-request-response-basics/"
+      class="mt-4 hidden items-center gap-1 text-sm font-medium hover:underline"
+      style="color: var(--accent-text)"
+    >
+      <span data-preview-followup-text
+        >See the full breakdown in web/http-request-response-basics</span
+      >
+      <ArrowRight class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+    </a>
+  </div>
+  <button
+    type="button"
+    data-another-question
+    class="mt-4 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600"
+  >
+    Another question
+  </button>
+
+  <script
+    type="application/json"
+    id="preview-questions-pool"
+    set:html={JSON.stringify(previewPool)}
+  />
+
+  <script>
+    import { getActiveProfile } from "../lib/profile";
+
+    interface PreviewQuestion {
+      track: string;
+      slug: string;
+      problem: string;
+      prompt: string;
+      choices: string[];
+      correctIndex: number;
+      tags: string[];
+    }
+
+    function wireChoiceButtons(
+      choices: HTMLButtonElement[],
+      followup: HTMLElement | null,
+    ) {
+      for (const btn of choices) {
+        btn.addEventListener("click", () => {
+          const pickedCorrect = btn.dataset.correct === "true";
+          for (const b of choices) {
+            b.disabled = true;
+            if (b.dataset.correct === "true") {
+              b.classList.add(
+                "border-emerald-500",
+                "bg-emerald-50",
+                "font-semibold",
+                "text-emerald-700",
+                "dark:border-emerald-400",
+                "dark:bg-emerald-950/40",
+                "dark:text-emerald-300",
+              );
+            }
+          }
+          if (!pickedCorrect) {
+            btn.classList.add(
+              "border-rose-400",
+              "bg-rose-50",
+              "text-rose-700",
+              "dark:border-rose-500",
+              "dark:bg-rose-950/40",
+              "dark:text-rose-300",
+            );
+          }
+          followup?.classList.remove("hidden");
+          followup?.classList.add("flex", "animate-fade-slide-in");
+        });
+      }
+    }
+
+    function initContentPreview() {
+      const root = document.querySelector<HTMLElement>(
+        "[data-content-preview]",
+      );
+      if (!root || root.dataset.wired === "true") return;
+      root.dataset.wired = "true";
+
+      const poolEl = document.getElementById("preview-questions-pool");
+      let pool: PreviewQuestion[] = [];
+      try {
+        pool = JSON.parse(poolEl?.textContent || "[]");
+      } catch {
+        // pool stays []
+      }
+
+      // Prefer questions from tracks matching the active profile's stated
+      // interests (same tag vocabulary as the track-card personalization
+      // above); fall back to the full pool for a fresh/interest-less
+      // profile, or if no match happens to exist.
+      const interests = new Set(getActiveProfile()?.interests ?? []);
+      let candidates = pool;
+      if (interests.size > 0) {
+        const matching = pool.filter((q) =>
+          q.tags.some((tag) => interests.has(tag)),
+        );
+        if (matching.length > 0) candidates = matching;
+      }
+
+      const promptEl = root.querySelector<HTMLElement>("[data-preview-prompt]");
+      const choicesContainer = root.querySelector<HTMLElement>(
+        "[data-preview-choices]",
+      );
+      const followup = root.querySelector<HTMLAnchorElement>(
+        "[data-preview-followup]",
+      );
+      if (!promptEl || !choicesContainer || !followup) return;
+
+      if (candidates.length === 0) {
+        // No pool available (e.g. a build with no written units yet) — keep
+        // whatever static fallback question is already in the markup.
+        const choices = Array.from(
+          choicesContainer.querySelectorAll<HTMLButtonElement>(
+            "[data-preview-choice]",
+          ),
+        );
+        wireChoiceButtons(choices, followup);
+        return;
+      }
+
+      const picked = candidates[Math.floor(Math.random() * candidates.length)];
+      promptEl.textContent = picked.prompt;
+      choicesContainer.innerHTML = "";
+      const newChoices: HTMLButtonElement[] = [];
+      picked.choices.forEach((choiceText, i) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.dataset.previewChoice = "true";
+        if (i === picked.correctIndex) btn.dataset.correct = "true";
+        btn.className =
+          "rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition hover:border-slate-400 disabled:cursor-default dark:border-slate-800 dark:hover:border-slate-600";
+        btn.textContent = choiceText;
+        choicesContainer.appendChild(btn);
+        newChoices.push(btn);
+      });
+      followup.href = `/${picked.track}/${picked.slug}/`;
+      const followupText = followup.querySelector<HTMLElement>(
+        "[data-preview-followup-text]",
+      );
+      if (followupText) {
+        followupText.textContent = `See the full breakdown in ${picked.track}/${picked.slug}`;
+      }
+      followup.classList.add("hidden");
+      followup.classList.remove("flex", "animate-fade-slide-in");
+
+      wireChoiceButtons(newChoices, followup);
+    }
+    initContentPreview();
+    document.addEventListener("astro:page-load", () => {
+      // A fresh question on every navigation back here — undo the
+      // wired/hidden state left over from the previous render.
+      const root = document.querySelector<HTMLElement>(
+        "[data-content-preview]",
+      );
+      if (root) root.dataset.wired = "false";
+      initContentPreview();
+    });
+
+    document
+      .querySelector<HTMLButtonElement>("[data-another-question]")
+      ?.addEventListener("click", () => {
+        const root = document.querySelector<HTMLElement>(
+          "[data-content-preview]",
+        );
+        if (root) root.dataset.wired = "false";
+        initContentPreview();
+      });
+  </script>
+</Layout>

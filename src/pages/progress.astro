@@ -1,0 +1,187 @@
+---
+import Layout from "../layouts/Layout.astro";
+import HubHeader from "../components/HubHeader.astro";
+import { loadHomeData } from "../lib/home-data";
+
+const { trackUnitSlugs } = await loadHomeData();
+
+const GAUGE_RADIUS = 16;
+const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_RADIUS;
+---
+
+<Layout title="Your progress">
+  <HubHeader
+    title="Your progress"
+    subtitle="Where you are on the path from junior to staff-level."
+  />
+
+  <div class="mt-8 max-w-lg">
+    <div class="relative mt-3 mb-1.5">
+      <div
+        class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800"
+      >
+        <div
+          data-journey-fill
+          class="h-full rounded-full transition-[width] duration-700"
+          style="width: 0%; background: var(--gauge-accent)"
+        >
+        </div>
+      </div>
+      <div
+        data-journey-marker
+        class="absolute top-1/2 transition-[left] duration-700"
+        style="left: 0%; transform: translate(-50%, -50%)"
+      >
+        <span
+          class="block h-4 w-4 rounded-full border-2 border-white shadow dark:border-slate-950"
+          style="background: var(--gauge-accent)"></span>
+      </div>
+    </div>
+    <div
+      class="flex justify-between text-[10px] font-semibold tracking-wide text-slate-400 uppercase dark:text-slate-600"
+    >
+      <span>Junior</span>
+      <span>Mid</span>
+      <span>Senior</span>
+      <span>Staff-level</span>
+    </div>
+    <p
+      data-journey-note
+      class="mt-2 text-xs font-medium text-slate-600 dark:text-slate-400"
+    >
+      Just getting started.
+    </p>
+
+    <div
+      class="mt-5 flex flex-wrap items-center gap-6 border-t border-slate-200 pt-4 dark:border-slate-800"
+    >
+      <div class="flex items-center gap-3.5">
+        <span
+          class="flex h-16 w-16 shrink-0 items-center justify-center rounded-full"
+          style="background: var(--accent-soft-bg)"
+        >
+          <svg width="56" height="56" viewBox="0 0 40 40" aria-hidden="true">
+            <circle
+              cx="20"
+              cy="20"
+              r={GAUGE_RADIUS}
+              fill="none"
+              stroke-width="4"
+              class="stroke-slate-200 dark:stroke-slate-800"></circle>
+            <circle
+              data-overall-arc
+              cx="20"
+              cy="20"
+              r={GAUGE_RADIUS}
+              fill="none"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-dasharray={GAUGE_CIRCUMFERENCE}
+              stroke-dashoffset={GAUGE_CIRCUMFERENCE}
+              transform="rotate(-90 20 20)"
+              class="transition-[stroke-dashoffset] duration-500"
+              style="stroke: var(--gauge-accent)"></circle>
+          </svg>
+        </span>
+        <div>
+          <p
+            class="text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-500"
+          >
+            Your progress
+          </p>
+          <p
+            data-overall-label
+            class="text-base font-semibold text-slate-900 dark:text-slate-100"
+          >
+            Nothing done yet
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script
+    type="application/json"
+    id="track-unit-slugs"
+    set:html={JSON.stringify(trackUnitSlugs)}
+  />
+
+  <script>
+    import {
+      countTotalDone,
+      GAUGE_CIRCUMFERENCE,
+    } from "../lib/progress-gauges";
+
+    // The tagline promises a path ("junior to staff-level"), not a pile —
+    // this projects the exact same done/total fraction the ring already
+    // uses onto that path instead of a bare percentage, so "46%" reads as
+    // a position on the journey the headline already described.
+    const JOURNEY_STAGES: { at: number; note: string }[] = [
+      { at: 0, note: "Just getting started." },
+      { at: 0.25, note: "Early — building the fundamentals." },
+      { at: 0.5, note: "Solid mid-range progress." },
+      {
+        at: 0.85,
+        note: "Deep into the range where most of the skill-building happens.",
+      },
+      { at: 1.01, note: "Closing in on staff-level breadth." },
+    ];
+    function renderJourney(fraction: number) {
+      const fill = document.querySelector<HTMLElement>("[data-journey-fill]");
+      const marker = document.querySelector<HTMLElement>(
+        "[data-journey-marker]",
+      );
+      const note = document.querySelector<HTMLElement>("[data-journey-note]");
+      const pct = Math.round(fraction * 100);
+      if (fill) fill.style.width = `${pct}%`;
+      if (marker) {
+        // Clamped so the marker dot never overflows outside the bar at
+        // either end, even at exactly 0% or 100%.
+        marker.style.left = `${Math.min(98, Math.max(2, pct))}%`;
+      }
+      if (note) {
+        let text = JOURNEY_STAGES[0].note;
+        for (const stage of JOURNEY_STAGES) {
+          if (fraction >= stage.at) text = stage.note;
+        }
+        note.textContent = text;
+      }
+    }
+
+    function initProgress() {
+      const el = document.getElementById("track-unit-slugs");
+      if (!el) return;
+      let map: Record<string, string[]>;
+      try {
+        map = JSON.parse(el.textContent || "{}");
+      } catch {
+        return;
+      }
+      const totalWritten = Object.values(map).reduce(
+        (n, arr) => n + arr.length,
+        0,
+      );
+      const done = countTotalDone(map);
+      const fraction = totalWritten > 0 ? done / totalWritten : 0;
+      const overallArc =
+        document.querySelector<SVGCircleElement>("[data-overall-arc]");
+      const overallLabel = document.querySelector<HTMLElement>(
+        "[data-overall-label]",
+      );
+      if (overallArc) {
+        overallArc.style.strokeDashoffset = String(
+          GAUGE_CIRCUMFERENCE * (1 - fraction),
+        );
+      }
+      if (overallLabel) {
+        overallLabel.textContent =
+          totalWritten > 0
+            ? `${done}/${totalWritten} done (${Math.round(fraction * 100)}%)`
+            : "Nothing written yet";
+      }
+      renderJourney(fraction);
+    }
+    initProgress();
+    document.addEventListener("astro:page-load", initProgress);
+  </script>
+</Layout>

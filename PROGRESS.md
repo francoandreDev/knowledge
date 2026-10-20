@@ -3172,3 +3172,15 @@ Migrated 3 more `business-communication/` units via 3 parallel content-only suba
 - **`upward-disagreement`**: 11 topics, 121 items. Removed an invented "Black Friday peaks 4x" claim; **fixed a reasoning error** (peak is ~1.7× the tested ceiling, 12,000 / 7,200, not "60% into" it); L1 and L2 listed different "four moves", now consistent; L2 receptiveness chart aligned to the demo formula ([86, 75, 58, 36, 25]); "senior" labels removed (rule 3); TPM/p99 jargon replaced.
 
 `business-communication/` is at 11 of 14. Total migrated: 61 of 246. Remaining here: `change-management`, `translating-technical-risk-business-risk`, `org-level-influence`.
+
+## 2026-10-20 — `business-communication/` batch 4 (final): `change-management`, `translating-technical-risk-business-risk`, `org-level-influence`
+
+Migrated the last 3 `business-communication/` units via 3 parallel content-only subagents. Same pipeline; `build` 267 pages, `typecheck` 0 errors; live click-through passed all 27 `DomainCheck` topics, 0 Mermaid errors, sliders present. All quiz. Answer-length tell: 25–31% strictly longest, 28–31% strictly shortest.
+
+- **`change-management`**: 10 topics, 110 items. Fixed "10 days" vs "nine days out" (both 9 days) and "eight people whose roles are safe" (the team of 8 loses one, so seven); rumor-fill `xychart-beta` uses the demo values (14, 43, 72, 100, 100) and is labelled a teaching model.
+- **`translating-technical-risk-business-risk`**: 8 topics, 88 items. Fixed an "11-week" projection that contradicted the chart's week 27 (about six months at 62% growing 8%/month); removed an unsupported "mid-October" date; "staff engineer" retitled (rule 3); replica option no longer claims to clear a peak the pool is already over capacity for. Dollar and runway figures are scenario assumptions.
+- **`org-level-influence`**: 9 topics, 108 items. Chart value aligned to the demo (6 bets = 2.27); chart labelled a teaching model (assumed 85% success rate); L3 states 3 bets ≈ 90 of 120 hours; replaced a meaningless headcount bar. Some practice answers are one word ("Nine", "Three") padded modestly.
+
+Practice items have 3 choices (matches the pilot); exam items have 4.
+
+`business-communication/` is complete: 14 of 14. Total migrated: 64 of 246. Next track in ROADMAP order: `logic`.

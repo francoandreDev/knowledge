@@ -1,832 +1,171 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import TrackIcon from "../components/TrackIcon.astro";
 import {
-  Search,
-  ArrowRight,
-  ArrowLeft,
-  Sparkles,
-  BookOpen,
-  Flame,
-  Layers,
-  Rocket,
-  History,
-  Lightbulb,
+  Play,
   RotateCcw,
+  Lightbulb,
+  Flame,
   TrendingUp,
-  ChevronDown,
-  Dices,
-  X,
+  Layers,
+  Search,
+  ChevronRight,
 } from "lucide-astro";
-import { roadmap, getUnit } from "../data/roadmap";
-import { getWrittenUnits } from "../lib/curriculum";
-import { groupSlugsByTrack } from "../lib/progress-gauges";
-import { TRACK_CATEGORIES, CATEGORY_LABELS } from "../lib/track-categories";
-import { TRACK_ICON_PATHS } from "../lib/track-icon-paths";
+import { roadmap } from "../data/roadmap";
+import { loadHomeData, STARTER_UNIT, starterProblem } from "../lib/home-data";
 
-const writtenUnits = await getWrittenUnits();
-const writtenByTrack = new Map<string, number>();
-const writtenSlugsByTrack = new Map<string, Set<string>>();
-for (const u of writtenUnits) {
-  writtenByTrack.set(u.track, (writtenByTrack.get(u.track) ?? 0) + 1);
-  if (!writtenSlugsByTrack.has(u.track))
-    writtenSlugsByTrack.set(u.track, new Set());
-  writtenSlugsByTrack.get(u.track)!.add(u.unitSlug);
-}
+const { unitLookup, trackUnitSlugs } = await loadHomeData();
 
-// Embedded for the client-side gauge script (see the bottom script block) —
-// the pool of slugs a reader could have marked done, per track.
-const trackUnitSlugs = groupSlugsByTrack(writtenUnits);
-
-const totalUnits = roadmap.tracks.reduce((n, t) => n + t.units.length, 0);
-const totalWritten = writtenUnits.length;
-const tracksStarted = roadmap.tracks.filter(
-  (t) => (writtenByTrack.get(t.name) ?? 0) > 0,
-).length;
-
-const GAUGE_RADIUS = 16;
-const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_RADIUS;
-
-// Client-side "continue learning" needs to resolve a bare track/slug key
-// (pStorage's progress:<track>/<slug>, scoped to the active profile) back
-// to a title + href — embed the minimal lookup table it needs rather than
-// shipping the whole roadmap.
-const unitLookup = roadmap.tracks.flatMap((t) =>
-  t.units
-    .filter((u) => writtenSlugsByTrack.get(t.name)?.has(u.slug))
-    .map((u) => ({
-      track: t.name,
-      slug: u.slug,
-      problem: u.problem,
-    })),
-);
-
-// Per-track, in roadmap order, written units only — lets the "continue
-// where you left off" carousel find what comes right after the reader's
-// current unit without ever linking to a merely-planned page.
-const trackSequences = Object.fromEntries(
-  roadmap.tracks.map((t) => [
-    t.name,
-    t.units
-      .filter((u) => writtenSlugsByTrack.get(t.name)?.has(u.slug))
-      .map((u) => ({ slug: u.slug, problem: u.problem })),
-  ]),
-);
-
-// "Surprise me" picks uniformly from every written unit — a flat href list
-// is all the client needs.
-const writtenUnitHrefs = writtenUnits.map((u) => `/${u.track}/${u.unitSlug}/`);
-
-// "Try a real question" pool — one representative level-1 quiz item per
-// written unit (favoring L1 since it's the most accessible without having
-// read the unit first), tagged with that unit's roadmap tags so the
-// client-side script can prefer questions matching the active profile's
-// interests. Picked randomly client-side on every load instead of always
-// showing the same hardcoded HTTP-429 question.
-const previewPool = writtenUnits
-  .map((u) => {
-    const quizL1 = u.exercises.find((e) => e.type === "quiz" && e.level === 1);
-    if (!quizL1 || quizL1.type !== "quiz") return null;
-    const roadmapUnit = getUnit(u.track, u.unitSlug);
-    return {
-      track: u.track,
-      slug: u.unitSlug,
-      problem: roadmapUnit?.problem ?? "",
-      prompt: quizL1.prompt,
-      choices: quizL1.choices,
-      correctIndex: quizL1.correctIndex,
-      tags: roadmapUnit?.tags ?? [],
-    };
-  })
-  .filter((x): x is NonNullable<typeof x> => x !== null);
-
-// Fixed pick for brand-new readers with no progress yet: the most
-// foundational problem on the site, one most other web/ units assume you
-// already feel. Shown in place of "continue learning" only when there's
-// nothing yet to continue.
-const STARTER_UNIT = {
-  track: "web",
-  slug: "http-request-response-basics",
-  reason:
-    "The most foundational problem on the site — most other web/ units assume you already feel this one.",
+// The home page is a menu: one button per destination, each with a live
+// number or title filled in client-side from the active profile's progress.
+// Continue is the hero row; the rest follow in the order of a typical session.
+const menu = [
+  {
+    key: "review",
+    href: "/review",
+    label: "Review",
+    icon: RotateCcw,
+    tone: "warn",
+    pill: "…",
+  },
+  {
+    key: "question",
+    href: "/question",
+    label: "Try a real question",
+    icon: Lightbulb,
+    tone: "accent",
+    pill: "30 sec",
+  },
+  {
+    key: "stats",
+    href: "/stats",
+    label: "Stats & streak",
+    icon: Flame,
+    tone: "flame",
+    pill: "…",
+  },
+  {
+    key: "progress",
+    href: "/progress",
+    label: "Your progress",
+    icon: TrendingUp,
+    tone: "done",
+    pill: "…",
+  },
+];
+const secondary = [
+  {
+    key: "tracks",
+    href: "/tracks",
+    label: "Tracks",
+    icon: Layers,
+    pill: String(roadmap.tracks.length),
+  },
+  { key: "search", href: "/search", label: "Search", icon: Search, pill: "" },
+];
+const TONE_ICON: Record<string, string> = {
+  warn: "background: var(--gauge-warn); color: #fff",
+  accent: "background: var(--accent-soft-bg); color: var(--accent-text)",
+  flame: "background: #ffedd5; color: #c2410c",
+  done: "background: #d1fae5; color: #047857",
 };
-const starterProblem =
-  getUnit(STARTER_UNIT.track, STARTER_UNIT.slug)?.problem ?? "";
-
-// Per-track tag vocabulary, embedded as a data attribute below — lets the
-// client-side personalization script (see the bottom script block) decide
-// which track cards match the active profile's interests without shipping
-// the whole roadmap again.
-const trackTags = new Map<string, string[]>(
-  roadmap.tracks.map((t) => [
-    t.name,
-    Array.from(new Set(t.units.flatMap((u) => u.tags))),
-  ]),
-);
 ---
 
 <Layout title="Home" wide>
-  <!-- Quiet/editorial hero (mocked up and picked as "Option C"): no eyebrow
-       pill, no decorative background blur — bigger, tighter headline and
-       more whitespace carry the page instead of chrome around it. -->
-  <section class="text-center sm:text-left">
-    <h1
-      class="text-5xl font-extrabold tracking-tight sm:text-6xl"
-      style="letter-spacing: -0.02em; line-height: 1.08"
-    >
-      From junior to <span style="color: var(--accent-text)">staff-level.</span>
-    </h1>
-    <p class="mt-5 max-w-xl text-lg text-slate-500 sm:mx-0 dark:text-slate-400">
-      {roadmap.tracks.length} tracks, each a sequence of real problems to understand
-      — not a pile of definitions. One unit per session, by design.
-    </p>
-
-    <!-- Quick access: entry points into secondary content that used to sit
-         inline as full cards, stacked one after another, before the reader
-         ever reached the search box or the track selector. Each button
-         opens a <dialog> with the same content/logic that used to render
-         inline — nothing removed, just not shown by default. Conditional
-         ones (due review, continue, stats) start hidden and are revealed by
-         the same scripts that used to reveal the inline section itself. -->
-    <!-- One or two time-sensitive actions (due review, continue) get the
-         solid "primary" treatment; everything else that used to sit in this
-         row at the same visual weight (try a question, stats, progress) now
-         lives behind "More" — with up to 5 pills side by side, nothing
-         actually read as *the* thing to do next. -->
-    <div class="mt-6 flex flex-wrap items-center gap-2">
-      <button
-        type="button"
-        data-due-review-trigger
-        class="hidden items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold text-white transition hover:brightness-95"
-        style="background: var(--gauge-warn)"
-      >
-        <RotateCcw class="h-3.5 w-3.5" aria-hidden="true" />
-        <span data-due-review-trigger-label>Due for review</span>
-      </button>
-      <button
-        type="button"
-        data-continue-trigger
-        class="hidden items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold text-white transition hover:brightness-95"
-        style="background: var(--accent-text)"
-      >
-        <History class="h-3.5 w-3.5" aria-hidden="true" />
-        <span data-continue-trigger-label>Continue where you left off</span>
-      </button>
-
-      <div class="relative" data-more-menu>
-        <button
-          type="button"
-          data-more-trigger
-          aria-haspopup="true"
-          aria-expanded="false"
-          class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-slate-400 dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600"
-        >
-          More
-          <ChevronDown class="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-        <div
-          data-more-panel
-          class="absolute top-full left-0 z-20 mt-1.5 hidden w-56 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
-        >
-          <button
-            type="button"
-            data-quiz-trigger
-            class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
-          >
-            <Lightbulb class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            Try a real question
-          </button>
-          <button
-            type="button"
-            data-stats-trigger
-            class="hidden w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
-          >
-            <Flame class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            Your stats &amp; streak
-          </button>
-          <button
-            type="button"
-            data-journey-trigger
-            class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
-          >
-            <TrendingUp class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            Your progress
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <dialog
-      data-due-review-modal
-      class="m-auto w-full max-w-xl rounded-xl border p-0 text-slate-900 backdrop:bg-slate-950/60 dark:text-slate-100"
-      style="border-color: var(--gauge-warn); background: color-mix(in srgb, var(--gauge-warn) 10%, #fff 90%)"
-    >
-      <div class="p-5 text-left">
-        <div class="flex items-start justify-between gap-4">
-          <p
-            class="inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide uppercase"
-            style="color: var(--gauge-warn)"
-          >
-            <RotateCcw class="h-3.5 w-3.5" aria-hidden="true" />
-            <span data-due-review-heading>Due for review</span>
-          </p>
-          <button
-            type="button"
-            data-due-review-close
-            aria-label="Close"
-            class="shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-900/5 hover:text-slate-900 dark:hover:bg-white/10 dark:hover:text-slate-100"
-          >
-            <X class="h-4 w-4" aria-hidden="true" />
-          </button>
-        </div>
-        <p class="mt-1 text-xs text-slate-600 dark:text-slate-400">
-          Spaced repetition works because you forget a little between visits —
-          that's the point. A quick re-check now is what makes it stick.
-        </p>
-        <div data-carousel class="relative mt-3">
-          <div
-            data-carousel-track
-            data-due-review-cards
-            class="no-scrollbar flex gap-3 overflow-x-auto pb-1"
-          >
-          </div>
-          <div
-            data-carousel-fade-start
-            aria-hidden="true"
-            class="pointer-events-none absolute inset-y-0 left-0 hidden w-12"
-            style="background: linear-gradient(to right, color-mix(in srgb, var(--gauge-warn) 10%, transparent), transparent)"
-          >
-          </div>
-          <div
-            data-carousel-fade-end
-            aria-hidden="true"
-            class="pointer-events-none absolute inset-y-0 right-0 hidden w-12"
-            style="background: linear-gradient(to left, color-mix(in srgb, var(--gauge-warn) 10%, transparent), transparent)"
-          >
-          </div>
-          <button
-            type="button"
-            data-carousel-prev
-            aria-label="Show previous review cards"
-            class="absolute top-1/2 left-0 hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-white shadow"
-            style="background: var(--gauge-warn)"
-          >
-            <ArrowLeft class="h-4 w-4" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            data-carousel-next
-            aria-label="Show more review cards"
-            class="absolute top-1/2 right-0 hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-white shadow"
-            style="background: var(--gauge-warn)"
-          >
-            <ArrowRight class="h-4 w-4" aria-hidden="true" />
-          </button>
-        </div>
-      </div>
-    </dialog>
-
-    <dialog
-      data-continue-modal
-      class="m-auto w-full max-w-xl rounded-xl border border-slate-200 bg-white p-0 text-slate-900 backdrop:bg-slate-950/60 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
-    >
-      <div class="p-5 text-left">
-        <div class="flex items-start justify-between gap-4">
-          <p
-            class="inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-500"
-          >
-            <History class="h-3.5 w-3.5" aria-hidden="true" />
-            Continue where you left off
-          </p>
-          <button
-            type="button"
-            data-continue-close
-            aria-label="Close"
-            class="shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-          >
-            <X class="h-4 w-4" aria-hidden="true" />
-          </button>
-        </div>
-        <div data-continue-learning class="hidden">
-          <div data-continue-cards class="mt-3 flex gap-3 overflow-x-auto pb-1">
-          </div>
-        </div>
-        <div data-starter-suggestion class="hidden">
-          <p
-            class="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide uppercase"
-            style="color: var(--accent-text)"
-          >
-            <Rocket class="h-3.5 w-3.5" aria-hidden="true" />
-            New here? Start with this one
-          </p>
-          <p class="mt-2 font-medium text-slate-900 dark:text-slate-100">
-            {starterProblem}
-          </p>
-          <p class="mt-1 text-xs text-slate-600 dark:text-slate-400">
-            {STARTER_UNIT.reason}
-          </p>
-          <a
-            href={`/${STARTER_UNIT.track}/${STARTER_UNIT.slug}/`}
-            class="mt-3 inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold text-white transition hover:brightness-95"
-            style="background: var(--accent-text)"
-          >
-            Start with the first problem
-            <ArrowRight class="h-4 w-4 shrink-0" aria-hidden="true" />
-          </a>
-        </div>
-      </div>
-    </dialog>
-
-    <form
-      action="/roadmap"
-      method="get"
-      class="mt-6 flex max-w-xl items-center gap-2 sm:mx-0"
-    >
-      <div class="relative flex-1">
-        <Search
-          class="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400"
-          aria-hidden="true"
-        />
-        <input
-          type="search"
-          name="search"
-          data-search-input
-          autocomplete="off"
-          role="combobox"
-          aria-expanded="false"
-          aria-autocomplete="list"
-          aria-controls="search-results-list"
-          placeholder='Search topics — e.g. "debugging", "merge conflicts", "feedback"...'
-          class="w-full rounded-lg border border-slate-200 bg-white py-2.5 pr-9 pl-9 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-slate-600"
-        />
-        <button
-          type="button"
-          data-surprise-me
-          title="Open a random written unit"
-          aria-label="Open a random written unit"
-          class="absolute top-1/2 right-2 -translate-y-1/2 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-        >
-          <Dices class="h-4 w-4" aria-hidden="true" />
-        </button>
-        <!-- Custom suggestion dropdown — replaces a native <datalist>, which
-             the browser renders itself and gives no way to cap to a count or
-             restyle at all. Capped to 4 results client-side; built fresh on
-             every keystroke from the same unit-lookup JSON already embedded
-             for "continue learning", plus the track list and lucide icon
-             geometry (track-icon-paths.ts, already built for OG images) so
-             each row gets its track's real icon instead of a generic one. -->
-        <div
-          data-search-dropdown
-          class="absolute inset-x-0 top-full z-20 mt-1.5 hidden overflow-hidden rounded-lg border border-slate-200 bg-white text-left shadow-lg dark:border-slate-700 dark:bg-slate-900"
-        >
-          <div data-search-results id="search-results-list" role="listbox">
-          </div>
-          <div
-            class="flex items-center justify-between border-t border-slate-200 px-3 py-1.5 dark:border-slate-800"
-          >
-            <span class="text-[11px] text-slate-400 dark:text-slate-600"
-              >↑↓ navigate · ↵ select</span
-            >
-            <span
-              data-search-total
-              class="text-[11px] text-slate-400 dark:text-slate-600"></span>
-          </div>
-        </div>
-      </div>
-      <button
-        type="submit"
-        class="shrink-0 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
-      >
-        Search
-      </button>
-    </form>
-
-    <dialog
-      data-quiz-modal
-      data-content-preview
-      class="m-auto w-full max-w-xl overflow-hidden rounded-xl border border-slate-200 bg-white p-0 text-left text-slate-900 shadow-sm backdrop:bg-slate-950/60 sm:mx-0 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
-    >
-      <div
-        aria-hidden="true"
-        class="absolute inset-x-0 top-0 h-1"
-        style="background: var(--accent)"
-      >
-      </div>
-      <div class="p-4">
-        <div class="flex items-start justify-between gap-4">
-          <p
-            class="inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-500"
-          >
-            <span
-              class="flex h-5 w-5 items-center justify-center rounded-full"
-              style="background: var(--accent-soft-bg); color: var(--accent-text)"
-            >
-              <Lightbulb class="h-3 w-3" aria-hidden="true" />
-            </span>
-            Try a real question
-          </p>
-          <button
-            type="button"
-            data-quiz-close
-            aria-label="Close"
-            class="shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-          >
-            <X class="h-4 w-4" aria-hidden="true" />
-          </button>
-        </div>
-        <p
-          data-preview-prompt
-          class="mt-2 text-sm font-medium text-slate-900 dark:text-slate-100"
-        >
-          What does an HTTP 429 response mean?
-        </p>
-        <div data-preview-choices class="mt-3 grid gap-2">
-          <button
-            type="button"
-            data-preview-choice
-            class="rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition hover:border-slate-400 disabled:cursor-default dark:border-slate-800 dark:hover:border-slate-600"
-          >
-            A server-side error — try again later
-          </button>
-          <button
-            type="button"
-            data-preview-choice
-            data-correct="true"
-            class="rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition hover:border-slate-400 disabled:cursor-default dark:border-slate-800 dark:hover:border-slate-600"
-          >
-            Too many requests — the client should back off
-          </button>
-          <button
-            type="button"
-            data-preview-choice
-            class="rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition hover:border-slate-400 disabled:cursor-default dark:border-slate-800 dark:hover:border-slate-600"
-          >
-            The resource moved permanently
-          </button>
-        </div>
-        <a
-          data-preview-followup
-          href="/web/http-request-response-basics/"
-          class="mt-3 hidden items-center gap-1 text-sm font-medium hover:underline"
-          style="color: var(--accent-text)"
-        >
-          <span data-preview-followup-text
-            >See the full breakdown in web/http-request-response-basics</span
-          >
-          <ArrowRight class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        </a>
-      </div>
-    </dialog>
-
-    <dialog
-      data-stats-modal
-      class="m-auto w-full max-w-md rounded-xl border border-slate-200 bg-white p-0 text-slate-900 backdrop:bg-slate-950/60 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
-    >
-      <div class="flex flex-col gap-3 p-5">
-        <div class="flex items-start justify-between gap-4">
-          <p
-            class="text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-500"
-          >
-            Your stats &amp; streak
-          </p>
-          <button
-            type="button"
-            data-stats-close
-            aria-label="Close"
-            class="shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-          >
-            <X class="h-4 w-4" aria-hidden="true" />
-          </button>
-        </div>
-        <!-- Content totals: what's written, not what the reader has done —
-           kept quiet and separate from "Your progress" below so the two
-           never read as contradicting each other. -->
-        <div
-          class="flex items-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-500"
-        >
-          <BookOpen class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span>
-            Full curriculum live — <span class="tabular-nums"
-              >{totalWritten}/{totalUnits}</span
-            > units ·
-            <span class="tabular-nums"
-              >{tracksStarted}/{roadmap.tracks.length}</span
-            > tracks ·
-            <span class="tabular-nums"
-              >{Math.round((totalWritten / totalUnits) * 100)}%</span
-            > of the roadmap
-          </span>
-        </div>
-
-        <div
-          data-streak-gauge
-          class="rounded-lg border border-slate-200 bg-white p-3 sm:max-w-xs dark:border-slate-800 dark:bg-slate-900/50"
-        >
-          <div data-streak-active>
-            <div
-              data-streak-icon-row
-              class="flex items-center gap-1.5 text-slate-400 dark:text-slate-600"
-            >
-              <Flame class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span class="text-[10px] font-semibold tracking-wide uppercase"
-                >Streak</span
-              >
-            </div>
-            <p data-streak-label class="mt-1 text-xl font-bold tabular-nums">
-              0 days
-            </p>
-            <div
-              data-streak-strip
-              class="mt-1.5 flex items-center gap-1"
-              aria-hidden="true"
-            >
-              {
-                Array.from({ length: 7 }).map(() => (
-                  <span
-                    data-day-dot
-                    class="h-1.5 w-1.5 rounded-full bg-slate-200 dark:bg-slate-700"
-                  />
-                ))
-              }
-            </div>
-          </div>
-          <div data-streak-invite class="hidden items-center gap-3">
-            <span
-              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
-              style="background: color-mix(in srgb, var(--gauge-warn) 15%, transparent)"
-            >
-              <Flame
-                class="h-4 w-4"
-                style="color: var(--gauge-warn)"
-                aria-hidden="true"
-              />
-            </span>
-            <div>
-              <p
-                class="text-sm font-semibold text-slate-900 dark:text-slate-100"
-              >
-                Start your streak today
-              </p>
-              <p class="text-xs text-slate-500 dark:text-slate-500">
-                Finish one unit to light it up.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </dialog>
-  </section>
-
-  <p
-    data-interest-notice
-    class="mt-10 hidden text-xs text-slate-500 dark:text-slate-500"
+  <div
+    class="flex flex-col gap-10 py-6 lg:flex-row lg:items-center lg:gap-16 lg:py-14"
   >
-    Showing tracks that match your interests. See the
-    <a
-      href="/roadmap"
-      class="underline hover:text-slate-900 dark:hover:text-slate-100"
-      >full roadmap</a
-    >
-    for everything, or update your interests from the profile menu.
-  </p>
-
-  <dialog
-    data-journey-modal
-    class="m-auto w-full max-w-lg rounded-xl border border-slate-200 bg-white p-0 text-slate-900 backdrop:bg-slate-950/60 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
-  >
-    <div class="p-5">
-      <div class="flex items-start justify-between gap-4">
-        <p
-          class="text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-500"
-        >
-          Your journey
-        </p>
-        <button
-          type="button"
-          data-journey-close
-          aria-label="Close"
-          class="shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-        >
-          <X class="h-4 w-4" aria-hidden="true" />
-        </button>
-      </div>
-      <div class="relative mt-3 mb-1.5">
-        <div
-          class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800"
-        >
-          <div
-            data-journey-fill
-            class="h-full rounded-full transition-[width] duration-700"
-            style="width: 0%; background: var(--gauge-accent)"
-          >
-          </div>
-        </div>
-        <div
-          data-journey-marker
-          class="absolute top-1/2 transition-[left] duration-700"
-          style="left: 0%; transform: translate(-50%, -50%)"
-        >
-          <span
-            class="block h-4 w-4 rounded-full border-2 border-white shadow dark:border-slate-950"
-            style="background: var(--gauge-accent)"></span>
-        </div>
-      </div>
-      <div
-        class="flex justify-between text-[10px] font-semibold tracking-wide text-slate-400 uppercase dark:text-slate-600"
+    <section class="min-w-0 flex-1 text-center lg:text-left">
+      <h1
+        class="text-5xl font-extrabold tracking-tight sm:text-6xl lg:text-7xl"
+        style="letter-spacing: -0.025em; line-height: 1.04"
       >
-        <span>Junior</span>
-        <span>Mid</span>
-        <span>Senior</span>
-        <span>Staff-level</span>
-      </div>
+        From junior to <span style="color: var(--accent-text)"
+          >staff-level.</span
+        >
+      </h1>
       <p
-        data-journey-note
-        class="mt-2 text-xs font-medium text-slate-600 dark:text-slate-400"
+        class="mx-auto mt-5 max-w-md text-lg text-slate-500 lg:mx-0 dark:text-slate-400"
       >
-        Just getting started.
+        {roadmap.tracks.length} tracks of real problems. One unit per session. Pick
+        up where you stopped, or start somewhere new.
       </p>
-
       <div
-        class="mt-5 flex flex-wrap items-center gap-6 border-t border-slate-200 pt-4 dark:border-slate-800"
+        class="mt-8 flex flex-wrap items-center justify-center gap-3 lg:justify-start"
       >
-        <div class="flex items-center gap-3.5">
-          <span
-            class="flex h-16 w-16 shrink-0 items-center justify-center rounded-full"
-            style="background: var(--accent-soft-bg)"
-          >
-            <svg width="56" height="56" viewBox="0 0 40 40" aria-hidden="true">
-              <circle
-                cx="20"
-                cy="20"
-                r={GAUGE_RADIUS}
-                fill="none"
-                stroke-width="4"
-                class="stroke-slate-200 dark:stroke-slate-800"></circle>
-              <circle
-                data-overall-arc
-                cx="20"
-                cy="20"
-                r={GAUGE_RADIUS}
-                fill="none"
-                stroke-width="4"
-                stroke-linecap="round"
-                stroke-dasharray={GAUGE_CIRCUMFERENCE}
-                stroke-dashoffset={GAUGE_CIRCUMFERENCE}
-                transform="rotate(-90 20 20)"
-                class="transition-[stroke-dashoffset] duration-500"
-                style="stroke: var(--gauge-accent)"></circle>
-            </svg>
-          </span>
-          <div>
-            <p
-              class="text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-500"
-            >
-              Your progress
-            </p>
-            <p
-              data-overall-label
-              class="text-base font-semibold text-slate-900 dark:text-slate-100"
-            >
-              Nothing done yet
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </dialog>
-
-  <div class="mt-10 flex items-baseline justify-between gap-3">
-    <h2
-      class="inline-flex items-center gap-1.5 text-sm font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-500"
-    >
-      <Layers class="h-3.5 w-3.5" aria-hidden="true" />
-      Explore all tracks
-    </h2>
-    <a
-      href="/roadmap"
-      class="text-xs font-medium hover:underline"
-      style="color: var(--accent-text)"
-    >
-      Filter the full roadmap →
-    </a>
-  </div>
-
-  <div data-category-filters class="mt-3 flex flex-wrap gap-1.5">
-    <button
-      type="button"
-      data-category-chip="all"
-      aria-pressed="true"
-      class="rounded-full bg-slate-500/10 px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-500/15 aria-pressed:bg-[var(--gauge-accent)] aria-pressed:text-white dark:text-slate-300"
-    >
-      All {roadmap.tracks.length}
-    </button>
-    {
-      Object.entries(CATEGORY_LABELS).map(([key, label]) => (
-        <button
-          type="button"
-          data-category-chip={key}
-          aria-pressed="false"
-          class="rounded-full bg-slate-500/10 px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-500/15 aria-pressed:bg-[var(--gauge-accent)] aria-pressed:text-white dark:text-slate-300"
+        <span
+          data-chip-streak
+          class="hidden items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-semibold"
+          style="background: #ffedd5; color: #9a3412"
         >
-          {label}
-        </button>
-      ))
-    }
-  </div>
+          <Flame class="h-4 w-4" aria-hidden="true" />
+          <span data-chip-streak-label></span>
+        </span>
+        <span
+          data-chip-done
+          class="hidden items-center rounded-full px-3.5 py-1.5 text-sm font-semibold"
+          style="background: #d1fae5; color: #065f46"></span>
+      </div>
+    </section>
 
-  <!-- Game-style track selector: one circular node per track (icon + a
-       progress ring + a small done-count badge, the same shape as the
-       gamepad nav icon's run-count badge) instead of 18 illustrated cards.
-       The whole node is the link, same destination as the old card
-       (`/${track}/`) — lighter to scan, same interaction underneath. -->
-  <div data-track-grid class="mt-4 flex flex-wrap gap-x-5 gap-y-6">
-    {
-      roadmap.tracks.map((track, i) => {
-        const written = writtenByTrack.get(track.name) ?? 0;
-        return (
-          <a
-            href={`/${track.name}/`}
-            data-track-card
-            data-track={track.name}
-            data-tags={(trackTags.get(track.name) ?? []).join(" ")}
-            data-category={TRACK_CATEGORIES[track.name] ?? ""}
-            data-gauge-track={track.name}
-            data-gauge-total={written}
-            title={`${track.name} — ${written} unit${written === 1 ? "" : "s"} written`}
-            style={`animation-delay: ${Math.min(i, 10) * 30}ms`}
-            class="animate-fade-slide-in group flex w-20 flex-col items-center gap-2 text-center"
+    <nav
+      aria-label="Home menu"
+      class="mx-auto flex w-full max-w-[520px] flex-col gap-3.5 lg:mx-0 lg:w-[520px] lg:flex-none"
+    >
+      <a
+        href={`/${STARTER_UNIT.track}/${STARTER_UNIT.slug}/`}
+        data-menu="continue"
+        class="menu-row menu-hero"
+      >
+        <span class="menu-icon" style="background: #fff; color: #0369a1">
+          <Play class="h-7 w-7" aria-hidden="true" />
+        </span>
+        <span class="min-w-0 flex-1">
+          <span
+            data-continue-eyebrow
+            class="block text-xs font-bold tracking-wider uppercase opacity-85"
+            >New here? Start with this one</span
           >
-            <span
-              data-node-circle
-              class="relative block h-16 w-16 shrink-0 rounded-full transition-shadow"
-            >
-              <svg
-                width="64"
-                height="64"
-                viewBox="0 0 40 40"
-                class="absolute inset-0 -rotate-90"
-                aria-hidden="true"
-              >
-                <circle
-                  cx="20"
-                  cy="20"
-                  r={GAUGE_RADIUS}
-                  fill="none"
-                  stroke-width="3"
-                  class="stroke-slate-200 dark:stroke-slate-800"
-                />
-                <circle
-                  data-gauge-arc
-                  cx="20"
-                  cy="20"
-                  r={GAUGE_RADIUS}
-                  fill="none"
-                  stroke-width="3"
-                  stroke-linecap="round"
-                  stroke-dasharray={GAUGE_CIRCUMFERENCE}
-                  stroke-dashoffset={GAUGE_CIRCUMFERENCE}
-                  class="transition-[stroke-dashoffset] duration-500"
-                  style="stroke: var(--gauge-accent)"
-                />
-              </svg>
-              <span
-                data-node-icon
-                class="absolute inset-[6px] flex items-center justify-center rounded-full bg-slate-100 text-slate-600 transition-[opacity,filter,background-color,color] duration-300 group-hover:bg-slate-900 group-hover:text-white dark:bg-slate-800 dark:text-slate-400 dark:group-hover:bg-slate-100 dark:group-hover:text-slate-900"
-              >
-                <TrackIcon track={track.name} class="h-6 w-6" />
-              </span>
-              <span
-                data-node-count
-                class="pointer-events-none absolute -top-0.5 -right-0.5 hidden h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white ring-2 ring-white dark:ring-slate-950"
-                style="background: var(--gauge-accent)"
-              />
-              <span
-                data-interest-badge
-                title="Matches your interests"
-                class="pointer-events-none absolute -bottom-0.5 -left-0.5 hidden h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-white ring-2 ring-white dark:bg-slate-100 dark:text-slate-900 dark:ring-slate-950"
-              >
-                <Sparkles class="h-2.5 w-2.5" aria-hidden="true" />
-              </span>
+          <span
+            data-continue-title
+            class="mt-0.5 block truncate text-lg font-extrabold"
+            >{starterProblem}</span
+          >
+        </span>
+        <ChevronRight class="h-6 w-6 shrink-0" aria-hidden="true" />
+      </a>
+
+      {
+        menu.map((item) => (
+          <a
+            href={item.href}
+            data-menu={item.key}
+            class={`menu-row ${item.tone === "warn" ? "menu-warn" : ""}`}
+          >
+            <span class="menu-icon" style={TONE_ICON[item.tone]}>
+              <item.icon class="h-5 w-5" aria-hidden="true" />
             </span>
-            <span
-              data-node-label
-              class="max-w-full truncate text-xs font-medium text-slate-600 transition group-hover:text-slate-900 dark:text-slate-400 dark:group-hover:text-slate-100"
-            >
-              {track.name}
+            <span class="flex-1 text-lg font-extrabold">{item.label}</span>
+            <span data-pill class="menu-pill">
+              {item.pill}
             </span>
-            {written > 0 && (
-              <span
-                data-node-frac
-                class="text-[9px] font-semibold"
-                style="color: var(--gauge-accent)"
-              >
-                {`0/${written}`}
-              </span>
-            )}
           </a>
-        );
-      })
-    }
+        ))
+      }
+
+      <div class="grid grid-cols-2 gap-3.5">
+        {
+          secondary.map((item) => (
+            <a href={item.href} data-menu={item.key} class="menu-row px-4">
+              <span class="menu-icon bg-slate-200 text-slate-900 dark:bg-slate-700 dark:text-slate-100">
+                <item.icon class="h-5 w-5" aria-hidden="true" />
+              </span>
+              <span class="flex-1 text-lg font-extrabold">{item.label}</span>
+              {item.pill && <span class="menu-pill">{item.pill}</span>}
+            </a>
+          ))
+        }
+      </div>
+    </nav>
   </div>
 
   <script
@@ -836,129 +175,51 @@ const trackTags = new Map<string, string[]>(
   />
   <script
     type="application/json"
-    id="track-list"
-    set:html={JSON.stringify(roadmap.tracks.map((t) => t.name))}
-  />
-  <script
-    type="application/json"
-    id="track-icon-paths"
-    set:html={JSON.stringify(TRACK_ICON_PATHS)}
-  />
-  <script
-    type="application/json"
-    id="track-sequences"
-    set:html={JSON.stringify(trackSequences)}
-  />
-  <script
-    type="application/json"
     id="track-unit-slugs"
     set:html={JSON.stringify(trackUnitSlugs)}
   />
-  <script
-    type="application/json"
-    id="written-unit-hrefs"
-    set:html={JSON.stringify(writtenUnitHrefs)}
-  />
-  <script
-    type="application/json"
-    id="preview-questions-pool"
-    set:html={JSON.stringify(previewPool)}
-  />
 
   <script>
-    import { pStorage, getActiveProfile } from "../lib/profile";
+    import { pStorage } from "../lib/profile";
     import {
-      applyTrackGauges,
-      countTotalDone,
-      countDoneByTrack,
       computeStreak,
-      isDayActive,
+      countTotalDone,
       getDueUnits,
-      GAUGE_CIRCUMFERENCE,
     } from "../lib/progress-gauges";
 
-    interface ProgressState {
-      done: boolean;
-      doneAt?: number;
-      nextReviewAt?: number;
-      stage: number;
-    }
     interface UnitRef {
       track: string;
       slug: string;
       problem: string;
     }
-    interface SequenceUnit {
-      slug: string;
-      problem: string;
+    interface ProgressState {
+      done: boolean;
+      doneAt?: number;
     }
 
-    function buildContinueCard(
-      problem: string,
-      href: string,
-      eyebrow: string,
-      highlighted: boolean,
-    ): HTMLAnchorElement {
-      const a = document.createElement("a");
-      a.href = href;
-      a.className = highlighted
-        ? "group flex w-56 shrink-0 flex-col rounded-lg border p-3 transition hover:brightness-95"
-        : "group flex w-56 shrink-0 flex-col rounded-lg border border-slate-200 p-3 transition hover:border-slate-400 dark:border-slate-800 dark:hover:border-slate-600";
-      if (highlighted) {
-        a.style.borderColor = "var(--accent-soft-border)";
-        a.style.background = "var(--accent-soft-bg)";
-      }
-      const eyebrowEl = document.createElement("span");
-      eyebrowEl.className =
-        "text-[10px] font-semibold tracking-wide uppercase text-slate-500 dark:text-slate-500";
-      eyebrowEl.textContent = eyebrow;
-      const titleEl = document.createElement("span");
-      titleEl.className =
-        "mt-1 text-sm font-medium text-slate-900 group-hover:underline dark:text-slate-100";
-      titleEl.textContent = problem;
-      a.append(eyebrowEl, titleEl);
-      return a;
+    function setPill(key: string, text: string) {
+      const pill = document.querySelector<HTMLElement>(
+        `[data-menu="${key}"] [data-pill]`,
+      );
+      if (pill) pill.textContent = text;
     }
 
-    function initContinueLearning() {
-      const continueSection = document.querySelector<HTMLElement>(
-        "[data-continue-learning]",
-      );
-      const cardsHost = document.querySelector<HTMLElement>(
-        "[data-continue-cards]",
-      );
-      const starterSection = document.querySelector<HTMLElement>(
-        "[data-starter-suggestion]",
-      );
-      const lookupEl = document.getElementById("unit-lookup");
-      const sequencesEl = document.getElementById("track-sequences");
-      if (!continueSection || !cardsHost || !starterSection || !lookupEl)
-        return;
-      if (continueSection.dataset.wired === "true") return;
-      continueSection.dataset.wired = "true";
-
-      let lookup: UnitRef[];
+    function readJson<T>(id: string, fallback: T): T {
       try {
-        lookup = JSON.parse(lookupEl.textContent || "[]");
+        return JSON.parse(document.getElementById(id)?.textContent || "");
       } catch {
-        return;
+        return fallback;
       }
+    }
+
+    // Prefer the most recently touched unit that isn't marked done — either
+    // never finished, or a spaced-repetition reset just cleared it. Falls
+    // back to the most recently completed one, then to the fixed starter
+    // already in the markup.
+    function applyContinue(lookup: UnitRef[]) {
       const byKey = new Map(lookup.map((u) => [`${u.track}/${u.slug}`, u]));
-
-      let sequences: Record<string, SequenceUnit[]> = {};
-      try {
-        sequences = JSON.parse(sequencesEl?.textContent || "{}");
-      } catch {
-        // Malformed embed — fall back to no sequence data.
-      }
-
-      // Prefer the most recently touched unit that isn't currently marked
-      // done — either never finished, or a spaced-repetition reset just
-      // cleared it (see spaced-repetition.ts) — that's the one worth
-      // resurfacing. Falls back to the most recently completed unit.
       let bestNotDone: { key: string; at: number } | null = null;
       let bestDone: { key: string; at: number } | null = null;
-
       for (const key of pStorage.keys()) {
         if (!key.startsWith("progress:")) continue;
         const unitKey = key.slice("progress:".length);
@@ -972,967 +233,185 @@ const trackTags = new Map<string, string[]>(
         const at = state.doneAt ?? 0;
         if (state.done) {
           if (!bestDone || at > bestDone.at) bestDone = { key: unitKey, at };
-        } else {
-          if (!bestNotDone || at > bestNotDone.at)
-            bestNotDone = { key: unitKey, at };
+        } else if (!bestNotDone || at > bestNotDone.at) {
+          bestNotDone = { key: unitKey, at };
         }
       }
-
-      const continueTrigger = document.querySelector<HTMLButtonElement>(
-        "[data-continue-trigger]",
-      );
-      const continueTriggerLabel = continueTrigger?.querySelector<HTMLElement>(
-        "[data-continue-trigger-label]",
-      );
-      function showContinueTrigger(label: string) {
-        if (!continueTrigger) return;
-        continueTrigger.classList.remove("hidden");
-        continueTrigger.classList.add("flex");
-        if (continueTriggerLabel) continueTriggerLabel.textContent = label;
-      }
-
       const pick = bestNotDone ?? bestDone;
-      if (!pick) {
-        // Nothing to continue yet — invite a brand-new reader to a fixed
-        // starting point instead.
-        starterSection.classList.remove("hidden");
-        showContinueTrigger("New here? Start with this one");
-        return;
-      }
-      const unit = byKey.get(pick.key);
-      if (!unit) {
-        starterSection.classList.remove("hidden");
-        showContinueTrigger("New here? Start with this one");
-        return;
-      }
-
-      // Same "most recently touched" unit the continue card already
-      // surfaces — reusing its track to mark where to jump back in on the
-      // track grid below, instead of asking the reader to remember the name.
-      const lastTrackCard = document.querySelector<HTMLElement>(
-        `[data-track-card][data-track="${CSS.escape(unit.track)}"]`,
+      const unit = pick ? byKey.get(pick.key) : undefined;
+      if (!unit) return;
+      const row = document.querySelector<HTMLAnchorElement>(
+        '[data-menu="continue"]',
       );
-      lastTrackCard
-        ?.querySelector("[data-node-circle]")
-        ?.classList.add(
-          "ring-2",
-          "ring-offset-2",
-          "dark:ring-offset-slate-950",
-        );
-      (
-        lastTrackCard?.querySelector("[data-node-circle]") as HTMLElement | null
-      )?.style.setProperty("--tw-ring-color", "var(--accent-text)");
-      const lastTrackLabel = lastTrackCard?.querySelector("[data-node-label]");
-      if (lastTrackLabel) {
-        lastTrackLabel.classList.add("font-semibold");
-        (lastTrackLabel as HTMLElement).style.color = "var(--accent-text)";
-      }
-
-      cardsHost.innerHTML = "";
-      cardsHost.appendChild(
-        buildContinueCard(
-          unit.problem,
-          `/${unit.track}/${unit.slug}/`,
-          "Continue",
-          true,
-        ),
-      );
-      const seq = sequences[unit.track] ?? [];
-      const idx = seq.findIndex((u) => u.slug === unit.slug);
-      if (idx >= 0) {
-        const labels = ["Next", "Then"];
-        for (let i = 0; i < 2; i++) {
-          const next = seq[idx + 1 + i];
-          if (!next) break;
-          cardsHost.appendChild(
-            buildContinueCard(
-              next.problem,
-              `/${unit.track}/${next.slug}/`,
-              labels[i],
-              false,
-            ),
-          );
-        }
-      }
-
-      continueSection.classList.remove("hidden");
-      showContinueTrigger("Continue where you left off");
+      if (!row) return;
+      row.href = `/${unit.track}/${unit.slug}/`;
+      const eyebrow = row.querySelector("[data-continue-eyebrow]");
+      const title = row.querySelector("[data-continue-title]");
+      if (eyebrow) eyebrow.textContent = "Continue where you left off";
+      if (title) title.textContent = unit.problem;
     }
 
-    initContinueLearning();
-    document.addEventListener("astro:page-load", initContinueLearning);
+    function initHome() {
+      const root = document.querySelector<HTMLElement>('[data-menu="review"]');
+      if (!root) return;
 
-    // The tagline promises a path ("junior to staff-level"), not a pile —
-    // this projects the exact same done/total fraction the ring already
-    // uses onto that path instead of a bare percentage, so "46%" reads as
-    // a position on the journey the headline already described.
-    const JOURNEY_STAGES: { at: number; note: string }[] = [
-      { at: 0, note: "Just getting started." },
-      { at: 0.25, note: "Early — building the fundamentals." },
-      { at: 0.5, note: "Solid mid-range progress." },
-      {
-        at: 0.85,
-        note: "Deep into the range where most of the skill-building happens.",
-      },
-      { at: 1.01, note: "Closing in on staff-level breadth." },
-    ];
-    function renderJourney(fraction: number) {
-      const fill = document.querySelector<HTMLElement>("[data-journey-fill]");
-      const marker = document.querySelector<HTMLElement>(
-        "[data-journey-marker]",
-      );
-      const note = document.querySelector<HTMLElement>("[data-journey-note]");
-      const pct = Math.round(fraction * 100);
-      if (fill) fill.style.width = `${pct}%`;
-      if (marker) {
-        // Clamped so the marker dot never overflows outside the bar at
-        // either end, even at exactly 0% or 100%.
-        marker.style.left = `${Math.min(98, Math.max(2, pct))}%`;
-      }
-      if (note) {
-        let text = JOURNEY_STAGES[0].note;
-        for (const stage of JOURNEY_STAGES) {
-          if (fraction >= stage.at) text = stage.note;
-        }
-        note.textContent = text;
-      }
-    }
+      const lookup = readJson<UnitRef[]>("unit-lookup", []);
+      const slugs = readJson<Record<string, string[]>>("track-unit-slugs", {});
 
-    // Each node's ring (data-gauge-track/data-gauge-arc) is already filled
-    // in by applyTrackGauges above — this adds the two things that gauge
-    // pass doesn't: the small done-count badge (hidden at 0, same shape as
-    // the gamepad nav icon's run-count badge) and muting the icon itself
-    // for a track the reader hasn't touched, so the one real signal
-    // (progress) doesn't compete for attention with 17 identical nodes.
-    function applyTrackCardWeight(trackUnits: Record<string, string[]>) {
-      const counts = countDoneByTrack(trackUnits);
-      document
-        .querySelectorAll<HTMLElement>("[data-track-card]")
-        .forEach((card) => {
-          const track = card.dataset.track;
-          if (!track) return;
-          const done = counts[track] ?? 0;
-          const started = done > 0;
-          const countBadge =
-            card.querySelector<HTMLElement>("[data-node-count]");
-          if (countBadge) countBadge.textContent = String(done);
-          countBadge?.classList.toggle("hidden", !started);
-          countBadge?.classList.toggle("flex", started);
-          const icon = card.querySelector<HTMLElement>("[data-node-icon]");
-          icon?.classList.toggle("opacity-50", !started);
-          icon?.classList.toggle("saturate-50", !started);
-          const frac = card.querySelector<HTMLElement>("[data-node-frac]");
-          if (frac) {
-            const total = card.dataset.gaugeTotal ?? "0";
-            frac.textContent = `${done}/${total}`;
-          }
-        });
-    }
+      applyContinue(lookup);
 
-    function initTrackGauges() {
-      const el = document.getElementById("track-unit-slugs");
-      if (!el) return;
-      let map: Record<string, string[]>;
-      try {
-        map = JSON.parse(el.textContent || "{}");
-      } catch {
-        return;
-      }
-      applyTrackGauges(map);
-      applyTrackCardWeight(map);
+      const due = getDueUnits(lookup).length;
+      setPill("review", due === 0 ? "All caught up" : `${due} due`);
+      root.classList.toggle("menu-dim", due === 0);
+      root.classList.toggle("menu-attention", due > 0);
 
-      const totalWritten = Object.values(map).reduce(
+      const { current } = computeStreak();
+      const streakText = current === 0 ? "Start" : `${current} d`;
+      setPill("stats", streakText);
+
+      const totalWritten = Object.values(slugs).reduce(
         (n, arr) => n + arr.length,
         0,
       );
-      const done = countTotalDone(map);
-      const fraction = totalWritten > 0 ? done / totalWritten : 0;
-      const overallArc =
-        document.querySelector<SVGCircleElement>("[data-overall-arc]");
-      const overallLabel = document.querySelector<HTMLElement>(
-        "[data-overall-label]",
-      );
-      if (overallArc) {
-        overallArc.style.strokeDashoffset = String(
-          GAUGE_CIRCUMFERENCE * (1 - fraction),
-        );
-      }
-      if (overallLabel) {
-        overallLabel.textContent =
-          totalWritten > 0
-            ? `${done}/${totalWritten} done (${Math.round(fraction * 100)}%)`
-            : "Nothing written yet";
-      }
+      const done = countTotalDone(slugs);
+      const pct =
+        totalWritten > 0 ? Math.round((done / totalWritten) * 100) : 0;
+      setPill("progress", `${pct}%`);
 
-      // A brand-new profile sees zero everywhere on this strip before
-      // they've read a single unit — that's honest but not a reason to
-      // stay. Hide the trigger until there's a real number to show; the
-      // hero's starter-suggestion CTA carries the "why stay" job instead.
-      const statsTrigger = document.querySelector<HTMLElement>(
-        "[data-stats-trigger]",
-      );
-      if (statsTrigger) {
-        statsTrigger.classList.toggle("hidden", done === 0);
-        statsTrigger.classList.toggle("flex", done > 0);
-      }
-
-      renderJourney(fraction);
-      renderStreak();
-    }
-    initTrackGauges();
-    document.addEventListener("astro:page-load", initTrackGauges);
-
-    // Real day-over-day continuity, not a weekly quota — a streak is what
-    // actually makes someone open the app again tomorrow instead of
-    // "sometime this week." See lib/progress-gauges.ts's computeStreak for
-    // how this is derived from existing progress records (no new storage).
-    function renderStreak() {
-      const streakActive = document.querySelector<HTMLElement>(
-        "[data-streak-active]",
-      );
-      const streakInvite = document.querySelector<HTMLElement>(
-        "[data-streak-invite]",
-      );
+      const streakChip =
+        document.querySelector<HTMLElement>("[data-chip-streak]");
       const streakLabel = document.querySelector<HTMLElement>(
-        "[data-streak-label]",
+        "[data-chip-streak-label]",
       );
-      const streakIconRow = document.querySelector<HTMLElement>(
-        "[data-streak-icon-row]",
-      );
-      const dayDots = document.querySelectorAll<HTMLElement>(
-        "[data-streak-strip] [data-day-dot]",
-      );
-      const { current, longest, activeToday } = computeStreak();
-
-      // A "0 days" streak with seven empty dots reads as a failure state on
-      // a reader's very first visit — swap it for an invitation instead of
-      // showing an empty chart. Only once a real streak exists does the
-      // dots view (which can show it slipping) earn its place.
-      streakActive?.classList.toggle("hidden", current === 0);
-      streakInvite?.classList.toggle("hidden", current > 0);
-      streakInvite?.classList.toggle("flex", current === 0);
-      if (current === 0) return;
-
-      if (streakLabel) {
-        streakLabel.textContent = current === 1 ? "1 day" : `${current} days`;
-        streakLabel.title = activeToday
-          ? `${current}-day streak — you're in today. Best: ${longest}.`
-          : current > 0
-            ? `${current}-day streak — do one unit today to keep it alive. Best: ${longest}.`
-            : `No active streak yet. Best so far: ${longest}.`;
+      if (streakChip && streakLabel && current > 0) {
+        streakLabel.textContent =
+          current === 1 ? "1-day streak" : `${current}-day streak`;
+        streakChip.classList.remove("hidden");
+        streakChip.classList.add("inline-flex");
       }
-      if (streakIconRow) {
-        const lit = current > 0;
-        streakIconRow.classList.toggle("text-orange-500", lit);
-        streakIconRow.classList.toggle("dark:text-orange-400", lit);
-        streakIconRow.classList.toggle("text-slate-400", !lit);
-        streakIconRow.classList.toggle("dark:text-slate-600", !lit);
-      }
-
-      const DAY_MS = 24 * 60 * 60 * 1000;
-      const today = Date.now();
-      dayDots.forEach((dot, i) => {
-        // Dots run oldest (6 days ago) to newest (today), left to right.
-        const offsetFromToday = dayDots.length - 1 - i;
-        const active = isDayActive(today - offsetFromToday * DAY_MS);
-        dot.classList.toggle("bg-orange-400", active);
-        dot.classList.toggle("dark:bg-orange-500", active);
-        dot.classList.toggle("bg-slate-200", !active);
-        dot.classList.toggle("dark:bg-slate-700", !active);
-      });
-    }
-
-    interface DueUnit {
-      track: string;
-      slug: string;
-      problem: string;
-    }
-
-    function buildDueCard(unit: DueUnit): HTMLAnchorElement {
-      const a = document.createElement("a");
-      a.href = `/${unit.track}/${unit.slug}/`;
-      a.className =
-        "group flex w-56 shrink-0 flex-col rounded-lg border p-3 transition hover:brightness-95";
-      a.style.borderColor = "var(--gauge-warn)";
-      a.style.background =
-        "color-mix(in srgb, var(--gauge-warn) 8%, transparent)";
-      const eyebrowEl = document.createElement("span");
-      eyebrowEl.className = "text-[10px] font-semibold tracking-wide uppercase";
-      eyebrowEl.style.color = "var(--gauge-warn)";
-      eyebrowEl.textContent = "Review due";
-      const titleEl = document.createElement("span");
-      titleEl.className =
-        "mt-1 text-sm font-medium text-slate-900 group-hover:underline dark:text-slate-100";
-      titleEl.textContent = unit.problem;
-      a.append(eyebrowEl, titleEl);
-      return a;
-    }
-
-    // The only signal that a horizontally-scrolling card row holds more
-    // than what's visible used to be a thin native scrollbar — easy to miss,
-    // especially on mobile. Adds a right-edge fade plus a visible "next"
-    // button, both of which disappear once there's nothing left to scroll to.
-    function wireCarouselAffordance(root: HTMLElement) {
-      const track = root.querySelector<HTMLElement>("[data-carousel-track]");
-      const fadeStart = root.querySelector<HTMLElement>(
-        "[data-carousel-fade-start]",
-      );
-      const fadeEnd = root.querySelector<HTMLElement>(
-        "[data-carousel-fade-end]",
-      );
-      const prev = root.querySelector<HTMLButtonElement>(
-        "[data-carousel-prev]",
-      );
-      const next = root.querySelector<HTMLButtonElement>(
-        "[data-carousel-next]",
-      );
-      if (!track || !fadeStart || !fadeEnd || !prev || !next) return;
-
-      // Symmetric in both directions — the first pass only ever showed a
-      // forward arrow, so once a reader scrolled right there was no visible
-      // way back except the (now-hidden) native scrollbar or a swipe gesture.
-      function update() {
-        if (!track) return;
-        const overflows = track.scrollWidth > track.clientWidth + 4;
-        const atStart = track.scrollLeft <= 4;
-        const atEnd =
-          track.scrollLeft + track.clientWidth >= track.scrollWidth - 4;
-        const showPrev = overflows && !atStart;
-        const showNext = overflows && !atEnd;
-        fadeStart?.classList.toggle("hidden", !showPrev);
-        fadeEnd?.classList.toggle("hidden", !showNext);
-        prev?.classList.toggle("hidden", !showPrev);
-        prev?.classList.toggle("flex", showPrev);
-        next?.classList.toggle("hidden", !showNext);
-        next?.classList.toggle("flex", showNext);
-      }
-      prev.addEventListener("click", () => {
-        track.scrollBy({
-          left: -track.clientWidth * 0.8,
-          behavior: "smooth",
-        });
-      });
-      next.addEventListener("click", () => {
-        track.scrollBy({ left: track.clientWidth * 0.8, behavior: "smooth" });
-      });
-      track.addEventListener("scroll", update);
-      new ResizeObserver(update).observe(track);
-      update();
-    }
-
-    // Spaced repetition already schedules re-exams (7/30/90 days after a
-    // unit is marked done) — this is what actually surfaces that schedule
-    // as a reason to open the app, instead of it silently waiting until
-    // the reader happens to revisit that one unit's own page.
-    function initDueReview() {
-      const modal = document.querySelector<HTMLDialogElement>(
-        "[data-due-review-modal]",
-      );
-      const carousel = modal?.querySelector<HTMLElement>("[data-carousel]");
-      const cardsHost = document.querySelector<HTMLElement>(
-        "[data-due-review-cards]",
-      );
-      const heading = document.querySelector<HTMLElement>(
-        "[data-due-review-heading]",
-      );
-      const trigger = document.querySelector<HTMLButtonElement>(
-        "[data-due-review-trigger]",
-      );
-      const triggerLabel = trigger?.querySelector<HTMLElement>(
-        "[data-due-review-trigger-label]",
-      );
-      const lookupEl = document.getElementById("unit-lookup");
-      if (
-        !modal ||
-        !carousel ||
-        !cardsHost ||
-        !heading ||
-        !trigger ||
-        !lookupEl
-      )
-        return;
-      if (modal.dataset.wired === "true") return;
-      modal.dataset.wired = "true";
-
-      let lookup: DueUnit[];
-      try {
-        lookup = JSON.parse(lookupEl.textContent || "[]");
-      } catch {
-        return;
-      }
-
-      const due = getDueUnits(lookup);
-      if (due.length === 0) return;
-
-      heading.textContent =
-        due.length === 1
-          ? "1 unit due for review"
-          : `${due.length} units due for review`;
-      cardsHost.innerHTML = "";
-      for (const unit of due.slice(0, 6)) {
-        cardsHost.append(buildDueCard(unit));
-      }
-      trigger.classList.remove("hidden");
-      trigger.classList.add("flex");
-      if (triggerLabel) {
-        triggerLabel.textContent =
-          due.length === 1
-            ? "1 due for review"
-            : `${due.length} due for review`;
-      }
-      wireCarouselAffordance(carousel);
-    }
-    initDueReview();
-    document.addEventListener("astro:page-load", initDueReview);
-
-    // Shared open/close wiring for every homepage <dialog> — same native
-    // <dialog> pattern as LevelsModal.astro/TopicMythModal.astro (showModal,
-    // close button, backdrop click closes because the click target is the
-    // dialog element itself once ::backdrop is excluded from hit-testing).
-    function wireModal(
-      modalSelector: string,
-      triggerSelector: string,
-      closeSelector: string,
-    ) {
-      const dialog = document.querySelector<HTMLDialogElement>(modalSelector);
-      if (!dialog) return;
-      if (dialog.dataset.modalWired === "true") return;
-      dialog.dataset.modalWired = "true";
-
-      document
-        .querySelectorAll<HTMLElement>(triggerSelector)
-        .forEach((trigger) => {
-          trigger.addEventListener("click", () => dialog.showModal());
-        });
-      dialog
-        .querySelector(closeSelector)
-        ?.addEventListener("click", () => dialog.close());
-      dialog.addEventListener("click", (e) => {
-        if (e.target === dialog) dialog.close();
-      });
-    }
-    function initHomeModals() {
-      wireModal(
-        "[data-due-review-modal]",
-        "[data-due-review-trigger]",
-        "[data-due-review-close]",
-      );
-      wireModal(
-        "[data-continue-modal]",
-        "[data-continue-trigger]",
-        "[data-continue-close]",
-      );
-      wireModal(
-        "[data-quiz-modal]",
-        "[data-quiz-trigger]",
-        "[data-quiz-close]",
-      );
-      wireModal(
-        "[data-stats-modal]",
-        "[data-stats-trigger]",
-        "[data-stats-close]",
-      );
-      wireModal(
-        "[data-journey-modal]",
-        "[data-journey-trigger]",
-        "[data-journey-close]",
-      );
-    }
-    initHomeModals();
-    document.addEventListener("astro:page-load", initHomeModals);
-
-    // The "More" popover groups the secondary hero actions (try a question,
-    // stats, progress) that used to sit as full pills next to due-review/
-    // continue — same open/close pattern as the roadmap's filter popovers.
-    function initMoreMenu() {
-      const wrap = document.querySelector<HTMLElement>("[data-more-menu]");
-      const trigger = wrap?.querySelector<HTMLButtonElement>(
-        "[data-more-trigger]",
-      );
-      const panel = wrap?.querySelector<HTMLElement>("[data-more-panel]");
-      if (!wrap || !trigger || !panel) return;
-      if (wrap.dataset.wired === "true") return;
-      wrap.dataset.wired = "true";
-
-      function closeMenu() {
-        panel!.classList.add("hidden");
-        panel!.classList.remove("flex");
-        trigger!.setAttribute("aria-expanded", "false");
-      }
-      function openMenu() {
-        panel!.classList.remove("hidden");
-        panel!.classList.add("flex");
-        trigger!.setAttribute("aria-expanded", "true");
-      }
-
-      trigger.addEventListener("click", () => {
-        if (panel.classList.contains("hidden")) openMenu();
-        else closeMenu();
-      });
-      // Any item inside (try a question / stats / progress) opens its own
-      // modal via wireModal above — this just collapses the menu alongside
-      // that, so it doesn't stay open behind the modal.
-      panel
-        .querySelectorAll("button")
-        .forEach((item) => item.addEventListener("click", closeMenu));
-      document.addEventListener("click", (e) => {
-        if (!wrap.contains(e.target as Node)) closeMenu();
-      });
-      document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") closeMenu();
-      });
-    }
-    initMoreMenu();
-    document.addEventListener("astro:page-load", initMoreMenu);
-
-    function initInterestPersonalization() {
-      const grid = document.querySelector<HTMLElement>("[data-track-grid]");
-      const notice = document.querySelector<HTMLElement>(
-        "[data-interest-notice]",
-      );
-      if (!grid || grid.dataset.wired === "true") return;
-      grid.dataset.wired = "true";
-
-      const interests = new Set(getActiveProfile()?.interests ?? []);
-      if (interests.size === 0) return;
-
-      const cards = Array.from(
-        grid.querySelectorAll<HTMLElement>("[data-track-card]"),
-      );
-      let matchCount = 0;
-      for (const card of cards) {
-        const tags = (card.dataset.tags ?? "").split(" ").filter(Boolean);
-        const isMatch = tags.some((tag) => interests.has(tag));
-        // A profile with interests set should only ever see tracks that
-        // match at least one of them here — a non-matching track stays
-        // hidden until the reader updates their interests, not just
-        // pushed further down the page.
-        card.classList.toggle("hidden", !isMatch);
-        card.dataset.interestMatch = String(isMatch);
-        if (isMatch) {
-          card
-            .querySelector<HTMLElement>("[data-interest-badge]")
-            ?.classList.remove("hidden");
-          card
-            .querySelector<HTMLElement>("[data-interest-badge]")
-            ?.classList.add("flex");
-          matchCount++;
-        }
-      }
-      notice?.classList.toggle("hidden", matchCount === 0);
-    }
-    initInterestPersonalization();
-    document.addEventListener("astro:page-load", initInterestPersonalization);
-
-    // A card's final visibility ANDs the category filter with whatever the
-    // interest-personalization pass above already decided — clicking a
-    // category chip should narrow further, never resurface a track the
-    // reader's own stated interests already excluded.
-    function initCategoryFilters() {
-      const bar = document.querySelector<HTMLElement>(
-        "[data-category-filters]",
-      );
-      const grid = document.querySelector<HTMLElement>("[data-track-grid]");
-      if (!bar || !grid) return;
-      if (bar.dataset.wired === "true") return;
-      bar.dataset.wired = "true";
-
-      const chips = Array.from(
-        bar.querySelectorAll<HTMLButtonElement>("[data-category-chip]"),
-      );
-      const cards = Array.from(
-        grid.querySelectorAll<HTMLElement>("[data-track-card]"),
-      );
-
-      chips.forEach((chip) => {
-        chip.addEventListener("click", () => {
-          const category = chip.dataset.categoryChip!;
-          chips.forEach((c) =>
-            c.setAttribute("aria-pressed", String(c === chip)),
-          );
-          for (const card of cards) {
-            const matchesCategory =
-              category === "all" || card.dataset.category === category;
-            const matchesInterest = card.dataset.interestMatch !== "false";
-            card.classList.toggle(
-              "hidden",
-              !(matchesCategory && matchesInterest),
-            );
-          }
-        });
-      });
-    }
-    initCategoryFilters();
-    document.addEventListener("astro:page-load", initCategoryFilters);
-
-    interface PreviewQuestion {
-      track: string;
-      slug: string;
-      problem: string;
-      prompt: string;
-      choices: string[];
-      correctIndex: number;
-      tags: string[];
-    }
-
-    function wireChoiceButtons(
-      choices: HTMLButtonElement[],
-      followup: HTMLElement | null,
-    ) {
-      for (const btn of choices) {
-        btn.addEventListener("click", () => {
-          const pickedCorrect = btn.dataset.correct === "true";
-          for (const b of choices) {
-            b.disabled = true;
-            if (b.dataset.correct === "true") {
-              b.classList.add(
-                "border-emerald-500",
-                "bg-emerald-50",
-                "font-semibold",
-                "text-emerald-700",
-                "dark:border-emerald-400",
-                "dark:bg-emerald-950/40",
-                "dark:text-emerald-300",
-              );
-            }
-          }
-          if (!pickedCorrect) {
-            btn.classList.add(
-              "border-rose-400",
-              "bg-rose-50",
-              "text-rose-700",
-              "dark:border-rose-500",
-              "dark:bg-rose-950/40",
-              "dark:text-rose-300",
-            );
-          }
-          followup?.classList.remove("hidden");
-          followup?.classList.add("flex", "animate-fade-slide-in");
-        });
+      const doneChip = document.querySelector<HTMLElement>("[data-chip-done]");
+      if (doneChip && done > 0) {
+        doneChip.textContent = `${done} of ${totalWritten} done`;
+        doneChip.classList.remove("hidden");
+        doneChip.classList.add("inline-flex");
       }
     }
-
-    function initContentPreview() {
-      const root = document.querySelector<HTMLElement>(
-        "[data-content-preview]",
-      );
-      if (!root || root.dataset.wired === "true") return;
-      root.dataset.wired = "true";
-
-      const poolEl = document.getElementById("preview-questions-pool");
-      let pool: PreviewQuestion[] = [];
-      try {
-        pool = JSON.parse(poolEl?.textContent || "[]");
-      } catch {
-        // pool stays []
-      }
-
-      // Prefer questions from tracks matching the active profile's stated
-      // interests (same tag vocabulary as the track-card personalization
-      // above); fall back to the full pool for a fresh/interest-less
-      // profile, or if no match happens to exist.
-      const interests = new Set(getActiveProfile()?.interests ?? []);
-      let candidates = pool;
-      if (interests.size > 0) {
-        const matching = pool.filter((q) =>
-          q.tags.some((tag) => interests.has(tag)),
-        );
-        if (matching.length > 0) candidates = matching;
-      }
-
-      const promptEl = root.querySelector<HTMLElement>("[data-preview-prompt]");
-      const choicesContainer = root.querySelector<HTMLElement>(
-        "[data-preview-choices]",
-      );
-      const followup = root.querySelector<HTMLAnchorElement>(
-        "[data-preview-followup]",
-      );
-      if (!promptEl || !choicesContainer || !followup) return;
-
-      if (candidates.length === 0) {
-        // No pool available (e.g. a build with no written units yet) — keep
-        // whatever static fallback question is already in the markup.
-        const choices = Array.from(
-          choicesContainer.querySelectorAll<HTMLButtonElement>(
-            "[data-preview-choice]",
-          ),
-        );
-        wireChoiceButtons(choices, followup);
-        return;
-      }
-
-      const picked = candidates[Math.floor(Math.random() * candidates.length)];
-      promptEl.textContent = picked.prompt;
-      choicesContainer.innerHTML = "";
-      const newChoices: HTMLButtonElement[] = [];
-      picked.choices.forEach((choiceText, i) => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.dataset.previewChoice = "true";
-        if (i === picked.correctIndex) btn.dataset.correct = "true";
-        btn.className =
-          "rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition hover:border-slate-400 disabled:cursor-default dark:border-slate-800 dark:hover:border-slate-600";
-        btn.textContent = choiceText;
-        choicesContainer.appendChild(btn);
-        newChoices.push(btn);
-      });
-      followup.href = `/${picked.track}/${picked.slug}/`;
-      const followupText = followup.querySelector<HTMLElement>(
-        "[data-preview-followup-text]",
-      );
-      if (followupText) {
-        followupText.textContent = `See the full breakdown in ${picked.track}/${picked.slug}`;
-      }
-      followup.classList.add("hidden");
-      followup.classList.remove("flex", "animate-fade-slide-in");
-
-      wireChoiceButtons(newChoices, followup);
-    }
-    initContentPreview();
-    document.addEventListener("astro:page-load", () => {
-      // A fresh question on every navigation back to "/" — undo the
-      // wired/hidden state left over from the previous render.
-      const root = document.querySelector<HTMLElement>(
-        "[data-content-preview]",
-      );
-      if (root) root.dataset.wired = "false";
-      initContentPreview();
-    });
-
-    function initSurpriseMe() {
-      const btn =
-        document.querySelector<HTMLButtonElement>("[data-surprise-me]");
-      const el = document.getElementById("written-unit-hrefs");
-      if (!btn || !el || btn.dataset.wired === "true") return;
-      btn.dataset.wired = "true";
-
-      btn.addEventListener("click", () => {
-        let hrefs: string[];
-        try {
-          hrefs = JSON.parse(el.textContent || "[]");
-        } catch {
-          return;
-        }
-        if (hrefs.length === 0) return;
-        const pick = hrefs[Math.floor(Math.random() * hrefs.length)];
-        window.location.href = pick;
-      });
-    }
-    initSurpriseMe();
-    document.addEventListener("astro:page-load", initSurpriseMe);
-
-    // Custom search dropdown — picked as "Option 3, command-palette style"
-    // from a mockup: compact rows, first match pre-selected, arrow-key nav,
-    // capped to 4 results with a total count. Replaces a native <datalist>,
-    // which the browser renders itself (no cap, no restyling possible).
-    interface SearchUnit {
-      track: string;
-      slug: string;
-      problem: string;
-    }
-    interface SearchResult {
-      label: string;
-      track: string;
-      href: string;
-    }
-    interface IconNode {
-      type: string;
-      props: Record<string, string | number>;
-    }
-
-    function buildSearchRowIcon(
-      iconPaths: Record<string, IconNode[]>,
-      track: string,
-      selected: boolean,
-    ): SVGSVGElement {
-      const svgNS = "http://www.w3.org/2000/svg";
-      const svg = document.createElementNS(svgNS, "svg");
-      svg.setAttribute("width", "13");
-      svg.setAttribute("height", "13");
-      svg.setAttribute("viewBox", "0 0 24 24");
-      svg.setAttribute("fill", "none");
-      svg.setAttribute("stroke", "currentColor");
-      svg.setAttribute("stroke-width", "2");
-      svg.setAttribute("stroke-linecap", "round");
-      svg.setAttribute("stroke-linejoin", "round");
-      svg.setAttribute("aria-hidden", "true");
-      svg.setAttribute(
-        "class",
-        `shrink-0 ${selected ? "" : "text-slate-400 dark:text-slate-600"}`,
-      );
-      if (selected) svg.style.color = "var(--accent-text)";
-      for (const node of iconPaths[track] ?? []) {
-        const el = document.createElementNS(svgNS, node.type);
-        for (const [key, value] of Object.entries(node.props)) {
-          el.setAttribute(key, String(value));
-        }
-        svg.appendChild(el);
-      }
-      return svg;
-    }
-
-    function initSearchDropdown() {
-      const input = document.querySelector<HTMLInputElement>(
-        "[data-search-input]",
-      );
-      const form = input?.closest("form");
-      const dropdown = document.querySelector<HTMLElement>(
-        "[data-search-dropdown]",
-      );
-      const resultsHost = document.querySelector<HTMLElement>(
-        "[data-search-results]",
-      );
-      const totalEl = document.querySelector<HTMLElement>(
-        "[data-search-total]",
-      );
-      const unitsEl = document.getElementById("unit-lookup");
-      const tracksEl = document.getElementById("track-list");
-      const iconsEl = document.getElementById("track-icon-paths");
-      if (
-        !input ||
-        !form ||
-        !dropdown ||
-        !resultsHost ||
-        !totalEl ||
-        !unitsEl ||
-        !tracksEl ||
-        !iconsEl
-      )
-        return;
-      if (input.dataset.searchWired === "true") return;
-      input.dataset.searchWired = "true";
-
-      let units: SearchUnit[] = [];
-      let tracks: string[] = [];
-      let iconPaths: Record<string, IconNode[]> = {};
-      try {
-        units = JSON.parse(unitsEl.textContent || "[]");
-      } catch {
-        // Malformed embed — search just finds nothing.
-      }
-      try {
-        tracks = JSON.parse(tracksEl.textContent || "[]");
-      } catch {
-        // Malformed embed — track matches just don't appear.
-      }
-      try {
-        iconPaths = JSON.parse(iconsEl.textContent || "{}");
-      } catch {
-        // Malformed embed — rows render with no icon.
-      }
-
-      const MAX_RESULTS = 4;
-      let results: SearchResult[] = [];
-      let activeIndex = 0;
-
-      function computeResults(query: string): {
-        shown: SearchResult[];
-        total: number;
-      } {
-        const q = query.trim().toLowerCase();
-        if (!q) return { shown: [], total: 0 };
-        const unitMatches: SearchResult[] = units
-          .filter((u) => u.problem.toLowerCase().includes(q))
-          .map((u) => ({
-            label: u.problem,
-            track: u.track,
-            href: `/${u.track}/${u.slug}/`,
-          }));
-        const trackMatches: SearchResult[] = tracks
-          .filter((t) => t.toLowerCase().includes(q))
-          .map((t) => ({ label: t, track: t, href: `/${t}/` }));
-        const all = [...unitMatches, ...trackMatches];
-        return { shown: all.slice(0, MAX_RESULTS), total: all.length };
-      }
-
-      function renderResults() {
-        resultsHost!.innerHTML = "";
-        results.forEach((r, i) => {
-          const selected = i === activeIndex;
-          const row = document.createElement("a");
-          row.href = r.href;
-          row.id = `search-result-${i}`;
-          row.setAttribute("role", "option");
-          row.setAttribute("aria-selected", String(selected));
-          row.className = `flex items-center gap-2 px-3 py-2 text-sm ${
-            selected ? "bg-slate-100 dark:bg-slate-800" : ""
-          }`;
-          row.appendChild(buildSearchRowIcon(iconPaths, r.track, selected));
-          const text = document.createElement("span");
-          text.className = `flex-1 truncate ${
-            selected
-              ? "text-slate-900 dark:text-slate-100"
-              : "text-slate-600 dark:text-slate-400"
-          }`;
-          text.textContent = r.label;
-          const tag = document.createElement("span");
-          tag.className = `shrink-0 text-[10px] ${
-            selected
-              ? "text-slate-500 dark:text-slate-500"
-              : "text-slate-400 dark:text-slate-600"
-          }`;
-          tag.textContent = r.track;
-          row.append(text, tag);
-          resultsHost!.appendChild(row);
-        });
-        input!.setAttribute(
-          "aria-activedescendant",
-          results.length ? `search-result-${activeIndex}` : "",
-        );
-      }
-
-      function openDropdown() {
-        dropdown!.classList.remove("hidden");
-        input!.setAttribute("aria-expanded", "true");
-      }
-      function closeDropdown() {
-        dropdown!.classList.add("hidden");
-        input!.setAttribute("aria-expanded", "false");
-      }
-
-      function update() {
-        const { shown, total } = computeResults(input!.value);
-        results = shown;
-        activeIndex = 0;
-        if (results.length === 0) {
-          closeDropdown();
-          return;
-        }
-        totalEl!.textContent = total === 1 ? "1 result" : `${total} results`;
-        renderResults();
-        openDropdown();
-      }
-
-      input.addEventListener("input", update);
-      input.addEventListener("focus", () => {
-        if (input.value.trim()) update();
-      });
-      input.addEventListener("keydown", (e) => {
-        if (dropdown!.classList.contains("hidden") || results.length === 0)
-          return;
-        if (e.key === "ArrowDown") {
-          e.preventDefault();
-          activeIndex = (activeIndex + 1) % results.length;
-          renderResults();
-        } else if (e.key === "ArrowUp") {
-          e.preventDefault();
-          activeIndex = (activeIndex - 1 + results.length) % results.length;
-          renderResults();
-        } else if (e.key === "Enter") {
-          const pick = results[activeIndex];
-          if (pick) {
-            e.preventDefault();
-            window.location.href = pick.href;
-          }
-        } else if (e.key === "Escape") {
-          closeDropdown();
-        }
-      });
-      document.addEventListener("click", (e) => {
-        if (!form.contains(e.target as Node)) closeDropdown();
-      });
-    }
-    initSearchDropdown();
-    document.addEventListener("astro:page-load", initSearchDropdown);
+    initHome();
+    document.addEventListener("astro:page-load", initHome);
   </script>
 </Layout>
+
+<style>
+  .menu-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    min-height: 4.25rem;
+    padding: 0.5rem 1.25rem 0.5rem 1rem;
+    border-radius: 0.875rem;
+    border: 2px solid #cbd5e1;
+    background: #fff;
+    color: #0f172a;
+    box-shadow: 0 4px 0 #cbd5e1;
+    transition:
+      transform 0.08s,
+      box-shadow 0.08s,
+      border-color 0.08s;
+  }
+  .menu-row:hover {
+    border-color: #0f172a;
+    box-shadow: 0 4px 0 #0f172a;
+    transform: translateX(6px);
+  }
+  .menu-row:active {
+    transform: translate(6px, 4px);
+    box-shadow: 0 0 0 #0f172a;
+  }
+  .menu-row:focus-visible {
+    outline: 3px solid var(--accent-text);
+    outline-offset: 4px;
+  }
+  :global(.dark) .menu-row {
+    border-color: #334155;
+    background: #0f172a;
+    color: #f1f5f9;
+    box-shadow: 0 4px 0 #334155;
+  }
+  :global(.dark) .menu-row:hover {
+    border-color: #f1f5f9;
+    box-shadow: 0 4px 0 #f1f5f9;
+  }
+  .menu-hero {
+    min-height: 6rem;
+    padding: 0.5rem 1.5rem 0.5rem 1.25rem;
+    background: #0369a1;
+    color: #fff;
+    border-color: #082f49;
+    box-shadow: 0 6px 0 #082f49;
+  }
+  .menu-hero:hover {
+    border-color: #082f49;
+    box-shadow: 0 6px 0 #082f49;
+  }
+  :global(.dark) .menu-hero {
+    background: #0369a1;
+    color: #fff;
+    border-color: #082f49;
+    box-shadow: 0 6px 0 #082f49;
+  }
+  :global(.dark) .menu-hero:hover {
+    border-color: #082f49;
+    box-shadow: 0 6px 0 #082f49;
+  }
+  .menu-warn.menu-attention {
+    background: #fff7ed;
+    border-color: #c2410c;
+    box-shadow: 0 4px 0 #c2410c;
+    color: #0f172a;
+  }
+  :global(.dark) .menu-warn.menu-attention {
+    background: #431407;
+    color: #f1f5f9;
+  }
+  .menu-dim {
+    opacity: 0.6;
+  }
+  .menu-icon {
+    display: flex;
+    width: 2.5rem;
+    height: 2.5rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.625rem;
+  }
+  .menu-hero .menu-icon {
+    width: 3.25rem;
+    height: 3.25rem;
+  }
+  .menu-pill {
+    white-space: nowrap;
+    border-radius: 999px;
+    background: #e2e8f0;
+    padding: 0.3rem 0.75rem;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    color: #0f172a;
+  }
+  :global(.dark) .menu-pill {
+    background: #334155;
+    color: #f1f5f9;
+  }
+  .menu-attention .menu-pill {
+    background: #c2410c;
+    color: #fff;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .menu-row,
+    .menu-row:hover,
+    .menu-row:active {
+      transition: none;
+      transform: none;
+    }
+  }
+</style>
