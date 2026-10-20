@@ -1,210 +1,167 @@
 ---
-title: "L3 — Simulating the Scenario's force-push, and how --force-with-lease catches it"
+title: "L3 — The incident as a timeline: where the lease fails and how to recover"
 ---
 
+import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L2 established that a normal push checks whether the remote's tip is an
-ancestor of what's being pushed, and that force-pushing simply replaces the
-ref without asking that question. L3 turns both of those into runnable
-code — a small commit-history model that measures exactly which commit the
-Scenario's force-push destroys, and a working `--force-with-lease` check
-that would have caught it first.
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "shared-history",
+};
+
+<Scenario label="The commit is gone from the branch. Is it gone from everywhere?">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📌</span> <strong>Remote branch</strong> — now points at <code>E</code>, the developer's rewrite</div>
+      <div class="flex items-center gap-1.5"><span>🕳️</span> <strong>Missing</strong> — <code>D</code>, the teammate's commit</div>
+      <div class="flex items-center gap-1.5"><span>💻</span> <strong>Teammate's laptop</strong> — still has <code>D</code>, the only clone that made it</div>
+      <div class="flex items-center gap-1.5"><span>🧭</span> <strong>Developer's laptop</strong> — never fetched <code>D</code>, so it was never there</div>
+    </div>
+  </Fragment>
+
+The team lead finds out an hour later. The pointer has moved, the teammate is
+frustrated, and the developer has switched to `--force-with-lease` for next
+time. **Would that switch really have prevented it, can anything fool the
+lease, and if the damage is already done, where do you get `D` back from?**
+
+</Scenario>
 
 <LevelIntro
   items={[
-    "A minimal commit-history model with reachability",
-    "Measuring exactly which commit a force-push discards",
-    "Implementing the `--force-with-lease` check itself",
+    "The incident as a timeline",
+    "Where the lease can be fooled",
+    "Recovering a commit nobody points at",
   ]}
 />
 
-## Modeling commit history well enough to measure the actual loss
+## What exactly happened, in order?
 
-**A real git repository is more machinery than needed to see what
-happened. Here's a minimal commit-history model — enough to measure
-exactly which commits the Scenario's force-push destroys.**
+**Which moment made the loss inevitable?** Not the rebase and not the
+teammate's push. It was the force-push, which ran against a view that
+was already out of date:
 
-Here is the story before code:
-
-| Commit | Parent | Who made it                    | In old remote line? | In developer's new local line? |
-| ------ | ------ | ------------------------------ | ------------------- | ------------------------------ |
-| `A`    | none   | shared starting point          | Yes                 | Yes                            |
-| `B`    | `A`    | earlier shared work            | Yes                 | Yes                            |
-| `C`    | `B`    | last commit developer had seen | Yes                 | Yes                            |
-| `D`    | `C`    | teammate's newer push          | Yes                 | No                             |
-| `E`    | `C`    | developer's rebased work       | No                  | Yes                            |
-
-In the JavaScript below, `null` means "no parent." A `Set` is used to
-remember hashes without duplicates. `find` searches the array for the
-commit with a matching hash. "Reachable" means the loop starts at a
-tip like `D` or `E` and walks backward through `parent` links.
-
-```js
-function findCommit(history, hash) {
-  return history.find((c) => c.hash === hash);
-}
-
-function reachableHashes(history, tipHash) {
-  const hashes = new Set();
-  let current = findCommit(history, tipHash);
-  while (current) {
-    hashes.add(current.hash);
-    if (current.parent === null) break;
-    current = findCommit(history, current.parent);
-  }
-  return hashes;
-}
-
-function commitsLostByForcePush(history, oldRemoteTip, newLocalTip) {
-  const oldReachable = reachableHashes(history, oldRemoteTip);
-  const newReachable = reachableHashes(history, newLocalTip);
-  return [...oldReachable].filter((h) => !newReachable.has(h));
-}
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant Srv as Remote (feature)
+    participant Mate as Teammate
+    Note over Dev,Srv: everyone at C
+    Dev->>Dev: rebase local work, creating E on top of C
+    Mate->>Srv: push D (remote = D)
+    Dev->>Srv: push --force (remote = E)
+    Note over Srv: D unreachable from the branch
+    Mate->>Srv: next normal push is rejected
 ```
 
-```js
-const history = [
-  { hash: "A", parent: null },
-  { hash: "B", parent: "A" },
-  { hash: "C", parent: "B" },
-  { hash: "D", parent: "C" }, // teammate's commit, pushed after dev last fetched
-  { hash: "E", parent: "C" }, // dev's rebased local work, based on a stale C
-];
+| Commit          | Old remote line |  New remote line  |
+| --------------- | :-------------: | :---------------: |
+| `A`, `B`, `C`   |    reachable    |     reachable     |
+| `D` (teammate)  |    reachable    | **not reachable** |
+| `E` (developer) |   not present   |     reachable     |
 
-commitsLostByForcePush(history, "D", "E"); // ["D"]
-```
+Reachability is the whole story: the loss is every commit reachable from the
+old tip but not from the new one. That matches the interactive demo of this
+unit, where each unfetched teammate commit is lost one for one. If the
+developer had fetched and rebased onto `D`, the new tip would reach `D` and
+the loss would be zero.
 
-The remote's actual tip is `D` (the teammate's commit). The
-developer's local tip after rebasing is `E`, built on top of `C` —
-because their local view never included `D` in the first place.
-`commitsLostByForcePush` walks backward from both tips and finds
-exactly one commit reachable from the old tip but not the new one:
-`D` itself. This is the mechanical, measurable version of "the
-teammate's commit disappeared" — not a metaphor, an actual reachability
-calculation.
+<Checkpoint question="The developer fetches right before the rebase and rebases onto D, then force-pushes. Is anything lost? And if the teammate pushes yet another commit F seconds after that fetch?">
 
-<Checkpoint question="If the developer had fetched right before rebasing, so their local history included D as C's child and E were rebased on top of D instead of C, what would commitsLostByForcePush(history, 'D', 'E') return, and why?">
-
-It would return an empty array. `reachableHashes` walking backward from
-the new local tip `E` would now pass through `D` on its way to `C`,
-`B`, and `A`, so every commit reachable from the old remote tip `D`
-would also be reachable from the new tip. Nothing computed as "lost"
-because nothing actually would be — this is the mechanical reason
-"fetch before you rewrite" fixes the problem: it's not a superstition,
-it's ensuring the new tip's reachable set is a superset of the old
-one's.
+In the first case nothing is lost: `E` now sits on top of `D`, so every
+commit reachable from the old tip is still reachable from the new one.
+The second case is different: the fetch narrowed the window but did not
+close it. `F` arrived after the developer's last look, a plain `--force`
+would drop it, and this is exactly the gap the lease is meant to cover.
 
 </Checkpoint>
 
-## Reproducing why a normal push would have caught this
+## Can the lease itself be fooled?
 
-**Before force was involved, would a normal `git push` have allowed
-this?**
+**If `--force-with-lease` compares against my `origin/<name>`, what if
+`origin/<name>` was updated without me looking?** Many editors and tools
+fetch in the background. If one fetches `D` into `origin/feature` at 10:00,
+a lease push at 10:05 sees "remote is D, I expected D" and succeeds, even
+though your rebased branch never included `D`.
 
-```js
-function isAncestor(history, ancestorHash, tipHash) {
-  let current = findCommit(history, tipHash);
-  while (current) {
-    if (current.hash === ancestorHash) return true;
-    if (current.parent === null) return false;
-    current = findCommit(history, current.parent);
-  }
-  return false;
-}
+```mermaid
+flowchart TD
+    BG["Background fetch\nupdates origin/feature to D"] --> L["You run push --force-with-lease"]
+    L --> Cmp{"remote == origin/feature?"}
+    Cmp -->|"yes (both D)"| Win["Push succeeds\nD silently dropped"]
+    Win -.->|"guard"| G["Check 'git log origin/feature'\nor add --force-if-includes"]
 ```
 
-```js
-isAncestor(history, "D", "E"); // false
-```
+| Guard                                                             | What it adds                                                               |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Read what changed before every rewritten push                     | Turns the lease from "unchanged since a fetch" into "reviewed"             |
+| Spell the expected value out: `--force-with-lease=feature:<hash>` | The lease no longer depends on whatever the tracking ref now holds         |
+| `--force-if-includes` alongside the lease                         | Refuses unless your local branch actually contains the remote-tracking tip |
 
-A normal push checks exactly this: is the remote's current tip (`D`)
-an ancestor of what's being pushed (`E`)? It isn't — `E`'s history
-goes back through `C`, `B`, `A`, and never passes through `D` at all.
-A normal push would have been rejected here with "updates were
-rejected because the remote contains work that you do not have
-locally" — the exact protection `--force` bypasses.
+The lease is a seatbelt, not a substitute for knowing what is on the remote.
 
-## The fix: `--force-with-lease`
+<Checkpoint question="Your lease push succeeded. Does that prove the remote contained nothing you hadn't incorporated?">
 
-**How does `--force-with-lease` avoid the naive force-push's
-mistake without giving up the ability to rewrite history at all?**
-
-```js
-function forceWithLease(remoteRef, expectedRemoteTip, localTipHash) {
-  if (remoteRef.tip !== expectedRemoteTip) {
-    throw new Error(
-      `rejected: remote tip is ${remoteRef.tip}, expected ${expectedRemoteTip} — someone else pushed`,
-    );
-  }
-  return { ...remoteRef, tip: localTipHash };
-}
-```
-
-```js
-const remoteRef = { name: "main", tip: "D" };
-
-forceWithLease(remoteRef, "C", "E");
-// throws: rejected: remote tip is D, expected C — someone else pushed
-```
-
-`--force-with-lease` records what the pusher's client believed the
-remote tip was at the time of their last fetch (`C`, in the
-developer's stale view) and compares it against the _actual_ current
-remote tip (`D`) at push time. Because they don't match, the push is
-rejected — the developer is forced to fetch, see the teammate's
-commit, and reconcile before any history gets overwritten. A plain
-`--force` never asks this question at all.
-
-<Checkpoint question="isAncestor(history, 'D', 'E') returns false, and forceWithLease(remoteRef, 'C', 'E') also throws. Both reject the same push — so is forceWithLease just reimplementing the normal push's ancestor check under a different name?">
-
-No — they catch the same accident here, but by checking different
-things. The ancestor check (`isAncestor`) is a property of the commit
-graph itself: is the remote tip reachable by walking backward from the
-new tip, regardless of when anyone looked. `forceWithLease` checks a
-snapshot in time: does the remote's tip right now match what the
-pusher's client last saw, which is exactly the check a plain
-`--force` skips on purpose so it can override history that a normal
-push would reject. They agree in this example because the developer's
-stale expectation (`C`) genuinely isn't the remote's real tip (`D`) —
-but `forceWithLease` is the one built to run even when force is
-intentional, which is the whole reason it exists as a separate flag
-rather than just "always do the ancestor check."
+No. It proves the remote matched your `origin/<name>` at push time. If
+something refreshed that tracking ref without you incorporating the new
+commits, the check passes while commits are dropped. Success means "the
+remote hasn't moved since my tracking ref was updated", not "my branch
+contains everything on the remote".
 
 </Checkpoint>
 
-Fetching is only the start of the safe behavior. If fetching shows the
-remote now has commits you did not include, you still have to
-incorporate them or make an explicit team decision about replacing
-them. `--force-with-lease` protects against surprising remote changes;
-it does not decide for you whether your rewritten history contains
-everything that should remain on the shared branch.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="lease-blind-spots"
+/>
 
-## What generalizes and what doesn't
+## Can the lost commit be recovered?
 
-The core lesson — force-pushing replaces a ref unconditionally, while
-a normal push (or `--force-with-lease`) checks the remote's current
-state first — generalizes to any system with a similar
-"last-write-wins unless checked" hazard: overwriting a file based on
-a stale read, or updating a database record without checking it
-hasn't changed since it was loaded (a version/optimistic-concurrency
-check solves the same underlying problem in that context). What's
-specific to this worked example: the exact mechanics (parent
-pointers, reachability from a tip) are git's specific model of
-history — a different version control system's equivalent safety
-check would be built differently, even though the underlying idea
-(don't discard changes you haven't seen) is the same. **Try extending
-it yourself:** if the developer's rebase had happened to include the
-teammate's commit `D` as well (because they'd fetched right before
-rebasing), would `commitsLostByForcePush` report anything lost at
-all — and does that change what makes a force-push actually risky?
+**If nothing on the branch points at `D`, is it deleted?** Not immediately.
+The commit object stays in any repository that holds it until garbage
+collection eventually removes unreferenced objects. The question is who holds it.
+
+| Where to look                        | Has `D`?                           | Why                                                               |
+| ------------------------------------ | ---------------------------------- | ----------------------------------------------------------------- |
+| Teammate's clone                     | Yes                                | They created and pushed it                                        |
+| Developer's clone                    | **No**                             | Never fetched it, and a reflog only records places a ref has been |
+| Remote server                        | Maybe, until garbage collection    | Often not reachable through normal tools for a regular user       |
+| CI logs or hosting-provider activity | Often the hash, sometimes the diff | Pushes are logged by hash                                         |
+
+Recovery, in order: tell the team and stop pushing, get the 40-character
+hash from the person who has it, and restore the commit with a new branch at
+that hash or a cherry-pick onto the corrected branch. On the machine that
+did have it, `git reflog` lists where branches and `HEAD` used to point, so
+the hash can be found there. Then agree on the intended branch state before
+anyone pushes again, or the next overwrite repeats the incident.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="recovering-lost-commits"
+/>
+
+## What generalizes, and what doesn't?
+
+This timeline is a **case, not the whole territory**. The core idea,
+"last write wins unless the writer checks what it is overwriting", shows
+up wherever updates are made from a stale read: overwriting a file, saving
+a database row without a version check. The specifics here (ancestors,
+reachability, tracking refs) are git's model.
+
+Try extending it yourself. What changes if the shared branch is protected on
+the server and rejects force-pushes entirely? What if `D` were a revert of
+a production incident rather than ordinary feature work? What if three
+teammates, not one, had pushed after your last fetch?
 
 ## Failure modes
 
-| Failure mode                                                      | What it gets wrong                                                                                                                               |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Reaching for `--force` reflexively when a normal push is rejected | A rejection means the remote has commits the local branch doesn't — the fix is to fetch and reconcile, not to bypass the check that caught it    |
-| Treating `--force-with-lease` as equivalent to `--force`          | `--force-with-lease` still checks the remote's actual current state before overwriting — it's meaningfully safer, not just a longer command name |
-| Assuming a personal-branch force-push habit is safe on any branch | The same command is safe on a branch nobody else touches and dangerous on a shared one — the branch's status, not the command, is what changed   |
-| Fetching, then force-pushing without reading what changed         | A fresh fetch updates your view, but it doesn't mean your local rewritten branch includes the new remote commits — inspect and reconcile first   |
+| Failure mode                                           | What it gets wrong                                                               |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| Re-running a rejected push with plain `--force`        | Discards the one signal that the remote holds unseen work                        |
+| Treating `--force-with-lease` as a guarantee           | It checks the tracking ref, which a background fetch can update without review   |
+| Fetching, then force-pushing without reading the fetch | Your view is fresh, but your rewritten branch still may not contain the new work |
+| Looking for the lost commit in the pusher's reflog     | That clone never held it; the author's clone did                                 |

@@ -1,129 +1,149 @@
 ---
-title: "L2 — What force-push actually does, and why a normal push refuses to overwrite"
+title: "L2 — What a normal push checks, and what force-push and the lease change"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named the three copies involved in the Scenario's disappearing commit
-and pointed at `--force-with-lease` as the fix, without yet showing what a
-force-push actually does to the remote branch, or why a normal push would
-have refused to do the same thing. L2 works through both.
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "shared-history",
+};
+
+L1 showed that a force-push moves the remote's branch pointer and that a
+stale view of the remote turns that into data loss. L2 asks the next
+questions: why a normal push would have refused, what the lease adds, and
+what everyone else experiences when pushed history is rewritten.
 
 <LevelIntro
   items={[
-    "The ancestor check a normal push performs",
-    "What a branch ref actually is, and what force-pushing moves",
-    "Why the danger is stale state, not rebasing or force itself",
+    "The fast-forward check of a normal push",
+    "How the lease differs from that check",
+    "What teammates see after a rewrite",
   ]}
 />
 
-## Why a normal push protects against this, and force explicitly disables that protection
+## What does a normal push check?
 
-**If losing a teammate's commit is this dangerous, why does `git
-push --force` exist at all?** Because rewriting your own not-yet-shared
-history (squashing commits, fixing a typo in a commit message before
-anyone's built on it) is a completely normal, safe operation — the
-danger only appears once someone else has already based work on the
-commits being rewritten. A normal push has a built-in safety check for
-exactly this:
-
-Read a branch as a movable label, not as a folder. In a simple line
-like `A <- B <- C <- D`, the branch label might be attached to `D`,
-the latest commit. If you move that label from `D` to `E`, anyone
-looking at the branch starts from `E` instead. Commits not reachable
-from `E` can disappear from normal branch history even if their raw
-objects still exist for a while.
+**If force-push is this dangerous, why does a plain `git push` not do the
+same damage?** Because the server asks one question before moving the
+pointer: is the branch's current tip an **ancestor** of what you are
+sending? If yes, the move only adds commits (a fast-forward) and nothing
+is lost. If no, the server holds commits you do not have.
 
 ```mermaid
 flowchart TD
-    A["git push (no force)"] --> B{"Is the remote's\ncurrent tip an ancestor\nof what I'm pushing?"}
-    B -->|"Yes — nothing on\nremote would be lost"| C["Push succeeds"]
-    B -->|"No — remote has commits\nI don't have locally"| D["Push rejected:\n'fetch first'"]
-    E["git push --force"] --> F["Remote tip is replaced\nunconditionally —\nno ancestor check at all"]
+    P["git push"] --> Q{"Is the remote's current tip\nan ancestor of my tip?"}
+    Q -->|"yes: only adds commits"| OK["Accepted (fast-forward)"]
+    Q -->|"no: remote has commits I lack"| R["Rejected: fetch first"]
+    F["git push --force"] --> S["Pointer moved unconditionally\nno ancestor question asked"]
 ```
 
-A normal push checks whether the remote's current tip is an ancestor
-of the commit being pushed — if it is, nothing on the remote would be
-lost, so the push is safe. If it isn't (because the remote moved
-since the last fetch), git rejects the push rather than guess.
-`--force` exists specifically to skip that check — which is
-necessary for legitimate history rewrites, but also removes the one
-protection that would have caught the Scenario's problem.
+A rejection is not a broken repository. It is the protection doing its
+job, and the correct reaction is to fetch and integrate, not to add
+`--force`.
 
-<Checkpoint question="A teammate says: 'I pushed a rebase of my own commits and it got rejected with a fetch-first error — is my repo broken?'. Using the ancestor check above, what actually happened, and what should they do next?">
+<Checkpoint question="You rebased commits you had already pushed, and a plain push is now rejected. The remote has nothing new from teammates. Why is it still rejected?">
 
-Nothing is broken — the rejection is the ancestor check working exactly
-as designed. Git compared the remote's current tip against the commit
-they were trying to push and found the remote tip isn't an ancestor of
-it, meaning the remote has at least one commit their local branch
-doesn't know about yet. The fix is to fetch, look at what arrived, and
-reconcile their rebased work with it before pushing again — not to add
-`--force` to push past a check that just caught something real.
+Rebasing replaced your old commits with new ones that have different
+hashes. The remote's tip is one of the old commits, and it is no longer an
+ancestor of your rewritten tip, so the ancestor check fails even though no
+teammate pushed anything. That is the legitimate case for a force-push, and
+exactly where the lease belongs instead of a plain `--force`.
 
 </Checkpoint>
 
-## What "the remote branch's ref" actually is
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="fast-forward-check"
+/>
 
-**When people say a force-push "overwrites history," what's actually
-being overwritten?** A branch, on the remote, is really just a named
-pointer to one specific commit (its "tip"). Force-pushing doesn't
-delete any commit objects directly — it just moves that pointer to a
-different commit. Any commits that were only reachable by walking
-backward from the _old_ pointer position, and aren't reachable from
-the _new_ one, become effectively invisible on that branch — still
-technically in the repository's object database for a while, but
-nothing points to them anymore, and nobody browsing the branch will
-ever see them.
+## How does `--force-with-lease` change the picture?
 
-Think of the remote branch's ref as a bookmark in a long chain of
-snapshots. A normal push says, "move the bookmark forward only if the
-old page is still behind the new page." A force-push says, "put the
-bookmark here now." The snapshots may still be in the book for a
-while, but if the bookmark no longer leads to one of them, ordinary
-readers will not find it by following the branch.
+**If a rewrite legitimately needs force, can the push still refuse when
+someone else got there first?** Yes. The lease swaps "is the remote an
+ancestor of mine?" for a different question: **is the remote still exactly
+where I last saw it?** Your `origin/<name>` records that last-seen position.
 
-**Does this mean the teammate's lost commit is unrecoverable?** Not
-immediately — it likely still exists as an object in the repository,
-and the _original author's own local copy_ still has it. But from the
-remote branch's perspective, and for anyone who doesn't have a local
-copy of that specific commit, it's gone — which is exactly why this
-unit's Scenario describes it as the commit "disappearing," even
-though nothing was technically deleted.
+```mermaid
+sequenceDiagram
+    participant Dev as Developer (origin/feature = C)
+    participant Srv as Remote (feature)
+    Note over Srv: teammate pushes D, remote = D
+    Dev->>Srv: push --force-with-lease (expect C)
+    Srv-->>Dev: rejected, remote is D not C
+    Dev->>Srv: fetch
+    Srv-->>Dev: D arrives, origin/feature = D
+    Note over Dev: inspect D, rebase onto it, push again
+```
 
-If this already happened, the safest order is practical, not heroic:
-tell the team immediately, stop force-pushing, ask the original author
-or another local clone for the missing commit hash, and restore it by
-merging or cherry-picking once everyone agrees on the correct branch
-state. The `snapshots-manual-copies` unit is a useful refresher for
-why a commit hash can identify the exact saved snapshot you need.
+| Command                       | Question asked before moving the pointer     | Rewrites allowed?     |
+| ----------------------------- | -------------------------------------------- | --------------------- |
+| `git push`                    | Is the remote tip an ancestor of mine?       | No                    |
+| `git push --force`            | None                                         | Yes, blindly          |
+| `git push --force-with-lease` | Is the remote tip still what I last fetched? | Yes, if nothing moved |
 
-<Checkpoint question="If a force-push moves the branch ref but doesn't delete any commit objects, why does the Scenario still call the teammate's commit 'gone', and does that framing hold up once you know a ref is just a pointer?">
+<Checkpoint question="A lease-protected push is rejected. Is the right next step to run it again with --force?">
 
-The framing holds up for anyone who only has access to the remote
-branch, which is nearly everyone downstream of it — CI, other
-teammates cloning fresh, and the branch's own commit log. The commit
-object may still exist in the repository's storage for a while, but
-nothing on the branch points to it anymore, so normal tools like `git
-log` on that branch will never surface it, and it's eligible for
-garbage collection eventually. "Gone from the branch" and "deleted
-from disk" are different claims — the Scenario's teammate experiences
-the first one, which is exactly as disruptive as it sounds even though
-the second one hasn't necessarily happened yet.
+No. The rejection means the remote holds something you have not seen.
+Fetching shows you what it is, and then you decide how to include it in
+your rewritten branch. Repeating the push with plain `--force` throws away
+exactly the safety the rejection just gave you.
 
 </Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="force-with-lease"
+/>
+
+## What happens to teammates when pushed history is rewritten?
+
+**Suppose the rewrite succeeds and nobody lost anything. Is everyone fine?**
+Not yet. Each commit is identified by a 40-character SHA-1 hash computed
+from its content, its message, and its **parent's hash**. Change anything
+early in the chain and every later commit gets a new hash. A rebase
+therefore produces brand-new commits that merely look the same.
+
+```mermaid
+flowchart LR
+    A["A"] --> Bo["B-old"] --> Co["C-old"] --> T1["T1 (teammate's work)"]
+    A --> Bn["B-new"] --> Cn["C-new"]
+    Co -. "same changes,\ndifferent hashes" .- Cn
+```
+
+A teammate who already built `T1` on `C-old` still has the old chain. If
+they now `git pull` (a fetch plus merge), git merges the old and the new
+copies together and the same changes appear twice. The tidy fix is for them
+to move only their own commits onto the new history, for example with
+`git rebase --onto`. Better, rewrite only commits that nobody else has yet
+based work on.
+
+<Checkpoint question="You amend only the message of a commit that is already pushed and force-push. Does anyone else's history change?">
+
+Yes. The message is part of what the hash is computed from, so that
+commit gets a new hash, and every commit after it gets one too because each
+includes its parent's hash. Anyone who had the old commits now holds a
+parallel history. "Only the message" is still a full rewrite as far as
+shared history is concerned.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="rewrite-teammate-effects"
+/>
 
 ## Failure modes at this level
 
-- **Treating "I only rebased my own commits" as proof nothing else
-  could be affected.** The rebase itself only touches the rebaser's
-  commits — but the force-push that follows can still discard
-  someone else's commits if the remote moved in the meantime.
-- **Assuming a rejected push means something is broken.** A normal
-  push rejection ("fetch first") is git's safety check working
-  correctly, not a sign of a git problem — the fix is fetching and
-  reconciling, not reaching for `--force` reflexively.
-- **Force-pushing to a shared branch out of habit from personal
-  branches.** A workflow that's perfectly safe on a branch nobody
-  else touches becomes genuinely dangerous the moment that branch is
-  shared, without the command itself looking any different.
+- **Believing "I only rebased my own commits" proves nothing else is
+  affected.** The rebase is local; the force-push that follows is what
+  reaches other people's commits.
+- **Reading a rejection as a git problem.** It is the ancestor check or the
+  lease saying the remote knows something you do not.
+- **Carrying a personal-branch habit onto a shared branch.** The command
+  looks identical; only who else relies on the branch changed.

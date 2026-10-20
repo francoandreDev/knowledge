@@ -4,102 +4,125 @@ title: 'L1 — Why did a "safe" force-push break someone else''s day? (shared hi
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="“I just cleaned up my own commits and force-pushed.” A teammate's already-pushed commit vanished from main.">
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "shared-history",
+};
+
+<Scenario label="“I only cleaned up my own commits.” A teammate's pushed commit vanished from the shared branch.">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🧹</span> <strong>What the developer did</strong> — rebased their own local commits, then <code>git push --force</code></div>
-      <div class="flex items-center gap-1.5"><span>⏱️</span> <strong>What they didn't know</strong> — a teammate had pushed a commit to the same branch minutes earlier</div>
-      <div class="flex items-center gap-1.5"><span>💥</span> <strong>The result</strong> — the teammate's commit silently disappeared from the remote branch</div>
+      <div class="flex items-center gap-1.5"><span>🧹</span> <strong>What the developer did</strong> — rebased their own local commits, then ran <code>git push --force</code></div>
+      <div class="flex items-center gap-1.5"><span>⏱️</span> <strong>What they didn't know</strong> — a teammate had pushed to the same branch after their last fetch</div>
+      <div class="flex items-center gap-1.5"><span>💥</span> <strong>The result</strong> — the teammate's commit silently stopped being part of the branch</div>
     </div>
   </Fragment>
 
-A developer rebases their own local commits to clean up the history
-before pushing — a normal, everyday habit. They run
-`git push --force` on a shared branch. A few minutes later, a
-teammate discovers their own commit — pushed to that same branch just
-before the force-push — is gone from the remote. No error, no
-warning, no conflict. **The developer only touched their own
-commits. So how did someone else's already-pushed work disappear?**
+A developer rebases their own local commits to tidy them up, a normal
+everyday habit, and runs `git push --force` on a shared branch. A few
+minutes later a teammate notices that the commit they pushed to that same
+branch is gone. No error, no warning, no conflict. **The developer only
+touched their own commits. So how did someone else's already-pushed work
+disappear?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "The three-copy mental model (local, remote, teammate's copy)",
-    "Why force-push can discard commits silently",
-    "`--force-with-lease` as the safer alternative",
+    "What a force-push really moves",
+    "Why a stale view of the remote is the danger",
+    "The safer alternative, previewed",
   ]}
 />
 
-## The three-copy picture
+## What does a force-push actually do?
 
-Before the command, there are three useful places to imagine:
+**If the developer never edited the teammate's commit, what could have removed it?**
+Look at the two histories side by side. The server's branch has the
+teammate's commit `D`. The developer's rebased branch has their own commit
+`E`, built on the older `C`:
 
-| Place                | What it means here                                    |
-| -------------------- | ----------------------------------------------------- |
-| Your local branch    | Your copy on your machine, cleaned up by your rebase  |
-| The remote branch    | The shared branch on the server, where teammates push |
-| Your teammate's copy | Their machine, which still has the commit they made   |
+```mermaid
+gitGraph
+  commit id: "A"
+  commit id: "B"
+  commit id: "C"
+  branch remote-main
+  checkout remote-main
+  commit id: "D (teammate, pushed)"
+  checkout main
+  branch dev-local
+  checkout dev-local
+  commit id: "E (developer, rebased)"
+```
 
-The accident happens because your local branch still thinks the
-remote ends at an older commit. Your teammate already pushed a newer
-commit to the server, but your machine has not fetched that newer
-position yet. `git push --force` then tells the server: "make the
-shared branch point where my local branch points," even if that skips
-the teammate's newer commit.
+Git has no merge step here. A branch on the remote is only a **named
+pointer to one commit**. `git push --force` says "make that pointer point
+at my commit", and the server obeys. `D` is no longer reachable from the
+branch, so it drops out of the branch's history.
 
-## The shape of the problem
+| Step                  | Remote branch points at | Is `D` reachable from the branch? |
+| --------------------- | ----------------------- | --------------------------------- |
+| Before the push       | `D`                     | Yes                               |
+| After `push --force`  | `E`                     | No                                |
+| After a normal push\* | `D` (push rejected)     | Yes                               |
 
-- A **force-push** doesn't merge or reconcile histories — it replaces
-  whatever the remote branch currently points to with whatever the
-  local branch currently points to, discarding any remote commits
-  that aren't reachable from the new local tip.
-- The danger isn't rebasing itself, and it isn't force-pushing itself
-  — it's force-pushing **based on a stale view of the remote**. If
-  the remote has moved since the last fetch (because a teammate
-  pushed in the meantime), a force-push based on the old view silently
-  throws away whatever moved.
-- Git has a safer alternative built for exactly this: **`--force-with-lease`**,
-  which refuses to push if the remote branch has moved since the
-  last time it was fetched — turning a silent, destructive overwrite
-  into a rejected push with a clear reason.
+\*A normal push is refused here, which is the whole point of the next
+sections.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="force-push-replaces-ref"
+/>
+
+## Why did the developer not see it coming?
+
+**Where did the developer's picture of the remote go wrong?** Three copies
+exist, and only one of them was out of date:
+
+| Place                | What it holds                                           |
+| -------------------- | ------------------------------------------------------- |
+| Your local branch    | Your commits, rebased and tidy                          |
+| Your `origin/<name>` | The last position of the remote **you fetched**         |
+| The real remote      | The truth, which the teammate has already moved forward |
+
+Your machine only learns about the teammate's push when you **fetch**.
+Until then `origin/<name>` still says "the remote ends at `C`". A
+force-push built on that old picture overwrites a remote that has moved on.
+The danger is neither rebasing nor force alone; it is **force combined with
+a stale view of a shared branch**.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="stale-remote-view"
+/>
 
 ## Key terms
 
-- **Remote** — the shared copy of the repository on a server, usually
-  the one everyone pushes to and pulls from.
-- **Local branch** — your machine's branch pointer. It can be behind
-  the remote if you have not fetched recently.
-- **Fetch** — asking the remote what commits and branch positions it
-  has now, without merging them into your work yet.
-- **Tip** — the latest commit a branch currently points at.
-- **Shared history** — commit history on a branch that more than one
-  person pushes to or bases work on, as opposed to a purely personal
-  branch nobody else touches.
-- **Force-push (`--force`)** — a push that overwrites the remote
-  branch's history with the local branch's history, regardless of
-  whether the remote has commits the local branch doesn't have.
-- **Ancestor commit** — commit A is an ancestor of commit B if B's
-  history, traced backward through parent commits, eventually reaches
-  A. A normal (non-force) push only succeeds if the remote's current
-  tip is an ancestor of the new tip being pushed.
-- **Reachable** — a commit is reachable from a branch tip if Git can
-  start at that tip and walk backward through parent commits until it
-  reaches that commit.
-- **`--force-with-lease`** — a safer form of force-push that fails if
-  the remote branch has moved since the last fetch, instead of
-  silently overwriting whatever is there.
+- **Remote** — the shared copy of the repository on a server.
+- **Tip** — the latest commit a branch points at.
+- **Reachable** — a commit is reachable from a tip if you can walk backward
+  through parent links and arrive at it.
+- **Fetch** — download what the remote has now and update `origin/<name>`,
+  without touching your own branches.
+- **Shared history** — commits on a branch that more than one person pushes
+  to or builds on.
+- **Force-push (`--force`)** — overwrite the remote branch pointer with
+  yours, with no check that you have seen what is there.
+- **`--force-with-lease`** — a force-push that first checks the remote still
+  points where you last saw it, and refuses otherwise.
 
-If `--force-with-lease` fails, do not add more force. Fetch, inspect
-what arrived, reconcile your work with those commits, and only then
-decide whether a rewritten push is still appropriate.
+If a lease-protected push is refused, do not add more force. Fetch, read
+what arrived, reconcile, and only then decide whether a rewritten push is
+still appropriate.
 
-## What this unit covers
+## What the next levels cover
 
-L2 works through exactly what a force-push does to the remote
-branch's ref, and why a normal push (without force) refuses to
-overwrite commits it doesn't already know about. L3 builds a small
-commit-history simulation to measure precisely which commits the
-Scenario's naive force-push actually destroys, and shows how
-`--force-with-lease` would have caught the problem before it happened.
+L2 explains the check a normal push performs, how `--force-with-lease`
+differs from it, and what teammates experience when pushed history is
+rewritten. L3 walks the whole incident as a timeline, then looks at where
+the lease can itself be fooled and how lost commits are recovered.
