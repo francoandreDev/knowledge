@@ -3149,3 +3149,16 @@ Migrated the first 4 of 14 `business-communication/` units via 4 parallel conten
 **Residual tell:** correct quiz choice is still the longest in ~35–55% of items (e.g. 52/96 in `reading-stakeholder-incentives`, 67/143 in `audience-awareness`). Open follow-up: a hand-edit pass on distractors, and a 4th distractor for the 3-choice exam items in `reading-stakeholder-incentives`.
 
 `business-communication/` is at 4 of 14. Total migrated: 54 of 246. Remaining here: `building-credibility-ahead-ask`, `decision-making-frameworks`, `executive-summaries`, `conflict-resolution`, `visibility-self-promotion`, `informal-authority`, `upward-disagreement`, `change-management`, `translating-technical-risk-business-risk`, `org-level-influence`.
+
+## 2026-10-20 — `business-communication/` batch 2: `building-credibility-ahead-ask`, `decision-making-frameworks`, `executive-summaries`, `conflict-resolution`
+
+Migrated 4 more `business-communication/` units via 4 parallel content-only subagents. Same pipeline; `build` 267 pages, `typecheck` 0 errors; live click-through passed all 33 `DomainCheck` topics, 0 Mermaid errors, sliders still present where `interactives.json` exists. All quiz.
+
+**Process change:** subagent prompts now require 4-choice exam items and hand-written, equal-length distractors (no filler tails), with a computed "correct is strictly longest" share targeted at ≤ ~35%. Result: 18–32% across the batch (was 35–55% in batch 1). One agent over-corrected to "correct is shortest 46%" and rebalanced — watch for both directions.
+
+- **`building-credibility-ahead-ask`**: 11 topics, 121 items. Added L1 flow + table and an L3 `xychart-beta` of the running balance (0, 5, 10, 15, 20, 5; formula matches the demo); rewrote an L3 Checkpoint with muddled reasoning; softened an unsourced "single most common way".
+- **`decision-making-frameworks`**: 8 topics, 96 items. Scenarios swapped to a friends' trip (L1) and a club dinner committee (L3) per rule 4c; "senior engineers" removed; 720 vs 88 person-minutes kept, and L3 now notes the Driver's prep time is excluded (60 assumed minutes → 148, ~79% saving, labelled an assumption); RACI matrix added.
+- **`executive-summaries`**: 7 topics, 78 items. L1/L2 use a flatmate fridge-note scenario; BLUF spelled out; dropped an unsourced "ask at 80%" bar; seconds-to-reach-the-ask chart (44.4 s vs 23.7 s at 200 wpm). The 148-word figure is the demo's; prose says "roughly 150" and the 79-word BLUF opening — consistent.
+- **`conflict-resolution`**: 7 topics, 84 items. L1 housemates scenario (L2/L3 keep the Platform/Growth case); removed an invented "90% / 10%"; failure-mode bullets became a table; no `interactives.json` (relationships are qualitative).
+
+`business-communication/` is at 8 of 14. Total migrated: 58 of 246. Remaining here: `visibility-self-promotion`, `informal-authority`, `upward-disagreement`, `change-management`, `translating-technical-risk-business-risk`, `org-level-influence`.
