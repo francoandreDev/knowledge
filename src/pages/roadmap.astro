@@ -6,758 +6,405 @@ import {
   Search,
   HelpCircle,
   ChevronDown,
-  ArrowRight,
   RotateCcw,
-  Maximize2,
   Check,
-  X,
+  Play,
+  Lock,
+  Flag,
 } from "lucide-astro";
-import { roadmap, type UnitStatus } from "../data/roadmap";
-import { getWrittenUnits } from "../lib/curriculum";
-import { groupSlugsByTrack } from "../lib/progress-gauges";
+import { roadmap } from "../data/roadmap";
+import { loadHomeData } from "../lib/home-data";
 
-const writtenUnits = await getWrittenUnits();
+const { writtenUnits } = await loadHomeData();
 const writtenKeys = new Set(
   writtenUnits.map((u) => `${u.track}/${u.unitSlug}`),
 );
 
-// Embedded for the client-side gauge script (see the bottom script block) —
-// the pool of slugs a reader could have marked done, per track.
-const trackUnitSlugs = groupSlugsByTrack(writtenUnits);
-
-const STATUSES: UnitStatus[] = ["planned", "in-progress", "done"];
-
-// Radius/circumference for each track section's circular progress node —
-// same ring math as the homepage's track selector (index.astro).
-const GAUGE_RADIUS = 16;
-const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_RADIUS;
-
-// How many units show per track before the reader has to click "Show all" —
-// most tracks run well past this, and an un-filtered browse view doesn't
-// need every unit in view at once (see roadmap.astro's per-unit list redesign).
-const UNIT_DISPLAY_LIMIT = 6;
+const PER_ROW = 5;
+const CHECKPOINT_EVERY = 5;
 
 const ALL_TAGS = Array.from(
   new Set(roadmap.tracks.flatMap((t) => t.units.flatMap((u) => u.tags))),
 ).sort();
 
-// Embedded for the wizard's tag step (see the bottom script block) — which
-// tags actually occur within each track, so picking tracks in step 1
-// narrows the tag options offered in step 2 instead of always showing every
-// tag in the roadmap.
-const tagsByTrack: Record<string, string[]> = {};
-for (const track of roadmap.tracks) {
-  tagsByTrack[track.name] = Array.from(
-    new Set(track.units.flatMap((u) => u.tags)),
-  );
-}
+const STATUS_FILTERS = [
+  { key: "done", label: "Done" },
+  { key: "next", label: "Up next" },
+  { key: "locked", label: "Locked" },
+];
 
-// Content-coverage stats for the overview strip — these are the same for
-// every visitor (how much of the roadmap is written), unlike the per-track
-// gauges below (how much *this reader* has completed of what's written).
-const totalUnitsAll = roadmap.tracks.reduce((n, t) => n + t.units.length, 0);
-const tracksStartedCount = roadmap.tracks.filter((t) =>
-  t.units.some((u) => writtenKeys.has(`${t.name}/${u.slug}`)),
-).length;
-const inProgressCount = roadmap.tracks.reduce(
-  (n, t) =>
-    n +
-    t.units.filter(
-      (u) =>
-        !writtenKeys.has(`${t.name}/${u.slug}`) && u.status === "in-progress",
-    ).length,
-  0,
-);
-const plannedCount = totalUnitsAll - writtenUnits.length - inProgressCount;
-const donePct = totalUnitsAll ? (writtenUnits.length / totalUnitsAll) * 100 : 0;
-const progressPct = totalUnitsAll ? (inProgressCount / totalUnitsAll) * 100 : 0;
+// Each world is one track laid out as a path of level nodes: its units in
+// curriculum order, plus a checkpoint node after every fifth unit and at the
+// end. The path is cut into rows of PER_ROW; odd rows run right-to-left so the
+// trail snakes. The client script stamps each node's state (done / next /
+// locked) from the active profile's progress.
+const worlds = roadmap.tracks.map((track) => {
+  const nodes: Array<
+    | {
+        kind: "unit";
+        index: number;
+        slug: string;
+        problem: string;
+        short: string;
+        tags: string[];
+        written: boolean;
+      }
+    | { kind: "check"; label: string; group: string[] }
+  > = [];
+  let group: string[] = [];
+  track.units.forEach((u, i) => {
+    const written = writtenKeys.has(`${track.name}/${u.slug}`);
+    nodes.push({
+      kind: "unit",
+      index: i,
+      slug: u.slug,
+      problem: u.problem,
+      short: u.problem.replace(/\s*\(.*$/, "").trim(),
+      tags: u.tags,
+      written,
+    });
+    if (written) group.push(u.slug);
+    const isLast = i === track.units.length - 1;
+    if ((i + 1) % CHECKPOINT_EVERY === 0 || isLast) {
+      nodes.push({
+        kind: "check",
+        label: isLast
+          ? "Final checkpoint"
+          : `Checkpoint ${(i + 1) / CHECKPOINT_EVERY}`,
+        group: [...group],
+      });
+      group = [];
+    }
+  });
+  const rows: (typeof nodes)[] = [];
+  for (let i = 0; i < nodes.length; i += PER_ROW) {
+    rows.push(nodes.slice(i, i + PER_ROW));
+  }
+  return { name: track.name, total: track.units.length, rows };
+});
+const totalWritten = writtenUnits.length;
 ---
 
 <Layout title="Roadmap" wide>
-  <div>
-    <h1 class="text-3xl font-bold tracking-tight">Roadmap</h1>
-    <p class="mt-3 text-slate-600 dark:text-slate-400">
-      Every planned unit across all tracks. Written units are linked; the rest
-      are still <code>planned</code>.
-    </p>
+  <div class="flex flex-wrap items-end justify-between gap-4">
+    <div>
+      <h1
+        class="text-5xl font-extrabold tracking-tight sm:text-6xl"
+        style="letter-spacing: -0.02em; line-height: 1.05"
+      >
+        Roadmap
+      </h1>
+      <p class="mt-3 text-lg text-slate-500 dark:text-slate-400">
+        Finish a unit to unlock the next one. Every world starts at unit 1.
+      </p>
+    </div>
+    <span
+      data-done-pill
+      class="inline-flex items-center rounded-full px-4 py-2 text-sm font-extrabold"
+      style="background: #d1fae5; color: #065f46"
+    >
+      0 of {totalWritten} done
+    </span>
   </div>
 
-  <!-- The coverage card used to always show the full bar + 4-item legend —
-       at 100% written that's a lot of mostly-static detail to scan past
-       before reaching the wizard/results below. A compact one-line summary
-       button opens the same detail in a dialog instead, same pattern as
-       the homepage's stats/journey modals. -->
-  <button
-    type="button"
-    data-roadmap-stats-trigger
-    class="mt-6 inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 transition hover:border-slate-400 dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600"
-  >
-    <span class="font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-      {writtenUnits.length}/{totalUnitsAll}
-    </span>
-    units written
-    <span class="tabular-nums" style="color: var(--gauge-accent)">
-      {Math.round(donePct)}%
-    </span>
-    <ChevronDown class="h-3.5 w-3.5" aria-hidden="true" />
-  </button>
-
-  <dialog
-    data-roadmap-stats-modal
-    class="m-auto w-full max-w-md rounded-xl border border-slate-200 bg-white p-0 text-slate-900 backdrop:bg-slate-950/60 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
-  >
-    <div class="p-5">
-      <div class="flex items-start justify-between gap-4">
-        <p
-          class="text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-500"
-        >
-          Roadmap coverage
-        </p>
-        <button
-          type="button"
-          data-roadmap-stats-close
-          aria-label="Close"
-          class="shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-        >
-          <X class="h-4 w-4" aria-hidden="true" />
-        </button>
-      </div>
-      <div class="mt-3 flex items-baseline justify-between gap-3">
-        <div class="text-2xl font-extrabold tracking-tight tabular-nums">
-          {writtenUnits.length}
-          <span
-            class="text-base font-semibold text-slate-400 dark:text-slate-600"
-          >
-            / {totalUnitsAll} units written
-          </span>
-        </div>
-        <div
-          class="text-sm font-semibold tabular-nums"
-          style="color: var(--gauge-accent)"
-        >
-          {Math.round(donePct)}%
-        </div>
-      </div>
-      <div class="mt-3 flex h-2.5 overflow-hidden rounded-full bg-slate-500/10">
-        <div
-          class="h-full"
-          style={`width: ${donePct}%; background: var(--gauge-accent)`}
-        >
-        </div>
-        <div
-          class="h-full"
-          style={`width: ${progressPct}%; background: var(--gauge-warn)`}
-        >
-        </div>
-      </div>
-      <div class="mt-3.5 flex flex-wrap gap-x-4 gap-y-1.5">
-        <span
-          class="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400"
-        >
-          <span
-            class="h-2 w-2 shrink-0 rounded-full"
-            style="background: var(--gauge-accent)"></span>
-          {writtenUnits.length} done
-        </span>
-        <span
-          class="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400"
-        >
-          <span
-            class="h-2 w-2 shrink-0 rounded-full"
-            style="background: var(--gauge-warn)"></span>
-          {inProgressCount} in progress
-        </span>
-        <span
-          class="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400"
-        >
-          <span class="h-2 w-2 shrink-0 rounded-full bg-slate-500/20"></span>
-          {plannedCount} planned
-        </span>
-        <span class="text-xs text-slate-400 dark:text-slate-600">
-          {tracksStartedCount}/{roadmap.tracks.length} tracks started
-        </span>
-      </div>
+  <!-- Filter bar: dims what doesn't match instead of removing it, so the
+       shape of the path never changes under the reader's hands. -->
+  <div class="mt-7 flex flex-wrap items-center gap-3">
+    <div class="game-btn relative min-w-[220px] flex-1 !p-0">
+      <Search
+        class="pointer-events-none absolute top-1/2 left-4 h-5 w-5 -translate-y-1/2 text-slate-400"
+        aria-hidden="true"
+      />
+      <input
+        type="search"
+        data-roadmap-search
+        aria-label="Search units"
+        placeholder='Search units, e.g. "rebase"'
+        class="h-12 w-full rounded-[12px] bg-transparent pr-4 pl-12 text-[15px] font-semibold outline-none placeholder:text-slate-400"
+      />
     </div>
-  </dialog>
 
-  <!-- Flat filter bar: search + three popovers (Track/Tags/Status), always
-       next to the results they narrow — replaces the old 4-step wizard
-       (Track -> Tags -> Status -> Results), which stayed visible as a
-       progress stepper even once results were showing, asking the reader
-       to parse "step 4 of 4" before they could focus on the units
-       themselves. Picking a filter here just narrows what's already on
-       screen; there is nothing to "complete". -->
-  <div class="mt-6">
-    <div class="flex flex-wrap items-center gap-2">
-      <div class="relative min-w-[220px] flex-1">
-        <Search
-          class="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400"
-          aria-hidden="true"
-        />
-        <input
-          type="search"
-          data-roadmap-search
-          placeholder='Search units or tracks, e.g. "rebase"...'
-          class="w-full rounded-lg border border-slate-200 bg-white py-2.5 pr-3 pl-9 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-slate-600"
-        />
-      </div>
-
-      <!-- Track popover -->
-      <div class="relative">
-        <button
-          type="button"
-          data-filter-popover-trigger="track"
-          aria-expanded="false"
-          class="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-medium text-slate-600 transition hover:border-slate-400 dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600"
-        >
-          Track
-          <span
-            data-filter-count="track"
-            class="hidden rounded-full px-1.5 py-0.5 text-[11px] font-semibold text-white"
-            style="background: var(--gauge-accent)"></span>
-          <ChevronDown class="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-        <div
-          data-filter-popover="track"
-          class="hidden absolute top-full left-0 z-20 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-4 shadow-lg dark:border-slate-700 dark:bg-slate-900"
-        >
-          <div class="relative">
-            <Search
-              class="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
-              aria-hidden="true"
-            />
-            <input
-              type="search"
-              data-track-search
-              placeholder='Search tracks, e.g. "web"...'
-              class="w-full rounded-lg border border-slate-200 bg-white py-2 pr-3 pl-8 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-400 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-slate-600"
-            />
-          </div>
-          <div
-            class="mt-3 flex max-h-64 flex-wrap gap-x-3 gap-y-3 overflow-y-auto"
-          >
-            {
-              roadmap.tracks.map((track) => (
-                <button
-                  type="button"
-                  data-track-chip={track.name}
-                  data-search-label={track.name}
-                  aria-pressed="false"
-                  title={track.name}
-                  class="group flex w-16 flex-col items-center gap-1.5 text-center"
-                >
-                  <span class="flex h-11 w-11 items-center justify-center rounded-full border-2 border-slate-200 bg-white text-slate-500 transition group-aria-pressed:border-[var(--gauge-accent)] group-aria-pressed:bg-[var(--gauge-accent)] group-aria-pressed:text-white dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
-                    <TrackIcon track={track.name} class="h-4.5 w-4.5" />
-                  </span>
-                  <span class="max-w-full truncate text-[11px] font-medium text-slate-600 group-aria-pressed:text-slate-900 dark:text-slate-400 dark:group-aria-pressed:text-slate-100">
-                    {track.name}
-                  </span>
-                </button>
-              ))
-            }
-          </div>
-        </div>
-      </div>
-
-      <!-- Tags popover -->
-      <div class="relative">
-        <button
-          type="button"
-          data-filter-popover-trigger="tags"
-          aria-expanded="false"
-          class="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-medium text-slate-600 transition hover:border-slate-400 dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600"
-        >
-          Tags
-          <span
-            data-filter-count="tags"
-            class="hidden rounded-full px-1.5 py-0.5 text-[11px] font-semibold text-white"
-            style="background: var(--gauge-accent)"></span>
-          <ChevronDown class="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-        <div
-          data-filter-popover="tags"
-          class="hidden absolute top-full left-0 z-20 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-4 shadow-lg dark:border-slate-700 dark:bg-slate-900"
-        >
-          <div class="relative">
-            <Search
-              class="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
-              aria-hidden="true"
-            />
-            <input
-              type="search"
-              data-tag-search
-              placeholder='Search tags, e.g. "caching"...'
-              class="w-full rounded-lg border border-slate-200 bg-white py-2 pr-3 pl-8 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-400 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-slate-600"
-            />
-          </div>
-          <p class="mt-2 text-xs text-slate-400 dark:text-slate-600">
-            Narrowed to the tracks picked above — pick a track first for a
-            shorter list, or leave it to see every tag.
-          </p>
-          <div
-            class="mt-3 flex max-h-64 flex-wrap items-center gap-1.5 overflow-y-auto"
-          >
-            {
-              ALL_TAGS.map((tag) => (
-                <button
-                  type="button"
-                  data-tag-chip={tag}
-                  data-search-label={tag}
-                  aria-pressed="false"
-                  class="inline-flex items-center gap-1 rounded-full bg-slate-500/10 px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-500/15 aria-pressed:bg-[var(--gauge-accent)] aria-pressed:text-white dark:text-slate-300"
-                >
-                  {tag}
-                </button>
-              ))
-            }
-          </div>
-          <p
-            data-tag-empty
-            class="mt-3 hidden text-sm text-slate-500 dark:text-slate-500"
-          >
-            No tags match this search among the selected tracks.
-          </p>
-        </div>
-      </div>
-
-      <!-- Status popover -->
-      <div class="relative">
-        <button
-          type="button"
-          data-filter-popover-trigger="status"
-          aria-expanded="false"
-          class="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-medium text-slate-600 transition hover:border-slate-400 dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600"
-        >
-          Status
-          <span
-            data-filter-count="status"
-            class="hidden rounded-full px-1.5 py-0.5 text-[11px] font-semibold text-white"
-            style="background: var(--gauge-accent)"></span>
-          <ChevronDown class="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-        <div
-          data-filter-popover="status"
-          class="hidden absolute top-full left-0 z-20 mt-2 w-64 rounded-xl border border-slate-200 bg-white p-4 shadow-lg dark:border-slate-700 dark:bg-slate-900"
-        >
-          <div class="flex flex-col gap-2">
-            {
-              STATUSES.map((status) => (
-                <button
-                  type="button"
-                  data-status-chip={status}
-                  data-search-label={status}
-                  aria-pressed="false"
-                  class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3.5 py-2.5 text-left text-sm font-medium text-slate-600 capitalize transition hover:border-slate-400 aria-pressed:border-[var(--gauge-accent)] dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600"
-                >
-                  <span class="flex items-center gap-2">
-                    <span
-                      aria-hidden="true"
-                      class={`h-2.5 w-2.5 shrink-0 rounded-full ${
-                        status === "done"
-                          ? "bg-[var(--gauge-accent)]"
-                          : status === "in-progress"
-                            ? "bg-[var(--gauge-warn)]"
-                            : "border border-slate-400 dark:border-slate-600"
-                      }`}
-                    />
-                    {status}
-                  </span>
-                  <span
-                    data-status-count
-                    class="text-xs font-normal text-slate-400 tabular-nums normal-case dark:text-slate-600"
-                  />
-                </button>
-              ))
-            }
-          </div>
-        </div>
-      </div>
-
+    <div class="relative">
       <button
         type="button"
-        data-clear-filters
-        title="Clear all filters"
-        class="hidden items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold"
-        style="color: var(--accent-text); border-color: var(--accent-soft-border); background: var(--accent-soft-bg)"
+        data-filter-trigger="tags"
+        aria-expanded="false"
+        class="game-btn"
       >
-        <RotateCcw class="h-3 w-3" aria-hidden="true" />
-        Reset
+        Tags
+        <span
+          data-filter-count="tags"
+          class="hidden rounded-full px-1.5 text-xs font-bold text-white"
+          style="background: var(--gauge-accent)"></span>
+        <ChevronDown class="h-4 w-4" aria-hidden="true" />
       </button>
+      <div
+        data-filter-panel="tags"
+        class="game-panel absolute top-full left-0 z-20 mt-3 hidden w-80 max-w-[calc(100vw-2rem)]"
+      >
+        <input
+          type="search"
+          data-tag-search
+          aria-label="Search tags"
+          placeholder='Search tags, e.g. "caching"'
+          class="w-full rounded-lg border-2 border-slate-200 bg-transparent px-3 py-2 text-sm font-semibold outline-none focus:border-slate-900 dark:border-slate-700 dark:focus:border-slate-100"
+        />
+        <div class="mt-3 flex max-h-64 flex-wrap gap-1.5 overflow-y-auto">
+          {
+            ALL_TAGS.map((tag) => (
+              <button
+                type="button"
+                data-tag-chip={tag}
+                aria-pressed="false"
+                class="rounded-full bg-slate-500/10 px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-500/20 aria-pressed:bg-[var(--gauge-accent)] aria-pressed:text-white dark:text-slate-300"
+              >
+                {tag}
+              </button>
+            ))
+          }
+        </div>
+      </div>
     </div>
 
-    <p data-match-count class="mt-3 text-xs text-slate-500 dark:text-slate-500">
-      {writtenUnits.length} of {
-        roadmap.tracks.reduce((n, t) => n + t.units.length, 0)
-      } units written
-    </p>
+    <div class="relative">
+      <button
+        type="button"
+        data-filter-trigger="status"
+        aria-expanded="false"
+        class="game-btn"
+      >
+        Status
+        <span
+          data-filter-count="status"
+          class="hidden rounded-full px-1.5 text-xs font-bold text-white"
+          style="background: var(--gauge-accent)"></span>
+        <ChevronDown class="h-4 w-4" aria-hidden="true" />
+      </button>
+      <div
+        data-filter-panel="status"
+        class="game-panel absolute top-full left-0 z-20 mt-3 hidden w-56"
+      >
+        <div class="flex flex-col gap-2">
+          {
+            STATUS_FILTERS.map((s) => (
+              <button
+                type="button"
+                data-status-chip={s.key}
+                aria-pressed="false"
+                class="rounded-lg border-2 border-slate-200 px-3.5 py-2.5 text-left text-sm font-bold transition hover:border-slate-400 aria-pressed:border-[var(--gauge-accent)] aria-pressed:bg-[var(--gauge-accent)] aria-pressed:text-white dark:border-slate-700"
+              >
+                {s.label}
+              </button>
+            ))
+          }
+        </div>
+      </div>
+    </div>
 
-    <p
-      data-empty-state
-      class="mt-10 hidden text-center text-sm text-slate-500 dark:text-slate-500"
+    <button
+      type="button"
+      data-clear-filters
+      class="hidden items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold"
+      style="color: var(--accent-text); border-color: var(--accent-soft-border); background: var(--accent-soft-bg)"
     >
-      No units match these filters.
-    </p>
+      <RotateCcw class="h-3.5 w-3.5" aria-hidden="true" />
+      Reset
+    </button>
+  </div>
+  <p
+    data-match-summary
+    class="mt-3 hidden text-sm font-medium text-slate-500 dark:text-slate-400"
+  >
+  </p>
 
-    <div class="mt-6 grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
+  <div class="mt-8 flex flex-col gap-8 lg:flex-row lg:items-start">
+    <!-- World rail: one button per track. Doubles as the track filter. -->
+    <nav aria-label="Worlds" class="lg:w-60 lg:shrink-0">
+      <p
+        class="mb-3 text-xs font-extrabold tracking-wider text-slate-500 uppercase dark:text-slate-400"
+      >
+        Worlds
+      </p>
+      <div
+        data-rail
+        class="no-scrollbar flex gap-4 overflow-x-auto pb-3 lg:grid lg:grid-cols-3 lg:gap-x-2 lg:gap-y-5 lg:overflow-visible lg:pb-0"
+      >
+        {
+          worlds.map((w) => (
+            <button
+              type="button"
+              data-world={w.name}
+              aria-pressed="false"
+              title={`${w.name}/`}
+              aria-label={`${w.name}, ${w.total} units`}
+              class="world-btn group flex shrink-0 flex-col items-center gap-1.5 lg:shrink"
+            >
+              <span class="world-ring" data-ring style="--p: 0">
+                <span class="world-core">
+                  <TrackIcon track={w.name} class="h-6 w-6" />
+                </span>
+                <span
+                  data-world-badge
+                  class="absolute -top-1 -right-1 hidden h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-extrabold text-white ring-2 ring-white dark:ring-slate-950"
+                  style="background: var(--gauge-warn)"
+                />
+              </span>
+              <span class="w-16 truncate text-center text-[11px] font-bold text-slate-600 dark:text-slate-400">
+                {w.name}
+              </span>
+            </button>
+          ))
+        }
+      </div>
+    </nav>
+
+    <div class="min-w-0 flex-1">
       {
-        roadmap.tracks.map((track) => {
-          const trackWrittenCount = track.units.filter((u) =>
-            writtenKeys.has(`${track.name}/${u.slug}`),
-          ).length;
-          return (
-            <>
-              <section
-                data-track-section={track.name}
-                class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/50"
-              >
-                <div
-                  data-track-toggle
-                  role="button"
-                  tabindex="0"
-                  aria-haspopup="dialog"
-                  title={`Show ${track.units.length} units in ${track.name}/`}
-                  class="flex w-full cursor-pointer flex-wrap items-center gap-4 rounded-xl p-3 transition hover:bg-slate-50 dark:hover:bg-slate-900"
-                >
+        worlds.map((w) => (
+          <section
+            data-world-panel={w.name}
+            data-total={w.total}
+            class="hidden"
+          >
+            <div class="game-panel flex flex-wrap items-center gap-4 !py-4">
+              <span class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900">
+                <TrackIcon track={w.name} class="h-6 w-6" />
+              </span>
+              <div class="min-w-0 flex-1 basis-48">
+                <div class="flex items-baseline gap-3">
+                  <h2 class="text-xl font-extrabold">{w.name}/</h2>
                   <span
-                    class="relative block h-14 w-14 shrink-0"
-                    data-gauge-track={track.name}
-                    data-gauge-total={trackWrittenCount}
+                    data-world-count
+                    class="text-sm font-bold text-slate-500 dark:text-slate-400"
                   >
-                    <svg
-                      width="56"
-                      height="56"
-                      viewBox="0 0 40 40"
-                      class="absolute inset-0 -rotate-90"
-                      aria-hidden="true"
-                    >
-                      <circle
-                        cx="20"
-                        cy="20"
-                        r={GAUGE_RADIUS}
-                        fill="none"
-                        stroke-width="3"
-                        class="stroke-slate-200 dark:stroke-slate-800"
-                      />
-                      <circle
-                        data-gauge-arc
-                        cx="20"
-                        cy="20"
-                        r={GAUGE_RADIUS}
-                        fill="none"
-                        stroke-width="3"
-                        stroke-linecap="round"
-                        stroke-dasharray={GAUGE_CIRCUMFERENCE}
-                        stroke-dashoffset={GAUGE_CIRCUMFERENCE}
-                        class="transition-[stroke-dashoffset] duration-500"
-                        style="stroke: var(--gauge-accent)"
-                      />
-                    </svg>
-                    <span
-                      data-node-icon
-                      class="absolute inset-[5px] flex items-center justify-center rounded-full bg-slate-100 text-slate-600 transition-[opacity,filter] duration-300 dark:bg-slate-800 dark:text-slate-400"
-                    >
-                      <TrackIcon track={track.name} class="h-5 w-5" />
-                    </span>
-                    <span
-                      data-node-count
-                      class="pointer-events-none absolute -top-0.5 -right-0.5 hidden h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white ring-2 ring-white dark:ring-slate-900"
-                      style="background: var(--gauge-accent)"
-                    />
+                    0 of {w.total} units
                   </span>
-                  <div class="min-w-0 flex-1">
-                    <div class="flex flex-wrap items-center justify-between gap-3">
-                      <span class="flex items-center gap-2">
-                        <span class="text-lg font-semibold tracking-tight">
-                          {track.name}/
-                        </span>
-                        <span
-                          data-track-count
-                          class="text-xs text-slate-400 tabular-nums dark:text-slate-600"
-                        >
-                          {track.units.length} units
-                        </span>
-                      </span>
-                      <span class="flex items-center gap-3">
-                        <button
-                          type="button"
-                          data-myth-trigger={track.name}
-                          title={`What is ${track.name}, really?`}
-                          aria-label={`What is ${track.name}, really?`}
-                          class="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:text-slate-100"
-                        >
-                          <HelpCircle class="h-3.5 w-3.5" aria-hidden="true" />
-                        </button>
-                        <span
-                          class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-400"
-                          aria-hidden="true"
-                        >
-                          <Maximize2 class="h-3.5 w-3.5" />
-                        </span>
-                      </span>
-                    </div>
-                  </div>
                 </div>
-              </section>
-
-              <dialog
-                data-track-modal={track.name}
-                class="relative m-auto hidden max-h-[85vh] w-full max-w-2xl open:flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-0 text-slate-900 backdrop:bg-slate-950/60 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
+                <div class="mt-2 h-3 overflow-hidden rounded-full bg-slate-500/15">
+                  <div
+                    data-world-fill
+                    class="h-full rounded-full transition-[width] duration-700"
+                    style="width: 0%; background: var(--gauge-accent)"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                data-myth-trigger={w.name}
+                title={`What is ${w.name}, really?`}
+                aria-label={`What is ${w.name}, really?`}
+                class="flex h-9 w-9 items-center justify-center rounded-full border-2 border-slate-300 text-slate-600 transition hover:border-slate-900 hover:text-slate-900 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-100 dark:hover:text-slate-100"
               >
-                <div class="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 p-4 dark:border-slate-800">
-                  <span class="flex min-w-0 items-center gap-2">
-                    <TrackIcon track={track.name} class="h-5 w-5 shrink-0" />
-                    <span class="truncate text-lg font-semibold tracking-tight">
-                      {track.name}/
-                    </span>
-                    <span
-                      data-track-count
-                      class="shrink-0 text-xs text-slate-400 tabular-nums dark:text-slate-600"
-                    >
-                      {track.units.length} units
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    data-track-modal-close={track.name}
-                    aria-label="Close"
-                    title="Close"
-                    class="shrink-0 rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-                  >
-                    <X class="h-4 w-4" aria-hidden="true" />
-                  </button>
-                </div>
+                <HelpCircle class="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
 
-                {/* Reader's own completion for this track (not content
-                  status — everything's written). Values are filled by JS
-                  on every open from the same pStorage-backed source as the
-                  profile ring/home gauges. */}
-                <div class="shrink-0 px-4 pt-3">
-                  <div class="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-500">
-                    <span data-track-progress-text>
-                      0 of {track.units.length} done
-                    </span>
-                    <span
-                      data-track-progress-pct
-                      class="tabular-nums"
-                      style="color: var(--gauge-accent)"
-                    >
-                      0%
-                    </span>
-                  </div>
-                  <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-500/10">
-                    <div
-                      data-track-progress-fill
-                      class="h-full rounded-full"
-                      style="background: var(--gauge-accent); --target-width: 0%"
-                    />
-                  </div>
-                </div>
-
-                <div
-                  data-reader-filter-group
-                  class="flex shrink-0 items-center gap-1.5 px-4 pt-3"
+            <ol class="mt-10 flex flex-col gap-16 px-1 pb-6 sm:px-4">
+              {w.rows.map((row, r) => (
+                <li
+                  class={`trail-row relative flex justify-between ${r % 2 ? "flex-row-reverse" : "flex-row"}`}
                 >
-                  <button
-                    type="button"
-                    data-reader-filter-chip="new"
-                    aria-pressed="false"
-                    class="group rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-500 transition hover:border-slate-400 hover:text-slate-900 aria-pressed:border-transparent aria-pressed:text-white dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:text-slate-100"
-                    style="--pressed-bg: var(--gauge-warn)"
-                  >
-                    <span class="group-aria-pressed:[background:var(--pressed-bg)] group-aria-pressed:text-white">
-                      New
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    data-reader-filter-chip="completed"
-                    aria-pressed="false"
-                    class="group rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-500 transition hover:border-slate-400 hover:text-slate-900 aria-pressed:border-transparent aria-pressed:text-white dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:text-slate-100"
-                    style="--pressed-bg: var(--gauge-accent)"
-                  >
-                    <span class="group-aria-pressed:[background:var(--pressed-bg)] group-aria-pressed:text-white">
-                      Completed
-                    </span>
-                  </button>
-                </div>
-
-                <div class="shrink-0 px-4 pt-3">
-                  <div class="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 dark:border-slate-800">
-                    <Search
-                      class="h-3.5 w-3.5 shrink-0 text-slate-400"
-                      aria-hidden="true"
-                    />
-                    <input
-                      type="text"
-                      data-track-local-search
-                      placeholder={`Search ${track.name}'s units…`}
-                      class="w-full bg-transparent text-xs text-slate-900 outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500"
-                    />
-                  </div>
-                </div>
-                {/* A connected, numbered timeline in the track's real
-                  curriculum order — "one unit per session, by design" —
-                  rather than a flat list of bordered cards. A filled teal
-                  check marks a written unit, a hollow amber ring with its
-                  position number marks one in progress, and a plain gray
-                  ring/number marks one still planned (its title stays
-                  muted, same signal as before). */}
-                {/* Non-scrolling header content stops here — everything
-                  below (the list + "Show all") scrolls on its own, which
-                  is what lets the Continue notification float fixed in
-                  place over it instead of scrolling away. */}
-                <div class="min-h-0 flex-1 overflow-y-auto">
-                  <ol data-track-body class="p-4">
-                    {track.units.map((unit, unitIndex) => {
-                      const isWritten = writtenKeys.has(
-                        `${track.name}/${unit.slug}`,
-                      );
-                      const status = isWritten ? "done" : unit.status;
-                      const searchText =
-                        `${unit.problem} ${unit.slug} ${track.name}`.toLowerCase();
-                      const shownTags = unit.tags.slice(0, 2);
-                      const extraTagCount = unit.tags.length - shownTags.length;
-                      // Breaks the flat scroll into fixed-size waypoints
-                      // (there's no authored "chapter" concept in the
-                      // roadmap data, so this is positional, not thematic)
-                      // — a reader scrolling a 17-unit track gets visual
-                      // rest stops instead of one undifferentiated column.
-                      const isWaypointStart = unitIndex % 5 === 0;
-                      const isWaypointEnd =
-                        (unitIndex + 1) % 5 === 0 ||
-                        unitIndex === track.units.length - 1;
-                      const waypointEnd = Math.min(
-                        unitIndex + 5,
-                        track.units.length,
-                      );
-                      return (
-                        <>
-                          {isWaypointStart && (
-                            <li
-                              data-waypoint-head
-                              aria-hidden="true"
-                              class="my-2 flex items-center gap-2 text-[10px] font-bold tracking-wide text-slate-400 uppercase first:mt-0 dark:text-slate-600"
-                            >
-                              <span>
-                                {unitIndex + 1}–{waypointEnd}
-                              </span>
-                              <span class="h-px flex-1 bg-slate-200 dark:bg-slate-800" />
-                            </li>
-                          )}
-                          <li
-                            data-unit-row
-                            data-track={track.name}
-                            data-status={status}
-                            data-row-index={unitIndex}
-                            data-search={searchText}
-                            data-tags={unit.tags.join(" ")}
-                            class={`relative flex gap-3 pb-4 ${
-                              isWaypointEnd
-                                ? ""
-                                : "before:absolute before:top-6 before:bottom-[-2px] before:left-[11px] before:w-px before:bg-slate-200 before:content-[''] dark:before:bg-slate-700"
-                            }`}
-                          >
-                            <span
-                              aria-hidden="true"
-                              class={`relative z-10 flex h-[23px] w-[23px] shrink-0 items-center justify-center rounded-full border text-[10px] font-bold ${
-                                status === "done"
-                                  ? "border-[var(--gauge-accent)] bg-[var(--gauge-accent)] text-white"
-                                  : status === "in-progress"
-                                    ? "border-[var(--gauge-warn)] text-[var(--gauge-warn)]"
-                                    : "border-slate-300 text-slate-400 dark:border-slate-600 dark:text-slate-600"
-                              }`}
-                            >
-                              {status === "done" ? (
-                                <Check class="h-3 w-3" aria-hidden="true" />
-                              ) : (
-                                unitIndex + 1
-                              )}
-                            </span>
-                            <div class="min-w-0 flex-1 pt-px">
-                              {isWritten ? (
-                                <a
-                                  href={`/${track.name}/${unit.slug}/`}
-                                  class="text-sm font-medium text-slate-900 hover:underline dark:text-slate-100"
-                                >
-                                  {unit.problem}
-                                </a>
-                              ) : (
-                                <span class="text-sm text-slate-500 dark:text-slate-500">
-                                  {unit.problem}
-                                </span>
-                              )}
-                              {shownTags.length > 0 && (
-                                <p class="mt-1 text-[11px] text-slate-400 dark:text-slate-600">
-                                  {shownTags.join(" · ")}
-                                  {extraTagCount > 0
-                                    ? ` · +${extraTagCount}`
-                                    : ""}
-                                </p>
-                              )}
-                            </div>
-                          </li>
-                        </>
-                      );
-                    })}
-                  </ol>
-                  {track.units.length > UNIT_DISPLAY_LIMIT && (
-                    <div class="px-3 pb-3">
-                      <button
-                        type="button"
-                        data-show-more-trigger={track.name}
-                        class="text-xs font-medium text-slate-500 hover:text-slate-900 hover:underline dark:text-slate-400 dark:hover:text-slate-100"
+                  <div
+                    aria-hidden="true"
+                    class="trail-line absolute top-[calc(var(--disc)/2)] right-[10%] left-[10%] h-0 border-t-[6px] border-dotted border-slate-300 dark:border-slate-700"
+                  />
+                  {row.map((node) =>
+                    node.kind === "unit" ? (
+                      <div
+                        data-node
+                        data-kind="unit"
+                        data-track={w.name}
+                        data-slug={node.slug}
+                        data-written={String(node.written)}
+                        data-state={
+                          !node.written
+                            ? "planned"
+                            : node.index === 0
+                              ? "next"
+                              : "locked"
+                        }
+                        data-search={`${node.problem} ${node.slug} ${w.name}`.toLowerCase()}
+                        data-tags={node.tags.join(" ")}
+                        class="node relative z-10 flex w-[20%] flex-col items-center"
                       >
-                        Show all {track.units.length} units
-                      </button>
-                    </div>
+                        <span data-start-tag class="start-tag">
+                          START HERE
+                        </span>
+                        {node.written ? (
+                          <a
+                            href={`/${w.name}/${node.slug}/`}
+                            data-disc
+                            title={node.problem}
+                            aria-label={`Unit ${node.index + 1}: ${node.problem}`}
+                            class="disc"
+                          >
+                            <Check
+                              data-ic="done"
+                              class="h-[45%] w-[45%]"
+                              stroke-width="3"
+                              aria-hidden="true"
+                            />
+                            <Play
+                              data-ic="next"
+                              class="h-[42%] w-[42%]"
+                              fill="currentColor"
+                              aria-hidden="true"
+                            />
+                            <Lock
+                              data-ic="locked"
+                              class="h-[38%] w-[38%]"
+                              stroke-width="2.6"
+                              aria-hidden="true"
+                            />
+                          </a>
+                        ) : (
+                          <span data-disc class="disc" title={node.problem}>
+                            {node.index + 1}
+                          </span>
+                        )}
+                        <span class="node-label" title={node.problem}>
+                          {node.short}
+                        </span>
+                      </div>
+                    ) : (
+                      <div
+                        data-node
+                        data-kind="check"
+                        data-track={w.name}
+                        data-group={node.group.join(" ")}
+                        data-state="locked"
+                        class="node relative z-10 flex w-[20%] flex-col items-center"
+                      >
+                        <span data-disc class="disc check" aria-hidden="true">
+                          <Flag
+                            data-ic="done"
+                            class="h-[40%] w-[40%]"
+                            fill="currentColor"
+                            aria-hidden="true"
+                          />
+                          <Lock
+                            data-ic="locked"
+                            class="h-[38%] w-[38%]"
+                            stroke-width="2.6"
+                            aria-hidden="true"
+                          />
+                        </span>
+                        <span class="node-label">{node.label}</span>
+                      </div>
+                    ),
                   )}
-                </div>
-
-                {/* The "continue" notification — floats over the scrolling
-                  list (absolute within the dialog, which doesn't itself
-                  scroll) and slides in a beat after the dialog opens, the
-                  same animate-fade-slide-in + staggered-arrival language as
-                  the game's threat/boss/synergy toasts. Populated by JS
-                  (title/href depend on the reader's own progress) and
-                  hidden entirely once every unit in the track is done. */}
-                <div
-                  data-track-continue={track.name}
-                  class="absolute top-20 right-4 z-20 hidden w-72 max-w-[calc(100%-2rem)] items-start gap-2 rounded-xl border bg-white p-3 shadow-lg dark:bg-slate-900"
-                  style="border-color: var(--accent-soft-border); box-shadow: 0 10px 24px -8px rgb(0 0 0 / 0.35)"
-                >
-                  <span
-                    class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white"
-                    style="background: var(--accent-text)"
-                  >
-                    <ArrowRight class="h-3.5 w-3.5" aria-hidden="true" />
-                  </span>
-                  <a href="#" data-track-continue-link class="min-w-0 flex-1">
-                    <span
-                      class="block text-[10px] font-bold tracking-wide uppercase"
-                      style="color: var(--accent-text)"
-                    >
-                      Continue
-                    </span>
-                    <span
-                      data-track-continue-title
-                      class="mt-0.5 line-clamp-2 block text-sm font-medium text-slate-900 dark:text-slate-100"
-                    />
-                  </a>
-                  <button
-                    type="button"
-                    data-track-continue-dismiss
-                    aria-label="Dismiss"
-                    title="Dismiss"
-                    class="shrink-0 rounded p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-                  >
-                    <X class="h-3.5 w-3.5" aria-hidden="true" />
-                  </button>
-                </div>
-              </dialog>
-            </>
-          );
-        })
+                </li>
+              ))}
+            </ol>
+          </section>
+        ))
       }
+      <p
+        data-empty-state
+        class="mt-10 hidden text-center text-sm text-slate-500 dark:text-slate-400"
+      >
+        No units match these filters.
+      </p>
     </div>
   </div>
 
@@ -765,733 +412,584 @@ const progressPct = totalUnitsAll ? (inProgressCount / totalUnitsAll) * 100 : 0;
 
   <script
     type="application/json"
-    id="track-unit-slugs"
-    set:html={JSON.stringify(trackUnitSlugs)}
-  />
-  <script
-    type="application/json"
-    id="tags-by-track"
-    set:html={JSON.stringify(tagsByTrack)}
+    id="world-order"
+    set:html={JSON.stringify(worlds.map((w) => w.name))}
   />
 
   <script>
-    import {
-      getActiveProfile,
-      updateProfileInterests,
-      pStorage,
-    } from "../lib/profile";
-    import { applyTrackGauges, countDoneByTrack } from "../lib/progress-gauges";
+    import { unitStates, lastTouchedTrack } from "../lib/unlock";
 
-    // The reader's own completion state (distinct from a unit's *content*
-    // status — written/in-progress/planned, already covered by the Status
-    // wizard step). Read once per mount and stamped onto each row as
-    // data-reader-done so the new "New"/"Completed" chips can filter on it
-    // without touching the content-status filtering logic.
-    function markReaderDone() {
-      document
-        .querySelectorAll<HTMLElement>("[data-unit-row]")
-        .forEach((row) => {
-          const track = row.dataset.track ?? "";
-          const slug = row.querySelector("a")?.getAttribute("href");
-          const slugMatch = slug?.match(/\/([^/]+)\/$/);
-          const unitSlug = slugMatch?.[1];
-          if (!track || !unitSlug) {
-            row.dataset.readerDone = "false";
-            return;
-          }
-          const raw = pStorage.getItem(`progress:${track}/${unitSlug}`);
-          let done = false;
-          if (raw) {
-            try {
-              done = Boolean(JSON.parse(raw).done);
-            } catch {
-              // Malformed entry — treat as not done.
-            }
-          }
-          row.dataset.readerDone = String(done);
+    const WORLD_KEY = "roadmap:world";
+    const q = <T extends HTMLElement>(
+      sel: string,
+      root: ParentNode = document,
+    ) => root.querySelector<T>(sel);
+    const qa = <T extends HTMLElement>(
+      sel: string,
+      root: ParentNode = document,
+    ) => Array.from(root.querySelectorAll<T>(sel));
+
+    // ---- state: stamp every node from the active profile's progress -----
+    function stampStates() {
+      let doneTotal = 0;
+      for (const panel of qa("[data-world-panel]")) {
+        const track = panel.dataset.worldPanel!;
+        const unitNodes = qa<HTMLElement>(
+          '[data-kind="unit"][data-written="true"]',
+          panel,
+        );
+        const states = unitStates(
+          track,
+          unitNodes.map((n) => n.dataset.slug!),
+        );
+        const stateBySlug = new Map<string, string>();
+        unitNodes.forEach((n, i) => {
+          n.dataset.state = states[i];
+          stateBySlug.set(n.dataset.slug!, states[i]);
         });
+        const firstNext = unitNodes.find((_, i) => states[i] === "next");
+        qa("[data-node]", panel).forEach((n) =>
+          n.removeAttribute("data-start"),
+        );
+        firstNext?.setAttribute("data-start", "true");
+
+        for (const c of qa<HTMLElement>('[data-kind="check"]', panel)) {
+          const group = (c.dataset.group ?? "").split(" ").filter(Boolean);
+          const allDone =
+            group.length > 0 &&
+            group.every((s) => stateBySlug.get(s) === "done");
+          c.dataset.state = allDone ? "done" : "locked";
+        }
+
+        const done = states.filter((s) => s === "done").length;
+        doneTotal += done;
+        const total = Number(panel.dataset.total ?? "0");
+        const count = q("[data-world-count]", panel);
+        if (count) count.textContent = `${done} of ${total} units`;
+        const fill = q("[data-world-fill]", panel);
+        if (fill) fill.style.width = `${total ? (done / total) * 100 : 0}%`;
+        const ring = q(`[data-world="${CSS.escape(track)}"] [data-ring]`);
+        ring?.style.setProperty("--p", String(total ? done / total : 0));
+      }
+      const pill = q("[data-done-pill]");
+      const totalWritten = qa('[data-kind="unit"][data-written="true"]').length;
+      if (pill) pill.textContent = `${doneTotal} of ${totalWritten} done`;
     }
 
-    // Same native <dialog> open/close pattern as the homepage's modals
-    // (index.astro) and LevelsModal.astro/TopicMythModal.astro.
-    function initRoadmapStatsModal() {
-      const dialog = document.querySelector<HTMLDialogElement>(
-        "[data-roadmap-stats-modal]",
-      );
-      if (!dialog) return;
-      if (dialog.dataset.modalWired === "true") return;
-      dialog.dataset.modalWired = "true";
-
-      document
-        .querySelectorAll<HTMLElement>("[data-roadmap-stats-trigger]")
-        .forEach((trigger) => {
-          trigger.addEventListener("click", () => dialog.showModal());
-        });
-      dialog
-        .querySelector("[data-roadmap-stats-close]")
-        ?.addEventListener("click", () => dialog.close());
-      dialog.addEventListener("click", (e) => {
-        if (e.target === dialog) dialog.close();
-      });
-    }
-    initRoadmapStatsModal();
-    document.addEventListener("astro:page-load", initRoadmapStatsModal);
-
-    // Mirrors the homepage's track-grid treatment (index.astro) — a track
-    // the reader has actually started gets an "in progress" badge and keeps
-    // its illustration at full strength; an untouched one gets its
-    // illustration muted, so scanning 18 collapsed accordion rows has one
-    // real signal instead of 18 identically-weighted diagrams.
-    function applyTrackSectionWeight(trackUnits: Record<string, string[]>) {
-      const counts = countDoneByTrack(trackUnits);
-      document
-        .querySelectorAll<HTMLElement>("[data-track-section]")
-        .forEach((section) => {
-          const track = section.dataset.trackSection;
-          if (!track) return;
-          const done = counts[track] ?? 0;
-          const started = done > 0;
-          const countBadge =
-            section.querySelector<HTMLElement>("[data-node-count]");
-          if (countBadge) countBadge.textContent = String(done);
-          countBadge?.classList.toggle("hidden", !started);
-          countBadge?.classList.toggle("flex", started);
-          const icon = section.querySelector<HTMLElement>("[data-node-icon]");
-          icon?.classList.toggle("opacity-50", !started);
-          icon?.classList.toggle("saturate-50", !started);
-        });
-    }
-
-    function initTrackGauges() {
-      const el = document.getElementById("track-unit-slugs");
-      if (!el) return;
-      let map: Record<string, string[]>;
+    // ---- world selection ------------------------------------------------
+    function selectWorld(name: string) {
+      for (const p of qa("[data-world-panel]")) {
+        p.classList.toggle("hidden", p.dataset.worldPanel !== name);
+      }
+      for (const b of qa("[data-world]")) {
+        b.setAttribute("aria-pressed", String(b.dataset.world === name));
+      }
       try {
-        map = JSON.parse(el.textContent || "{}");
+        localStorage.setItem(WORLD_KEY, name);
       } catch {
-        return;
+        // Private mode — selection just isn't remembered.
       }
-      applyTrackGauges(map);
-      applyTrackSectionWeight(map);
+      history.replaceState(null, "", `#${name}`);
+      q(`[data-world="${CSS.escape(name)}"]`)?.scrollIntoView({
+        block: "nearest",
+        inline: "center",
+      });
     }
-    initTrackGauges();
-    document.addEventListener("astro:page-load", initTrackGauges);
 
-    function initRoadmapFilters() {
-      // Stamps data-reader-done fresh on every page-load event (first visit
-      // or back-navigation) so the New/Completed chips reflect the reader's
-      // latest progress, independent of whether the filter listeners below
-      // get (re-)wired this time.
-      markReaderDone();
+    function currentWorld(): string | null {
+      return q("[data-world][aria-pressed='true']")?.dataset.world ?? null;
+    }
 
-      const root = document.body;
-      if (root.dataset.roadmapFiltersWired === "true") return;
-      root.dataset.roadmapFiltersWired = "true";
+    // ---- filters --------------------------------------------------------
+    const filters = {
+      query: "",
+      tags: new Set<string>(),
+      statuses: new Set<string>(),
+    };
+    const filtersActive = () =>
+      filters.query !== "" ||
+      filters.tags.size > 0 ||
+      filters.statuses.size > 0;
 
-      const searchInput = document.querySelector<HTMLInputElement>(
-        "[data-roadmap-search]",
-      );
-      const trackChips = Array.from(
-        document.querySelectorAll<HTMLButtonElement>("[data-track-chip]"),
-      );
-      const statusChips = Array.from(
-        document.querySelectorAll<HTMLButtonElement>("[data-status-chip]"),
-      );
-      const tagChips = Array.from(
-        document.querySelectorAll<HTMLButtonElement>("[data-tag-chip]"),
-      );
-      const clearButton = document.querySelector<HTMLButtonElement>(
-        "[data-clear-filters]",
-      );
-      const rows = Array.from(
-        document.querySelectorAll<HTMLElement>("[data-unit-row]"),
-      );
-      const sections = Array.from(
-        document.querySelectorAll<HTMLElement>("[data-track-section]"),
-      );
-      const matchCount =
-        document.querySelector<HTMLElement>("[data-match-count]");
-      const emptyState =
-        document.querySelector<HTMLElement>("[data-empty-state]");
-      if (!searchInput || !matchCount || !emptyState) return;
-
-      const readerFilterChips = Array.from(
-        document.querySelectorAll<HTMLButtonElement>(
-          "[data-reader-filter-chip]",
-        ),
-      );
-      const showMoreButtons = Array.from(
-        document.querySelectorAll<HTMLButtonElement>(
-          "[data-show-more-trigger]",
-        ),
-      );
-
-      const activeTracks = new Set<string>();
-      const activeStatuses = new Set<string>();
-      const activeTags = new Set<string>();
-      const activeReaderFilters = new Set<string>();
-      const expandedTracks = new Set<string>();
-      // Kept in sync by eye with UNIT_DISPLAY_LIMIT in this file's frontmatter —
-      // the client script can't import a server-side const.
-      const UNIT_DISPLAY_LIMIT = 6;
-
-      // The roadmap's tags step *is* the interests picker now (the profile
-      // modal's separate one was removed) — whatever tags are active here
-      // persist as the active profile's interests, the same way the old
-      // modal chips did on every click.
-      function syncInterestsFromTags() {
-        const profile = getActiveProfile();
-        if (!profile) return;
-        updateProfileInterests(profile.id, [...activeTags]);
+    function nodeMatches(n: HTMLElement): boolean {
+      if (filters.query && !(n.dataset.search ?? "").includes(filters.query))
+        return false;
+      if (filters.tags.size > 0) {
+        const tags = (n.dataset.tags ?? "").split(" ");
+        if (!tags.some((t) => filters.tags.has(t))) return false;
       }
+      if (
+        filters.statuses.size > 0 &&
+        !filters.statuses.has(n.dataset.state ?? "")
+      )
+        return false;
+      return true;
+    }
 
-      function applyFilters() {
-        const query = searchInput!.value.trim().toLowerCase();
-        const isFiltering =
-          query !== "" ||
-          activeTracks.size > 0 ||
-          activeStatuses.size > 0 ||
-          activeTags.size > 0 ||
-          activeReaderFilters.size > 0;
-        let visible = 0;
-
-        for (const row of rows) {
-          const matchesQuery =
-            !query || (row.dataset.search ?? "").includes(query);
-          const matchesTrack =
-            activeTracks.size === 0 ||
-            activeTracks.has(row.dataset.track ?? "");
-          const matchesStatus =
-            activeStatuses.size === 0 ||
-            activeStatuses.has(row.dataset.status ?? "");
-          const rowTags = (row.dataset.tags ?? "").split(" ");
-          const matchesTags =
-            activeTags.size === 0 || rowTags.some((t) => activeTags.has(t));
-          const readerDone = row.dataset.readerDone === "true";
-          const matchesReader =
-            activeReaderFilters.size === 0 ||
-            (activeReaderFilters.has("completed") && readerDone) ||
-            (activeReaderFilters.has("new") && !readerDone);
-          const matchesFilters =
-            matchesQuery &&
-            matchesTrack &&
-            matchesStatus &&
-            matchesTags &&
-            matchesReader;
-
-          // Outside of any active filter, a track only shows its first N
-          // units at a glance — "Show all" (per section) or any filter
-          // (which implies the reader is specifically looking for something)
-          // lifts the cap.
-          const rowIndex = Number(row.dataset.rowIndex ?? "0");
-          const track = row.dataset.track ?? "";
-          const overLimit =
-            !isFiltering &&
-            rowIndex >= UNIT_DISPLAY_LIMIT &&
-            !expandedTracks.has(track);
-
-          const show = matchesFilters && !overLimit;
-          row.classList.toggle("hidden", !show);
-          if (show) visible++;
+    function applyFilters() {
+      const active = filtersActive();
+      const perWorld = new Map<string, number>();
+      let total = 0;
+      for (const n of qa('[data-kind="unit"]')) {
+        const match = !active || nodeMatches(n);
+        n.classList.toggle("is-dim", !match);
+        if (active && match) {
+          const t = n.dataset.track!;
+          perWorld.set(t, (perWorld.get(t) ?? 0) + 1);
+          total++;
         }
-
-        for (const section of sections) {
-          const name = section.dataset.trackSection ?? "";
-          // The unit list, reader-filter chips, and "Show all" button all
-          // live inside this track's <dialog> now (a sibling of `section`,
-          // not a descendant) — the card itself only holds the trigger.
-          const dialog = document.querySelector<HTMLElement>(
-            `[data-track-modal="${name}"]`,
-          );
-          const sectionRows = rows.filter((r) => r.dataset.track === name);
-          const visibleCount = sectionRows.filter(
-            (r) => !r.classList.contains("hidden"),
-          ).length;
-          section.classList.toggle("hidden", visibleCount === 0);
-          const countText =
-            visibleCount === sectionRows.length
-              ? `${visibleCount} units`
-              : `${visibleCount} of ${sectionRows.length} units`;
-          const countEl =
-            section.querySelector<HTMLElement>("[data-track-count]");
-          if (countEl) countEl.textContent = countText;
-          const dialogCountEl =
-            dialog?.querySelector<HTMLElement>("[data-track-count]");
-          if (dialogCountEl) dialogCountEl.textContent = countText;
-          const moreBtn = dialog?.querySelector<HTMLElement>(
-            "[data-show-more-trigger]",
-          );
-          moreBtn?.classList.toggle(
-            "hidden",
-            isFiltering ||
-              expandedTracks.has(name) ||
-              sectionRows.length <= UNIT_DISPLAY_LIMIT,
-          );
-        }
-
-        matchCount!.textContent = `${visible} of ${rows.length} units match`;
-        emptyState!.classList.toggle("hidden", visible !== 0);
-        updateStatusCounts();
-        renderFilterChrome();
       }
-
-      // Each track opens as a modal instead of expanding inline — the
-      // trigger card (`section`) and its unit list now live in separate
-      // elements (a <dialog> sibling, see the markup above), so there's no
-      // open/collapsed state to track here beyond the dialog's own.
-      sections.forEach((section) => {
-        const name = section.dataset.trackSection;
-        const toggle = section.querySelector<HTMLElement>(
-          "[data-track-toggle]",
-        );
-        const dialog = name
-          ? document.querySelector<HTMLDialogElement>(
-              `[data-track-modal="${name}"]`,
-            )
-          : null;
-        if (!toggle || !dialog) return;
-
-        const open = () => {
-          dialog.showModal();
-          renderTrackDialogExtras(dialog);
-        };
-        // A <div role="button"> (not a real <button>, so the "what is this,
-        // really?" trigger can sit inside the clickable area — a real
-        // <button> can't nest an interactive descendant) needs both handlers
-        // wired by hand — native buttons get click-on-Enter/Space for free,
-        // this doesn't.
-        toggle.addEventListener("click", open);
-        toggle.addEventListener("keydown", (e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            open();
-          }
-        });
-
-        dialog
-          .querySelector(`[data-track-modal-close="${name}"]`)
-          ?.addEventListener("click", () => dialog.close());
-        // Same native <dialog> backdrop-click pattern as the stats/myth
-        // modals — a click lands on the dialog element itself only when it
-        // hits the backdrop, never when it hits anything inside the panel.
-        dialog.addEventListener("click", (e) => {
-          if (e.target === dialog) dialog.close();
-        });
-
-        dialog
-          .querySelector(`[data-track-continue-dismiss]`)
-          ?.addEventListener("click", () => {
-            const cta = dialog.querySelector<HTMLElement>(
-              "[data-track-continue]",
-            );
-            cta?.classList.add("hidden");
-            cta?.classList.remove("flex");
-          });
-
-        // The in-modal search is local to this track — it narrows this
-        // dialog's own list (via inline display, independent of the
-        // global search/filter classes applyFilters() owns) and, since
-        // typing implies "show me everything that matches," lifts the
-        // first-N display limit the same way picking a global filter does.
-        const localSearch = dialog.querySelector<HTMLInputElement>(
-          "[data-track-local-search]",
-        );
-        const dialogRows = Array.from(
-          dialog.querySelectorAll<HTMLElement>("[data-unit-row]"),
-        );
-        localSearch?.addEventListener("input", () => {
-          const q = localSearch.value.trim().toLowerCase();
-          if (q && name && !expandedTracks.has(name)) {
-            expandedTracks.add(name);
-            applyFilters();
-          }
-          dialogRows.forEach((row) => {
-            const matches = !q || (row.dataset.search ?? "").includes(q);
-            row.style.display = matches ? "" : "none";
-          });
-          updateWaypointVisibility(dialog);
-        });
-      });
-
-      // A waypoint head hides itself once every unit in its range is
-      // hidden (by the global filters, the first-N limit, or the in-modal
-      // search) — otherwise a filtered-down list could show a "6–10"
-      // divider over an empty gap.
-      function updateWaypointVisibility(dialog: HTMLElement) {
-        const heads = Array.from(
-          dialog.querySelectorAll<HTMLElement>("[data-waypoint-head]"),
-        );
-        heads.forEach((head) => {
-          let sibling = head.nextElementSibling as HTMLElement | null;
-          let anyVisible = false;
-          while (sibling && !sibling.hasAttribute("data-waypoint-head")) {
-            if (
-              sibling.hasAttribute("data-unit-row") &&
-              !sibling.classList.contains("hidden") &&
-              sibling.style.display !== "none"
-            ) {
-              anyVisible = true;
-              break;
-            }
-            sibling = sibling.nextElementSibling as HTMLElement | null;
-          }
-          head.classList.toggle("hidden", !anyVisible);
-        });
+      for (const b of qa("[data-world]")) {
+        const badge = q("[data-world-badge]", b);
+        const count = perWorld.get(b.dataset.world!) ?? 0;
+        if (!badge) continue;
+        badge.textContent = String(count);
+        badge.classList.toggle("hidden", !(active && count > 0));
+        badge.classList.toggle("flex", active && count > 0);
       }
-
-      // Everything a track's modal needs recomputed on every open, since
-      // all of it depends on the reader's own progress (localStorage) or
-      // on state left over from a previous open:
-      // - the progress bar (reader's done/total for this track)
-      // - the "Continue" notification (first not-done unit, in order) —
-      //   slides in a beat after the dialog itself, not with it, so it
-      //   reads as something arriving rather than part of the furniture
-      // - a staggered entrance for the currently-visible rows
-      // - clearing any in-modal search left over from last time
-      function renderTrackDialogExtras(dialog: HTMLDialogElement) {
-        const trackRows = Array.from(
-          dialog.querySelectorAll<HTMLElement>("[data-unit-row]"),
-        );
-        const total = trackRows.length;
-        const done = trackRows.filter(
-          (r) => r.dataset.readerDone === "true",
-        ).length;
-        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-
-        const progressText = dialog.querySelector<HTMLElement>(
-          "[data-track-progress-text]",
-        );
-        const progressPct = dialog.querySelector<HTMLElement>(
-          "[data-track-progress-pct]",
-        );
-        const progressFill = dialog.querySelector<HTMLElement>(
-          "[data-track-progress-fill]",
-        );
-        if (progressText) progressText.textContent = `${done} of ${total} done`;
-        if (progressPct) progressPct.textContent = `${pct}%`;
-        if (progressFill) {
-          progressFill.style.setProperty("--target-width", `${pct}%`);
-          progressFill.classList.remove("animate-fill-bar");
-          void progressFill.offsetWidth;
-          progressFill.classList.add("animate-fill-bar");
-        }
-
-        const cta = dialog.querySelector<HTMLElement>("[data-track-continue]");
-        const next = trackRows.find((r) => r.dataset.readerDone !== "true");
-        const nextLink = next?.querySelector<HTMLAnchorElement>("a") ?? null;
-        if (cta) {
-          if (!next || !nextLink) {
-            cta.classList.add("hidden");
-            cta.classList.remove("flex");
-          } else {
-            const ctaLink = cta.querySelector<HTMLAnchorElement>(
-              "[data-track-continue-link]",
-            );
-            const ctaTitle = cta.querySelector<HTMLElement>(
-              "[data-track-continue-title]",
-            );
-            if (ctaLink) ctaLink.href = nextLink.href;
-            if (ctaTitle) ctaTitle.textContent = nextLink.textContent.trim();
-            cta.classList.remove("hidden");
-            cta.classList.add("flex");
-            cta.classList.remove("animate-fade-slide-in");
-            window.setTimeout(() => {
-              cta.classList.add("animate-fade-slide-in");
-            }, 260);
-          }
-        }
-
-        const localSearch = dialog.querySelector<HTMLInputElement>(
-          "[data-track-local-search]",
-        );
-        if (localSearch) localSearch.value = "";
-        trackRows.forEach((row) => {
-          row.style.display = "";
-        });
-        updateWaypointVisibility(dialog);
-
-        let delay = 0;
-        trackRows.forEach((row) => {
-          if (row.classList.contains("hidden")) return;
-          row.classList.remove("animate-fade-slide-in");
-          row.style.animationDelay = "";
-          void row.offsetWidth;
-          row.style.animationDelay = `${delay}ms`;
-          row.classList.add("animate-fade-slide-in");
-          delay += 25;
-        });
+      const summary = q("[data-match-summary]");
+      if (summary) {
+        summary.classList.toggle("hidden", !active);
+        summary.textContent = `${total} ${total === 1 ? "unit matches" : "units match"} across ${perWorld.size} ${perWorld.size === 1 ? "world" : "worlds"}`;
       }
-
-      // Replaces the old text summary ("Track: web, systems · Tags: ...")
-      // with a small count badge directly on the popover button it
-      // describes, plus a Reset button that only exists once something is
-      // actually active — nothing to read when nothing is filtered.
-      function renderFilterChrome() {
-        const counts: [string, Set<string>][] = [
-          ["track", activeTracks],
-          ["tags", activeTags],
-          ["status", activeStatuses],
-        ];
-        for (const [name, set] of counts) {
-          const badge = document.querySelector<HTMLElement>(
-            `[data-filter-count="${name}"]`,
-          );
-          if (!badge) continue;
-          badge.textContent = String(set.size);
-          badge.classList.toggle("hidden", set.size === 0);
-        }
-        const anyActive =
-          activeTracks.size > 0 ||
-          activeTags.size > 0 ||
-          activeStatuses.size > 0 ||
-          searchInput!.value.trim() !== "";
-        clearButton?.classList.toggle("hidden", !anyActive);
-        clearButton?.classList.toggle("flex", anyActive);
+      q("[data-empty-state]")?.classList.toggle(
+        "hidden",
+        !(active && total === 0),
+      );
+      q("[data-clear-filters]")?.classList.toggle("hidden", !active);
+      q("[data-clear-filters]")?.classList.toggle("inline-flex", active);
+      for (const kind of ["tags", "status"] as const) {
+        const el = q(`[data-filter-count="${kind}"]`);
+        const n = kind === "tags" ? filters.tags.size : filters.statuses.size;
+        if (!el) continue;
+        el.textContent = String(n);
+        el.classList.toggle("hidden", n === 0);
       }
+      // Don't leave the reader on a world with nothing lit up.
+      const cur = currentWorld();
+      if (active && cur && (perWorld.get(cur) ?? 0) === 0) {
+        const first = qa("[data-world]").find(
+          (b) => (perWorld.get(b.dataset.world!) ?? 0) > 0,
+        );
+        if (first) selectWorld(first.dataset.world!);
+      }
+    }
 
-      searchInput.addEventListener("input", applyFilters);
+    function wireFilters() {
+      const search = q<HTMLInputElement>("[data-roadmap-search]");
+      if (!search || search.dataset.wired === "true") return;
+      search.dataset.wired = "true";
 
-      trackChips.forEach((chip) => {
-        chip.addEventListener("click", () => {
-          const name = chip.dataset.trackChip!;
-          const nowActive = chip.getAttribute("aria-pressed") !== "true";
-          chip.setAttribute("aria-pressed", String(nowActive));
-          if (nowActive) activeTracks.add(name);
-          else activeTracks.delete(name);
-          applyFilters();
-          filterTagOptionsByTrack();
-        });
-      });
-
-      statusChips.forEach((chip) => {
-        chip.addEventListener("click", () => {
-          const status = chip.dataset.statusChip!;
-          const nowActive = chip.getAttribute("aria-pressed") !== "true";
-          chip.setAttribute("aria-pressed", String(nowActive));
-          if (nowActive) activeStatuses.add(status);
-          else activeStatuses.delete(status);
-          applyFilters();
-        });
-      });
-
-      tagChips.forEach((chip) => {
-        chip.addEventListener("click", () => {
-          const tag = chip.dataset.tagChip!;
-          const nowActive = chip.getAttribute("aria-pressed") !== "true";
-          chip.setAttribute("aria-pressed", String(nowActive));
-          if (nowActive) activeTags.add(tag);
-          else activeTags.delete(tag);
-          applyFilters();
-          syncInterestsFromTags();
-        });
-      });
-
-      // "New" and "Completed" are mutually exclusive (one reader-progress
-      // axis), unlike track/status/tags which are each multi-select — picking
-      // one deselects the other rather than stacking both into "show none".
-      readerFilterChips.forEach((chip) => {
-        chip.addEventListener("click", () => {
-          const key = chip.dataset.readerFilterChip!;
-          const nowActive = chip.getAttribute("aria-pressed") !== "true";
-          readerFilterChips.forEach((c) => {
-            if (c !== chip) {
-              c.setAttribute("aria-pressed", "false");
-              activeReaderFilters.delete(c.dataset.readerFilterChip!);
-            }
-          });
-          chip.setAttribute("aria-pressed", String(nowActive));
-          if (nowActive) activeReaderFilters.add(key);
-          else activeReaderFilters.delete(key);
-          applyFilters();
-        });
-      });
-
-      showMoreButtons.forEach((button) => {
-        button.addEventListener("click", () => {
-          const track = button.dataset.showMoreTrigger!;
-          expandedTracks.add(track);
-          applyFilters();
-        });
-      });
-
-      function resetFilters() {
-        searchInput!.value = "";
-        activeTracks.clear();
-        activeStatuses.clear();
-        activeTags.clear();
-        activeReaderFilters.clear();
-        expandedTracks.clear();
-        [
-          ...trackChips,
-          ...statusChips,
-          ...tagChips,
-          ...readerFilterChips,
-        ].forEach((chip) => chip.setAttribute("aria-pressed", "false"));
+      search.addEventListener("input", () => {
+        filters.query = search.value.trim().toLowerCase();
         applyFilters();
-        filterTagOptionsByTrack();
-        syncInterestsFromTags();
-      }
-
-      clearButton?.addEventListener("click", resetFilters);
-
-      // Progressive-enhancement target for the homepage's search box
-      // (submits a plain GET form to /roadmap?search=...) — prefill and
-      // run the filter once on load so it works even if this script is the
-      // first thing to touch the input.
-      const params = new URLSearchParams(location.search);
-      const initialQuery = params.get("search");
-      if (initialQuery) searchInput.value = initialQuery;
-
-      // Pre-select tag chips matching the active profile's interests, if
-      // any — purely a starting point for the filter UI, not a forced
-      // choice; the reader can deselect/clear as normal. A profile with no
-      // interests set leaves every chip unselected, same as today.
-      const interests = new Set(getActiveProfile()?.interests ?? []);
-      if (interests.size > 0) {
-        tagChips.forEach((chip) => {
-          const tag = chip.dataset.tagChip!;
-          if (interests.has(tag)) {
-            chip.setAttribute("aria-pressed", "true");
-            activeTags.add(tag);
-          }
-        });
-      }
-
-      applyFilters();
-
-      // ---- popovers: Track/Tags/Status, each its own open/close + search ----
-
-      const filterPopoverTriggers = Array.from(
-        document.querySelectorAll<HTMLButtonElement>(
-          "[data-filter-popover-trigger]",
-        ),
-      );
-      const filterPopovers = Array.from(
-        document.querySelectorAll<HTMLElement>("[data-filter-popover]"),
-      );
-
-      function closeAllPopovers() {
-        filterPopovers.forEach((p) => p.classList.add("hidden"));
-        filterPopoverTriggers.forEach((t) =>
-          t.setAttribute("aria-expanded", "false"),
-        );
-      }
-
-      filterPopoverTriggers.forEach((trigger) => {
-        const name = trigger.dataset.filterPopoverTrigger!;
-        const panel = document.querySelector<HTMLElement>(
-          `[data-filter-popover="${name}"]`,
-        );
-        if (!panel) return;
-        trigger.addEventListener("click", (e) => {
-          e.stopPropagation();
-          const wasHidden = panel.classList.contains("hidden");
-          closeAllPopovers();
-          if (wasHidden) {
-            panel.classList.remove("hidden");
-            trigger.setAttribute("aria-expanded", "true");
-          }
-        });
       });
 
-      // Clicking a chip inside a popover (track/tag/status) never closes it —
-      // those clicks land on a descendant of the panel, so `contains()` below
-      // keeps it open for picking more than one before dismissing.
+      for (const chip of qa("[data-tag-chip]")) {
+        chip.addEventListener("click", () => {
+          const tag = chip.dataset.tagChip!;
+          const on = !filters.tags.has(tag);
+          if (on) filters.tags.add(tag);
+          else filters.tags.delete(tag);
+          chip.setAttribute("aria-pressed", String(on));
+          applyFilters();
+        });
+      }
+      for (const chip of qa("[data-status-chip]")) {
+        chip.addEventListener("click", () => {
+          const s = chip.dataset.statusChip!;
+          const on = !filters.statuses.has(s);
+          if (on) filters.statuses.add(s);
+          else filters.statuses.delete(s);
+          chip.setAttribute("aria-pressed", String(on));
+          applyFilters();
+        });
+      }
+      q<HTMLInputElement>("[data-tag-search]")?.addEventListener(
+        "input",
+        (e) => {
+          const text = (e.target as HTMLInputElement).value
+            .trim()
+            .toLowerCase();
+          for (const chip of qa("[data-tag-chip]")) {
+            chip.classList.toggle(
+              "hidden",
+              !!text &&
+                !(chip.dataset.tagChip ?? "").toLowerCase().includes(text),
+            );
+          }
+        },
+      );
+      q("[data-clear-filters]")?.addEventListener("click", () => {
+        filters.query = "";
+        filters.tags.clear();
+        filters.statuses.clear();
+        search.value = "";
+        for (const c of qa("[data-tag-chip], [data-status-chip]")) {
+          c.setAttribute("aria-pressed", "false");
+        }
+        applyFilters();
+      });
+
+      // Popovers: one open at a time, closed by outside click or Escape.
+      const triggers = qa("[data-filter-trigger]");
+      const closeAll = () => {
+        for (const t of triggers) {
+          t.setAttribute("aria-expanded", "false");
+          q(`[data-filter-panel="${t.dataset.filterTrigger}"]`)?.classList.add(
+            "hidden",
+          );
+        }
+      };
+      for (const t of triggers) {
+        t.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const panel = q(`[data-filter-panel="${t.dataset.filterTrigger}"]`);
+          const wasOpen = panel && !panel.classList.contains("hidden");
+          closeAll();
+          if (panel && !wasOpen) {
+            panel.classList.remove("hidden");
+            t.setAttribute("aria-expanded", "true");
+          }
+        });
+      }
       document.addEventListener("click", (e) => {
-        const target = e.target as Node;
-        const insideAny =
-          filterPopovers.some((p) => p.contains(target)) ||
-          filterPopoverTriggers.some((t) => t.contains(target));
-        if (!insideAny) closeAllPopovers();
+        if (!(e.target as HTMLElement).closest("[data-filter-panel]"))
+          closeAll();
       });
       document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") closeAllPopovers();
+        if (e.key === "Escape") closeAll();
       });
+    }
 
-      // Each popover's own search box filters that popover's option list
-      // (which tracks/tags are offered), not the final unit results below.
-      function wireOptionSearch(
-        inputSelector: string,
-        chips: HTMLButtonElement[],
-        emptySelector?: string,
-      ) {
-        const input = document.querySelector<HTMLInputElement>(inputSelector);
-        if (!input) return;
-        input.addEventListener("input", () => {
-          const q = input.value.trim().toLowerCase();
-          let visibleCount = 0;
-          for (const chip of chips) {
-            if (chip.classList.contains("hidden-by-track")) continue;
-            const label = (chip.dataset.searchLabel ?? "").toLowerCase();
-            const show = !q || label.includes(q);
-            chip.classList.toggle("hidden", !show);
-            if (show) visibleCount++;
-          }
-          if (emptySelector) {
-            document
-              .querySelector(emptySelector)
-              ?.classList.toggle("hidden", visibleCount !== 0);
-          }
-        });
-      }
-      wireOptionSearch("[data-track-search]", trackChips);
-      wireOptionSearch("[data-tag-search]", tagChips, "[data-tag-empty]");
-
-      // Tags popover: narrow the offered tag chips to only those that occur
-      // in at least one currently-selected track (all tags stay available if
-      // no track is selected).
-      let tagsByTrack: Record<string, string[]> = {};
-      try {
-        tagsByTrack = JSON.parse(
-          document.getElementById("tags-by-track")?.textContent || "{}",
-        );
-      } catch {
-        tagsByTrack = {};
-      }
-
-      function filterTagOptionsByTrack() {
-        const allowed =
-          activeTracks.size === 0
-            ? null
-            : new Set([...activeTracks].flatMap((t) => tagsByTrack[t] ?? []));
-        for (const chip of tagChips) {
-          const tag = chip.dataset.tagChip!;
-          const allowedByTrack = allowed === null || allowed.has(tag);
-          chip.classList.toggle("hidden-by-track", !allowedByTrack);
-          if (!allowedByTrack) chip.classList.add("hidden");
-          else {
-            const searchInputEl =
-              document.querySelector<HTMLInputElement>("[data-tag-search]");
-            const q = (searchInputEl?.value ?? "").trim().toLowerCase();
-            const label = (chip.dataset.searchLabel ?? "").toLowerCase();
-            chip.classList.toggle("hidden", !(!q || label.includes(q)));
-          }
-        }
-      }
-      filterTagOptionsByTrack();
-
-      // Status popover: show how many currently track/tag-matching units
-      // fall into each status, so picking one isn't a guess. Kept fresh by
-      // applyFilters() on every change, not just while the popover is open.
-      function updateStatusCounts() {
-        for (const chip of statusChips) {
-          const status = chip.dataset.statusChip!;
-          const count = rows.filter((r) => {
-            const matchesTrack =
-              activeTracks.size === 0 ||
-              activeTracks.has(r.dataset.track ?? "");
-            const rowTags = (r.dataset.tags ?? "").split(" ");
-            const matchesTags =
-              activeTags.size === 0 || rowTags.some((t) => activeTags.has(t));
-            return matchesTrack && matchesTags && r.dataset.status === status;
-          }).length;
-          const countEl = chip.querySelector("[data-status-count]");
-          if (countEl) countEl.textContent = `${count} units`;
-        }
+    function wireRail() {
+      const rail = q("[data-rail]");
+      if (!rail || rail.dataset.wired === "true") return;
+      rail.dataset.wired = "true";
+      for (const b of qa("[data-world]", rail)) {
+        b.addEventListener("click", () => selectWorld(b.dataset.world!));
       }
     }
 
-    initRoadmapFilters();
-    document.addEventListener("astro:page-load", initRoadmapFilters);
+    function initRoadmap() {
+      if (!q("[data-rail]")) return;
+      wireRail();
+      wireFilters();
+      stampStates();
+
+      let order: string[] = [];
+      try {
+        order = JSON.parse(q("#world-order")?.textContent || "[]");
+      } catch {
+        order = [];
+      }
+      const fromHash = decodeURIComponent(location.hash.slice(1));
+      const saved = (() => {
+        try {
+          return localStorage.getItem(WORLD_KEY);
+        } catch {
+          return null;
+        }
+      })();
+      const start =
+        [fromHash, lastTouchedTrack(order), saved, order[0]].find(
+          (t): t is string => !!t && order.includes(t),
+        ) ?? order[0];
+      if (start) selectWorld(start);
+      applyFilters();
+    }
+    initRoadmap();
+    document.addEventListener("astro:page-load", initRoadmap);
   </script>
 </Layout>
+
+<style>
+  .game-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    height: 3rem;
+    padding: 0 1rem;
+    border-radius: 0.875rem;
+    border: 2px solid #cbd5e1;
+    background: #fff;
+    color: #0f172a;
+    font-size: 0.9375rem;
+    font-weight: 800;
+    box-shadow: 0 4px 0 #cbd5e1;
+    transition:
+      border-color 0.08s,
+      box-shadow 0.08s;
+  }
+  .game-btn:hover,
+  .game-btn:focus-within {
+    border-color: #0f172a;
+    box-shadow: 0 4px 0 #0f172a;
+  }
+  .game-btn:focus-visible {
+    outline: 3px solid var(--accent-text);
+    outline-offset: 3px;
+  }
+  :global(.dark) .game-btn {
+    border-color: #334155;
+    background: #0f172a;
+    color: #f1f5f9;
+    box-shadow: 0 4px 0 #334155;
+  }
+  :global(.dark) .game-btn:hover,
+  :global(.dark) .game-btn:focus-within {
+    border-color: #f1f5f9;
+    box-shadow: 0 4px 0 #f1f5f9;
+  }
+  .game-panel {
+    border-radius: 1.125rem;
+    border: 2px solid #0f172a;
+    background: #fff;
+    color: #0f172a;
+    box-shadow: 0 6px 0 #0f172a;
+    padding: 1rem;
+  }
+  :global(.dark) .game-panel {
+    border-color: #f1f5f9;
+    background: #0f172a;
+    color: #f1f5f9;
+    box-shadow: 0 6px 0 #f1f5f9;
+  }
+
+  /* world rail */
+  .world-ring {
+    position: relative;
+    display: flex;
+    height: 4rem;
+    width: 4rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background: conic-gradient(
+      var(--gauge-accent) calc(var(--p, 0) * 1turn),
+      #e2e8f0 0
+    );
+  }
+  :global(.dark) .world-ring {
+    background: conic-gradient(
+      var(--gauge-accent) calc(var(--p, 0) * 1turn),
+      #334155 0
+    );
+  }
+  .world-core {
+    display: flex;
+    height: 3.125rem;
+    width: 3.125rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background: #fff;
+    color: #0f172a;
+  }
+  :global(.dark) .world-core {
+    background: #0f172a;
+    color: #f1f5f9;
+  }
+  .world-btn[aria-pressed="true"] .world-ring {
+    box-shadow:
+      0 0 0 4px #fff,
+      0 0 0 7px #0f172a;
+  }
+  :global(.dark) .world-btn[aria-pressed="true"] .world-ring {
+    box-shadow:
+      0 0 0 4px #020617,
+      0 0 0 7px #f1f5f9;
+  }
+  .world-btn[aria-pressed="true"] .world-core {
+    background: #0f172a;
+    color: #fff;
+  }
+  :global(.dark) .world-btn[aria-pressed="true"] .world-core {
+    background: #f1f5f9;
+    color: #0f172a;
+  }
+  .world-btn:focus-visible {
+    outline: 3px solid var(--accent-text);
+    outline-offset: 4px;
+    border-radius: 0.75rem;
+  }
+
+  /* level nodes */
+  .trail-row {
+    --disc: clamp(3.25rem, 8vw, 4.5rem);
+  }
+  .disc {
+    position: relative;
+    display: flex;
+    height: var(--disc);
+    width: var(--disc);
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    border: 3px solid #cbd5e1;
+    background: #e2e8f0;
+    color: #475569;
+    box-shadow: 0 5px 0 #cbd5e1;
+    font-weight: 800;
+    transition:
+      transform 0.08s,
+      box-shadow 0.08s;
+  }
+  a.disc:hover {
+    transform: translateY(-2px);
+  }
+  a.disc:active {
+    transform: translateY(5px);
+    box-shadow: 0 0 0 #cbd5e1;
+  }
+  a.disc:focus-visible {
+    outline: 3px solid var(--accent-text);
+    outline-offset: 4px;
+  }
+  .disc :global([data-ic]) {
+    display: none;
+  }
+  .node[data-state="done"] .disc {
+    background: #059669;
+    border-color: #064e3b;
+    box-shadow: 0 5px 0 #064e3b;
+    color: #fff;
+  }
+  .node[data-state="done"] .disc :global([data-ic="done"]),
+  .node[data-state="next"] .disc :global([data-ic="next"]),
+  .node[data-state="locked"] .disc :global([data-ic="locked"]) {
+    display: block;
+  }
+  .node[data-state="next"] .disc {
+    background: #0369a1;
+    border-color: #082f49;
+    box-shadow: 0 5px 0 #082f49;
+    color: #fff;
+    animation: node-pulse 1.8s infinite;
+  }
+  .node[data-state="planned"] .disc {
+    border-style: dashed;
+    background: transparent;
+    box-shadow: none;
+    color: #94a3b8;
+  }
+  :global(.dark) .disc {
+    border-color: #475569;
+    background: #1e293b;
+    color: #cbd5e1;
+    box-shadow: 0 5px 0 #475569;
+  }
+  :global(.dark) .node[data-state="done"] .disc {
+    background: #059669;
+    border-color: #064e3b;
+    box-shadow: 0 5px 0 #064e3b;
+    color: #fff;
+  }
+  :global(.dark) .node[data-state="next"] .disc {
+    background: #0369a1;
+    border-color: #082f49;
+    box-shadow: 0 5px 0 #082f49;
+    color: #fff;
+  }
+  :global(.dark) .node[data-state="planned"] .disc {
+    background: transparent;
+    box-shadow: none;
+    color: #64748b;
+  }
+
+  /* checkpoints */
+  .disc.check {
+    border-radius: 1.5rem;
+    background: #fff7ed;
+    border-color: #fdba74;
+    box-shadow: 0 5px 0 #fdba74;
+    color: #c2410c;
+  }
+  :global(.dark) .disc.check {
+    background: #431407;
+    border-color: #9a3412;
+    box-shadow: 0 5px 0 #9a3412;
+    color: #fdba74;
+  }
+  .node[data-state="done"] .disc.check,
+  :global(.dark) .node[data-state="done"] .disc.check {
+    background: #c2410c;
+    border-color: #7c2d12;
+    box-shadow: 0 5px 0 #7c2d12;
+    color: #fff;
+  }
+
+  .node-label {
+    margin-top: 1rem;
+    max-width: 7rem;
+    text-align: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1.25;
+    color: #0f172a;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  :global(.dark) .node-label {
+    color: #f1f5f9;
+  }
+  .node[data-state="locked"] .node-label,
+  .node[data-state="planned"] .node-label {
+    color: #64748b;
+  }
+  :global(.dark) .node[data-state="locked"] .node-label,
+  :global(.dark) .node[data-state="planned"] .node-label {
+    color: #94a3b8;
+  }
+
+  .start-tag {
+    display: none;
+    position: absolute;
+    top: -1.75rem;
+    white-space: nowrap;
+    border-radius: 9999px;
+    background: #0369a1;
+    color: #fff;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    padding: 0.1875rem 0.625rem;
+  }
+  .node[data-start="true"] .start-tag {
+    display: block;
+  }
+
+  .node {
+    transition: opacity 0.2s;
+  }
+  .node.is-dim {
+    opacity: 0.22;
+  }
+
+  @keyframes node-pulse {
+    0% {
+      box-shadow:
+        0 5px 0 #082f49,
+        0 0 0 0 rgb(3 105 161 / 0.45);
+    }
+    100% {
+      box-shadow:
+        0 5px 0 #082f49,
+        0 0 0 16px rgb(3 105 161 / 0);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .node[data-state="next"] .disc {
+      animation: none;
+    }
+    .disc,
+    a.disc:hover,
+    a.disc:active {
+      transition: none;
+      transform: none;
+    }
+  }
+</style>
