@@ -3184,3 +3184,16 @@ Migrated the last 3 `business-communication/` units via 3 parallel content-only 
 Practice items have 3 choices (matches the pilot); exam items have 4.
 
 `business-communication/` is complete: 14 of 14. Total migrated: 64 of 246. Next track in ROADMAP order: `logic`.
+
+## 2026-10-20 — Site redesign: game-style home and roadmap level map
+
+No content units this session; this was a UI redesign in two steps, each picked from mockups on a canvas.
+
+- **Home as a menu.** `/` is now a title-screen menu (option C): a hero Continue button plus Review, Try a real question, Stats & streak, Your progress, Tracks and Search, each with a live number or title filled in from the active profile. Review stays visible and dimmed when nothing is due. The old inline hero, search box, track grid and five modals moved out.
+- **New hub pages.** `/tracks` (track grid, category chips, interest filter), `/search`, `/review`, `/question`, `/stats`, `/progress`, sharing `HubHeader.astro` and build-time data from `src/lib/home-data.ts`. The header gained a "tracks" link. Lost in the move: the highlight ring on the last-visited track, and the Next/Then cards in the Continue modal (Continue now goes straight to the unit).
+- **Roadmap as a level map (option A).** `/roadmap` is a worlds rail plus a winding path of level nodes per track, with a checkpoint node after every fifth unit. Search, Tags and Status filters dim non-matching nodes instead of hiding them. The coverage modal and the New/Completed chips were dropped.
+- **Real sequential locks.** `src/lib/unlock.ts`: a unit is open if it is the first of its track or the previous one was ever completed (`done`, `doneAt` or `stage`), so a spaced-repetition reset never re-locks later units. Every track starts at unit 1. `UnitLockGuard.astro` covers a locked unit page with a "This level is locked" dialog. Client-side only, like progress itself.
+- **Known gaps.** `/[track]/` does not show locks yet; random-unit links (`/question` follow-up, "Surprise me") can land on a locked unit and hit the guard; mobile layout not viewed. The redesign files were swept into an unrelated commit (`c82ec1f`) by a concurrent `git add -A`; history left as is.
+- **Checks.** `bun run check` passes (typecheck 0 errors, validate 246 units, 9 tests, build 273 pages); both pages click-tested in a real browser, including lock, unlock and filter dimming.
+
+Next: your call. Open items are lock display on `/[track]/`, a phone-width pass on the home and roadmap, and `logic` as the next track for the three-tier exercise migration (64 of 246 migrated).
