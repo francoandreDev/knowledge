@@ -3136,3 +3136,16 @@ Migrated the last 4 `git-teamwork/` units (all soft-skill/workplace: no fake pse
 **Known residual tell:** the correct quiz choice is still the longest in many short-answer practice items (≈26/66 in `ownership`, 78/120 in `rfcs`, mostly practice with 1–4-word choices); exam items were rebalanced. Automatic padding was tried and reverted because it read awkwardly; `documentation-culture` padded distractors with neutral tails, a few of which read slightly stilted.
 
 `git-teamwork/` is now 16 of 16. Total migrated: 50 of 246 (17 `web/` + 17 `systems/` + 16 `git-teamwork/`). Next track in roadmap order: `business-communication`.
+
+## 2026-10-20 — Started `business-communication/` track: `audience-awareness`, `status-updates-build-trust`, `reading-stakeholder-incentives`, `pushback-frameworks`
+
+Migrated the first 4 of 14 `business-communication/` units via 4 parallel content-only subagents (domain-general track: rule 4c applied, universal scenarios). Same pipeline; `build` 267 pages, `typecheck` 0 errors; live click-through passed all 38 `DomainCheck` topics, 0 Mermaid errors, existing slider demos still present. All four units are all-`quiz`.
+
+- **`audience-awareness`** (the original visual/interactive pilot): 13 topics, 143 items. Scenario `facts` visuals ($340/$500 bar, icon rows) and `interactives.json` preserved; references and `learnMore` reused from the old pools (patched: "BLUF" → "bottom-line-first", seniority wording neutralised). Rewrote a mismatch Checkpoint whose answer misclassified which rows cost a round-trip; added a short "reader's question overrides their title" section.
+- **`status-updates-build-trust`**: 7 topics, 84 items. Hook and L3 scenario de-jargoned (rule 4c); trust-decay chart labelled an illustrative model (each vague miss removes 40% of remaining trust, matching the demo's 0.6^n); L3 checkable-claims tally spelled out; absolute claims softened to "tends to".
+- **`reading-stakeholder-incentives`**: 8 topics, 96 items; exam items have 3 choices (two distractors). Removed invented stats ("70% overlapping", "cut maintenance by a third"); old exercises (prompts saying "L1 says") rewritten from scratch, so the old per-pool references were replaced.
+- **`pushback-frameworks`**: 10 topics, 110 items. L1/L2 now open with a universal scenario (helping a friend move vs. a prior promise); workplace case kept in L3 where the power-gap lesson needs it; added trade-off-kinds table and a power-gap decision flow; arithmetic matches `interactives.json`.
+
+**Residual tell:** correct quiz choice is still the longest in ~35–55% of items (e.g. 52/96 in `reading-stakeholder-incentives`, 67/143 in `audience-awareness`). Open follow-up: a hand-edit pass on distractors, and a 4th distractor for the 3-choice exam items in `reading-stakeholder-incentives`.
+
+`business-communication/` is at 4 of 14. Total migrated: 54 of 246. Remaining here: `building-credibility-ahead-ask`, `decision-making-frameworks`, `executive-summaries`, `conflict-resolution`, `visibility-self-promotion`, `informal-authority`, `upward-disagreement`, `change-management`, `translating-technical-risk-business-risk`, `org-level-influence`.
