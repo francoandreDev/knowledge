@@ -5,249 +5,178 @@ title: "L3 — Dana's six weeks, end to end, including the pushback"
 import Scenario from "../../../components/Scenario.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "git-teamwork",
+  unitSlug: "technical-leadership",
+};
 
 <Scenario label="Week 4: search-indexing's lead says no">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
       <div class="flex items-center gap-1.5"><span>📄</span> <strong>Week 1</strong> — Dana ships the fix in payments, then writes the RFC</div>
       <div class="flex items-center gap-1.5"><span>✅</span> <strong>Week 2</strong> — Notifications adopts it in one PR, no resistance</div>
-      <div class="flex items-center gap-1.5"><span>🚫</span> <strong>Week 4</strong> — Search-indexing's lead, Owen, declines: "our retries are idempotency-sensitive, your library doesn't handle that"</div>
-      <div class="flex items-center gap-1.5"><span>🔧</span> <strong>Week 6</strong> — Owen's actual concern gets built into the library; search-indexing adopts a slightly different version than notifications did</div>
+      <div class="flex items-center gap-1.5"><span>🚫</span> <strong>Week 4</strong> — Owen, search-indexing's lead, declines: retries re-run on the same batch, and the library says nothing about that</div>
+      <div class="flex items-center gap-1.5"><span>🔧</span> <strong>Week 6</strong> — Owen's concern is built into the library and search-indexing adopts it</div>
     </div>
   </Fragment>
 
-By week 2, notifications had adopted Dana's retry library in a single
-PR with almost no discussion — the RFC and the working code did most of
-the persuading on their own. Week 4 went differently. Owen, search-
-indexing's lead, read the RFC and pushed back in a comment: **"This
-looks solid for payments, but our indexing job re-runs on the exact same
-batch of documents on retry — if two retries race, we could double-index
-a document. Your library doesn't say anything about that."** Owen wasn't
-wrong, and he wasn't just being difficult. **What does Dana do next —
-and does anything from the payments RFC actually transfer to a team
-whose retry problem has a genuinely different failure mode?**
+By week 2, notifications had adopted Dana's library in a single PR with almost
+no discussion; the RFC and the working code did the persuading. Week 4 went
+differently. Owen read the RFC and replied: **"This looks solid for payments,
+but our indexing job re-runs on the exact same batch of documents on retry. If
+two retries race, we could double-index a document. Your library doesn't say
+anything about that."** Owen wasn't wrong and wasn't being difficult. **What
+does Dana do next, and does anything from the payments RFC transfer to a team
+whose retry problem has a different failure mode?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "The real fix, and what its tests actually check",
-    "Handling real pushback without losing the win",
-    "When to invert the order: gathering input before building",
+    "What the fix actually decides",
+    "Treating pushback as design input",
+    "When to gather input before building",
   ]}
 />
 
-## The code Dana actually shipped
+## What did the shipped fix actually decide?
 
-Here's `withRetry()` as it landed in payments in week 1 — small, tested,
-and doing exactly one job: don't retry a request that's guaranteed to
-fail again.
+The wrapper makes one decision per response, and its tests protect that
+decision. Every other behavior (backoff with jitter, a cap on attempts) is
+secondary to the question that caused the incident.
 
-```python
-import time
-import random
-from dataclasses import dataclass, field
-
-RETRYABLE_STATUSES = {429, 502, 503, 504}
-
-
-@dataclass
-class RetryConfig:
-    max_attempts: int = 3
-    base_delay_seconds: float = 0.5
-    retryable_statuses: set[int] = field(
-        default_factory=lambda: set(RETRYABLE_STATUSES)
-    )
-
-
-class NonRetryableError(Exception):
-    """Raised when a response's status means retrying can't help."""
-
-
-def with_retry(make_request, config: RetryConfig | None = None):
-    """Calls make_request() up to config.max_attempts times.
-
-    make_request must return an object with a `.status_code` attribute
-    (or raise). A response whose status isn't in
-    config.retryable_statuses is returned immediately on the first
-    attempt — it is never retried, because retrying it can't change
-    the outcome.
-    """
-    config = config or RetryConfig()
-    last_response = None
-
-    for attempt in range(1, config.max_attempts + 1):
-        response = make_request()
-        if response.status_code < 400:
-            return response
-        if response.status_code not in config.retryable_statuses:
-            # A 400, 401, 403, 404 ... will fail again with identical
-            # input. Retrying wastes time and load on the downstream
-            # service for zero chance of success.
-            return response
-
-        last_response = response
-        if attempt < config.max_attempts:
-            # Exponential backoff with jitter, so a burst of callers
-            # retrying at once doesn't re-synchronize into another spike.
-            delay = config.base_delay_seconds * (2 ** (attempt - 1))
-            delay += random.uniform(0, delay * 0.25)
-            time.sleep(delay)
-
-    return last_response
+```mermaid
+flowchart TD
+    R["Response arrives"] --> Q1{"Status below 400?"}
+    Q1 -->|"Yes"| OK["Return it, success"]
+    Q1 -->|"No"| Q2{"Status in the retryable set?<br/>429, 502, 503, 504"}
+    Q2 -->|"No: 400, 401, 403, 404..."| STOP["Return at once, retrying can't help"]
+    Q2 -->|"Yes"| Q3{"Attempts left?"}
+    Q3 -->|"No"| LAST["Return the last response"]
+    Q3 -->|"Yes"| WAIT["Wait with growing, jittered delay<br/>then try again"]
+    WAIT --> R
 ```
 
-```python
-class FakeResponse:
-    def __init__(self, status_code):
-        self.status_code = status_code
+The most persuasive test in the RFC was the one that asserts a `400` is
+attempted exactly once. Without it, a missing check passes every other test.
+That one test would have caught both buggy implementations before they
+shipped, and it persuades better than a paragraph describing the bug, because
+it is a runnable claim, not an assertion.
 
+<Checkpoint question="Notifications adopted the library in week 2 with almost no discussion. Why did the identical RFC and code land so differently for search-indexing?">
 
-def test_non_retryable_status_returns_on_first_attempt():
-    calls = []
-
-    def make_request():
-        calls.append(1)
-        return FakeResponse(400)
-
-    result = with_retry(make_request)
-    assert len(calls) == 1
-    assert result.status_code == 400
-
-
-def test_retryable_status_retries_up_to_max_attempts():
-    calls = []
-
-    def make_request():
-        calls.append(1)
-        return FakeResponse(503)
-
-    result = with_retry(make_request, RetryConfig(base_delay_seconds=0))
-    assert len(calls) == 3
-    assert result.status_code == 503
-
-
-def test_success_stops_retrying_early():
-    calls = []
-
-    def make_request():
-        calls.append(1)
-        return FakeResponse(200) if len(calls) == 2 else FakeResponse(503)
-
-    result = with_retry(make_request, RetryConfig(base_delay_seconds=0))
-    assert len(calls) == 2
-    assert result.status_code == 200
-```
-
-The whole point of `test_non_retryable_status_returns_on_first_attempt`
-is the bug this unit opened with: without it, this exact test would have
-caught both buggy implementations at notifications and search-indexing
-before they ever shipped. That single test is doing more persuasive work
-in the RFC than a paragraph of prose describing the bug would — it's a
-runnable, falsifiable claim, not an assertion.
-
-<Checkpoint question="Notifications adopted it in week 2 with almost no discussion. Why did the exact same RFC, code, and pitch land so differently for search-indexing?">
-
-The RFC and code weren't the variable — the underlying problem was.
-Notifications' retry logic had the same shape of bug as payments' (retry
-everything, including non-retryable errors), so the fix mapped over
-directly with nothing left to argue about. Search-indexing's retry logic
-has a different failure mode layered on top — a retried request can
-re-run side effects (re-indexing a document) rather than just repeating
-a safe read, so `with_retry()` alone doesn't fully solve their problem
-even though it's still correct as far as it goes. This is the general
-shape of real cross-team adoption: a fix that's a complete solution for
-one team can be a partial, still-useful solution for another, and
-treating every "no" as resistance rather than checking whether it's a
-genuine gap in the proposal is exactly the mistake that turns a real
-technical objection into an unnecessary fight.
+The RFC and the code weren't the variable; the underlying problem was.
+Notifications had the same shape of bug as payments (retrying everything,
+including errors that can't succeed), so the fix mapped over directly and
+left nothing to argue about. Search-indexing has a second failure mode on
+top: a retried request can re-run a side effect such as indexing a document
+again, which the status check does not address. The fix was correct as far as
+it went and incomplete for them. Reading every "no" as resistance would have
+turned a genuine gap in the proposal into an unnecessary fight.
 
 </Checkpoint>
 
-## What Dana does with Owen's objection
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="pushback-response"
+/>
 
-Owen's objection is specific and technically correct: `with_retry()`
-guards against retrying a request that can't succeed, but says nothing
-about a request that succeeds twice with a side effect that isn't safe
-to repeat (indexing the same document twice). Dana's options at this
-point, and what each one actually costs:
+## What does Dana do with Owen's objection?
 
-| Response                                                       | What it costs                                                          |
-| -------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Argue the point away, insist the library is "close enough"     | Burns the trust that made notifications' fast adoption possible        |
-| Quietly drop search-indexing from the rollout                  | Leaves a real, known bug pattern unfixed in one more codebase          |
-| Treat the objection as a real design input, extend the library | Costs a week of extra work; produces a genuinely better shared library |
+Owen's point is specific and correct: the library guards against retrying a
+request that can't succeed, but says nothing about a request that succeeds
+twice with a side effect that isn't safe to repeat. Dana has three options.
 
-Dana takes the third option: she pairs with Owen for half a day, and
-they add an optional `idempotency_key` parameter to `RetryConfig` — when
-set, `with_retry()` passes the same key on every attempt so the
-downstream indexing service (which Owen's team already had the hooks
-for) can detect and skip a duplicate. This is not a compromise that
-waters down the original fix; the non-retryable-status check payments
-needed is untouched, and search-indexing gets an additional guarantee
-layered on top of it.
+| Response                                                  | What it costs                                                    |
+| --------------------------------------------------------- | ---------------------------------------------------------------- |
+| Argue it away: insist the library is "close enough"       | Spends the trust that made notifications' fast adoption possible |
+| Quietly drop search-indexing from the rollout             | Leaves a known bug pattern unfixed in one more codebase          |
+| Treat it as design input and extend the library with Owen | About a week of extra work, and a better shared library          |
+
+She takes the third. She pairs with Owen for half a day, and together they add
+an optional idempotency key: when set, the library sends the same key on every
+attempt so the downstream indexing service, which Owen's team already had hooks
+for, can recognize and skip a duplicate. The status check payments needed is
+untouched, so this adds a guarantee instead of watering down the original fix.
+The same gap matters to payments as well: any retry of a request that charges
+or writes something carries the same duplicate risk, so Owen's objection
+improved the library for the team it was written for.
 
 ```mermaid
 sequenceDiagram
-    participant Owen as Owen (search-indexing lead)
+    participant Owen as Owen (search-indexing)
     participant Dana
-    Owen->>Dana: "Your library doesn't handle idempotency"
-    Dana->>Owen: Pairs for half a day, reads the actual failure mode
-    Dana->>Dana: Adds idempotency_key param, keeps existing behavior intact
-    Dana->>Owen: Opens PR against shared library, tags Owen as reviewer
-    Owen->>Dana: Approves — search-indexing adopts week 6
+    Owen->>Dana: "Your library doesn't handle repeated side effects"
+    Dana->>Owen: Pairs for half a day, learns how duplicates are detected
+    Dana->>Dana: Adds optional idempotency key, existing behavior intact
+    Dana->>Owen: Opens PR against the shared library, tags Owen
+    Owen->>Dana: Approves, search-indexing adopts in week 6
 ```
 
-**Why does pairing do something a written reply to Owen's comment
-couldn't?** Owen's objection was correct but incomplete from Dana's side
-— she didn't yet know exactly how search-indexing's indexing pipeline
-detected duplicates, and a written back-and-forth would have taken
-several slow async rounds to extract that detail (the same round-trip
-cost L2's leverage-point discussion flagged). Half a day of pairing let
-Dana ask follow-up questions in real time and see the actual downstream
-service's duplicate-detection hook, which is what made the real fix
-possible instead of a fix based on a guess at what Owen meant.
+**Why did pairing do something a written reply couldn't?** Dana didn't yet
+know how search-indexing detects duplicates, and extracting that over written
+comments would have taken several slow rounds. Half a day together let her
+ask follow-ups in real time and see the actual hook, so the fix rested on
+Owen's real constraint instead of a guess at what he meant.
 
-## When the order inverts: gather input before building
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="pairing-value"
+/>
 
-L2 established code-first as the default because Dana already had high
-confidence the non-retryable-status bug was worth fixing and knew
-roughly what the fix looked like. That default doesn't hold everywhere —
-**what property of a decision would make gathering input first the
-better order, even for someone with Dana's credibility?**
+## When should the order invert?
 
-Code-first assumes the proposer already has enough conviction and
-context to build something worth reacting to. When the actual design
-space is genuinely open — multiple defensible directions exist and the
-person best positioned to build isn't the person who knows the most
-about the trade-offs — writing a short options memo and getting input
-_before_ anyone builds anything avoids sinking real implementation time
-into a direction that a five-minute conversation would have redirected.
-Search-indexing's idempotency handling is closer to this case in
-miniature: rather than Dana guessing at a design and presenting it as
-another finished PR, pairing with Owen first (gathering his team's
-actual constraint) before writing the `idempotency_key` code produced a
-better result faster than build-then-pitch would have for that specific
-piece.
+L2 made code-first the default because Dana was already confident the bug was
+worth fixing and roughly knew the fix. **What property of a decision would make
+gathering input first the better order, even for someone with Dana's
+credibility?**
 
-| Decision property                                      | Better order           |
-| ------------------------------------------------------ | ---------------------- |
-| Proposer already has strong evidence and a working fix | Code first, then RFC   |
-| Multiple genuinely open directions, unclear which wins | Input first, then code |
-| The people affected have context the proposer lacks    | Input first, then code |
+Code-first assumes the proposer has enough conviction and context to build
+something worth reacting to. When the design space is genuinely open, or the
+people affected hold context the proposer lacks, a short options memo and a
+conversation before building can redirect work that would otherwise be sunk.
+The idempotency piece was a small version of this: pairing with Owen before
+writing any key-handling code beat building a guess and pitching it.
+
+| Decision property                                     | Better order           |
+| ----------------------------------------------------- | ---------------------- |
+| Strong evidence and a fix the proposer already trusts | Code first, then RFC   |
+| Several defensible directions, unclear which wins     | Input first, then code |
+| The people affected have context the proposer lacks   | Input first, then code |
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="invert-order"
+/>
 
 ## Extending past Dana's example
 
-Every step of this walkthrough assumed a proposer with a full year of
-built-up credibility already in the bank, three teams, and a purely
-technical objection (idempotency) from the one team that pushed back.
-Consider two different versions of this same situation and how the
-technique would need to change: **first, what would Dana need to do
-differently in week 1 if she were new to the org — six months in, no
-track record yet — trying to drive the same fix? Second, suppose Owen's
-actual objection in week 4 wasn't idempotency at all, but "my team
-already spent two sprints building our own retry logic and adopting
-yours makes that work look wasted" — a status objection dressed as a
-technical one. Does the code-review-and-pairing playbook from this unit
-still work on that version of the objection, or does it call for a
-different channel entirely?**
+Dana's six weeks is one case, not the whole territory. It assumed a proposer
+with a year of earned credibility, three teams, and a purely technical
+objection from the one team that pushed back. Real situations vary on all
+three.
+
+<Checkpoint question="Suppose Dana were six months into the org with no track record. Which channel gets more weight in week 1, and why?">
+
+Relationships and review would carry more of the early weight, and code would
+need to be even more visibly solid. Without earned trust, an RFC is easy to
+ignore, so Dana would lean on small, useful reviews and a fix that is
+undeniably working in her own team's code before asking anyone to read a
+proposal. The timeline would stretch accordingly, which is the same
+relationship the unit's interactive demo lets you drag: less trust, longer
+adoption.
+
+</Checkpoint>
+
+Try these on your own. **First, suppose Owen's real objection in week 4 wasn't
+idempotency but "my team already spent two sprints building our own retry
+logic, and adopting yours makes that look wasted." That is a status concern
+dressed as a technical one. Does review-and-pairing still work, or does it
+call for a different channel?** **Second, suppose the shared library had to be
+adopted by a team that is hostile to Dana personally. Who else could carry the
+message, and which channel does that move you toward?**
