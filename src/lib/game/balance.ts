@@ -48,7 +48,7 @@ export function exposure(id: WeaponId, level: number): number {
 }
 
 // Furthest an enemy can be from the player's center and still be hit.
-export const BLADE_ARC_RADIUS = 60;
+export const BLADE_ARC_RADIUS = 68;
 // Center-to-center distance at which a typical enemy stands against the
 // player (player radius 14 + enemy radius 12). A weapon that claims to cover
 // enemies on top of you has to reach this — the orbit once did not, and
@@ -87,7 +87,7 @@ export function bladeArcShape(level: number) {
   const evolved = level >= WEAPON_MAX_LEVEL; // Whirlwind
   return {
     intervalMs: evolved ? 350 : 700 - (level - 1) * 70,
-    arcDeg: evolved ? 360 : 70 + (level - 1) * 15,
+    arcDeg: evolved ? 360 : 100 + (level - 1) * 15,
   };
 }
 
@@ -102,23 +102,23 @@ export function orbitShieldShape(level: number) {
 
 export function novaPulseShape(level: number) {
   return {
-    intervalMs: 2500 - (level - 1) * 250,
-    radius: 70 + (level - 1) * 12,
+    intervalMs: 2000 - (level - 1) * 200,
+    radius: 62 + (level - 1) * 15,
   };
 }
 
 export function homingDartShape(level: number) {
   const evolved = level >= WEAPON_MAX_LEVEL; // Swarm
   return {
-    intervalMs: evolved ? 1400 : 1200 - (level - 1) * 40,
-    count: evolved ? 5 : level >= 4 ? 2 : 1,
+    intervalMs: evolved ? 1200 : 900 - (level - 1) * 50,
+    count: evolved ? 5 : level >= 2 ? 2 : 1,
   };
 }
 
 export function chainLightningShape(level: number) {
   const evolved = level >= WEAPON_MAX_LEVEL; // Storm Chain
   return {
-    intervalMs: evolved ? 700 : 1000 - (level - 1) * 80,
+    intervalMs: evolved ? 700 : 1000 - (level - 1) * 100,
     maxJumps: evolved ? Infinity : 2 + Math.floor((level - 1) / 2),
   };
 }
@@ -178,17 +178,25 @@ export function damageMultiplierPerS(id: WeaponId, level: number): number {
   }
 }
 
-// Some weapons are safe but waste damage getting it there. Darts fly slowly
-// at a random target, so a good share of every volley lands late or on
-// something that was about to die anyway; measured at ~20% fewer kills than
-// a Bolt on the same budget, so the budget is raised to match.
-export const DELIVERY_BONUS: Partial<Record<WeaponId, number>> = {
-  homingDart: 1.25,
+// Room for a weapon that is safe but wastes damage getting it there. Empty
+// now: CALIBRATION absorbs what measurement shows.
+export const DELIVERY_BONUS: Partial<Record<WeaponId, number>> = {};
+
+// Measured correction per weapon and level, fitted against the Bolt (the
+// baseline) by `bun run balance:lab -- --fit`: 1 means the model was right.
+export const CALIBRATION: Record<WeaponId, number[]> = {
+  bolt: [1, 1, 1, 1, 1, 1],
+  homingDart: [1, 1, 1, 1, 1, 1],
+  chainLightning: [1, 1, 1, 1, 1, 1],
+  novaPulse: [1, 1, 1, 1, 1, 1],
+  orbitShield: [1, 1, 1, 1, 1, 1],
+  bladeArc: [1, 1, 1, 1, 1, 1],
 };
 
 export function targetDps(id: WeaponId, level: number): number {
   return (
     SAFE_DPS_BUDGET[level - 1] *
+    CALIBRATION[id][level - 1] *
     (1 + EXPOSURE_BONUS * exposure(id, level)) *
     (DELIVERY_BONUS[id] ?? 1)
   );

@@ -9,6 +9,7 @@
 // update() itself, and canvas/DOM are stubbed (nothing here renders).
 import { mock } from "bun:test";
 import type { WeaponId } from "../src/lib/game/engine";
+import { CALIBRATION, exposure } from "../src/lib/game/balance";
 
 // The bare name resolves to kontra's UMD build, which has no named exports.
 const kontraEsm = "../node_modules/kontra/kontra.mjs";
@@ -57,7 +58,13 @@ const stubContext = new Proxy(
   { get: () => () => {}, set: () => true },
 ) as CanvasRenderingContext2D;
 
-function run(weaponId: WeaponId, level: number, seconds: number, seed: number) {
+function run(
+  weaponId: WeaponId,
+  level: number,
+  seconds: number,
+  seed: number,
+  spawnRateMult: number,
+) {
   let s = seed;
   Math.random = () => (s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32;
   const canvas = {
@@ -91,7 +98,11 @@ function run(weaponId: WeaponId, level: number, seconds: number, seed: number) {
         choose((cards.find((c) => c.kind === "stat") ?? cards[0]).id);
       },
     },
-    { durationS: seconds + 5, startingWeapon: { id: weaponId, level } },
+    {
+      durationS: seconds + 5,
+      startingWeapon: { id: weaponId, level },
+      spawnRateMult,
+    },
   );
   for (let i = 0; i < seconds * 60 && !ended; i++) {
     const a = (i / 60) * 1.3;
@@ -111,35 +122,79 @@ const weapons: WeaponId[] = [
   "orbitShield",
   "bladeArc",
 ];
-const seconds = Number(process.argv[2] ?? 60);
-const seeds = [3, 11, 29, 57, 101];
+const args = process.argv.slice(2);
+const flag = (name: string) => args.includes(`--${name}`);
+const option = (name: string, fallback: number) => {
+  const i = args.indexOf(`--${name}`);
+  return i >= 0 ? Number(args[i + 1]) : fallback;
+};
+const seconds = Number(args.find((a) => /^\d+$/.test(a)) ?? 60);
+const dense = flag("dense") || flag("fit");
+const spawnRateMult = dense ? option("spawn", 3) : 1;
+const seeds = [3, 11, 29, 57, 101].slice(0, option("seeds", 5));
 
-for (const m of ["stand", "circle"] as const) {
+function measure(id: WeaponId, level: number, m: typeof mode) {
   mode = m;
-  for (const level of [1, 3, 6]) {
-    console.log(
-      `\nLevel ${level} — player ${m === "stand" ? "standing still" : "circling"}, ${seconds}s, mean of ${seeds.length} seeds`,
-    );
-    console.log(
-      "weapon".padEnd(16) +
-        "kills".padStart(7) +
-        "HP lost".padStart(9) +
-        "HP/kill".padStart(9) +
-        "survived".padStart(10),
-    );
-    for (const id of weapons) {
-      const rs = seeds.map((sd) => run(id, level, seconds, sd));
-      const mean = (f: (r: (typeof rs)[number]) => number) =>
-        rs.reduce((a, r) => a + f(r), 0) / rs.length;
-      const k = mean((r) => r.kills);
-      const t = mean((r) => r.taken);
+  const rs = seeds.map((sd) => run(id, level, seconds, sd, spawnRateMult));
+  const mean = (f: (r: (typeof rs)[number]) => number) =>
+    rs.reduce((a, r) => a + f(r), 0) / rs.length;
+  return {
+    kills: mean((r) => r.kills),
+    taken: mean((r) => r.taken),
+    survived: mean((r) => r.survived),
+  };
+}
+
+if (flag("fit")) {
+  // Fits CALIBRATION for one level so every weapon kills what the Bolt does
+  // in a dense wave, times a premium for the exposure it accepts. Kills in a
+  // dense wave fold killing power and survival into one number.
+  const EXPOSURE_KILL_PREMIUM = 0.4;
+  const level = option("level", 1);
+  const modes = ["stand", "circle"] as const;
+  const avgKills = (id: WeaponId) =>
+    modes.reduce((a, m) => a + measure(id, level, m).kills, 0) / modes.length;
+  const baseline = avgKills("bolt");
+  console.log(`level ${level}: Bolt baseline ${baseline.toFixed(1)} kills`);
+  for (const id of weapons.filter((w) => w !== "bolt")) {
+    const want = baseline * (1 + EXPOSURE_KILL_PREMIUM * exposure(id, level));
+    for (let step = 0; step < option("steps", 5); step++) {
+      const got = avgKills(id);
+      const factor = CALIBRATION[id][level - 1];
       console.log(
-        id.padEnd(16) +
-          k.toFixed(0).padStart(7) +
-          t.toFixed(0).padStart(9) +
-          (t / Math.max(k, 1)).toFixed(1).padStart(9) +
-          `${mean((r) => r.survived).toFixed(0)}s`.padStart(10),
+        `  ${id} L${level} step ${step}: ${got.toFixed(1)} kills (want ${want.toFixed(1)}) at x${factor.toFixed(2)}`,
       );
+      if (Math.abs(got - want) / want < 0.06) break;
+      CALIBRATION[id][level - 1] = Math.min(
+        4,
+        Math.max(0.4, factor * (want / Math.max(got, 1)) ** 0.8),
+      );
+    }
+    console.log(`FIT ${id} ${level} ${CALIBRATION[id][level - 1].toFixed(2)}`);
+  }
+} else {
+  for (const m of ["stand", "circle"] as const) {
+    for (const level of [1, 3, 6]) {
+      console.log(
+        `\nLevel ${level} — player ${m === "stand" ? "standing still" : "circling"}, ${seconds}s${dense ? `, dense x${spawnRateMult}` : ""}, mean of ${seeds.length} seeds`,
+      );
+      console.log(
+        "weapon".padEnd(16) +
+          "kills".padStart(7) +
+          "HP lost".padStart(9) +
+          "HP/kill".padStart(9) +
+          "survived".padStart(10),
+      );
+      for (const id of weapons) {
+        const r = measure(id, level, m);
+        console.log(
+          id.padEnd(16) +
+            r.kills.toFixed(0).padStart(7) +
+            r.taken.toFixed(0).padStart(9) +
+            (r.taken / Math.max(r.kills, 1)).toFixed(1).padStart(9) +
+            `${r.survived.toFixed(0)}s`.padStart(10),
+        );
+      }
     }
   }
 }

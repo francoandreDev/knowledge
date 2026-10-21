@@ -713,6 +713,9 @@ export interface GameOptions {
   /** Start with this weapon at this level instead of a level-1 Bolt. The lab
    * implies it from `training`; balance measurements set it on real runs. */
   startingWeapon?: { id: WeaponId; level: number };
+  /** Benchmarks only: spawn this many times faster, so a fixed-length run is
+   * a dense wave a weapon can't fully clear (kills stop saturating). */
+  spawnRateMult?: number;
 }
 
 export interface TrainingOptions {
@@ -2019,11 +2022,15 @@ export function startGame(
           const candidates = enemies.filter((e) => e.alive);
           if (candidates.length > 0) {
             w.lastActionAt = elapsedMs;
+            const byDistance = [...candidates].sort(
+              (a, b) => distance(player, a) - distance(player, b),
+            );
             const damage =
               weaponDamage("homingDart", w.level) * totalDamageMult();
             for (let i = 0; i < count; i++) {
-              const target =
-                candidates[Math.floor(Math.random() * candidates.length)];
+              // The nearest threats first, one dart each — a random pick sent
+              // darts after enemies that weren't the problem yet.
+              const target = byDistance[i % byDistance.length];
               const baseAngle = Math.atan2(
                 target.y - player.y,
                 target.x - player.x,
@@ -2444,7 +2451,8 @@ export function startGame(
       }
 
       // --- spawning (exponential-ish ramp, floored — see file header) ---
-      const spawnIntervalMs = currentSpawnIntervalMs(elapsedS);
+      const spawnIntervalMs =
+        currentSpawnIntervalMs(elapsedS) / (options.spawnRateMult ?? 1);
       if (elapsedMs - lastSpawnAt >= spawnIntervalMs) {
         lastSpawnAt = elapsedMs;
         spawnEnemy(elapsedS);
