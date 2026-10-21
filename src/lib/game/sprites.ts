@@ -76,6 +76,12 @@ function traceShapePath(
 
 const OUTLINE = "#0f172a";
 
+// Sprites are drawn larger than their simulation radius so the faces read at
+// the canvas's small size; hitboxes (engine.ts) are untouched.
+const PLAYER_SCALE = 1.4;
+const ENEMY_SCALE = 1.35;
+const PICKUP_SCALE = 1.5;
+
 // Draws a filled shape with a thick dark outline and a hard offset shadow —
 // the same sticker look as the site's game buttons — with an optional glow
 // (shadowBlur) and an optional white hit-flash overlay of the same silhouette.
@@ -224,6 +230,7 @@ export function drawPlayer(
   facingAngle: number,
   hitFlashAlpha = 0,
 ) {
+  radius *= PLAYER_SCALE;
   drawShape(ctx, "circle", x, y, radius, color, { flashAlpha: hitFlashAlpha });
   // Eyes look toward the last movement direction, so the player reads as
   // oriented even though the body itself is symmetric.
@@ -259,7 +266,7 @@ export function drawEnemy(
   color: string,
   opts: ShapeOptions = {},
 ) {
-  const r = radius;
+  const r = radius * ENEMY_SCALE;
   const line = Math.max(1.2, r * 0.17);
   // Horns sit behind the body, so they're drawn first.
   if (kind === "ogre") {
@@ -407,6 +414,7 @@ export function drawGem(
   radius: number,
   color: string,
 ) {
+  radius *= PICKUP_SCALE;
   drawShape(ctx, "diamond", x, y, radius, color);
   // Pale facet on the upper right.
   ctx.save();
@@ -427,6 +435,7 @@ export function drawCoin(
   radius: number,
   color: string,
 ) {
+  radius *= PICKUP_SCALE;
   drawShape(ctx, "circle", x, y, radius, color);
   ctx.save();
   ctx.strokeStyle = "#a16207";
