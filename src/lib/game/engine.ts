@@ -160,13 +160,28 @@ import {
   drawProjectile,
   drawImpactBurst,
 } from "./sprites";
+import {
+  BLADE_ARC_RADIUS,
+  CHAIN_LIGHTNING_JUMP_DECAY,
+  ORBIT_HIT_COOLDOWN_MS,
+  PLAYER_HIT_COOLDOWN_MS,
+  QUICK_RECOVERY_HPS,
+  QUICK_RECOVERY_MAX_STACKS,
+  WEAPON_MAX_LEVEL,
+  bladeArcShape,
+  boltShape,
+  chainLightningShape,
+  homingDartShape,
+  novaPulseShape,
+  orbitShieldShape,
+  weaponDamage,
+} from "./balance";
 
 const log = createLogger("engine");
 
 const PLAYER_SPEED = 160; // px/s
 const PLAYER_RADIUS = 14;
 const PLAYER_MAX_HP = 100;
-const PLAYER_HIT_COOLDOWN_MS = 600; // i-frames, melee contact only
 const CONTACT_DAMAGE = 8; // fallback if an enemy def is somehow missing one
 
 // --- Phase 7: dynamic virtual joystick ---
@@ -511,15 +526,11 @@ const EVOLUTION_BLURB: Record<WeaponId, string> = {
   chainLightning: "Unlimited chain jumps within range",
 };
 
-const WEAPON_MAX_LEVEL = 6; // level 6 is each weapon's evolved form
 const MAX_EQUIPPED_WEAPONS = 4;
 
-const BLADE_ARC_RADIUS = 60;
 const ARC_EFFECT_DURATION_MS = 180;
 
-const ORBIT_HIT_RADIUS = 10;
 const ORBIT_VISUAL_RADIUS = 6;
-const ORBIT_HIT_COOLDOWN_MS = 400;
 const ORBIT_TRAIL_DROP_INTERVAL_MS = 80; // Barrier Storm evolution (Lv6)
 const ORBIT_TRAIL_LIFETIME_MS = 900;
 const ORBIT_TRAIL_VISUAL_RADIUS = 5;
@@ -540,7 +551,6 @@ const HOMING_DART_TURN_RATE = 4; // rad/s
 // --- Phase 15: Chain Lightning, the locked 6th weapon (see
 // BASE_WEAPON_IDS above) ---
 const CHAIN_LIGHTNING_JUMP_RANGE = 140; // max distance to the next unhit enemy
-const CHAIN_LIGHTNING_JUMP_DECAY = 0.75; // each successive jump deals less
 const CHAIN_EFFECT_DURATION_MS = 200;
 
 // --- Phase 16C: weapon/upgrade synergies — a small curated named list
@@ -591,8 +601,8 @@ const TEMP_STATS: TempStatDef[] = [
   {
     id: "quickRecovery",
     label: "Quick Recovery",
-    effect: "+0.5 HP/s regen",
-    maxStacks: 3,
+    effect: `+${QUICK_RECOVERY_HPS} HP/s regen`,
+    maxStacks: QUICK_RECOVERY_MAX_STACKS,
   },
   {
     id: "luckyStar",
@@ -628,7 +638,18 @@ export interface GameHudState {
   level: number;
   xp: number;
   xpToNext: number;
-  weapons: { id: WeaponId; level: number }[];
+  weapons: {
+    id: WeaponId;
+    level: number;
+    /** Enemies this weapon has killed this run. */
+    kills: number;
+    /** Damage this weapon has actually dealt (overkill excluded). */
+    damage: number;
+  }[];
+  /** Seconds survived so far — lets the lab turn totals into rates. */
+  elapsedS: number;
+  /** HP regenerated per second right now (cards + shop). */
+  regenPerS: number;
   /** Phase 13: 1-based, capped at 5 — cosmetic readout of enemyTimeScale()'s
    * underlying ramp, so the player sees difficulty rising, not just feels it. */
   threatTier: number;
@@ -684,6 +705,21 @@ export interface GameOptions {
    * Might" weapon synergy's threshold check. See shop.ts's
    * getUpgradeLevel("might"). */
   mightLevel?: number;
+  /** Balance lab: one weapon at a chosen level, nothing can hurt the player,
+   * enemies can't come closer than `standoffPx` (surface to surface), and an
+   * optional constant HP drain stands in for incoming damage so recovery can
+   * be felt against a known rate. No level-ups, no rewards. */
+  training?: TrainingOptions;
+  /** Start with this weapon at this level instead of a level-1 Bolt. The lab
+   * implies it from `training`; balance measurements set it on real runs. */
+  startingWeapon?: { id: WeaponId; level: number };
+}
+
+export interface TrainingOptions {
+  weaponId: WeaponId;
+  weaponLevel: number;
+  standoffPx: number;
+  drainPerS: number;
 }
 
 interface Enemy extends GameObject {
@@ -1073,9 +1109,28 @@ export function startGame(
   let orbiterPositions: { x: number; y: number }[] = [];
 
   // --- Phase 3: weapons, leveling, run-only stat modifiers ---
+  const training = options.training;
+  const startingWeapon =
+    options.startingWeapon ??
+    (training
+      ? { id: training.weaponId, level: training.weaponLevel }
+      : { id: "bolt" as WeaponId, level: 1 });
   const ownedWeapons: WeaponRuntime[] = [
-    { id: "bolt", level: 1, lastActionAt: 0 },
+    {
+      id: startingWeapon.id,
+      level: Math.min(WEAPON_MAX_LEVEL, Math.max(1, startingWeapon.level)),
+      lastActionAt: 0,
+    },
   ];
+  // Per-weapon kill and damage counters. Synergy hits with no single owner
+  // (Storm Web, Overcharge) are credited to the weapon that triggered them.
+  const weaponStats: Partial<
+    Record<WeaponId, { kills: number; damage: number }>
+  > = {};
+  const SYNERGY_SOURCE_OWNER: Record<string, WeaponId> = {
+    stormWeb: "orbitShield",
+    overcharge: "novaPulse",
+  };
   let playerLevel = 1;
   let xp = 0;
   let pendingLevelUps = 0;
@@ -1145,7 +1200,14 @@ export function startGame(
       level: playerLevel,
       xp,
       xpToNext: xpForNextLevel(playerLevel),
-      weapons: ownedWeapons.map((w) => ({ id: w.id, level: w.level })),
+      weapons: ownedWeapons.map((w) => ({
+        id: w.id,
+        level: w.level,
+        kills: weaponStats[w.id]?.kills ?? 0,
+        damage: Math.round(weaponStats[w.id]?.damage ?? 0),
+      })),
+      elapsedS: elapsedMs / 1000,
+      regenPerS: hpRegenPerS + upgradeEffects.regenPerS,
       threatTier: computeThreatTier(elapsedMs / 1000),
       lowHp: player.hp > 0 && player.hp / effectiveMaxHp() <= LOW_HP_THRESHOLD,
     });
@@ -1311,7 +1373,15 @@ export function startGame(
     const finalAmount = e.shieldWalled
       ? amount * (1 - SHIELD_WALL_DAMAGE_REDUCTION)
       : amount;
+    const dealt = Math.min(finalAmount, Math.max(0, e.hp));
     e.hp -= finalAmount;
+    const owner =
+      weaponIdForSource(source) ?? SYNERGY_SOURCE_OWNER[source] ?? null;
+    if (owner) {
+      const stats = (weaponStats[owner] ??= { kills: 0, damage: 0 });
+      stats.damage += dealt;
+      if (e.hp <= 0 && e.alive) stats.kills += 1;
+    }
     e.hitFlashUntil = elapsedMs + HIT_FLASH_MS;
     hitSparks.push({ x: e.x, y: e.y, createdAt: elapsedMs });
     damageNumbers.push({
@@ -1567,6 +1637,7 @@ export function startGame(
   }
 
   function damagePlayer(amount: number, source: string) {
+    if (training) return; // the lab never hurts the player
     player.hp = Math.max(0, player.hp - amount);
     playerHitFlashUntil = elapsedMs + HIT_FLASH_MS;
     lastDamageSource = source;
@@ -1578,6 +1649,7 @@ export function startGame(
   }
 
   function addXp(amount: number) {
+    if (training) return; // the lab tests one weapon at one level
     xp += amount;
     let leveledUp = false;
     while (xp >= xpForNextLevel(playerLevel)) {
@@ -1610,7 +1682,7 @@ export function startGame(
         pickupRadiusMult += 0.1;
         break;
       case "quickRecovery":
-        hpRegenPerS += 0.5;
+        hpRegenPerS += QUICK_RECOVERY_HPS;
         break;
       case "luckyStar":
         extraCoinChance += 0.1;
@@ -1771,20 +1843,12 @@ export function startGame(
     switch (w.id) {
       case "bolt": {
         const isEvolved = w.level >= WEAPON_MAX_LEVEL; // Piercing Lance
-        const interval = isEvolved ? 350 : 550 - (w.level - 1) * 60;
+        const { intervalMs: interval, count, pierce } = boltShape(w.level);
         if (elapsedMs - w.lastActionAt >= interval) {
           const target = findNearestEnemy();
           if (target) {
             w.lastActionAt = elapsedMs;
-            const damage = (6 + (w.level - 1) * 2) * totalDamageMult();
-            const pierce = isEvolved ? Infinity : w.level >= 4 ? 1 : 0;
-            const count = isEvolved
-              ? 1
-              : w.level >= 5
-                ? 3
-                : w.level >= 3
-                  ? 2
-                  : 1;
+            const damage = weaponDamage("bolt", w.level) * totalDamageMult();
             const baseAngle = Math.atan2(
               target.y - player.y,
               target.x - player.x,
@@ -1807,16 +1871,15 @@ export function startGame(
       }
       case "bladeArc": {
         const isEvolved = w.level >= WEAPON_MAX_LEVEL; // Whirlwind
-        const interval = isEvolved ? 250 : 700 - (w.level - 1) * 70;
+        const { intervalMs: interval, arcDeg } = bladeArcShape(w.level);
         if (elapsedMs - w.lastActionAt >= interval) {
           const target = findNearestEnemy();
           const facing = target
             ? Math.atan2(target.y - player.y, target.x - player.x)
             : 0;
           w.lastActionAt = elapsedMs;
-          const arcDeg = isEvolved ? 360 : 70 + (w.level - 1) * 15;
           const halfArc = isEvolved ? Math.PI : (arcDeg * Math.PI) / 180 / 2;
-          const damage = (10 + (w.level - 1) * 3) * totalDamageMult();
+          const damage = weaponDamage("bladeArc", w.level) * totalDamageMult();
           for (const e of enemies) {
             if (!e.alive) continue;
             const d = distance(player, e);
@@ -1847,10 +1910,11 @@ export function startGame(
         const hasStormWeb = ownedWeapons.some(
           (ow) => ow.id === "chainLightning",
         );
-        w.orbitAngle = (w.orbitAngle ?? 0) + (1.5 + (w.level - 1) * 0.3) * dt;
-        const count = w.level >= 3 ? 2 : 1;
-        const radius = 50 + (w.level - 1) * 6;
-        const damage = (5 + (w.level - 1) * 2) * totalDamageMult();
+        const { count, radius, hitRadius, rotationRadPerS } = orbitShieldShape(
+          w.level,
+        );
+        w.orbitAngle = (w.orbitAngle ?? 0) + rotationRadPerS * dt;
+        const damage = weaponDamage("orbitShield", w.level) * totalDamageMult();
         const positions: { x: number; y: number }[] = [];
         const shouldDropTrail =
           isEvolved &&
@@ -1863,7 +1927,7 @@ export function startGame(
           positions.push({ x: ox, y: oy });
           for (const e of enemies) {
             if (!e.alive) continue;
-            if (distance({ x: ox, y: oy }, e) < ORBIT_HIT_RADIUS + e.radius) {
+            if (distance({ x: ox, y: oy }, e) < hitRadius + e.radius) {
               if (
                 elapsedMs - (e.lastOrbitHitAt ?? -Infinity) >=
                 ORBIT_HIT_COOLDOWN_MS
@@ -1887,7 +1951,7 @@ export function startGame(
             }
             for (const e of enemies) {
               if (!e.alive) continue;
-              if (distance(t, e) < ORBIT_HIT_RADIUS + e.radius) {
+              if (distance(t, e) < hitRadius + e.radius) {
                 if (
                   elapsedMs - (e.lastOrbitHitAt ?? -Infinity) >=
                   ORBIT_HIT_COOLDOWN_MS
@@ -1904,12 +1968,10 @@ export function startGame(
       }
       case "novaPulse": {
         const isEvolved = w.level >= WEAPON_MAX_LEVEL; // Shockwave
-        const interval = 2500 - (w.level - 1) * 250;
+        const { intervalMs: interval, radius } = novaPulseShape(w.level);
         if (elapsedMs - w.lastActionAt >= interval) {
           w.lastActionAt = elapsedMs;
-          const radius = 70 + (w.level - 1) * 12;
-          let damage = (8 + (w.level - 1) * 3) * totalDamageMult();
-          if (isEvolved) damage *= 2;
+          const damage = weaponDamage("novaPulse", w.level) * totalDamageMult();
           for (const e of enemies) {
             if (!e.alive) continue;
             if (distance(player, e) <= radius) {
@@ -1933,7 +1995,7 @@ export function startGame(
           if (ownedWeapons.some((ow) => ow.id === "bolt")) {
             maybeTriggerSynergy("Overcharge");
             const boltDamage =
-              (8 + (w.level - 1) * 3) *
+              weaponDamage("novaPulse", w.level) *
               OVERCHARGE_BOLT_DAMAGE_MULT *
               totalDamageMult();
             for (let i = 0; i < OVERCHARGE_BOLT_COUNT; i++) {
@@ -1952,13 +2014,13 @@ export function startGame(
       }
       case "homingDart": {
         const isEvolved = w.level >= WEAPON_MAX_LEVEL; // Swarm
-        const interval = isEvolved ? 1400 : 1200 - (w.level - 1) * 100;
+        const { intervalMs: interval, count } = homingDartShape(w.level);
         if (elapsedMs - w.lastActionAt >= interval) {
-          const count = isEvolved ? 5 : w.level >= 3 ? 2 : 1;
           const candidates = enemies.filter((e) => e.alive);
           if (candidates.length > 0) {
             w.lastActionAt = elapsedMs;
-            const damage = (5 + (w.level - 1) * 2) * totalDamageMult();
+            const damage =
+              weaponDamage("homingDart", w.level) * totalDamageMult();
             for (let i = 0; i < count; i++) {
               const target =
                 candidates[Math.floor(Math.random() * candidates.length)];
@@ -1983,16 +2045,16 @@ export function startGame(
         break;
       }
       case "chainLightning": {
-        const isEvolved = w.level >= WEAPON_MAX_LEVEL; // Storm Chain
-        const interval = isEvolved ? 700 : 1000 - (w.level - 1) * 80;
+        const { intervalMs: interval, maxJumps: shapeJumps } =
+          chainLightningShape(w.level);
         if (elapsedMs - w.lastActionAt >= interval) {
           const start = findNearestEnemy();
           if (start) {
             w.lastActionAt = elapsedMs;
-            const damage = (7 + (w.level - 1) * 2) * totalDamageMult();
-            const maxJumps = isEvolved
-              ? enemies.length // effectively unbounded within jump range
-              : 2 + Math.floor((w.level - 1) / 2); // Lv1-2: 2, Lv3-4: 3, Lv5: 4
+            const damage =
+              weaponDamage("chainLightning", w.level) * totalDamageMult();
+            // Unbounded (evolved) still can't exceed the enemies on screen.
+            const maxJumps = Math.min(shapeJumps, enemies.length);
             chainLightningStrike(start, damage, maxJumps);
           }
         }
@@ -2309,6 +2371,12 @@ export function startGame(
         player.hp = Math.min(effectiveMaxHp(), player.hp + totalRegenPerS * dt);
       }
 
+      // Lab only: a constant drain stands in for incoming damage so recovery
+      // can be judged against a known rate. Never kills.
+      if (training && training.drainPerS > 0) {
+        player.hp = Math.max(1, player.hp - training.drainPerS * dt);
+      }
+
       // --- player movement (keyboard, or Phase 7's virtual joystick) ---
       let moveX = 0;
       let moveY = 0;
@@ -2386,6 +2454,18 @@ export function startGame(
       for (const e of enemies) {
         if (!e.alive) continue;
         updateEnemyBehavior(e, dt);
+        if (training) {
+          const minDist = PLAYER_RADIUS + e.radius + training.standoffPx;
+          const dx = e.x - player.x;
+          const dy = e.y - player.y;
+          const d = Math.hypot(dx, dy);
+          if (d < minDist) {
+            const angle =
+              d > 0 ? Math.atan2(dy, dx) : Math.random() * Math.PI * 2;
+            e.x = player.x + Math.cos(angle) * minDist;
+            e.y = player.y + Math.sin(angle) * minDist;
+          }
+        }
         if (status !== "running") return; // damagePlayer may have ended the run
         if (distance(player, e) < PLAYER_RADIUS + e.radius) {
           if (elapsedMs - player.lastHitAt >= PLAYER_HIT_COOLDOWN_MS) {
@@ -2424,14 +2504,14 @@ export function startGame(
           spawnPlayerProjectile(
             angle,
             PROJECTILE_SPEED,
-            (6 + (twinFangsBolt.level - 1) * 2) * totalDamageMult(),
+            weaponDamage("bolt", twinFangsBolt.level) * totalDamageMult(),
             twinFangsBolt.level >= 4 ? 1 : 0,
             "bolt",
           );
           const dart = spawnPlayerProjectile(
             angle,
             HOMING_DART_SPEED,
-            (5 + (twinFangsDart.level - 1) * 2) * totalDamageMult(),
+            weaponDamage("homingDart", twinFangsDart.level) * totalDamageMult(),
             0,
             "homingDart",
           );

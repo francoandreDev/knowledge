@@ -4,6 +4,7 @@
 // (`idb`) wrapper — see the "Implementation note (Phase 5)" this file's
 // header points to in GAME-DESIGN.md for why that migration was skipped.
 import { pStorage } from "../profile";
+import { SHOP_RECOVERY_HPS_PER_LEVEL } from "./balance";
 
 const COIN_BALANCE_KEY = "game:coins";
 const UPGRADE_KEY_PREFIX = "game:upgrade:";
@@ -29,8 +30,8 @@ export interface UpgradeDef {
 // straight from GAME-DESIGN.md's table. `baseCost` and Recovery's per-level
 // regen amount aren't specified there — both are open items resolved here:
 // a uniform base cost keeps the shop's cost curve easy to reason about, and
-// Recovery's regen was set low enough (0.3 HP/s/level, capped at 3 levels)
-// that it reads as a steady trickle rather than trivializing contact damage.
+// Recovery's regen comes from balance.ts, which sizes it so a full recovery
+// build is felt against typical incoming damage without cancelling it.
 export const UPGRADES: UpgradeDef[] = [
   {
     id: "vigor",
@@ -77,7 +78,7 @@ export const UPGRADES: UpgradeDef[] = [
   {
     id: "recovery",
     label: "Recovery",
-    effectLabel: "+0.3 HP/s passive regen",
+    effectLabel: `+${SHOP_RECOVERY_HPS_PER_LEVEL} HP/s passive regen`,
     maxLevel: 3,
     baseCost: 30,
   },
@@ -212,6 +213,6 @@ export function getUpgradeEffects(): UpgradeEffects {
     pickupRadiusMult: 1 + 0.15 * getUpgradeLevel("magnetism"),
     coinMult: 1 + 0.1 * getUpgradeLevel("greed"),
     xpMult: 1 + 0.05 * getUpgradeLevel("amanuensis"),
-    regenPerS: 0.3 * getUpgradeLevel("recovery"),
+    regenPerS: SHOP_RECOVERY_HPS_PER_LEVEL * getUpgradeLevel("recovery"),
   };
 }
