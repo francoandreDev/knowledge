@@ -3197,3 +3197,12 @@ No content units this session; this was a UI redesign in two steps, each picked 
 - **Checks.** `bun run check` passes (typecheck 0 errors, validate 246 units, 9 tests, build 273 pages); both pages click-tested in a real browser, including lock, unlock and filter dimming.
 
 Next: your call. Open items are a phone-width pass on the home and roadmap, and `logic` as the next track for the three-tier exercise migration (64 of 246 migrated).
+
+## 2026-10-21 — `/game` lobby and sticker-style assets
+
+- **Lobby.** `/game` is now a loadout screen: run tokens as tiles, best-survival bar and Start on the left; upgrades (pip levels, amber "Buy" buttons), coins and unlocks on the right. The shop toggle is gone.
+- **Assets.** Same thick dark outline and hard drop shadow as the site's game buttons, applied to the whole canvas: player (eyes that look where it moves), the seven enemies and two bosses (new silhouettes for the bat, ghost and reaper, a crown on the lich), gems, coins, shots, orbiters and damage numbers. Only elites keep a glow. Icons get a thicker stroke and pastel bordered badges in the shop and level-up overlay.
+- **HUD.** Panel, HP/XP bars, stat chips, weapon chips and the three toasts restyled to match.
+- **Checks.** `bun run check` passes. Chrome's screenshots were unusable in this session (about 1.5 fps even on a static page), so the sprites were rendered offline with `@napi-rs/canvas` and compared with the design artifact; the new HUD markup was not seen rendered.
+
+Next: look at `/game` in a normal browser and tune anything that reads off; HUD, level-up overlay and results screen are the remaining unrestyled pieces.

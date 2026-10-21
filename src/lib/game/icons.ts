@@ -16,7 +16,7 @@
 // of asking the player to learn 13 unrelated shapes.
 
 const ICON_ATTRS =
-  'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+  'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"';
 
 const ICON_BLADE = `<svg ${ICON_ATTRS}><line x1="5" y1="19" x2="19" y2="5"/><line x1="14" y1="5" x2="19" y2="5"/><line x1="19" y1="5" x2="19" y2="10"/><line x1="5" y1="19" x2="10" y2="19"/></svg>`;
 
@@ -47,7 +47,7 @@ const ICON_LOCK = `<svg ${ICON_ATTRS}><rect x="5" y="11" width="14" height="10" 
 const ICON_SPARKLE = `<svg ${ICON_ATTRS} stroke-linejoin="round"><path d="M12 2 L13.5 9 L21 12 L13.5 15 L12 22 L10.5 15 L3 12 L10.5 9 Z" fill="currentColor" stroke="none"/></svg>`;
 
 // heart — HP-related (Vigor / Thick Skin)
-const ICON_HEART = `<svg ${ICON_ATTRS}><path d="M12 21 C12 21 4 14.5 4 9 C4 6 6.5 4 9 4 C10.5 4 12 5 12 7 C12 5 13.5 4 15 4 C17.5 4 20 6 20 9 C20 14.5 12 21 12 21 Z"/></svg>`;
+const ICON_HEART = `<svg ${ICON_ATTRS} fill="currentColor"><path d="M12 21 C12 21 4 14.5 4 9 C4 6 6.5 4 9 4 C10.5 4 12 5 12 7 C12 5 13.5 4 15 4 C17.5 4 20 6 20 9 C20 14.5 12 21 12 21 Z"/></svg>`;
 
 // double chevron — speed-related (Fleetness / Adrenaline)
 const ICON_SPEED = `<svg ${ICON_ATTRS}><polyline points="4 6 12 12 4 18"/><polyline points="12 6 20 12 12 18"/></svg>`;
@@ -59,7 +59,7 @@ const ICON_MAGNET = `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="2" fill="curr
 const ICON_COIN = `<svg ${ICON_ATTRS}><circle cx="9" cy="9" r="6"/><circle cx="15" cy="15" r="6"/></svg>`;
 
 // flame — damage-related (Might / Power Surge)
-const ICON_FLAME = `<svg ${ICON_ATTRS}><path d="M12 2 C12 2 7 7 7 12 C7 15.3 9.7 18 13 18 C16.3 18 18 15.5 18 13 C18 11 17 9.5 16 8.5 C16 10 15 11 14 11 C14.5 9 13.5 6 12 2 Z"/></svg>`;
+const ICON_FLAME = `<svg ${ICON_ATTRS} fill="currentColor"><path d="M12 2 C12 2 7 7 7 12 C7 15.3 9.7 18 13 18 C16.3 18 18 15.5 18 13 C18 11 17 9.5 16 8.5 C16 10 15 11 14 11 C14.5 9 13.5 6 12 2 Z"/></svg>`;
 
 // plus in a circle — regen-related (Recovery / Quick Recovery)
 const ICON_REGEN = `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>`;
@@ -115,6 +115,29 @@ export const WEAPON_ICON: Record<
   homingDart: ICON_DART,
   chainLightning: ICON_CHAIN,
 };
+
+// Pastel badge fill per concept, shared by the shop rows and the level-up
+// cards (both draw dark ink on a bordered, shadowed badge). Same grouping as
+// the icon map: Vigor and Thick Skin are both "heart", and so on.
+const BADGE_BG: Record<string, string> = {
+  vigor: "bg-rose-300",
+  thickSkin: "bg-rose-300",
+  fleetness: "bg-sky-300",
+  adrenaline: "bg-sky-300",
+  might: "bg-orange-300",
+  powerSurge: "bg-orange-300",
+  magnetism: "bg-violet-300",
+  wideReach: "bg-violet-300",
+  greed: "bg-yellow-300",
+  luckyStar: "bg-yellow-300",
+  amanuensis: "bg-emerald-300",
+  recovery: "bg-emerald-300",
+  quickRecovery: "bg-emerald-300",
+};
+
+export function badgeClass(id: string | undefined, fallback = "bg-sky-300") {
+  return `border-2 border-slate-900 text-slate-900 shadow-[0_2px_0_#020617] ${BADGE_BG[id ?? ""] ?? fallback}`;
+}
 
 export const EVOLUTION_ICON = ICON_SPARKLE;
 

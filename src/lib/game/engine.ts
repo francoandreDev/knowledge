@@ -153,6 +153,7 @@ import {
 } from "./audio";
 import {
   drawPlayer,
+  drawShape,
   drawEnemy,
   drawGem,
   drawCoin,
@@ -2652,13 +2653,12 @@ export function startGame(
       // see src/lib/game/sprites.ts's drawEnemy().
       for (const e of enemies) {
         const isElite = e.tier === "elite";
-        const isBoss = e.kind === "reaper" || e.kind === "lich";
         const flashAlpha = e.hitFlashUntil
           ? Math.max(0, (e.hitFlashUntil - elapsedMs) / HIT_FLASH_MS)
           : 0;
         drawEnemy(context, e.kind, e.x, e.y, e.radius, e.color, {
-          glow: !reduceMotion && (isElite || isBoss),
-          glowColor: isElite ? "rgba(250, 204, 21, 0.9)" : e.color,
+          glow: !reduceMotion && isElite,
+          glowColor: "rgba(250, 204, 21, 0.9)",
           flashAlpha,
         });
         // Phase 16B: enemy pack synergy tell — a plain colored outline ring
@@ -2698,7 +2698,6 @@ export function startGame(
         PLAYER_RADIUS,
         "#38bdf8",
         playerFacingAngle,
-        !reduceMotion,
         playerFlashAlpha,
       );
 
@@ -2738,11 +2737,15 @@ export function startGame(
         context.fill();
       }
 
-      context.fillStyle = "#facc15";
       for (const pos of orbiterPositions) {
-        context.beginPath();
-        context.arc(pos.x, pos.y, ORBIT_VISUAL_RADIUS, 0, Math.PI * 2);
-        context.fill();
+        drawShape(
+          context,
+          "circle",
+          pos.x,
+          pos.y,
+          ORBIT_VISUAL_RADIUS,
+          "#facc15",
+        );
       }
 
       for (const a of arcEffects) {
@@ -2820,8 +2823,13 @@ export function startGame(
         );
         const alpha = Math.max(0, 1 - progress);
         const y = n.y - progress * DAMAGE_NUMBER_RISE_PX;
+        const label = String(Math.round(n.amount));
+        context.lineJoin = "round";
+        context.lineWidth = 3;
+        context.strokeStyle = `rgba(15, 23, 42, ${alpha})`;
+        context.strokeText(label, n.x, y);
         context.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-        context.fillText(String(Math.round(n.amount)), n.x, y);
+        context.fillText(label, n.x, y);
       }
       context.restore();
     },
