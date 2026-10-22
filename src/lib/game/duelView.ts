@@ -6,6 +6,8 @@ import {
   DIFFICULTY,
   FIGHTER_RADIUS,
   aiInput,
+  attackRange,
+  chargeFrac,
   createDuel,
   newAiMemory,
   orbiterPositions,
@@ -22,13 +24,12 @@ import {
   drawDamageNumber,
   drawNovaRing,
   drawParticles,
-  drawSlamWarning,
   drawSlash,
   ringPop,
   stepParticles,
   type Particle,
 } from "./fx";
-import { orbitCover, orbitShieldShape } from "./balance";
+import { bladeArcShape, orbitCover, orbitShieldShape } from "./balance";
 import { drawEnemy, drawPlayer, drawProjectile } from "./sprites";
 import type { WeaponId } from "./engine";
 
@@ -38,6 +39,7 @@ const COUNTDOWN_MS = 2400;
 const ROUND_END_MS = 1800;
 const WINS_NEEDED = 2;
 const MAX_ROUNDS = 5;
+const CHAIN_CONE_HALF = 0.32;
 const PLAYER_COLOR = "#38bdf8";
 const RIVAL_COLOR = "#fb7185";
 
@@ -57,6 +59,9 @@ const RIVAL_BODY: Record<WeaponId, string> = {
   orbitShield: "#4ade80",
   bladeArc: "#c026d3",
 };
+
+const bladeHalfArc = (f: Fighter) =>
+  (bladeArcShape(f.level).arcDeg * Math.PI) / 360;
 
 export const WEAPON_NAME: Record<WeaponId, string> = {
   bolt: "Bolt",
@@ -161,24 +166,30 @@ export function startDuel(
   }
   newRound();
 
-  // --- input: WASD / arrows, or drag anywhere on the field --------------
+  // --- input: WASD/arrows move, the pointer aims, hold to charge ---------
+  // Mouse: move the cursor to aim, hold the button (or Space) to charge and
+  // release to strike. Touch: drag in the left half to move; press and hold
+  // on the right half to aim at that spot and charge, lift to strike.
   const keys = new Set<string>();
+  let spaceHeld = false;
+  const MOVE_KEYS = [
+    "w",
+    "a",
+    "s",
+    "d",
+    "arrowup",
+    "arrowdown",
+    "arrowleft",
+    "arrowright",
+  ];
   const onKey = (down: boolean) => (e: KeyboardEvent) => {
     const k = e.key.toLowerCase();
-    if (
-      [
-        "w",
-        "a",
-        "s",
-        "d",
-        "arrowup",
-        "arrowdown",
-        "arrowleft",
-        "arrowright",
-      ].includes(k)
-    ) {
+    if (MOVE_KEYS.includes(k)) {
       if (down) keys.add(k);
       else keys.delete(k);
+      e.preventDefault();
+    } else if (k === " ") {
+      spaceHeld = down;
       e.preventDefault();
     }
   };
@@ -194,6 +205,8 @@ export function startDuel(
     x: number;
     y: number;
   } | null = null;
+  let aimPoint: { x: number; y: number } | null = null;
+  let chargeId: number | null = null;
   const toWorld = (e: PointerEvent) => {
     const r = canvas.getBoundingClientRect();
     return {
@@ -203,17 +216,26 @@ export function startDuel(
   };
   const pDown = (e: PointerEvent) => {
     const p = toWorld(e);
-    drag = { id: e.pointerId, ox: p.x, oy: p.y, x: p.x, y: p.y };
     canvas.setPointerCapture?.(e.pointerId);
+    if (e.pointerType === "touch" && p.x < ARENA_W * 0.5 && !drag) {
+      drag = { id: e.pointerId, ox: p.x, oy: p.y, x: p.x, y: p.y };
+    } else {
+      aimPoint = p;
+      chargeId = e.pointerId;
+    }
   };
   const pMove = (e: PointerEvent) => {
-    if (!drag || drag.id !== e.pointerId) return;
     const p = toWorld(e);
-    drag.x = p.x;
-    drag.y = p.y;
+    if (drag && drag.id === e.pointerId) {
+      drag.x = p.x;
+      drag.y = p.y;
+    } else if (e.pointerType === "mouse" || chargeId === e.pointerId) {
+      aimPoint = p;
+    }
   };
   const pUp = (e: PointerEvent) => {
     if (drag?.id === e.pointerId) drag = null;
+    if (chargeId === e.pointerId) chargeId = null;
   };
   canvas.addEventListener("pointerdown", pDown);
   canvas.addEventListener("pointermove", pMove);
@@ -236,7 +258,11 @@ export function startDuel(
         y += dy / Math.max(len, 40);
       }
     }
-    return { x, y };
+    const me = state.fighters[0];
+    const aim = aimPoint
+      ? Math.atan2(aimPoint.y - me.y, aimPoint.x - me.x)
+      : null;
+    return { x, y, aim, charge: chargeId !== null || spaceHeld };
   }
 
   // --- simulation -------------------------------------------------------
@@ -279,6 +305,13 @@ export function startDuel(
         novas.push({ x: ev.x, y: ev.y, radius: ev.radius, at: nowMs });
       } else if (ev.type === "chain") {
         chains.push({ x1: ev.x1, y1: ev.y1, x2: ev.x2, y2: ev.y2, at: nowMs });
+      } else if (ev.type === "dash") {
+        if (!reduceMotion) ringPop(particles, ev.x, ev.y, "#facc15", 40);
+      } else if (ev.type === "stagger") {
+        if (!reduceMotion) {
+          burst(particles, ev.x, ev.y, "#f8fafc", 10, 190);
+          ringPop(particles, ev.x, ev.y, "#fb7185", 36);
+        }
       }
     }
   }
@@ -452,26 +485,80 @@ export function startDuel(
         ctx.stroke();
       }
     }
-    // Wind-ups: the tell that makes every hit dodgeable.
-    const w = f.windup;
-    if (w) {
-      const p = 1 - w.msLeft / w.totalMs;
-      if (w.kind === "nova") {
-        drawSlamWarning(ctx, f.x, f.y, w.radius, p);
-      } else {
-        ctx.save();
-        ctx.globalAlpha = 0.25 + p * 0.4;
+    // The charge is the tell: it shows exactly where and how far the strike
+    // will land if let go now, for both fighters.
+    const c = chargeFrac(f);
+    if (c > 0) {
+      const col = f.side === 0 ? PLAYER_COLOR : RIVAL_COLOR;
+      const reach = attackRange(f.weaponId, f.level, Math.max(0.2, c));
+      const full = c >= 1;
+      const pulse = full ? 0.5 + 0.5 * Math.sin(nowMs / 60) : 0;
+      ctx.save();
+      ctx.lineCap = "round";
+      if (f.weaponId === "novaPulse") {
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, reach, 0, Math.PI * 2);
+        ctx.globalAlpha = 0.12 + c * 0.2;
+        ctx.fillStyle = col;
+        ctx.fill();
+        ctx.globalAlpha = 0.5 + pulse * 0.4;
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = INK;
+        ctx.stroke();
+      } else if (f.weaponId === "bladeArc" || f.weaponId === "chainLightning") {
+        const half =
+          f.weaponId === "bladeArc" ? bladeHalfArc(f) : CHAIN_CONE_HALF;
         ctx.beginPath();
         ctx.moveTo(f.x, f.y);
-        ctx.arc(f.x, f.y, w.radius, w.angle - w.arc / 2, w.angle + w.arc / 2);
+        ctx.arc(f.x, f.y, reach, f.aim - half, f.aim + half);
         ctx.closePath();
-        ctx.fillStyle = f.side === 0 ? PLAYER_COLOR : RIVAL_COLOR;
+        ctx.globalAlpha = 0.14 + c * 0.28;
+        ctx.fillStyle = col;
+        ctx.fill();
+        ctx.globalAlpha = 0.5 + pulse * 0.4;
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = INK;
+        ctx.stroke();
+      } else {
+        const endX = f.x + Math.cos(f.aim) * reach;
+        const endY = f.y + Math.sin(f.aim) * reach;
+        ctx.globalAlpha = 0.5 + pulse * 0.4;
+        ctx.lineWidth = 6 + c * 3;
+        ctx.strokeStyle = INK;
+        ctx.setLineDash(f.weaponId === "homingDart" ? [4, 8] : []);
+        ctx.beginPath();
+        ctx.moveTo(f.x, f.y);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+        ctx.lineWidth = 3 + c * 3;
+        ctx.strokeStyle = col;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.arc(endX, endY, 5 + c * 5, 0, Math.PI * 2);
+        ctx.fillStyle = col;
         ctx.fill();
         ctx.lineWidth = 2;
         ctx.strokeStyle = INK;
         ctx.stroke();
-        ctx.restore();
       }
+      // Charge ring around the body.
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      ctx.arc(
+        f.x,
+        f.y,
+        FIGHTER_RADIUS + 9,
+        -Math.PI / 2,
+        -Math.PI / 2 + c * Math.PI * 2,
+      );
+      ctx.lineWidth = 5;
+      ctx.strokeStyle = INK;
+      ctx.stroke();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = full ? "#fde047" : col;
+      ctx.stroke();
+      ctx.restore();
     }
   }
 
@@ -622,7 +709,7 @@ export function startDuel(
     }
     if (phase === "countdown" && roundNo === 1) {
       label(
-        "WASD or drag to move — weapons auto-fire",
+        "WASD move · aim with the mouse · hold click or Space to charge, release to strike",
         ARENA_W / 2,
         ARENA_H - 22,
         13,

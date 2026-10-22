@@ -1,8 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { DUEL_DAMAGE_SCALE, duelHp, simulateMatch } from "./duel";
-import type { WeaponId } from "./engine";
+import {
+  DUEL_WEAPONS,
+  attackRange,
+  createDuel,
+  duelHp,
+  simulateMatch,
+  stepDuel,
+  strikeDamage,
+} from "./duel";
 
-const WEAPONS = Object.keys(DUEL_DAMAGE_SCALE) as WeaponId[];
+const WEAPONS = DUEL_WEAPONS;
 
 const seeded = (seed: number) => {
   let s = seed >>> 0;
@@ -71,5 +78,46 @@ describe("duel fairness", () => {
       return w;
     };
     expect(wins("easy")).toBeGreaterThan(wins("hard"));
+  });
+
+  test("nothing fires on its own: idle fighters never hurt each other", () => {
+    const state = createDuel(
+      { weaponId: "bolt", level: 3 },
+      { weaponId: "bladeArc", level: 3 },
+    );
+    const idle = { x: 0, y: 0 };
+    for (let i = 0; i < 600; i++) stepDuel(state, 1000 / 60, [idle, idle]);
+    expect(state.fighters[0].hp).toBe(state.fighters[0].maxHp);
+    expect(state.fighters[1].hp).toBe(state.fighters[1].maxHp);
+  });
+
+  test("a longer charge reaches farther and hits harder", () => {
+    for (const weaponId of WEAPONS) {
+      const f = createDuel({ weaponId, level: 3 }, { weaponId, level: 3 })
+        .fighters[0];
+      expect(attackRange(weaponId, 3, 1)).toBeGreaterThan(
+        attackRange(weaponId, 3, 0.3),
+      );
+      expect(strikeDamage(f, 1)).toBeGreaterThan(strikeDamage(f, 0.3) * 2);
+    }
+  });
+
+  test("a hit while charging knocks the charge away", () => {
+    const state = createDuel(
+      { weaponId: "bolt", level: 3 },
+      { weaponId: "novaPulse", level: 3 },
+    );
+    const [a, b] = state.fighters;
+    b.x = a.x + 40;
+    b.y = a.y;
+    const hold = { x: 0, y: 0, charge: true };
+    for (let i = 0; i < 20; i++) stepDuel(state, 1000 / 60, [hold, hold]);
+    expect(a.chargeMs).toBeGreaterThan(0);
+    // Let the nova go: it lands on the close fighter and breaks their charge.
+    for (let i = 0; i < 60 && a.hp === a.maxHp; i++) {
+      stepDuel(state, 1000 / 60, [hold, { x: 0, y: 0, charge: i < 30 }]);
+    }
+    expect(a.hp).toBeLessThan(a.maxHp);
+    expect(a.chargeMs).toBe(0);
   });
 });
