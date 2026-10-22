@@ -48,7 +48,7 @@ export function exposure(id: WeaponId, level: number): number {
 }
 
 // Furthest an enemy can be from the player's center and still be hit.
-export const BLADE_ARC_RADIUS = 68;
+export const BLADE_ARC_RADIUS = 74;
 // Center-to-center distance at which a typical enemy stands against the
 // player (player radius 14 + enemy radius 12). A weapon that claims to cover
 // enemies on top of you has to reach this — the orbit once did not, and
@@ -86,8 +86,8 @@ export function boltShape(level: number) {
 export function bladeArcShape(level: number) {
   const evolved = level >= WEAPON_MAX_LEVEL; // Whirlwind
   return {
-    intervalMs: evolved ? 350 : 700 - (level - 1) * 70,
-    arcDeg: evolved ? 360 : 100 + (level - 1) * 15,
+    intervalMs: evolved ? 330 : 660 - (level - 1) * 60,
+    arcDeg: evolved ? 360 : 120 + (level - 1) * 15,
   };
 }
 
@@ -97,6 +97,17 @@ export function orbitShieldShape(level: number) {
     radius: 42 + (level - 1) * 3,
     hitRadius: 10 + (level - 1) * 2,
     rotationRadPerS: 2.4 + (level - 1) * 0.3,
+  };
+}
+
+// Each orbiter also soaks damage that comes from its side: a hit whose source
+// lies within `halfArcRad` of an orbiter's bearing is cut by `reduction`. More
+// orbiters and wider wedges cover more of the circle as the shield levels, so
+// protection grows without the shield dealing a point more damage.
+export function orbitCover(level: number) {
+  return {
+    reduction: 0.25 + (level - 1) * 0.06,
+    halfArcRad: 0.6 + (level - 1) * 0.12,
   };
 }
 
@@ -190,7 +201,9 @@ export const CALIBRATION: Record<WeaponId, number[]> = {
   chainLightning: [1, 1, 1, 1, 1, 1],
   novaPulse: [1, 1, 1, 1, 1, 1],
   orbitShield: [1, 1, 1, 1, 1, 1],
-  bladeArc: [1, 1, 1, 1, 1, 1],
+  // The blade pays the most exposure for the shortest reach, so it has to
+  // clearly out-kill the ranged weapons to be worth standing in the crowd.
+  bladeArc: [2.4, 2.4, 2.4, 2.4, 2.4, 2.4],
 };
 
 export function targetDps(id: WeaponId, level: number): number {

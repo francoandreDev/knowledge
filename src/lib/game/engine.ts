@@ -173,6 +173,7 @@ import {
   chainLightningShape,
   homingDartShape,
   novaPulseShape,
+  orbitCover,
   orbitShieldShape,
   weaponDamage,
 } from "./balance";
@@ -184,6 +185,7 @@ import {
   drawBigTime,
   drawBossBar,
   drawClock,
+  drawCoverArc,
   drawHpBar,
   drawDashLine,
   drawEliteMarker,
@@ -516,7 +518,8 @@ const WEAPON_NAMES: Record<WeaponId, string> = {
 const WEAPON_FLAVOR: Record<WeaponId, string> = {
   bladeArc: "Melee sweep toward the nearest enemy.",
   bolt: "Straight projectile at the nearest enemy, pierces at higher levels.",
-  orbitShield: "Shields orbit you, damaging anything they touch.",
+  orbitShield:
+    "Shields orbit you, damaging what they touch and soaking hits from their side.",
   novaPulse: "Periodic AoE burst centered on you.",
   homingDart: "Seeking projectile that homes in on a random enemy.",
   chainLightning: "Strikes the nearest enemy, then arcs to nearby enemies.",
@@ -525,7 +528,7 @@ const WEAPON_FLAVOR: Record<WeaponId, string> = {
 const UPGRADE_BLURB: Record<WeaponId, string> = {
   bladeArc: "+attack speed, +arc width, +damage",
   bolt: "+fire rate, +1 projectile (at higher levels), +pierce",
-  orbitShield: "+orbiter, +rotation speed, +radius",
+  orbitShield: "+orbiter, +cover, +rotation speed, +radius",
   novaPulse: "+radius, +damage, +frequency",
   homingDart: "+dart, +damage, -cooldown",
   chainLightning: "+damage, +fire rate, +chain jumps",
@@ -1159,6 +1162,9 @@ export function startGame(
   }
   let lastOrbitTrailDropAt = -Infinity;
   let orbiterPositions: { x: number; y: number }[] = [];
+  // Where the orbiters are, as bearings from the player, and what they cover.
+  let orbiterBearings: number[] = [];
+  let orbitCoverNow: { reduction: number; halfArcRad: number } | null = null;
 
   // --- Phase 3: weapons, leveling, run-only stat modifiers ---
   const training = options.training;
@@ -1713,8 +1719,35 @@ export function startGame(
     coinPickups.push(coin);
   }
 
-  function damagePlayer(amount: number, source: string) {
+  function damagePlayer(
+    amount: number,
+    source: string,
+    fromX?: number,
+    fromY?: number,
+  ) {
     if (training) return; // the lab never hurts the player
+    // The Orbit Shield soaks hits that arrive from an orbiter's side.
+    if (orbitCoverNow && fromX !== undefined && fromY !== undefined) {
+      const bearing = Math.atan2(fromY - player.y, fromX - player.x);
+      for (let i = 0; i < orbiterBearings.length; i++) {
+        let diff = Math.abs(bearing - orbiterBearings[i]);
+        if (diff > Math.PI) diff = Math.PI * 2 - diff;
+        if (diff <= orbitCoverNow.halfArcRad) {
+          amount *= 1 - orbitCoverNow.reduction;
+          if (!reduceMotion) {
+            burst(
+              particles,
+              orbiterPositions[i].x,
+              orbiterPositions[i].y,
+              "#facc15",
+              5,
+              110,
+            );
+          }
+          break;
+        }
+      }
+    }
     player.hp = Math.max(0, player.hp - amount);
     playerHitFlashUntil = elapsedMs + HIT_FLASH_MS;
     if (!reduceMotion) burst(particles, player.x, player.y, "#fb7185", 7, 140);
@@ -2028,6 +2061,10 @@ export function startGame(
             orbitTrails.push({ x: ox, y: oy, createdAt: elapsedMs });
         }
         orbiterPositions = positions;
+        orbiterBearings = positions.map((_, i) =>
+          Math.atan2(positions[i].y - player.y, positions[i].x - player.x),
+        );
+        orbitCoverNow = orbitCover(w.level);
         if (isEvolved) {
           for (let i = orbitTrails.length - 1; i >= 0; i--) {
             const t = orbitTrails[i];
@@ -2299,7 +2336,7 @@ export function startGame(
           e.width = e.baseWidth ?? e.width;
           e.height = e.baseHeight ?? e.height;
           if (distance(player, e) <= OGRE_SLAM_RANGE) {
-            damagePlayer(OGRE_SLAM_DAMAGE, "ogre-slam");
+            damagePlayer(OGRE_SLAM_DAMAGE, "ogre-slam", e.x, e.y);
             log.log("ogre:slam-hit");
           } else {
             log.log("ogre:slam-miss");
@@ -2576,6 +2613,8 @@ export function startGame(
             damagePlayer(
               e.contactDamage || CONTACT_DAMAGE,
               `contact:${e.kind}`,
+              e.x,
+              e.y,
             );
             if (status !== "running") return;
           }
@@ -2714,7 +2753,7 @@ export function startGame(
           // fireEnemyProjectile() call sites) instead of a hardcoded
           // "ranged" — needed so describeDeathCause() can tell a ghost
           // bolt apart from a reaper-ring hit.
-          damagePlayer(p.damage, p.source);
+          damagePlayer(p.damage, p.source, p.x, p.y);
           if (status !== "running") break;
         }
       }
@@ -3032,6 +3071,21 @@ export function startGame(
         context.fill();
       }
 
+      if (orbitCoverNow) {
+        for (let i = 0; i < orbiterPositions.length; i++) {
+          drawCoverArc(
+            context,
+            player.x,
+            player.y,
+            Math.hypot(
+              orbiterPositions[i].x - player.x,
+              orbiterPositions[i].y - player.y,
+            ),
+            orbiterBearings[i],
+            orbitCoverNow.halfArcRad,
+          );
+        }
+      }
       for (const pos of orbiterPositions) {
         drawShape(
           context,

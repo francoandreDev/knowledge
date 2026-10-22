@@ -555,3 +555,27 @@ export function drawHpBar(
   ctx.strokeRect(x - w / 2, y, w, 6);
   ctx.restore();
 }
+
+/** The wedge an orbiter shields: a faint arc on its ring. */
+export function drawCoverArc(
+  ctx: CanvasRenderingContext2D,
+  px: number,
+  py: number,
+  ringRadius: number,
+  bearing: number,
+  halfArc: number,
+) {
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.globalAlpha = 0.5;
+  ctx.beginPath();
+  ctx.arc(px, py, ringRadius, bearing - halfArc, bearing + halfArc);
+  ctx.lineWidth = 7;
+  ctx.strokeStyle = INK;
+  ctx.stroke();
+  ctx.globalAlpha = 0.75;
+  ctx.lineWidth = 3.5;
+  ctx.strokeStyle = "#fde047";
+  ctx.stroke();
+  ctx.restore();
+}

@@ -10,6 +10,7 @@ import {
   effectiveDps,
   exposure,
   maxRecoveryHps,
+  orbitCover,
   orbitShieldShape,
   reachPx,
   targetDps,
@@ -129,5 +130,28 @@ describe("recovery balance", () => {
     expect(maxRecoveryHps() / REFERENCE_INCOMING_HPS).toBeGreaterThanOrEqual(
       FELT_REGEN_RATIO,
     );
+  });
+});
+
+describe("orbit shield protection", () => {
+  // Average share of incoming damage the shield removes, over all bearings.
+  const avgProtection = (level: number) => {
+    const c = orbitCover(level);
+    const coverage = Math.min(
+      1,
+      (orbitShieldShape(level).count * 2 * c.halfArcRad) / (Math.PI * 2),
+    );
+    return coverage * c.reduction;
+  };
+
+  test("protection grows with every level", () => {
+    for (let level = 2; level <= WEAPON_MAX_LEVEL; level++) {
+      expect(avgProtection(level)).toBeGreaterThan(avgProtection(level - 1));
+    }
+  });
+
+  test("it starts as a nudge and ends as real cover", () => {
+    expect(avgProtection(1)).toBeLessThan(0.1);
+    expect(avgProtection(WEAPON_MAX_LEVEL)).toBeGreaterThan(0.3);
   });
 });
