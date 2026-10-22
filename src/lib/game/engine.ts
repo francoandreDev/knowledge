@@ -736,6 +736,8 @@ export interface GameOptions {
   /** Benchmarks only: spawn this many times faster, so a fixed-length run is
    * a dense wave a weapon can't fully clear (kills stop saturating). */
   spawnRateMult?: number;
+  /** Backing-store pixels per world pixel (default 1). */
+  renderScale?: number;
 }
 
 export interface TrainingOptions {
@@ -909,7 +911,7 @@ function xpForNextLevel(level: number): number {
   return 20 + (level - 1) * 12;
 }
 
-function spawnEdgePosition(canvas: HTMLCanvasElement) {
+function spawnEdgePosition(canvas: { width: number; height: number }) {
   const side = Math.floor(Math.random() * 4);
   let x: number;
   let y: number;
@@ -1008,6 +1010,11 @@ export function startGame(
   callbacks: GameCallbacks,
   options: GameOptions = {},
 ) {
+  // The world is always canvas size / renderScale: the page can raise the
+  // backing resolution for a sharper picture without changing the playfield.
+  const renderScale = options.renderScale ?? 1;
+  const WORLD_W = canvas.width / renderScale;
+  const WORLD_H = canvas.height / renderScale;
   const runDurationS = options.durationS ?? DEFAULT_RUN_DURATION_S;
   const upgradeEffects: UpgradeEffects = options.upgradeEffects ?? {
     maxHpMult: 1,
@@ -1029,8 +1036,8 @@ export function startGame(
   const abilityUnlocked = options.abilityUnlocked ?? false;
   const mightLevel = options.mightLevel ?? 0;
   log.log("startGame() called", {
-    width: canvas.width,
-    height: canvas.height,
+    width: WORLD_W,
+    height: WORLD_H,
     runDurationS,
     powerIndex,
     upgradeEffects,
@@ -1041,8 +1048,8 @@ export function startGame(
   initKeys();
 
   const player = Sprite({
-    x: canvas.width / 2,
-    y: canvas.height / 2,
+    x: WORLD_W / 2,
+    y: WORLD_H / 2,
     width: PLAYER_RADIUS * 2,
     height: PLAYER_RADIUS * 2,
     anchor: { x: 0.5, y: 0.5 },
@@ -1067,8 +1074,8 @@ export function startGame(
 
   function clientToCanvasPoint(clientX: number, clientY: number) {
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
+    const scaleX = WORLD_W / rect.width;
+    const scaleY = WORLD_H / rect.height;
     return {
       x: (clientX - rect.left) * scaleX,
       y: (clientY - rect.top) * scaleY,
@@ -1256,7 +1263,7 @@ export function startGame(
       log.log("pool:unlocked", { kind: def.kind, atS: elapsedS.toFixed(1) });
     }
     const tier = pickEnemyTier(powerIndex);
-    const { x, y } = spawnEdgePosition(canvas);
+    const { x, y } = spawnEdgePosition({ width: WORLD_W, height: WORLD_H });
     const sizeMult = TIER_SIZE_MULT[tier];
     const timeHpScale = enemyTimeScale(elapsedS, ENEMY_HP_SCALE_CAP);
     const timeDamageScale = enemyTimeScale(elapsedS, ENEMY_DAMAGE_SCALE_CAP);
@@ -1302,7 +1309,7 @@ export function startGame(
       ? LICH_CONTACT_DAMAGE
       : REAPER_CONTACT_DAMAGE;
     const sprite = Sprite({
-      x: canvas.width / 2,
+      x: WORLD_W / 2,
       y: -40,
       width: radius * 2,
       height: radius * 2,
@@ -2490,11 +2497,11 @@ export function startGame(
           PLAYER_SPEED * speedMult * upgradeEffects.speedMult * moveMagnitude;
         player.x = Math.min(
           Math.max(player.x + moveX * speed * dt, PLAYER_RADIUS),
-          canvas.width - PLAYER_RADIUS,
+          WORLD_W - PLAYER_RADIUS,
         );
         player.y = Math.min(
           Math.max(player.y + moveY * speed * dt, PLAYER_RADIUS),
-          canvas.height - PLAYER_RADIUS,
+          WORLD_H - PLAYER_RADIUS,
         );
         playerVelX = moveX * speed; // Phase 16A: zombie lunge's "moving away" check
         playerVelY = moveY * speed;
@@ -2622,9 +2629,9 @@ export function startGame(
         if (
           p.ttl <= 0 ||
           p.x < -20 ||
-          p.x > canvas.width + 20 ||
+          p.x > WORLD_W + 20 ||
           p.y < -20 ||
-          p.y > canvas.height + 20
+          p.y > WORLD_H + 20
         ) {
           p.alive = false;
           continue;
@@ -2675,9 +2682,9 @@ export function startGame(
         if (
           p.ttl <= 0 ||
           p.x < -20 ||
-          p.x > canvas.width + 20 ||
+          p.x > WORLD_W + 20 ||
           p.y < -20 ||
-          p.y > canvas.height + 20
+          p.y > WORLD_H + 20
         ) {
           p.alive = false;
           continue;
@@ -2796,7 +2803,8 @@ export function startGame(
       }
     },
     render() {
-      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.setTransform(renderScale, 0, 0, renderScale, 0, 0);
+      context.clearRect(0, 0, WORLD_W, WORLD_H);
       context.save();
       if (feedbackOn && elapsedMs < shakeUntil) {
         const fade = Math.min(1, (shakeUntil - elapsedMs) / 200);
@@ -3034,7 +3042,7 @@ export function startGame(
         if ((e.kind === "reaper" || e.kind === "lich") && e.alive && e.maxHp) {
           drawBossBar(
             context,
-            canvas.width,
+            WORLD_W,
             e.kind === "reaper" ? "THE REAPER" : "THE LICH",
             e.hp / e.maxHp,
           );
@@ -3050,14 +3058,13 @@ export function startGame(
           e.kind === "ogre" ||
           e.tier === "elite";
         if (!danger || !e.alive) continue;
-        if (e.x >= 0 && e.x <= canvas.width && e.y >= 0 && e.y <= canvas.height)
-          continue;
+        if (e.x >= 0 && e.x <= WORLD_W && e.y >= 0 && e.y <= WORLD_H) continue;
         drawOffscreenArrow(
           context,
           e.x,
           e.y,
-          canvas.width,
-          canvas.height,
+          WORLD_W,
+          WORLD_H,
           e.kind === "reaper" || e.kind === "lich" ? "#fb7185" : "#fde047",
           elapsedMs,
         );

@@ -447,7 +447,7 @@ export function drawBossBar(
 ) {
   const w = Math.min(260, width - 40);
   const x = (width - w) / 2;
-  const y = 30;
+  const y = 72; // below the HUD overlay
   const f = Math.max(0, Math.min(1, fraction));
   ctx.save();
   ctx.lineJoin = "round";

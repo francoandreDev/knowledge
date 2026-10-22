@@ -3229,3 +3229,9 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 - Danger tells: ogre slam zone fills during its telegraph; Reaper/Lich show a "!" wind-up (550 ms) and the Reaper's dash line; enemy shots carry a red halo; elites get a gold ring and crown; off-screen bosses/ogres/elites get an edge arrow.
 - `/game` screens: sticker level-up cards with kind tags and staggered entry, results with 0–3 stars (a third of the run each) and count-up stats, bigger boss-incoming banner.
 - Not viewed in a real browser (screenshots hang); effects were rendered offline. Level-up and results screens need a human look.
+
+### Bigger /game field with an integrated HUD (2026-10-22)
+
+- The play field now fills the viewport height (up to 780 px wide) instead of a fixed 500 px box. The backing store is 2× (`renderScale` engine option) so it stays sharp; the world stays 420×500, so balance is unchanged.
+- The HUD is no longer a separate card: a translucent blurred strip over the top of the field, weapon chips along the bottom. Toasts, the boss bar and the level-up overlay were moved to fit.
+- Lint, typecheck, tests and build pass. In a 590 px-tall window the field measured 402×478 and ran past the fold, so the height budget was changed to `100svh - 9rem`; that last tweak was not rebuilt or re-measured.
