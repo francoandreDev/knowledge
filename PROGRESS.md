@@ -3238,3 +3238,9 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 - Wide screens: the world width is chosen at launch from the window (aspect 0.84–1.5, height stays 500); the lab keeps 420 px. Wider worlds change how enemies arrive from the sides and were not rebalanced.
 - Level-up cards scale with the field width. Bosses get a small bar under the sprite as well as the top bar.
 - Clock: a brief freeze showing the time left (threat tier, boss warning, each minute, 30 s, 10 s), a pulsing stopwatch in the last 30 s, and a throbbing HUD timer. Off in reduced-motion and in the lab.
+
+### /game lobby redesign (2026-10-22)
+
+- Hero panel with an animated backdrop (the player with two orbiters, enemies drifting in and popping; still frame under reduced motion), a big Start button and compact run tokens. Sound/effects toggles moved into it.
+- Upgrades are cards in a two-column grid (buyable ones tinted, maxed ones compact with a MAX tag); best survival, unlocks and a collapsed Balance lab sit in the right column. The lobby is up to 1024 px wide.
+- Lint, typecheck, tests and build pass; the screen was not seen rendered (browser screenshots hang), only measured via the DOM.
