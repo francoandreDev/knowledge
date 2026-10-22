@@ -176,6 +176,24 @@ import {
   orbitShieldShape,
   weaponDamage,
 } from "./balance";
+import {
+  burst,
+  drawBolt,
+  drawDamageNumber,
+  drawDangerHalo,
+  drawBossBar,
+  drawDashLine,
+  drawEliteMarker,
+  drawNovaRing,
+  drawOffscreenArrow,
+  drawParticles,
+  drawSlamWarning,
+  drawSlash,
+  drawWindup,
+  ringPop,
+  stepParticles,
+  type Particle,
+} from "./fx";
 
 const log = createLogger("engine");
 
@@ -266,6 +284,8 @@ const THREAT_TIER_COUNT = 5; // cosmetic readout, see computeThreatTier()
 // --- Phase 14: floating damage numbers ---
 const DAMAGE_NUMBER_DURATION_MS = 700;
 const DAMAGE_NUMBER_RISE_PX = 34;
+const BIG_HIT_DAMAGE = 20; // numbers at or above this render large and gold
+const WINDUP_WARNING_MS = 550; // boss tell before a ring, dash or curse bolt
 
 // --- Phase 14: low-HP screen warning ---
 const LOW_HP_THRESHOLD = 0.25; // fraction of effective max HP
@@ -739,6 +759,8 @@ interface Enemy extends GameObject {
   lastRangedAt?: number;
   // ogre
   chargeUntil?: number;
+  chargeStartedAt?: number; // for the slam warning's fill
+  maxHp?: number; // bosses only: for the health bar
   slamReadyAt?: number;
   baseWidth?: number;
   baseHeight?: number;
@@ -1108,6 +1130,13 @@ export function startGame(
   const hitSparks: HitSpark[] = [];
   const damageNumbers: DamageNumber[] = []; // Phase 14
   const chainEffects: ChainEffect[] = []; // Phase 15, chain lightning jumps
+  // Combat feedback (fx.ts). The lab turns shake and hit-stop off so they
+  // can't skew what it measures.
+  const particles: Particle[] = [];
+  const feedbackOn = !reduceMotion && !options.training;
+  let shakeMag = 0;
+  let shakeUntil = 0;
+  let hitStopMs = 0;
   let lastOrbitTrailDropAt = -Infinity;
   let orbiterPositions: { x: number; y: number }[] = [];
 
@@ -1283,6 +1312,7 @@ export function startGame(
     sprite.kind = isLich ? "lich" : "reaper";
     sprite.tier = "normal"; // the boss is unique per run, not tiered
     sprite.hp = baseHp * powerScale * timeHpScale;
+    sprite.maxHp = sprite.hp;
     sprite.alive = true;
     sprite.radius = radius;
     sprite.contactDamage = baseContactDamage * powerScale * timeDamageScale;
@@ -1387,6 +1417,7 @@ export function startGame(
     }
     e.hitFlashUntil = elapsedMs + HIT_FLASH_MS;
     hitSparks.push({ x: e.x, y: e.y, createdAt: elapsedMs });
+    if (!reduceMotion) burst(particles, e.x, e.y, "#ffffff", 2, 90);
     damageNumbers.push({
       x: e.x,
       y: e.y - e.radius,
@@ -1398,6 +1429,29 @@ export function startGame(
     if (e.hp <= 0 && e.alive) {
       e.alive = false;
       kills += 1;
+      const isBoss = e.kind === "reaper" || e.kind === "lich";
+      if (!reduceMotion) {
+        burst(
+          particles,
+          e.x,
+          e.y,
+          e.color,
+          isBoss ? 34 : e.tier === "elite" ? 16 : 9,
+          isBoss ? 260 : 170,
+        );
+        ringPop(particles, e.x, e.y, e.color, e.radius * (isBoss ? 5 : 2.6));
+      }
+      if (feedbackOn) {
+        if (isBoss) {
+          shakeMag = 7;
+          shakeUntil = elapsedMs + 450;
+          hitStopMs = 120;
+        } else if (e.tier === "elite") {
+          shakeMag = 3;
+          shakeUntil = elapsedMs + 160;
+          hitStopMs = 45;
+        }
+      }
       log.log("kill:enemy", { kind: e.kind, source, totalKills: kills });
       spawnGem(e.x, e.y);
       maybeSpawnCoin(e);
@@ -1643,6 +1697,11 @@ export function startGame(
     if (training) return; // the lab never hurts the player
     player.hp = Math.max(0, player.hp - amount);
     playerHitFlashUntil = elapsedMs + HIT_FLASH_MS;
+    if (!reduceMotion) burst(particles, player.x, player.y, "#fb7185", 7, 140);
+    if (feedbackOn) {
+      shakeMag = Math.min(8, 3 + amount / 6);
+      shakeUntil = elapsedMs + 220;
+    }
     lastDamageSource = source;
     log.log("player:damaged", { amount, source, hpRemaining: player.hp });
     if (player.hp <= 0) {
@@ -1663,6 +1722,10 @@ export function startGame(
     }
     if (leveledUp) {
       playLevelUp();
+      if (!reduceMotion) {
+        ringPop(particles, player.x, player.y, "#fde047", 90);
+        burst(particles, player.x, player.y, "#fde047", 14, 200);
+      }
       log.log("player:levelup", { newLevel: playerLevel, pendingLevelUps });
     }
   }
@@ -2238,6 +2301,7 @@ export function startGame(
             ? OGRE_SLAM_TELEGRAPH_TIER5_MS
             : OGRE_SLAM_TELEGRAPH_MS;
         e.chargeUntil = elapsedMs + telegraphMs;
+        e.chargeStartedAt = elapsedMs;
         e.baseWidth = e.width;
         e.baseHeight = e.height;
         e.width *= 1.4;
@@ -2360,6 +2424,11 @@ export function startGame(
     update(dt = 1 / 60) {
       dt = Math.min(dt, MAX_DT); // Phase 8: cap a single frame's catch-up
       if (status !== "running") return;
+      if (hitStopMs > 0) {
+        // A few frozen frames on a heavy kill; the world holds still.
+        hitStopMs -= dt * 1000;
+        return;
+      }
       elapsedMs += dt * 1000;
       const elapsedS = elapsedMs / 1000;
 
@@ -2683,6 +2752,7 @@ export function startGame(
       }
 
       // --- transient visual effects ---
+      stepParticles(particles, dt * 1000);
       for (let i = arcEffects.length - 1; i >= 0; i--) {
         if (elapsedMs - arcEffects[i].createdAt >= ARC_EFFECT_DURATION_MS) {
           arcEffects.splice(i, 1);
@@ -2727,6 +2797,42 @@ export function startGame(
     },
     render() {
       context.clearRect(0, 0, canvas.width, canvas.height);
+      context.save();
+      if (feedbackOn && elapsedMs < shakeUntil) {
+        const fade = Math.min(1, (shakeUntil - elapsedMs) / 200);
+        context.translate(
+          (Math.random() - 0.5) * 2 * shakeMag * fade,
+          (Math.random() - 0.5) * 2 * shakeMag * fade,
+        );
+      }
+      // Ground warnings first, so enemies and the player stand on top.
+      for (const e of enemies) {
+        if (e.kind === "ogre" && e.chargeUntil && e.chargeStartedAt != null) {
+          drawSlamWarning(
+            context,
+            e.x,
+            e.y,
+            OGRE_SLAM_RANGE,
+            (elapsedMs - e.chargeStartedAt) /
+              Math.max(1, e.chargeUntil - e.chargeStartedAt),
+          );
+        }
+        if (
+          e.kind === "reaper" &&
+          !(e.dashUntil && elapsedMs < e.dashUntil) &&
+          REAPER_DASH_INTERVAL_MS - (elapsedMs - (e.lastDashAt ?? 0)) <
+            WINDUP_WARNING_MS
+        ) {
+          const a = Math.atan2(player.y - e.y, player.x - e.x);
+          drawDashLine(
+            context,
+            e.x,
+            e.y,
+            e.x + Math.cos(a) * 190,
+            e.y + Math.sin(a) * 190,
+          );
+        }
+      }
       for (const g of gems) {
         drawGem(context, g.x, g.y, GEM_RADIUS, g.color);
       }
@@ -2745,10 +2851,9 @@ export function startGame(
           ? Math.max(0, (e.hitFlashUntil - elapsedMs) / HIT_FLASH_MS)
           : 0;
         drawEnemy(context, e.kind, e.x, e.y, e.radius, e.color, {
-          glow: !reduceMotion && isElite,
-          glowColor: "rgba(250, 204, 21, 0.9)",
           flashAlpha,
         });
+        if (isElite) drawEliteMarker(context, e.x, e.y, e.radius, elapsedMs);
         // Phase 16B: enemy pack synergy tell — a plain colored outline ring
         // (cheap, no shadowBlur) so the buff is visible while it holds, not
         // just felt as a stat change. Not gated by reduceMotion — it's
@@ -2771,7 +2876,30 @@ export function startGame(
         drawProjectile(context, p.x, p.y, p.width / 2, p.color, p.dx, p.dy);
       }
       for (const p of enemyProjectiles) {
+        drawDangerHalo(context, p.x, p.y, p.width / 2, elapsedMs);
         drawProjectile(context, p.x, p.y, p.width / 2, p.color, p.dx, p.dy);
+      }
+      // Boss wind-up tells, above the sprites so they can't be missed.
+      for (const e of enemies) {
+        const untilNext =
+          e.kind === "reaper"
+            ? Math.min(
+                REAPER_RING_INTERVAL_MS - (elapsedMs - (e.lastRingAt ?? 0)),
+                REAPER_DASH_INTERVAL_MS - (elapsedMs - (e.lastDashAt ?? 0)),
+              )
+            : e.kind === "lich"
+              ? LICH_CURSE_INTERVAL_MS - (elapsedMs - (e.lastRangedAt ?? 0))
+              : Infinity;
+        if (untilNext < WINDUP_WARNING_MS) {
+          drawWindup(
+            context,
+            e.x,
+            e.y,
+            e.radius,
+            1 - untilNext / WINDUP_WARNING_MS,
+            elapsedMs,
+          );
+        }
       }
       const idleBobOffset =
         playerIsIdle && !reduceMotion ? Math.sin(playerBobPhase) * 1.6 : 0;
@@ -2837,57 +2965,40 @@ export function startGame(
       }
 
       for (const a of arcEffects) {
-        const age = elapsedMs - a.createdAt;
-        const alpha = Math.max(0, 1 - age / ARC_EFFECT_DURATION_MS);
-        context.strokeStyle = `rgba(226,232,240,${alpha})`;
-        context.lineWidth = 2;
-        context.beginPath();
-        context.moveTo(a.x, a.y);
-        context.arc(
+        drawSlash(
+          context,
           a.x,
           a.y,
           a.radius,
-          a.angle - a.halfArc,
-          a.angle + a.halfArc,
+          a.angle,
+          a.halfArc,
+          (elapsedMs - a.createdAt) / ARC_EFFECT_DURATION_MS,
         );
-        context.closePath();
-        context.stroke();
       }
 
       for (const p of pulseEffects) {
-        const age = elapsedMs - p.createdAt;
-        const progress = Math.min(1, age / PULSE_EFFECT_DURATION_MS);
-        const alpha = Math.max(0, 1 - progress);
-        context.strokeStyle = `rgba(167,139,250,${alpha})`;
-        context.lineWidth = 2;
-        context.beginPath();
-        context.arc(
+        drawNovaRing(
+          context,
           p.x,
           p.y,
-          p.radius * (0.3 + progress * 0.7),
-          0,
-          Math.PI * 2,
+          p.radius,
+          Math.min(1, (elapsedMs - p.createdAt) / PULSE_EFFECT_DURATION_MS),
         );
-        context.stroke();
       }
 
       // Phase 15: Chain Lightning jump lines — a bright cyan-white streak
       // fading over CHAIN_EFFECT_DURATION_MS, cheap (no shadowBlur) like the
       // other weapon-effect draws above.
       for (const c of chainEffects) {
-        const progress = Math.min(
-          1,
-          (elapsedMs - c.createdAt) / CHAIN_EFFECT_DURATION_MS,
+        drawBolt(
+          context,
+          c.x1,
+          c.y1,
+          c.x2,
+          c.y2,
+          Math.min(1, (elapsedMs - c.createdAt) / CHAIN_EFFECT_DURATION_MS),
+          c.createdAt,
         );
-        const alpha = Math.max(0, 1 - progress);
-        context.save();
-        context.strokeStyle = `rgba(125,211,252,${alpha})`;
-        context.lineWidth = 2;
-        context.beginPath();
-        context.moveTo(c.x1, c.y1);
-        context.lineTo(c.x2, c.y2);
-        context.stroke();
-        context.restore();
       }
 
       for (const s of hitSparks) {
@@ -2898,28 +3009,59 @@ export function startGame(
         drawImpactBurst(context, s.x, s.y, progress);
       }
 
+      drawParticles(context, particles);
+
       // Phase 14: floating damage numbers — rise and fade over
       // DAMAGE_NUMBER_DURATION_MS, drawn last so they sit above everything
       // else at the hit point.
-      context.save();
-      context.font = "bold 12px sans-serif";
-      context.textAlign = "center";
       for (const n of damageNumbers) {
         const progress = Math.min(
           1,
           (elapsedMs - n.createdAt) / DAMAGE_NUMBER_DURATION_MS,
         );
-        const alpha = Math.max(0, 1 - progress);
-        const y = n.y - progress * DAMAGE_NUMBER_RISE_PX;
-        const label = String(Math.round(n.amount));
-        context.lineJoin = "round";
-        context.lineWidth = 3;
-        context.strokeStyle = `rgba(15, 23, 42, ${alpha})`;
-        context.strokeText(label, n.x, y);
-        context.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-        context.fillText(label, n.x, y);
+        drawDamageNumber(
+          context,
+          n.x,
+          n.y - progress * DAMAGE_NUMBER_RISE_PX,
+          n.amount,
+          progress,
+          n.amount >= BIG_HIT_DAMAGE,
+        );
       }
       context.restore();
+
+      for (const e of enemies) {
+        if ((e.kind === "reaper" || e.kind === "lich") && e.alive && e.maxHp) {
+          drawBossBar(
+            context,
+            canvas.width,
+            e.kind === "reaper" ? "THE REAPER" : "THE LICH",
+            e.hp / e.maxHp,
+          );
+        }
+      }
+
+      // Dangerous enemies that are off-screen get an edge arrow (the field
+      // doesn't scroll, so they walk in from outside the canvas).
+      for (const e of enemies) {
+        const danger =
+          e.kind === "reaper" ||
+          e.kind === "lich" ||
+          e.kind === "ogre" ||
+          e.tier === "elite";
+        if (!danger || !e.alive) continue;
+        if (e.x >= 0 && e.x <= canvas.width && e.y >= 0 && e.y <= canvas.height)
+          continue;
+        drawOffscreenArrow(
+          context,
+          e.x,
+          e.y,
+          canvas.width,
+          canvas.height,
+          e.kind === "reaper" || e.kind === "lich" ? "#fb7185" : "#fde047",
+          elapsedMs,
+        );
+      }
     },
   });
 

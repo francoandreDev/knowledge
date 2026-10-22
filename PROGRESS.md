@@ -3222,3 +3222,10 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 - Bolt is the reference; the others were reworked in shape, not nerfed Bolt. Dart fires faster (900 ms, −50/level) with 2 darts from level 2 and targets the nearest threat; Nova radius 62+15/level; Chain speeds up 100 ms/level; Blade arc 100°+15/level; Nova interval 2000−200/level.
 - `balance:lab` gained `--dense` (spawn ×3, so kills don't saturate), `--seeds`, `--fit`. Fitting a damage multiplier (`CALIBRATION`) didn't converge: where a weapon lags, damage isn't the limit, delivery is. `CALIBRATION` stays at 1.
 - Dense, standing, 30 s: level 6 is even; Orbit/Blade lose far less HP than Bolt. Open: Dart and Chain lag Bolt at level 3, Nova leads at level 1. Likely needs a mechanic change, not numbers; play the lab at levels 1–3 first.
+
+### Game feel pass: combat juice, screens, danger tells (2026-10-22)
+
+- New `src/lib/game/fx.ts`: sticker-style particles (confetti, ring pops), damage-number labels, weapon effects (blade wedge, nova ring, jagged chain bolt), boss bar, and danger tells. Shake and hit-stop are off in reduced-motion and in the balance lab.
+- Danger tells: ogre slam zone fills during its telegraph; Reaper/Lich show a "!" wind-up (550 ms) and the Reaper's dash line; enemy shots carry a red halo; elites get a gold ring and crown; off-screen bosses/ogres/elites get an edge arrow.
+- `/game` screens: sticker level-up cards with kind tags and staggered entry, results with 0–3 stars (a third of the run each) and count-up stats, bigger boss-incoming banner.
+- Not viewed in a real browser (screenshots hang); effects were rendered offline. Level-up and results screens need a human look.
