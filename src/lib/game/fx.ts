@@ -467,3 +467,91 @@ export function drawBossBar(
   ctx.strokeRect(x, y, w, 10);
   ctx.restore();
 }
+
+// --- Clock ---------------------------------------------------------------
+
+function clockText(seconds: number) {
+  const s = Math.max(0, Math.ceil(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** A faint stopwatch face; the long hand follows the seconds left. */
+export function drawClock(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  r: number,
+  secondsLeft: number,
+  alpha: number,
+  color: string,
+) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineCap = "round";
+  ctx.lineWidth = r * 0.09;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillRect(cx - r * 0.1, cy - r * 1.28, r * 0.2, r * 0.18); // crown
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r * 0.82, cy + Math.sin(a) * r * 0.82);
+    ctx.lineTo(cx + Math.cos(a) * r * 0.92, cy + Math.sin(a) * r * 0.92);
+    ctx.stroke();
+  }
+  const a = ((secondsLeft % 60) / 60) * Math.PI * 2 - Math.PI / 2;
+  ctx.lineWidth = r * 0.07;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(a) * r * 0.72, cy + Math.sin(a) * r * 0.72);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.07, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+/** The time left, big and faint behind the action. */
+export function drawBigTime(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  secondsLeft: number,
+  alpha: number,
+  color: string,
+) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `900 ${Math.round(width * 0.3)}px sans-serif`;
+  ctx.fillText(clockText(secondsLeft), width / 2, height * 0.46);
+  ctx.font = `800 ${Math.round(width * 0.04)}px sans-serif`;
+  ctx.fillText("TIME LEFT", width / 2, height * 0.46 + width * 0.2);
+  ctx.restore();
+}
+
+/** Small health bar under a boss, so its HP is readable at a glance. */
+export function drawHpBar(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  fraction: number,
+  color: string,
+) {
+  const f = Math.max(0, Math.min(1, fraction));
+  ctx.save();
+  ctx.fillStyle = "#e2e8f0";
+  ctx.fillRect(x - w / 2, y, w, 6);
+  ctx.fillStyle = color;
+  ctx.fillRect(x - w / 2, y, w * f, 6);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = INK;
+  ctx.strokeRect(x - w / 2, y, w, 6);
+  ctx.restore();
+}

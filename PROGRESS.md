@@ -3234,4 +3234,7 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 
 - The play field now fills the viewport height (up to 780 px wide) instead of a fixed 500 px box. The backing store is 2× (`renderScale` engine option) so it stays sharp; the world stays 420×500, so balance is unchanged.
 - The HUD is no longer a separate card: a translucent blurred strip over the top of the field, weapon chips along the bottom. Toasts, the boss bar and the level-up overlay were moved to fit.
-- Lint, typecheck, tests and build pass. In a 590 px-tall window the field measured 402×478 and ran past the fold, so the height budget was changed to `100svh - 9rem`; that last tweak was not rebuilt or re-measured.
+- Lint, typecheck, tests and build pass. In a 590 px-tall window the field measured 402×478 and ran past the fold, so the height budget was changed to `100svh - 9rem`; that tweak is included in the build below.
+- Wide screens: the world width is chosen at launch from the window (aspect 0.84–1.5, height stays 500); the lab keeps 420 px. Wider worlds change how enemies arrive from the sides and were not rebalanced.
+- Level-up cards scale with the field width. Bosses get a small bar under the sprite as well as the top bar.
+- Clock: a brief freeze showing the time left (threat tier, boss warning, each minute, 30 s, 10 s), a pulsing stopwatch in the last 30 s, and a throbbing HUD timer. Off in reduced-motion and in the lab.

@@ -181,7 +181,10 @@ import {
   drawBolt,
   drawDamageNumber,
   drawDangerHalo,
+  drawBigTime,
   drawBossBar,
+  drawClock,
+  drawHpBar,
   drawDashLine,
   drawEliteMarker,
   drawNovaRing,
@@ -1144,6 +1147,16 @@ export function startGame(
   let shakeMag = 0;
   let shakeUntil = 0;
   let hitStopMs = 0;
+  // A "beat": a short freeze that shows the time left, fired when the clock
+  // triggers something (threat tier, boss, whole minutes, the last seconds).
+  let beatMs = 0;
+  let beatTotalMs = 1;
+  let lastBeatMark = Infinity;
+  function startBeat(ms = 850) {
+    if (!feedbackOn || beatMs > 0) return;
+    beatMs = ms;
+    beatTotalMs = ms;
+  }
   let lastOrbitTrailDropAt = -Infinity;
   let orbiterPositions: { x: number; y: number }[] = [];
 
@@ -2431,6 +2444,10 @@ export function startGame(
     update(dt = 1 / 60) {
       dt = Math.min(dt, MAX_DT); // Phase 8: cap a single frame's catch-up
       if (status !== "running") return;
+      if (beatMs > 0) {
+        beatMs -= dt * 1000;
+        return;
+      }
       if (hitStopMs > 0) {
         // A few frozen frames on a heavy kill; the world holds still.
         hitStopMs -= dt * 1000;
@@ -2445,6 +2462,7 @@ export function startGame(
       if (currentThreatTier > lastThreatTier) {
         lastThreatTier = currentThreatTier;
         callbacks.onThreatTierUp?.(currentThreatTier);
+        startBeat();
         log.log("threat:tierUp", { tier: currentThreatTier });
       }
 
@@ -2520,6 +2538,7 @@ export function startGame(
       if (!bossWarned && elapsedS >= bossSpawnAtS - BOSS_WARNING_LEAD_S) {
         bossWarned = true;
         callbacks.onBossIncoming?.();
+        startBeat();
         log.log("boss:incoming");
       }
       if (!bossSpawned && elapsedS >= bossSpawnAtS) {
@@ -2789,6 +2808,20 @@ export function startGame(
         }
       }
 
+      // --- clock beats: each whole minute left, then 30 s and 10 s ---
+      const remainingS = runDurationS - elapsedS;
+      const mark =
+        remainingS <= 10
+          ? 10
+          : remainingS <= 30
+            ? 30
+            : Math.ceil(remainingS / 60) * 60;
+      if (mark < lastBeatMark) {
+        // The first frame only initialises the mark.
+        if (lastBeatMark !== Infinity) startBeat();
+        lastBeatMark = mark;
+      }
+
       // --- timer ---
       if (elapsedS >= runDurationS) {
         endGame("timer");
@@ -2812,6 +2845,34 @@ export function startGame(
           (Math.random() - 0.5) * 2 * shakeMag * fade,
           (Math.random() - 0.5) * 2 * shakeMag * fade,
         );
+      }
+      // Clock backdrop: faint, behind everything. During a beat the time left
+      // swells in and out; in the last 30 s a stopwatch pulses, faster and
+      // redder as the end nears.
+      {
+        const left = Math.max(0, runDurationS - elapsedMs / 1000);
+        if (beatMs > 0) {
+          const t = 1 - beatMs / beatTotalMs;
+          const env = Math.sin(Math.PI * Math.min(1, t));
+          drawBigTime(context, WORLD_W, WORLD_H, left, 0.2 * env, "#e2e8f0");
+        }
+        if (feedbackOn && left <= 30 && left > 0) {
+          const urgent = left <= 10;
+          const beatsPerS = urgent ? 2 : 1;
+          const pulse = Math.pow(
+            0.5 + 0.5 * Math.sin(elapsedMs * 0.001 * beatsPerS * Math.PI * 2),
+            2,
+          );
+          drawClock(
+            context,
+            WORLD_W / 2,
+            WORLD_H * 0.52,
+            WORLD_W * (0.17 + pulse * 0.02),
+            left,
+            (urgent ? 0.1 : 0.06) + pulse * (urgent ? 0.14 : 0.07),
+            urgent ? "#fb7185" : "#e2e8f0",
+          );
+        }
       }
       // Ground warnings first, so enemies and the player stand on top.
       for (const e of enemies) {
@@ -2862,6 +2923,16 @@ export function startGame(
           flashAlpha,
         });
         if (isElite) drawEliteMarker(context, e.x, e.y, e.radius, elapsedMs);
+        if ((e.kind === "reaper" || e.kind === "lich") && e.maxHp) {
+          drawHpBar(
+            context,
+            e.x,
+            e.y + e.radius + 8,
+            e.radius * 2.6,
+            e.hp / e.maxHp,
+            "#fb7185",
+          );
+        }
         // Phase 16B: enemy pack synergy tell — a plain colored outline ring
         // (cheap, no shadowBlur) so the buff is visible while it holds, not
         // just felt as a stat change. Not gated by reduceMotion — it's
