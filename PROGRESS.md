@@ -3280,3 +3280,9 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 - **HUD.** Equipped weapons sit bottom-left with a cooldown sweep and level pips (evolved ones gold); a red wedge on the player's ring points at what hit them; a heartbeat ring pulses at low HP.
 - **Legibility.** Danger zones carry diagonal hatching and enemy shots a dashed outline, so they do not rely on colour alone.
 - Verified with offline renders of the run, the boss intro and the duel; not yet seen in a real browser. Mobile widths were not touched.
+
+### Character and attack redesign (2026-10-27)
+
+- New `src/lib/game/characters.ts`: the hero and all seven enemies are now built from inked parts (head, torso, limbs, gear) instead of a tinted blob with a face — a capped scout with a fluttering scarf, a stitched zombie, a bat with flapping scalloped wings, a helmeted skeleton, a swaying ghost, a horned ogre with a belt and fists, a hooded reaper that carries its scythe when not swinging, and a crowned lich with an orb. Hit flash overlays every part. `sprites.ts` keeps the pose wrappers and delegates to it; veteran-tier `rgb()` colours are handled.
+- Attacks: blade swing is a tapered crescent that sweeps with speed streaks; nova is a shockwave (core flash, spiked rim, fading disc, now orange to match its icon); chain lightning is forked with flares; projectiles differ by source (bolt teardrop, homing dart with fletching, tumbling bone, ghost wisp, spiked reaper orbs, lich curse); impact bursts are starbursts tinted per weapon; orbiters are heater shields facing outward.
+- Verified by offline renders only; not seen in a real browser.

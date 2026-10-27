@@ -159,7 +159,8 @@ export function drawDamageNumber(
   ctx.restore();
 }
 
-/** Blade swing: a filled wedge with an ink outline and a bright leading edge. */
+/** Blade swing: a tapered crescent that sweeps through the arc, leaving
+ * speed streaks behind its bright leading edge. */
 export function drawSlash(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -168,54 +169,160 @@ export function drawSlash(
   angle: number,
   halfArc: number,
   progress: number,
+  color = "#f5d0fe",
 ) {
-  const alpha = Math.max(0, 1 - progress);
+  const alpha = Math.max(
+    0,
+    1 - Math.pow(Math.max(0, progress - 0.25) / 0.75, 1.5),
+  );
+  if (alpha <= 0) return;
+  const sweep = Math.min(1, progress / 0.4);
+  const eased = 1 - (1 - sweep) * (1 - sweep);
+  const a0 = angle - halfArc;
+  const lead = a0 + halfArc * 2 * eased;
+  const steps = 14;
+  // The tail thins to nothing; the band is widest just behind the edge.
+  const outerAt = (i: number) =>
+    radius * (0.97 + 0.03 * Math.sin((i / steps) * Math.PI));
+  const widthAt = (i: number) =>
+    radius *
+    0.5 *
+    Math.pow(
+      Math.sin(Math.min(1, 0.1 + (i / steps) * 0.9) * Math.PI * 0.5),
+      1.2,
+    );
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.lineJoin = "round";
   ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.arc(x, y, radius, angle - halfArc, angle + halfArc);
+  for (let i = 0; i <= steps; i++) {
+    const a = a0 + (lead - a0) * (i / steps);
+    const rad = outerAt(i);
+    ctx.lineTo(x + Math.cos(a) * rad, y + Math.sin(a) * rad);
+  }
+  for (let i = steps; i >= 0; i--) {
+    const a = a0 + (lead - a0) * (i / steps);
+    const rad = outerAt(i) - widthAt(i);
+    ctx.lineTo(x + Math.cos(a) * rad, y + Math.sin(a) * rad);
+  }
   ctx.closePath();
-  ctx.fillStyle = "rgba(226,232,240,0.35)";
+  ctx.fillStyle = color;
+  ctx.globalAlpha = alpha * 0.85;
   ctx.fill();
-  ctx.lineWidth = 5;
+  ctx.globalAlpha = alpha;
+  ctx.lineWidth = 3;
   ctx.strokeStyle = INK;
+  ctx.stroke();
+  // Bright outer rim.
+  ctx.lineWidth = 2.2;
+  ctx.strokeStyle = "#ffffff";
   ctx.beginPath();
-  ctx.arc(x, y, radius, angle - halfArc, angle + halfArc);
+  for (let i = 3; i <= steps; i++) {
+    const a = a0 + (lead - a0) * (i / steps);
+    const rad = outerAt(i) - 1;
+    if (i === 3) ctx.moveTo(x + Math.cos(a) * rad, y + Math.sin(a) * rad);
+    else ctx.lineTo(x + Math.cos(a) * rad, y + Math.sin(a) * rad);
+  }
   ctx.stroke();
-  ctx.lineWidth = 2.5;
-  ctx.strokeStyle = "#f8fafc";
-  ctx.stroke();
+  // Speed streaks inside the sweep.
+  ctx.lineCap = "round";
+  ctx.lineWidth = 1.6;
+  ctx.strokeStyle = "rgba(255,255,255,0.75)";
+  for (const k of [0.62, 0.74]) {
+    ctx.beginPath();
+    ctx.arc(
+      x,
+      y,
+      radius * k,
+      Math.max(a0, lead - halfArc * 0.9),
+      lead - halfArc * 0.15,
+    );
+    ctx.stroke();
+  }
+  // A spark at the leading edge while it travels.
+  if (sweep < 1) {
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(
+      x + Math.cos(lead) * radius,
+      y + Math.sin(lead) * radius,
+      3.2,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+  }
   ctx.restore();
 }
 
-/** Nova pulse: a thick ring that grows, outlined like a sticker. */
+/** Nova pulse: a shockwave — a flash at the core, a thick ring that expands
+ * with a crown of spikes on its rim, and a fading disc inside. */
 export function drawNovaRing(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   radius: number,
   progress: number,
+  color = "#fb923c",
 ) {
   const alpha = Math.max(0, 1 - progress);
-  const r = radius * (0.3 + progress * 0.7);
+  if (alpha <= 0) return;
+  const grow = 1 - Math.pow(1 - progress, 2);
+  const r = radius * (0.2 + grow * 0.8);
   ctx.save();
   ctx.globalAlpha = alpha;
+  const g = ctx.createRadialGradient(x, y, r * 0.2, x, y, r);
+  g.addColorStop(0, "rgba(254,243,199,0)");
+  g.addColorStop(1, color);
+  ctx.globalAlpha = alpha * 0.5;
+  ctx.fillStyle = g;
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(196,181,253,0.22)";
   ctx.fill();
-  ctx.lineWidth = 6;
+  ctx.globalAlpha = alpha;
+  // Spikes riding the rim.
+  const spikes = 16;
+  const len = radius * 0.16 * (1 - progress * 0.6);
+  ctx.beginPath();
+  for (let i = 0; i < spikes; i++) {
+    const a = (i / spikes) * Math.PI * 2 + progress * 0.6;
+    const half = (Math.PI / spikes) * 0.5;
+    ctx.moveTo(x + Math.cos(a - half) * r, y + Math.sin(a - half) * r);
+    ctx.lineTo(x + Math.cos(a) * (r + len), y + Math.sin(a) * (r + len));
+    ctx.lineTo(x + Math.cos(a + half) * r, y + Math.sin(a + half) * r);
+  }
+  ctx.fillStyle = "#fef3c7";
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = INK;
+  ctx.lineJoin = "round";
+  ctx.stroke();
+  ctx.lineWidth = 7 * (1 - progress * 0.5);
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
   ctx.strokeStyle = INK;
   ctx.stroke();
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = "#c4b5fd";
+  ctx.lineWidth = 3.5 * (1 - progress * 0.5);
+  ctx.strokeStyle = color;
   ctx.stroke();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "rgba(255,255,255,0.8)";
+  ctx.beginPath();
+  ctx.arc(x, y, r * 0.84, 0, Math.PI * 2);
+  ctx.stroke();
+  // The flash at the core, gone in the first quarter.
+  if (progress < 0.25) {
+    const k = 1 - progress / 0.25;
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 0.22 * k + 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
-/** Chain lightning: a jagged bolt, ink underlay, bright core. */
+/** Chain lightning: a forked bolt with an ink underlay, a cyan body and a
+ * white core, flaring where it lands. */
 export function drawBolt(
   ctx: CanvasRenderingContext2D,
   x1: number,
@@ -227,30 +334,85 @@ export function drawBolt(
 ) {
   const alpha = Math.max(0, 1 - progress);
   const len = Math.hypot(x2 - x1, y2 - y1);
-  const segments = Math.max(2, Math.round(len / 18));
+  const segments = Math.max(3, Math.round(len / 14));
   const nx = -(y2 - y1) / (len || 1);
   const ny = (x2 - x1) / (len || 1);
+  const pts: [number, number][] = [[x1, y1]];
+  for (let i = 1; i < segments; i++) {
+    const t = i / segments;
+    const jitter = Math.sin(seed * 12.9898 + i * 78.233) * 8;
+    pts.push([
+      x1 + (x2 - x1) * t + nx * jitter,
+      y1 + (y2 - y1) * t + ny * jitter,
+    ]);
+  }
+  pts.push([x2, y2]);
+  const trace = (list: [number, number][]) => {
+    ctx.beginPath();
+    list.forEach(([px, py], i) =>
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py),
+    );
+  };
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(x1, y1);
-  for (let i = 1; i < segments; i++) {
-    const t = i / segments;
-    const jitter = Math.sin(seed * 12.9898 + i * 78.233) * 7;
-    ctx.lineTo(
-      x1 + (x2 - x1) * t + nx * jitter,
-      y1 + (y2 - y1) * t + ny * jitter,
-    );
+  // Two short forks off the main bolt.
+  const forks: [number, number][][] = [];
+  for (const [idx, side] of [
+    [Math.floor(segments * 0.35), 1],
+    [Math.floor(segments * 0.7), -1],
+  ] as const) {
+    if (idx < 1 || idx >= pts.length - 1) continue;
+    const [px, py] = pts[idx];
+    const dirx = (x2 - x1) / (len || 1);
+    const diry = (y2 - y1) / (len || 1);
+    const reach = Math.min(18, len * 0.25);
+    forks.push([
+      [px, py],
+      [
+        px + dirx * reach * 0.5 + nx * side * reach * 0.7,
+        py + diry * reach * 0.5 + ny * side * reach * 0.7,
+      ],
+      [
+        px + dirx * reach + nx * side * reach * 0.9,
+        py + diry * reach + ny * side * reach * 0.9,
+      ],
+    ]);
   }
-  ctx.lineTo(x2, y2);
-  ctx.lineWidth = 6;
-  ctx.strokeStyle = INK;
-  ctx.stroke();
-  ctx.lineWidth = 2.5;
-  ctx.strokeStyle = "#a5f3fc";
-  ctx.stroke();
+  for (const [w, c] of [
+    [7, INK],
+    [3.6, "#67e8f9"],
+    [1.6, "#ffffff"],
+  ] as const) {
+    ctx.strokeStyle = c;
+    ctx.lineWidth = w;
+    trace(pts);
+    ctx.stroke();
+    ctx.lineWidth = w * 0.6;
+    for (const fk of forks) {
+      trace(fk);
+      ctx.stroke();
+    }
+  }
+  // Flares where the bolt leaves and lands.
+  for (const [fx2, fy2, big] of [
+    [x1, y1, 4],
+    [x2, y2, 7],
+  ] as const) {
+    ctx.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const a = (i * Math.PI) / 4 + seed;
+      const rad = i % 2 ? big * 0.45 : big;
+      ctx.lineTo(fx2 + Math.cos(a) * rad, fy2 + Math.sin(a) * rad);
+    }
+    ctx.closePath();
+    ctx.fillStyle = "#ecfeff";
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = INK;
+    ctx.stroke();
+  }
   ctx.restore();
 }
 

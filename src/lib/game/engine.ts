@@ -154,7 +154,6 @@ import {
 } from "./audio";
 import {
   drawPlayer,
-  drawShape,
   drawEnemy,
   drawSwingArm,
   drawWeaponGlyph,
@@ -164,6 +163,7 @@ import {
   drawCoin,
   drawProjectile,
   drawImpactBurst,
+  drawOrbiter,
 } from "./sprites";
 import {
   BLADE_ARC_RADIUS,
@@ -949,6 +949,7 @@ interface HitSpark {
   x: number;
   y: number;
   createdAt: number;
+  color?: string;
 }
 
 // Phase 14: a rising/fading damage amount at the hit point, layered on top
@@ -1622,7 +1623,12 @@ export function startGame(
       if (e.hp <= 0 && e.alive) stats.kills += 1;
     }
     e.hitFlashUntil = elapsedMs + HIT_FLASH_MS;
-    hitSparks.push({ x: e.x, y: e.y, createdAt: elapsedMs });
+    hitSparks.push({
+      x: e.x,
+      y: e.y,
+      createdAt: elapsedMs,
+      color: WEAPON_COLOR[source.replace("-trail", "") as WeaponId],
+    });
     if (!reduceMotion) impactFx(e, source);
     damageNumbers.push({
       x: e.x,
@@ -3551,7 +3557,11 @@ export function startGame(
         const { pose, alpha } = corpsePose(c, p);
         context.save();
         context.globalAlpha = Math.max(0, alpha);
-        drawEnemy(context, c.kind, c.x, c.y, c.radius, c.color, { pose });
+        drawEnemy(context, c.kind, c.x, c.y, c.radius, c.color, {
+          pose,
+          t: elapsedMs,
+          armed: false,
+        });
         context.restore();
       }
       // Elite/boss get a glow (GAME-DESIGN.md "Distinct glow/aura"); Veteran
@@ -3579,6 +3589,8 @@ export function startGame(
         drawEnemy(context, e.kind, e.x, e.y, e.radius, e.color, {
           flashAlpha,
           pose: enemyPose(e),
+          t: elapsedMs + (e.seed ?? 0) * 997,
+          armed: e.swing?.kind !== "melee",
         });
         // The arm and weapon of a melee swing: drawn back while winding up,
         // whipped across on the strike.
@@ -3638,11 +3650,29 @@ export function startGame(
         }
       }
       for (const p of projectiles) {
-        drawProjectile(context, p.x, p.y, p.width / 2, p.color, p.dx, p.dy);
+        drawProjectile(
+          context,
+          p.x,
+          p.y,
+          p.width / 2,
+          p.color,
+          p.dx,
+          p.dy,
+          p.source,
+        );
       }
       for (const p of enemyProjectiles) {
         drawDangerHalo(context, p.x, p.y, p.width / 2, elapsedMs);
-        drawProjectile(context, p.x, p.y, p.width / 2, p.color, p.dx, p.dy);
+        drawProjectile(
+          context,
+          p.x,
+          p.y,
+          p.width / 2,
+          p.color,
+          p.dx,
+          p.dy,
+          p.source,
+        );
       }
       // Boss wind-up tells, above the sprites so they can't be missed.
       for (const e of enemies) {
@@ -3694,6 +3724,7 @@ export function startGame(
         playerFacingAngle,
         playerFlashAlpha,
         playerPose(playerFlashAlpha),
+        elapsedMs,
       );
       // The weapon in hand: it points where the player last struck, and the
       // blade swings through its arc.
@@ -3782,14 +3813,13 @@ export function startGame(
           );
         }
       }
-      for (const pos of orbiterPositions) {
-        drawShape(
+      for (let i = 0; i < orbiterPositions.length; i++) {
+        drawOrbiter(
           context,
-          "circle",
-          pos.x,
-          pos.y,
-          ORBIT_VISUAL_RADIUS,
-          "#facc15",
+          orbiterPositions[i].x,
+          orbiterPositions[i].y,
+          ORBIT_VISUAL_RADIUS * 1.5,
+          orbiterBearings[i] ?? 0,
         );
       }
 
@@ -3814,6 +3844,7 @@ export function startGame(
           st.angle,
           st.half,
           (elapsedMs - st.at) / 220,
+          "#fecaca",
         );
       }
 
@@ -3847,7 +3878,7 @@ export function startGame(
           1,
           (elapsedMs - s.createdAt) / HIT_SPARK_DURATION_MS,
         );
-        drawImpactBurst(context, s.x, s.y, progress);
+        drawImpactBurst(context, s.x, s.y, progress, s.color);
       }
 
       drawParticles(context, particles);

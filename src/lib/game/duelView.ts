@@ -774,6 +774,7 @@ export function startDuel(
         mine ? PLAYER_COLOR : "#fda4af",
         s.vx,
         s.vy,
+        state.fighters[s.owner].weaponId,
       );
     }
     for (let i = slashes.length - 1; i >= 0; i--) {

@@ -6,6 +6,7 @@
 // logic"). engine.ts calls these from render(); simulation/collision code
 // is entirely untouched by this file — it is rendering-only.
 import type { EnemyKind, WeaponId } from "./engine";
+import { OUTLINE, drawEnemyArt, drawHeroArt, lighten } from "./characters";
 
 export type Shape = "circle" | "square" | "diamond" | "bat" | "ghost" | "hood";
 
@@ -35,6 +36,10 @@ interface ShapeOptions {
   // Phase 11: 0-1 fade — a white overlay of the same silhouette, used for a
   // brief "just got hit" flash. 0/undefined draws nothing extra.
   flashAlpha?: number;
+  // Clock in ms, for things that flap and sway.
+  t?: number;
+  // False while a swinging arm carries the weapon instead.
+  armed?: boolean;
 }
 
 // Traces the given shape's outline into ctx's current path (caller controls
@@ -83,8 +88,6 @@ function traceShapePath(
     ctx.closePath();
   }
 }
-
-const OUTLINE = "#0f172a";
 
 // Sprites are drawn larger than their simulation radius so the faces read at
 // the canvas's small size; hitboxes (engine.ts) are untouched.
@@ -177,60 +180,6 @@ function drawLine(
   ctx.restore();
 }
 
-// Open path of connected points (mouths, brows).
-function drawPolyline(
-  ctx: CanvasRenderingContext2D,
-  points: [number, number][],
-  width: number,
-) {
-  ctx.save();
-  ctx.strokeStyle = OUTLINE;
-  ctx.lineWidth = width;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.beginPath();
-  points.forEach(([px, py], i) => {
-    if (i === 0) ctx.moveTo(px, py);
-    else ctx.lineTo(px, py);
-  });
-  ctx.stroke();
-  ctx.restore();
-}
-
-// White of the eye plus a dark pupil and a thin outline.
-function drawEye(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  radius: number,
-  pupilDx = 0,
-  pupilDy = 0,
-) {
-  drawDot(ctx, x, y, radius, "#ffffff", Math.max(1, radius * 0.4));
-  drawDot(ctx, x + pupilDx, y + pupilDy, radius * 0.5, OUTLINE);
-}
-
-// Solid dark socket (skeleton, ghost, ogre-free faces).
-function drawSocket(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  rx: number,
-  ry: number,
-) {
-  ctx.fillStyle = OUTLINE;
-  ctx.beginPath();
-  ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-// Mixes a #rrggbb color toward white; used for the pale core of projectiles.
-function lighten(hex: string, amount: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  const mix = (c: number) => Math.round(c + (255 - c) * amount);
-  return `rgb(${mix((n >> 16) & 255)},${mix((n >> 8) & 255)},${mix(n & 255)})`;
-}
-
 export function drawPlayer(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -240,6 +189,7 @@ export function drawPlayer(
   facingAngle: number,
   hitFlashAlpha = 0,
   pose?: EnemyPose,
+  t = 0,
 ) {
   radius *= PLAYER_SCALE;
   if (pose) {
@@ -249,40 +199,11 @@ export function drawPlayer(
     ctx.rotate(pose.tilt);
     ctx.scale(pose.sx, pose.sy);
     ctx.translate(-x, -feetY);
-    drawPlayer(
-      ctx,
-      x,
-      y,
-      radius / PLAYER_SCALE,
-      color,
-      facingAngle,
-      hitFlashAlpha,
-    );
+    drawHeroArt(ctx, x, y, radius, color, facingAngle, hitFlashAlpha, t);
     ctx.restore();
     return;
   }
-  drawShape(ctx, "circle", x, y, radius, color, { flashAlpha: hitFlashAlpha });
-  // Eyes look toward the last movement direction, so the player reads as
-  // oriented even though the body itself is symmetric.
-  const eyeR = radius * 0.24;
-  const lookX = Math.cos(facingAngle) * eyeR * 0.45;
-  const lookY = Math.sin(facingAngle) * eyeR * 0.45;
-  drawEye(ctx, x - radius * 0.36, y - radius * 0.14, eyeR, lookX, lookY);
-  drawEye(ctx, x + radius * 0.36, y - radius * 0.14, eyeR, lookX, lookY);
-  ctx.save();
-  ctx.strokeStyle = OUTLINE;
-  ctx.lineWidth = Math.max(1.2, radius * 0.17);
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(x - radius * 0.3, y + radius * 0.42);
-  ctx.quadraticCurveTo(
-    x,
-    y + radius * 0.7,
-    x + radius * 0.3,
-    y + radius * 0.42,
-  );
-  ctx.stroke();
-  ctx.restore();
+  drawHeroArt(ctx, x, y, radius, color, facingAngle, hitFlashAlpha, t);
 }
 
 // Per-kind faces layered on top of the base shape — deliberately simple
@@ -375,145 +296,17 @@ function drawEnemyBody(
   color: string,
   opts: ShapeOptions,
 ) {
-  const r = radius * ENEMY_SCALE;
-  const line = Math.max(1.2, r * 0.17);
-  // Horns sit behind the body, so they're drawn first.
-  if (kind === "ogre") {
-    const horn = "#fed7aa";
-    for (const side of [-1, 1]) {
-      ctx.save();
-      ctx.fillStyle = horn;
-      ctx.strokeStyle = OUTLINE;
-      ctx.lineWidth = Math.max(1.5, r * 0.2);
-      ctx.lineJoin = "round";
-      ctx.beginPath();
-      ctx.moveTo(x + side * r * 0.75, y - r * 0.75);
-      ctx.lineTo(x + side * r * 0.85, y - r * 1.4);
-      ctx.lineTo(x + side * r * 0.3, y - r * 0.8);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-    }
-  }
-  drawShape(ctx, ENEMY_SHAPE[kind], x, y, r, color, opts);
-  if (opts.flashAlpha && opts.flashAlpha > 0.5) return; // fully whited-out — skip accents
-  switch (kind) {
-    case "zombie":
-      drawEye(ctx, x - r * 0.3, y - r * 0.15, r * 0.25);
-      drawEye(ctx, x + r * 0.3, y - r * 0.1, r * 0.18);
-      drawPolyline(
-        ctx,
-        [
-          [x - r * 0.4, y + r * 0.5],
-          [x - r * 0.15, y + r * 0.35],
-          [x + r * 0.1, y + r * 0.5],
-          [x + r * 0.4, y + r * 0.35],
-        ],
-        line,
-      );
-      break;
-    case "bat":
-      drawDot(ctx, x, y - r * 0.05, r * 0.36, color, Math.max(1.2, r * 0.2));
-      drawDot(ctx, x - r * 0.14, y - r * 0.05, r * 0.11, "#ffffff");
-      drawDot(ctx, x + r * 0.14, y - r * 0.05, r * 0.11, "#ffffff");
-      break;
-    case "skeleton":
-      drawSocket(ctx, x - r * 0.3, y - r * 0.15, r * 0.24, r * 0.24);
-      drawSocket(ctx, x + r * 0.3, y - r * 0.15, r * 0.24, r * 0.24);
-      drawLine(
-        ctx,
-        x - r * 0.35,
-        y + r * 0.45,
-        x + r * 0.35,
-        y + r * 0.45,
-        line,
-      );
-      drawLine(
-        ctx,
-        x - r * 0.12,
-        y + r * 0.3,
-        x - r * 0.12,
-        y + r * 0.62,
-        line,
-      );
-      drawLine(
-        ctx,
-        x + r * 0.12,
-        y + r * 0.3,
-        x + r * 0.12,
-        y + r * 0.62,
-        line,
-      );
-      break;
-    case "ghost":
-      drawSocket(ctx, x - r * 0.3, y - r * 0.3, r * 0.17, r * 0.25);
-      drawSocket(ctx, x + r * 0.3, y - r * 0.3, r * 0.17, r * 0.25);
-      drawSocket(ctx, x, y + r * 0.2, r * 0.17, r * 0.17);
-      break;
-    case "ogre":
-      drawLine(
-        ctx,
-        x - r * 0.55,
-        y - r * 0.28,
-        x - r * 0.15,
-        y - r * 0.1,
-        line,
-      );
-      drawLine(
-        ctx,
-        x + r * 0.55,
-        y - r * 0.28,
-        x + r * 0.15,
-        y - r * 0.1,
-        line,
-      );
-      for (const side of [-1, 1]) {
-        ctx.save();
-        ctx.fillStyle = "#ffffff";
-        ctx.strokeStyle = OUTLINE;
-        ctx.lineWidth = Math.max(1, r * 0.1);
-        ctx.lineJoin = "round";
-        ctx.beginPath();
-        ctx.moveTo(x + side * r * 0.2, y + r * 0.35);
-        ctx.lineTo(x + side * r * 0.4, y + r * 0.75);
-        ctx.lineTo(x + side * r * 0.6, y + r * 0.35);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        ctx.restore();
-      }
-      break;
-    case "reaper":
-      ctx.fillStyle = OUTLINE;
-      ctx.beginPath();
-      ctx.ellipse(x, y + r * 0.1, r * 0.33, r * 0.4, 0, 0, Math.PI * 2);
-      ctx.fill();
-      drawDot(ctx, x - r * 0.14, y + r * 0.08, r * 0.1, "#f0abfc");
-      drawDot(ctx, x + r * 0.14, y + r * 0.08, r * 0.1, "#f0abfc");
-      break;
-    case "lich": {
-      // Three-point crown above the diamond's top corner.
-      ctx.save();
-      ctx.fillStyle = "#fde047";
-      ctx.strokeStyle = OUTLINE;
-      ctx.lineWidth = Math.max(1.2, r * 0.13);
-      ctx.lineJoin = "round";
-      ctx.beginPath();
-      ctx.moveTo(x - r * 0.3, y - r * 0.35);
-      ctx.lineTo(x - r * 0.2, y - r * 0.7);
-      ctx.lineTo(x, y - r * 0.5);
-      ctx.lineTo(x + r * 0.2, y - r * 0.7);
-      ctx.lineTo(x + r * 0.3, y - r * 0.35);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-      drawSocket(ctx, x - r * 0.25, y + r * 0.1, r * 0.14, r * 0.14);
-      drawSocket(ctx, x + r * 0.25, y + r * 0.1, r * 0.14, r * 0.14);
-      break;
-    }
-  }
+  drawEnemyArt(
+    ctx,
+    kind,
+    x,
+    y,
+    radius * ENEMY_SCALE,
+    color,
+    opts.flashAlpha ?? 0,
+    opts.t ?? 0,
+    opts.armed ?? true,
+  );
 }
 
 /** Idle shimmer shared by pickups: a gentle bob and a twinkle that sweeps
@@ -619,8 +412,37 @@ export function drawCoin(
   ctx.restore();
 }
 
-// A tapered trail opposite the velocity vector behind a pale, outlined core:
-// bright at the head, fading to nothing at the tail.
+function spikeStar(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  outer: number,
+  inner: number,
+  points: number,
+  rot = 0,
+) {
+  ctx.beginPath();
+  for (let i = 0; i < points * 2; i++) {
+    const a = rot + (i * Math.PI) / points;
+    const rad = i % 2 ? inner : outer;
+    ctx.lineTo(x + Math.cos(a) * rad, y + Math.sin(a) * rad);
+  }
+  ctx.closePath();
+}
+
+function inkFill(ctx: CanvasRenderingContext2D, fill: string, width: number) {
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.lineWidth = width;
+  ctx.strokeStyle = OUTLINE;
+  ctx.lineJoin = "round";
+  ctx.stroke();
+}
+
+/** A shot in flight. What it looks like follows who fired it: the hero's
+ * energy bolt and homing dart, a skeleton's thrown bone, a ghost's wisp, the
+ * spiked orbs of a reaper's ring, the lich's curse. Anything unnamed is a
+ * plain energy bolt. */
 export function drawProjectile(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -629,29 +451,164 @@ export function drawProjectile(
   color: string,
   vx: number,
   vy: number,
+  source = "bolt",
 ) {
   const speed = Math.hypot(vx, vy);
-  if (speed > 0) {
+  const heading = speed > 0 ? Math.atan2(vy, vx) : 0;
+  const lw = Math.max(1.5, radius * 0.4);
+  // A tapered trail opposite the velocity vector, bright at the head.
+  if (speed > 0 && source !== "skeleton-bone") {
     const tailLen = radius * 5 + Math.min(speed, 400) * 0.04;
-    const ux = vx / speed;
-    const uy = vy / speed;
-    const tx = x - ux * tailLen;
-    const ty = y - uy * tailLen;
+    const tx = x - Math.cos(heading) * tailLen;
+    const ty = y - Math.sin(heading) * tailLen;
     ctx.save();
     ctx.lineCap = "round";
     const g = ctx.createLinearGradient(x, y, tx, ty);
     g.addColorStop(0, color);
     g.addColorStop(1, "rgba(255,255,255,0)");
     ctx.strokeStyle = g;
-    ctx.lineWidth = Math.max(2, radius * 1.5);
-    ctx.globalAlpha = 0.75;
+    ctx.lineWidth = Math.max(2, radius * 1.4);
+    ctx.globalAlpha = 0.7;
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(tx, ty);
     ctx.stroke();
     ctx.restore();
   }
-  drawShape(ctx, "circle", x, y, radius, lighten(color, 0.75));
+  ctx.save();
+  ctx.translate(x, y);
+  if (source === "homingDart") {
+    ctx.rotate(heading);
+    const L = radius * 2.6;
+    // Fletching, shaft, then a pointed head.
+    ctx.beginPath();
+    ctx.moveTo(-L * 0.9, 0);
+    ctx.lineTo(-L * 1.25, -L * 0.45);
+    ctx.lineTo(-L * 0.55, -L * 0.1);
+    ctx.lineTo(-L * 0.55, L * 0.1);
+    ctx.lineTo(-L * 1.25, L * 0.45);
+    ctx.closePath();
+    inkFill(ctx, "#f472b6", lw);
+    ctx.beginPath();
+    ctx.moveTo(L * 1.1, 0);
+    ctx.lineTo(L * 0.2, -L * 0.4);
+    ctx.lineTo(-L * 0.9, -L * 0.14);
+    ctx.lineTo(-L * 0.9, L * 0.14);
+    ctx.lineTo(L * 0.2, L * 0.4);
+    ctx.closePath();
+    inkFill(ctx, lighten(color, 0.35), lw);
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(L * 0.15, 0, L * 0.14, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (source === "skeleton-bone") {
+    // Tumbles as it travels.
+    ctx.rotate((x + y) * 0.12);
+    const L = radius * 2.3;
+    ctx.lineCap = "round";
+    for (const [w, c] of [
+      [radius * 1.0 + lw * 2, OUTLINE],
+      [radius * 1.0, "#f1f5f9"],
+    ] as const) {
+      ctx.lineWidth = w;
+      ctx.strokeStyle = c;
+      ctx.beginPath();
+      ctx.moveTo(-L, 0);
+      ctx.lineTo(L, 0);
+      ctx.stroke();
+    }
+    for (const sx of [-L, L]) {
+      for (const sy of [-radius * 0.55, radius * 0.55]) {
+        ctx.beginPath();
+        ctx.arc(sx, sy, radius * 0.62, 0, Math.PI * 2);
+        inkFill(ctx, "#f1f5f9", lw * 0.8);
+      }
+    }
+  } else if (source === "ghost") {
+    // A wisp: a teardrop whose tail flickers behind it.
+    ctx.rotate(heading);
+    ctx.beginPath();
+    ctx.moveTo(radius * 1.5, 0);
+    ctx.bezierCurveTo(
+      radius * 1.5,
+      -radius * 1.4,
+      -radius * 0.4,
+      -radius * 1.4,
+      -radius * 2.6,
+      -radius * 0.2,
+    );
+    ctx.lineTo(-radius * 1.8, radius * 0.2);
+    ctx.lineTo(-radius * 2.4, radius * 0.9);
+    ctx.bezierCurveTo(
+      -radius * 0.4,
+      radius * 1.4,
+      radius * 1.5,
+      radius * 1.4,
+      radius * 1.5,
+      0,
+    );
+    ctx.closePath();
+    inkFill(ctx, "#e0f2fe", lw);
+    ctx.fillStyle = OUTLINE;
+    ctx.beginPath();
+    ctx.arc(radius * 0.55, -radius * 0.3, radius * 0.22, 0, Math.PI * 2);
+    ctx.arc(radius * 0.55, radius * 0.4, radius * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (source === "lich-curse") {
+    // A dark orb ringed in violet, with a skull's eyes glaring out of it.
+    const flick = 1 + 0.08 * Math.sin((x + y) * 0.3);
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 1.7 * flick, 0, Math.PI * 2);
+    inkFill(ctx, "#4c1d95", lw);
+    ctx.lineWidth = Math.max(1.5, radius * 0.4);
+    ctx.strokeStyle = "#c4b5fd";
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 1.2, 0.4, Math.PI * 1.6);
+    ctx.stroke();
+    ctx.fillStyle = "#e9d5ff";
+    for (const sx of [-1, 1]) {
+      ctx.beginPath();
+      ctx.arc(sx * radius * 0.5, -radius * 0.1, radius * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (source === "reaper-ring") {
+    ctx.rotate((x + y) * 0.1);
+    spikeStar(ctx, 0, 0, radius * 1.9, radius * 1.0, 8);
+    inkFill(ctx, "#fb7185", lw);
+    ctx.fillStyle = "#fff1f2";
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    // The hero's bolt: a glowing teardrop with a pale core.
+    ctx.rotate(heading);
+    ctx.beginPath();
+    ctx.moveTo(-radius * 3.2, 0);
+    ctx.quadraticCurveTo(
+      -radius * 0.6,
+      -radius * 1.5,
+      radius * 0.4,
+      -radius * 1.45,
+    );
+    ctx.arc(radius * 0.4, 0, radius * 1.45, -Math.PI / 2, Math.PI / 2);
+    ctx.quadraticCurveTo(-radius * 0.6, radius * 1.5, -radius * 3.2, 0);
+    ctx.closePath();
+    inkFill(ctx, color, lw);
+    ctx.fillStyle = "#fffbeb";
+    ctx.beginPath();
+    ctx.arc(radius * 0.4, 0, radius * 0.85, 0, Math.PI * 2);
+    ctx.fill();
+    // Two little sparks riding the trail.
+    ctx.fillStyle = "#ffffff";
+    for (const [px, py] of [
+      [-radius * 3.4, -radius * 1.0],
+      [-radius * 4.2, radius * 0.9],
+    ] as const) {
+      spikeStar(ctx, px, py, radius * 0.7, radius * 0.2, 4);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
 }
 
 // Phase 11: a small radiating-line burst at a weapon-hit point — the
@@ -659,28 +616,72 @@ export function drawProjectile(
 // swing/burst/ring effect (arcEffects/pulseEffects/orbitTrails in
 // engine.ts), giving individual hits an impact even outside those. progress
 // runs 0 (just spawned) to 1 (fully faded) — engine.ts owns the timing.
+// The starburst pops white and settles into `color`.
 export function drawImpactBurst(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   progress: number,
+  color = "#fde047",
 ) {
   const alpha = Math.max(0, 1 - progress);
   if (alpha <= 0) return;
-  const inner = 3 + progress * 2;
-  const outer = 6 + progress * 8;
+  const outer = 6 + progress * 12;
   ctx.save();
   ctx.globalAlpha = alpha;
+  spikeStar(ctx, x, y, outer, outer * 0.42, 8, progress * 0.8);
+  inkFill(ctx, progress < 0.35 ? "#ffffff" : color, 2);
   ctx.strokeStyle = "#ffffff";
   ctx.lineWidth = 1.5;
   ctx.lineCap = "round";
-  for (let i = 0; i < 4; i++) {
-    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + 0.5;
     ctx.beginPath();
-    ctx.moveTo(x + Math.cos(a) * inner, y + Math.sin(a) * inner);
-    ctx.lineTo(x + Math.cos(a) * outer, y + Math.sin(a) * outer);
+    ctx.moveTo(x + Math.cos(a) * (outer + 2), y + Math.sin(a) * (outer + 2));
+    ctx.lineTo(
+      x + Math.cos(a) * (outer + 5 + progress * 6),
+      y + Math.sin(a) * (outer + 5 + progress * 6),
+    );
     ctx.stroke();
   }
+  ctx.restore();
+}
+
+/** An orbiting shield: a heater shield held flat side out, so what circles
+ * the hero looks like what it does. `bearing` is the direction from the hero
+ * to the shield. */
+export function drawOrbiter(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+  bearing: number,
+) {
+  const r = size;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(bearing);
+  const trace = (k: number) => {
+    ctx.beginPath();
+    ctx.moveTo(0.8 * r * k, -0.95 * r * k);
+    ctx.lineTo(0.8 * r * k, 0.95 * r * k);
+    ctx.lineTo(-0.15 * r * k, 0.8 * r * k);
+    ctx.lineTo(-1.0 * r * k, 0);
+    ctx.lineTo(-0.15 * r * k, -0.8 * r * k);
+    ctx.closePath();
+  };
+  trace(1);
+  inkFill(ctx, "#facc15", Math.max(2, r * 0.3));
+  trace(0.62);
+  ctx.fillStyle = "#fef08a";
+  ctx.fill();
+  ctx.lineWidth = Math.max(1.2, r * 0.14);
+  ctx.strokeStyle = OUTLINE;
+  ctx.stroke();
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(0.1 * r, 0, r * 0.2, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 }
 
