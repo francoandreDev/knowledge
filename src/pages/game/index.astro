@@ -91,11 +91,17 @@ import Layout from "../../layouts/Layout.astro";
             </p>
           </div>
           <p
+            data-daily-chip
+            class="inline-flex items-center gap-2 rounded-full border-2 border-slate-900 bg-emerald-300 px-3 py-1 text-xs font-extrabold text-slate-900 shadow-[0_3px_0_#020617]"
+          >
+          </p>
+          <p
             data-lobby-zero-message
             class="hidden text-sm font-bold text-amber-300"
           >
             No runs left —
-            <a href="/roadmap" class="underline">finish a unit</a> to earn one.
+            <a href="/roadmap" class="underline">finish a unit</a> to earn one, or
+            come back tomorrow for the free daily run.
           </p>
         </div>
       </section>
@@ -237,6 +243,46 @@ import Layout from "../../layouts/Layout.astro";
             <span class="text-xs text-slate-500 dark:text-slate-400"
               >Against this run's length. Finish units to extend it.</span
             >
+          </div>
+
+          <div
+            class="flex flex-col gap-3 rounded-2xl border-2 border-slate-900 bg-amber-100 p-5 text-slate-900 shadow-[0_5px_0_#020617]"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs font-extrabold tracking-widest uppercase"
+                >Chests</span
+              >
+              <span class="text-[11px] font-bold text-amber-900/70"
+                >Survive a whole run to win one</span
+              >
+            </div>
+            <div data-chest-rows class="flex flex-col gap-2"></div>
+            <p class="text-[11px] font-semibold text-amber-900/70">
+              Defeat the boss as well and it is a golden chest: two relics and
+              better odds.
+            </p>
+          </div>
+
+          <div
+            class="flex flex-col gap-3 rounded-2xl border-2 border-slate-300 bg-white p-5 shadow-[0_5px_0_#cbd5e1] dark:border-slate-700 dark:bg-slate-900 dark:shadow-[0_5px_0_#334155]"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span
+                class="text-xs font-extrabold tracking-widest text-slate-500 uppercase dark:text-slate-400"
+                >Relics</span
+              >
+              <span
+                data-relic-count
+                class="text-xs font-extrabold text-slate-500 tabular-nums dark:text-slate-400"
+              ></span>
+            </div>
+            <div data-relic-grid class="grid grid-cols-5 gap-2"></div>
+            <p
+              data-relic-detail
+              class="min-h-8 text-xs font-semibold text-slate-500 dark:text-slate-400"
+            >
+              Relics are permanent. A duplicate levels one up to 5.
+            </p>
           </div>
 
           <div
@@ -707,6 +753,22 @@ import Layout from "../../layouts/Layout.astro";
         <span data-icon-record></span>
         <span>New best time!</span>
       </p>
+      <div
+        data-results-chest
+        class="animate-pop hidden w-full items-center justify-between gap-3 rounded-xl border-2 border-slate-900 bg-amber-200 px-3 py-2 text-left shadow-[0_3px_0_#020617]"
+      >
+        <span class="flex items-center gap-2 text-sm font-extrabold">
+          <span data-results-chest-icon class="h-7 w-7"></span>
+          <span data-results-chest-text></span>
+        </span>
+        <button
+          type="button"
+          data-results-chest-open
+          class="rounded-full border-2 border-slate-900 bg-white px-3 py-1 text-xs font-black shadow-[0_2px_0_#020617] active:translate-y-0.5 active:shadow-none"
+        >
+          Open
+        </button>
+      </div>
       <button
         type="button"
         data-back-to-lobby-button
@@ -714,6 +776,28 @@ import Layout from "../../layouts/Layout.astro";
       >
         <span data-icon-back></span>
         <span>Lobby</span>
+      </button>
+    </div>
+  </div>
+
+  <div
+    data-chest-modal
+    class="fixed inset-0 z-[55] hidden items-center justify-center bg-slate-950/70 p-4"
+  >
+    <div
+      class="animate-pop flex w-full max-w-md flex-col items-center gap-3 rounded-2xl border-2 border-slate-900 bg-amber-100 p-6 text-center text-slate-900 shadow-[0_6px_0_#020617]"
+    >
+      <p data-chest-title class="text-2xl font-black tracking-tight">
+        Chest opened!
+      </p>
+      <div data-chest-art class="h-16 w-16"></div>
+      <div data-chest-reveal class="flex w-full flex-col gap-2"></div>
+      <button
+        type="button"
+        data-chest-close
+        class="rounded-full border-2 border-slate-900 bg-white px-5 py-1.5 text-sm font-black shadow-[0_3px_0_#020617] active:translate-y-0.5 active:shadow-none"
+      >
+        Nice
       </button>
     </div>
   </div>
@@ -765,6 +849,22 @@ import Layout from "../../layouts/Layout.astro";
       isUnlocked,
       purchaseUnlock,
     } from "../../lib/game/shop";
+    import { getRelicLevels } from "../../lib/game/shop";
+    import {
+      consumeDailyFree,
+      dailyFreeAvailable,
+      getChestCount,
+      grantChest,
+      openChest,
+    } from "../../lib/game/meta";
+    import { formatCountdown, msUntilReset } from "../../lib/game/daily";
+    import {
+      RELICS,
+      RELIC_MAX_LEVEL,
+      relicById,
+      type ChestTier,
+      type Rarity,
+    } from "../../lib/game/relics";
     import { unlockAudio, isMuted, toggleMuted } from "../../lib/game/audio";
     import {
       isReducedMotion,
@@ -774,6 +874,7 @@ import Layout from "../../layouts/Layout.astro";
       WEAPON_ICON,
       STAT_ICON,
       UPGRADE_ICON,
+      RELIC_ICON,
       EVOLUTION_ICON,
       UI_ICON,
       badgeClass,
@@ -1296,9 +1397,10 @@ import Layout from "../../layouts/Layout.astro";
 
       function renderLobby() {
         const tokens = getTokenCount();
+        const daily = dailyFreeAvailable();
         const duration = computeRunDurationS();
         const best = getBestTimeS();
-        lobbyTokensEl!.textContent = String(tokens);
+        lobbyTokensEl!.textContent = String(tokens + (daily ? 1 : 0));
         lobbyDurationEl!.textContent = `${duration}s`;
         lobbyBestEl!.textContent = best > 0 ? formatTime(best) : "--";
         lobbyCoinsEl!.textContent = String(getCoinBalance());
@@ -1307,9 +1409,12 @@ import Layout from "../../layouts/Layout.astro";
         if (bestBar) {
           bestBar.style.width = `${Math.min(100, Math.round((best / duration) * 100))}%`;
         }
-        lobbyZeroMessage!.classList.toggle("hidden", tokens >= 1);
-        startButton!.disabled = tokens < 1;
+        lobbyZeroMessage!.classList.toggle("hidden", tokens >= 1 || daily);
+        startButton!.disabled = tokens < 1 && !daily;
+        renderDailyChip(daily);
         renderShop();
+        renderChests();
+        renderRelics();
       }
 
       // One amber tile per run token (capped), then an empty dashed slot so
@@ -1332,6 +1437,137 @@ import Layout from "../../layouts/Layout.astro";
         }
         wrap.innerHTML = html;
       }
+
+      // The free run renews at local midnight; the chip says which state it is in.
+      function renderDailyChip(daily: boolean) {
+        const chip = document.querySelector<HTMLElement>("[data-daily-chip]");
+        if (!chip) return;
+        chip.classList.toggle("bg-emerald-300", daily);
+        chip.classList.toggle("bg-slate-300", !daily);
+        chip.textContent = daily
+          ? "Daily free run ready — costs no token"
+          : `Daily run used — renews in ${formatCountdown(msUntilReset())}`;
+      }
+
+      const RARITY_STYLE: Record<Rarity, { bg: string; label: string }> = {
+        common: { bg: "bg-sky-200", label: "Common" },
+        rare: { bg: "bg-violet-300", label: "Rare" },
+        epic: { bg: "bg-fuchsia-300", label: "Epic" },
+        legendary: { bg: "bg-amber-300", label: "Legendary" },
+      };
+
+      function renderChests() {
+        const wrap = document.querySelector<HTMLElement>("[data-chest-rows]");
+        if (!wrap) return;
+        wrap.innerHTML = "";
+        for (const tier of ["wooden", "golden"] as ChestTier[]) {
+          const n = getChestCount(tier);
+          const row = document.createElement("div");
+          row.className = `flex items-center justify-between gap-2 rounded-xl border-2 border-slate-900 px-3 py-2 ${tier === "golden" ? "bg-amber-300" : "bg-orange-200"}`;
+          const label = document.createElement("span");
+          label.className = "flex items-center gap-2 text-sm font-extrabold";
+          label.innerHTML = `${sizedIcon(UI_ICON.chest, "h-6 w-6")}<span>${tier === "golden" ? "Golden" : "Wooden"} chest</span><span class="rounded-full border-2 border-slate-900 bg-white px-2 text-xs tabular-nums">×${n}</span>`;
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.textContent = "Open";
+          btn.disabled = n < 1;
+          btn.className =
+            "rounded-full border-2 border-slate-900 bg-white px-3 py-1 text-xs font-black shadow-[0_2px_0_#020617] active:translate-y-0.5 active:shadow-none disabled:cursor-not-allowed disabled:opacity-40";
+          btn.addEventListener("click", () => showChestOpening(tier));
+          row.append(label, btn);
+          wrap.append(row);
+        }
+      }
+
+      function renderRelics() {
+        const grid = document.querySelector<HTMLElement>("[data-relic-grid]");
+        const detail = document.querySelector<HTMLElement>(
+          "[data-relic-detail]",
+        );
+        const count = document.querySelector<HTMLElement>("[data-relic-count]");
+        if (!grid) return;
+        const levels = getRelicLevels();
+        const owned = Object.keys(levels).length;
+        if (count) count.textContent = `${owned}/${RELICS.length}`;
+        grid.innerHTML = "";
+        for (const r of RELICS) {
+          const level = levels[r.id] ?? 0;
+          const cell = document.createElement("button");
+          cell.type = "button";
+          cell.className = level
+            ? `relative flex aspect-square items-center justify-center rounded-xl border-2 border-slate-900 text-slate-900 shadow-[0_2px_0_#020617] ${RARITY_STYLE[r.rarity].bg}`
+            : "relative flex aspect-square items-center justify-center rounded-xl border-2 border-dashed border-slate-300 text-slate-300 dark:border-slate-700 dark:text-slate-700";
+          cell.innerHTML = `${sizedIcon(RELIC_ICON[r.id] ?? "", "h-5 w-5")}${level ? `<span class="absolute -right-1 -bottom-1 rounded-full border-2 border-slate-900 bg-white px-1 text-[9px] leading-tight font-black tabular-nums">${level}</span>` : ""}`;
+          cell.setAttribute(
+            "aria-label",
+            level ? `${r.name}, level ${level}` : "Not found yet",
+          );
+          cell.addEventListener("click", () => {
+            if (!detail) return;
+            detail.textContent = level
+              ? `${r.name} · ${RARITY_STYLE[r.rarity].label} · Lv ${level}/${RELIC_MAX_LEVEL} — ${r.blurb}`
+              : `${RARITY_STYLE[r.rarity].label} relic — not found yet. Open chests to find it.`;
+          });
+          grid.append(cell);
+        }
+      }
+
+      // The chest: it shakes shut, then flips open onto what was inside.
+      function showChestOpening(tier: ChestTier) {
+        const modal = document.querySelector<HTMLElement>("[data-chest-modal]");
+        const art = document.querySelector<HTMLElement>("[data-chest-art]");
+        const reveal = document.querySelector<HTMLElement>(
+          "[data-chest-reveal]",
+        );
+        const title = document.querySelector<HTMLElement>("[data-chest-title]");
+        if (!modal || !art || !reveal || !title) return;
+        const loot = openChest(tier);
+        if (!loot) return;
+        title.textContent = `${tier === "golden" ? "Golden" : "Wooden"} chest`;
+        art.innerHTML = sizedIcon(UI_ICON.chest, "h-16 w-16");
+        reveal.innerHTML = "";
+        modal.classList.remove("hidden");
+        modal.classList.add("flex");
+        const instant = isReducedMotion();
+        if (!instant) {
+          art.classList.remove("animate-shake");
+          void art.offsetWidth;
+          art.classList.add("animate-shake");
+        }
+        const show = () => {
+          title.textContent = "Chest opened!";
+          const coinsLine = document.createElement("div");
+          coinsLine.className =
+            "animate-fade-slide-in flex items-center justify-center gap-2 rounded-xl border-2 border-slate-900 bg-yellow-200 px-3 py-2 text-sm font-extrabold";
+          coinsLine.innerHTML = `${sizedIcon(UI_ICON.coins, "h-5 w-5")}+${loot.coins} coins`;
+          reveal.append(coinsLine);
+          loot.finds.forEach((f, i) => {
+            const def = relicById(f.relicId)!;
+            const card = document.createElement("div");
+            card.className = `animate-fade-slide-in flex items-center gap-3 rounded-xl border-2 border-slate-900 px-3 py-2 text-left ${RARITY_STYLE[def.rarity].bg}`;
+            card.style.animationDelay = `${(i + 1) * (instant ? 0 : 220)}ms`;
+            const badge = f.converted
+              ? "MAXED → coins"
+              : f.isNew
+                ? "NEW!"
+                : `Lv ${f.level}/${RELIC_MAX_LEVEL}`;
+            card.innerHTML = `<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border-2 border-slate-900 bg-white">${sizedIcon(RELIC_ICON[def.id] ?? "", "h-6 w-6")}</span><span class="flex flex-col"><span class="text-sm font-black">${def.name} <span class="ml-1 rounded-full border-2 border-slate-900 bg-white px-1.5 text-[10px]">${badge}</span></span><span class="text-xs font-semibold">${RARITY_STYLE[def.rarity].label} · ${def.blurb}</span></span>`;
+            reveal.append(card);
+          });
+          renderLobby();
+        };
+        if (instant) show();
+        else setTimeout(show, 650);
+      }
+
+      document
+        .querySelector<HTMLElement>("[data-chest-close]")
+        ?.addEventListener("click", () => {
+          const modal =
+            document.querySelector<HTMLElement>("[data-chest-modal]");
+          modal?.classList.add("hidden");
+          modal?.classList.remove("flex");
+        });
 
       function renderShop() {
         const balance = getCoinBalance();
@@ -1679,7 +1915,8 @@ import Layout from "../../layouts/Layout.astro";
       const launch = (training: TrainingOptions | null) => {
         unlockAudio();
         activeTraining = training;
-        if (!training && !consumeToken()) {
+        // Today's free run goes first, so earned tokens keep for later.
+        if (!training && !consumeDailyFree() && !consumeToken()) {
           log.warn("start clicked with 0 tokens — should have been disabled");
           renderLobby();
           return;
@@ -1821,6 +2058,38 @@ import Layout from "../../layouts/Layout.astro";
                 activeTraining ? -1 : starsFor(summary.survivedS, durationS),
               );
               resultsRecord.classList.toggle("hidden", !isRecord);
+              // Surviving the whole run wins a chest — golden if the boss fell.
+              const chestBox = document.querySelector<HTMLElement>(
+                "[data-results-chest]",
+              );
+              if (chestBox) {
+                const earned = !activeTraining && summary.won;
+                chestBox.classList.toggle("hidden", !earned);
+                chestBox.classList.toggle("flex", earned);
+                if (earned) {
+                  const tier: ChestTier = summary.bossDefeated
+                    ? "golden"
+                    : "wooden";
+                  grantChest(tier);
+                  chestBox.querySelector<HTMLElement>(
+                    "[data-results-chest-icon]",
+                  )!.innerHTML = sizedIcon(UI_ICON.chest, "h-7 w-7");
+                  chestBox.querySelector<HTMLElement>(
+                    "[data-results-chest-text]",
+                  )!.textContent =
+                    tier === "golden"
+                      ? "Golden chest — you beat the boss!"
+                      : "Wooden chest earned";
+                  const openBtn = chestBox.querySelector<HTMLButtonElement>(
+                    "[data-results-chest-open]",
+                  )!;
+                  openBtn.onclick = () => {
+                    showChestOpening(tier);
+                    chestBox.classList.add("hidden");
+                    chestBox.classList.remove("flex");
+                  };
+                }
+              }
               playArea!.classList.add("hidden");
               playArea!.classList.remove("flex");
               results!.classList.remove("hidden");

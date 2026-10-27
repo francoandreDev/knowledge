@@ -5,6 +5,13 @@
 // header points to in GAME-DESIGN.md for why that migration was skipped.
 import { pStorage } from "../profile";
 import { SHOP_RECOVERY_HPS_PER_LEVEL } from "./balance";
+import {
+  RELICS,
+  RELIC_MAX_LEVEL,
+  noEffects,
+  relicEffects,
+  type RelicEffects,
+} from "./relics";
 
 const COIN_BALANCE_KEY = "game:coins";
 const UPGRADE_KEY_PREFIX = "game:upgrade:";
@@ -16,7 +23,11 @@ export type UpgradeId =
   | "magnetism"
   | "greed"
   | "amanuensis"
-  | "recovery";
+  | "recovery"
+  | "bulwark"
+  | "haste"
+  | "precision"
+  | "siphon";
 
 export interface UpgradeDef {
   id: UpgradeId;
@@ -82,6 +93,34 @@ export const UPGRADES: UpgradeDef[] = [
     maxLevel: 3,
     baseCost: 30,
   },
+  {
+    id: "bulwark",
+    label: "Bulwark",
+    effectLabel: "Ignore 3% of damage taken",
+    maxLevel: 5,
+    baseCost: 25,
+  },
+  {
+    id: "haste",
+    label: "Haste",
+    effectLabel: "+4% weapon speed",
+    maxLevel: 5,
+    baseCost: 25,
+  },
+  {
+    id: "precision",
+    label: "Precision",
+    effectLabel: "+3% chance of a double-damage hit",
+    maxLevel: 5,
+    baseCost: 25,
+  },
+  {
+    id: "siphon",
+    label: "Siphon",
+    effectLabel: "Heal 0.1 HP per kill",
+    maxLevel: 5,
+    baseCost: 25,
+  },
 ];
 
 // Phase 15 — one-time "unlock" purchases, distinct from the leveled
@@ -139,15 +178,7 @@ export function purchaseUnlock(id: UnlockId): boolean {
   return true;
 }
 
-export interface UpgradeEffects {
-  maxHpMult: number;
-  speedMult: number;
-  damageMult: number;
-  pickupRadiusMult: number;
-  coinMult: number;
-  xpMult: number;
-  regenPerS: number;
-}
+export type UpgradeEffects = RelicEffects;
 
 function readIntKey(key: string): number {
   const raw = pStorage.getItem(key);
@@ -203,16 +234,52 @@ export function computePowerIndex(): number {
   return UPGRADES.reduce((sum, u) => sum + getUpgradeLevel(u.id), 0);
 }
 
-/** Aggregates owned upgrade levels into the multipliers engine.ts applies
- * for the duration of one run. */
+const RELIC_KEY_PREFIX = "game:relic:";
+
+/** Owned relic levels, 1-5 each (relics come from chests, see meta.ts). */
+export function getRelicLevels(): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of RELICS) {
+    const l = readIntKey(RELIC_KEY_PREFIX + r.id);
+    if (l > 0) out[r.id] = Math.min(RELIC_MAX_LEVEL, l);
+  }
+  return out;
+}
+
+export function setRelicLevel(id: string, level: number): void {
+  pStorage.setItem(RELIC_KEY_PREFIX + id, String(level));
+}
+
+/** Aggregates owned shop upgrade levels and relics into the numbers
+ * engine.ts applies for the duration of one run. */
 export function getUpgradeEffects(): UpgradeEffects {
-  return {
-    maxHpMult: 1 + 0.1 * getUpgradeLevel("vigor"),
-    speedMult: 1 + 0.05 * getUpgradeLevel("fleetness"),
-    damageMult: 1 + 0.05 * getUpgradeLevel("might"),
-    pickupRadiusMult: 1 + 0.15 * getUpgradeLevel("magnetism"),
-    coinMult: 1 + 0.1 * getUpgradeLevel("greed"),
-    xpMult: 1 + 0.05 * getUpgradeLevel("amanuensis"),
-    regenPerS: SHOP_RECOVERY_HPS_PER_LEVEL * getUpgradeLevel("recovery"),
-  };
+  const fx = noEffects();
+  fx.maxHpMult += 0.1 * getUpgradeLevel("vigor");
+  fx.speedMult += 0.05 * getUpgradeLevel("fleetness");
+  fx.damageMult += 0.05 * getUpgradeLevel("might");
+  fx.pickupRadiusMult += 0.15 * getUpgradeLevel("magnetism");
+  fx.coinMult += 0.1 * getUpgradeLevel("greed");
+  fx.xpMult += 0.05 * getUpgradeLevel("amanuensis");
+  fx.regenPerS += SHOP_RECOVERY_HPS_PER_LEVEL * getUpgradeLevel("recovery");
+  fx.armor += 0.03 * getUpgradeLevel("bulwark");
+  fx.haste += 0.04 * getUpgradeLevel("haste");
+  fx.critChance += 0.03 * getUpgradeLevel("precision");
+  fx.killHeal += 0.1 * getUpgradeLevel("siphon");
+  // Relics stack additively on top of the shop's levels.
+  const rel = relicEffects(getRelicLevels());
+  fx.maxHpMult += rel.maxHpMult - 1;
+  fx.speedMult += rel.speedMult - 1;
+  fx.damageMult += rel.damageMult - 1;
+  fx.pickupRadiusMult += rel.pickupRadiusMult - 1;
+  fx.coinMult += rel.coinMult - 1;
+  fx.xpMult += rel.xpMult - 1;
+  fx.regenPerS += rel.regenPerS;
+  fx.armor += rel.armor;
+  fx.haste += rel.haste;
+  fx.critChance += rel.critChance;
+  fx.killHeal += rel.killHeal;
+  fx.thorns += rel.thorns;
+  fx.enemySlow += rel.enemySlow;
+  fx.reviveHpFrac = rel.reviveHpFrac;
+  return fx;
 }

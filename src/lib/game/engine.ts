@@ -145,6 +145,8 @@ import {
 import { createLogger } from "./logger";
 import { BIOMES, createBackdrop, type Biome } from "./scenery";
 import type { UpgradeEffects } from "./shop";
+import { noEffects } from "./relics";
+import { lighten } from "./characters";
 import {
   playPickup,
   playHit,
@@ -248,7 +250,17 @@ const MAX_ALIVE_ENEMIES = 60; // perf cap — see file header
 
 // --- Phase 2: enemy roster --- (Phase 15 added "lich", the alternate boss)
 export type EnemyKind =
-  "zombie" | "bat" | "skeleton" | "ghost" | "ogre" | "reaper" | "lich";
+  | "zombie"
+  | "bat"
+  | "skeleton"
+  | "ghost"
+  | "ogre"
+  | "slime"
+  | "imp"
+  | "bomber"
+  | "knight"
+  | "reaper"
+  | "lich";
 
 // --- Phase 5: enemy tiers, weighted by shop powerIndex ---
 type EnemyTier = "normal" | "veteran" | "elite";
@@ -392,7 +404,61 @@ const ENEMY_DEFS: EnemyDef[] = [
     color: "#f97316",
     weight: 1,
   },
+  {
+    kind: "slime",
+    unlockAtS: 75,
+    radius: 12,
+    speed: 42,
+    hp: 20,
+    contactDamage: 6,
+    color: "#84cc16",
+    weight: 5,
+  },
+  {
+    kind: "imp",
+    unlockAtS: 130,
+    radius: 9,
+    speed: 80,
+    hp: 10,
+    contactDamage: 5,
+    color: "#f43f5e",
+    weight: 4,
+  },
+  {
+    kind: "bomber",
+    unlockAtS: 190,
+    radius: 10,
+    speed: 78,
+    hp: 9,
+    contactDamage: 3,
+    color: "#fbbf24",
+    weight: 3,
+  },
+  {
+    kind: "knight",
+    unlockAtS: 260,
+    radius: 16,
+    speed: 30,
+    hp: 70,
+    contactDamage: 12,
+    color: "#94a3b8",
+    weight: 2,
+  },
 ];
+
+// The expansion's four: a slime that splits, an imp that circles and throws
+// fire, a bomber that runs in and detonates, a knight that shrugs off blows.
+const SLIME_SPLIT_COUNT = 2;
+const SLIMELET_RADIUS = 7;
+const IMP_ORBIT_DISTANCE = 125;
+const IMP_FIRE_INTERVAL_MS = 2100;
+const IMP_FIREBALL_SPEED = 150;
+const IMP_FIREBALL_DAMAGE = 6;
+const BOMBER_TRIGGER_PX = 46;
+const BOMBER_FUSE_MS = 700;
+const BOMBER_BLAST_RADIUS = 60;
+const BOMBER_BLAST_DAMAGE = 18;
+const KNIGHT_DAMAGE_TAKEN = 0.6; // takes 40% less from every hit
 
 const GHOST_FIRE_INTERVAL_MS = 2200;
 const GHOST_PROJECTILE_SPEED = 90;
@@ -457,6 +523,16 @@ const MELEE_SWING: Partial<Record<EnemyKind, SwingCfg>> = {
     cooldownMs: 2800,
     damageMult: 2.1,
     source: "skeleton-club",
+  },
+  knight: {
+    minTier: 2,
+    range: 36,
+    half: 0.7,
+    windupMs: 650,
+    recoverMs: 380,
+    cooldownMs: 3200,
+    damageMult: 1.9,
+    source: "knight-bash",
   },
   reaper: {
     minTier: 1,
@@ -696,6 +772,36 @@ const TEMP_STATS: TempStatDef[] = [
     effect: "+10% chance of an extra coin drop",
     maxStacks: 4,
   },
+  {
+    id: "ironSkin",
+    label: "Iron Skin",
+    effect: "Ignore 4% of damage taken",
+    maxStacks: 5,
+  },
+  {
+    id: "quickDraw",
+    label: "Quick Draw",
+    effect: "+6% weapon speed",
+    maxStacks: 5,
+  },
+  {
+    id: "keenEye",
+    label: "Keen Eye",
+    effect: "+5% chance of a double-damage hit",
+    maxStacks: 5,
+  },
+  {
+    id: "bloodthirst",
+    label: "Bloodthirst",
+    effect: "Heal 0.2 HP per kill",
+    maxStacks: 4,
+  },
+  {
+    id: "chill",
+    label: "Chill",
+    effect: "Enemies move 4% slower",
+    maxStacks: 4,
+  },
 ];
 
 export interface LevelUpCard {
@@ -755,6 +861,10 @@ export interface GameCallbacks {
      * ending, or "Caught by a Zombie"/etc. for a death. See
      * describeDeathCause(). */
     cause: string;
+    /** Survived the whole run: this is what earns a chest. */
+    won: boolean;
+    /** The boss fell during the run: a golden chest instead of a wooden one. */
+    bossDefeated: boolean;
   }) => void;
   onLevelUp: (cards: LevelUpCard[], choose: (cardId: string) => void) => void;
   /** Phase 13: fired once per threat tier crossed (1→2, 2→3, ...) — lets the
@@ -874,6 +984,9 @@ interface Enemy extends GameObject {
   seed?: number; // desyncs the idle animation of neighbours
   spawnedAt?: number; // for the pop-in
   phase?: number; // bosses: 1-3, rises as HP falls
+  mini?: boolean; // slimelets from a split slime don't split again
+  fuseAt?: number; // bomber: when the lit fuse goes off
+  fuseStartedAt?: number;
 }
 
 // What is left behind where an enemy died: it plays out a death animation.
@@ -1073,6 +1186,13 @@ const DEATH_CAUSE_BY_SOURCE: Record<string, string> = {
   "contact:skeleton": "Caught by a Skeleton",
   "contact:ghost": "Caught by a Ghost",
   "contact:ogre": "Crushed by an Ogre",
+  "contact:slime": "Smothered by a Slime",
+  "contact:imp": "Scorched by an Imp",
+  "contact:bomber": "Caught by a Bomber",
+  "contact:knight": "Crushed by a Knight",
+  "bomber-blast": "Blown up by a Bomber",
+  "imp-fire": "Burned by imp fire",
+  "knight-bash": "Bashed by a Knight",
   "contact:reaper": "Caught by the Reaper",
   "contact:lich": "Caught by the Lich",
   "ogre-slam": "Flattened by an Ogre's slam",
@@ -1123,15 +1243,7 @@ export function startGame(
     biome,
     Math.floor(Math.random() * 1e9),
   );
-  const upgradeEffects: UpgradeEffects = options.upgradeEffects ?? {
-    maxHpMult: 1,
-    speedMult: 1,
-    damageMult: 1,
-    pickupRadiusMult: 1,
-    coinMult: 1,
-    xpMult: 1,
-    regenPerS: 0,
-  };
+  const upgradeEffects: UpgradeEffects = options.upgradeEffects ?? noEffects();
   const powerIndex = options.powerIndex ?? 0;
   const reduceMotion = options.reduceMotion ?? false;
   // Phase 15: which weapons this run's new-weapon offers can draw from, and
@@ -1315,6 +1427,14 @@ export function startGame(
   let pickupRadiusMult = 1;
   let hpRegenPerS = 0;
   let extraCoinChance = 0; // stacked by the Lucky Star temp-stat card
+  // Run-only stacks from the expansion's cards, added to the shop/relic totals.
+  let armorTemp = 0;
+  let hasteTemp = 0;
+  let critTemp = 0;
+  let killHealTemp = 0;
+  let slowTemp = 0;
+  let revivesLeft = upgradeEffects.reviveHpFrac > 0 ? 1 : 0;
+  let bossDefeated = false;
 
   function effectiveMaxHp(): number {
     return PLAYER_MAX_HP * upgradeEffects.maxHpMult + maxHpBonus;
@@ -1526,6 +1646,67 @@ export function startGame(
     log.log("lich:summon", { x: Math.round(x), y: Math.round(y) });
   }
 
+  // A slime that dies splits into smaller, weaker ones that fan outward.
+  function spawnSlimelets(from: Enemy) {
+    const def = ENEMY_DEFS.find((d) => d.kind === "slime")!;
+    const elapsedS = elapsedMs / 1000;
+    const timeHpScale = enemyTimeScale(elapsedS, ENEMY_HP_SCALE_CAP);
+    const timeDamageScale = enemyTimeScale(elapsedS, ENEMY_DAMAGE_SCALE_CAP);
+    const start = Math.random() * Math.PI * 2;
+    for (let i = 0; i < SLIME_SPLIT_COUNT; i++) {
+      if (enemies.length >= MAX_ALIVE_ENEMIES) return;
+      const a = start + (i / SLIME_SPLIT_COUNT) * Math.PI * 2;
+      const sprite = Sprite({
+        x: from.x + Math.cos(a) * from.radius * 0.8,
+        y: from.y + Math.sin(a) * from.radius * 0.8,
+        width: SLIMELET_RADIUS * 2,
+        height: SLIMELET_RADIUS * 2,
+        anchor: { x: 0.5, y: 0.5 },
+        color: lighten(def.color, 0.25),
+      }) as unknown as Enemy;
+      sprite.kind = "slime";
+      sprite.mini = true;
+      sprite.tier = "normal";
+      sprite.hp = def.hp * 0.3 * timeHpScale;
+      sprite.alive = true;
+      sprite.radius = SLIMELET_RADIUS;
+      sprite.contactDamage = def.contactDamage * 0.7 * timeDamageScale;
+      sprite.wigglePhase = Math.random() * Math.PI * 2;
+      sprite.lastRangedAt = elapsedMs;
+      sprite.slamReadyAt = elapsedMs;
+      sprite.spawnedAt = elapsedMs;
+      enemies.push(sprite);
+    }
+    if (!reduceMotion) burst(particles, from.x, from.y, def.color, 8, 150);
+  }
+
+  // The bomber's blast: hurts the hero if close, and flings the rest of the
+  // crowd a little — the bomber itself is spent.
+  function detonateBomber(e: Enemy) {
+    e.alive = false;
+    leaveCorpse(e, false);
+    const reach = BOMBER_BLAST_RADIUS + PLAYER_RADIUS;
+    if (distance(player, e) <= reach) {
+      damagePlayer(
+        BOMBER_BLAST_DAMAGE *
+          enemyTimeScale(elapsedMs / 1000, ENEMY_DAMAGE_SCALE_CAP),
+        "bomber-blast",
+        e.x,
+        e.y,
+      );
+    }
+    if (!reduceMotion) {
+      ringPop(particles, e.x, e.y, "#fbbf24", BOMBER_BLAST_RADIUS * 1.2);
+      burst(particles, e.x, e.y, "#fb923c", 18, 240);
+      burst(particles, e.x, e.y, "#fef08a", 10, 140);
+    }
+    if (feedbackOn) {
+      shakeMag = 5;
+      shakeUntil = elapsedMs + 260;
+    }
+    log.log("bomber:detonate");
+  }
+
   function findNearestEnemy(): Enemy | null {
     let nearest: Enemy | null = null;
     let nearestDist = Infinity;
@@ -1608,6 +1789,15 @@ export function startGame(
   }
 
   function damageEnemy(e: Enemy, amount: number, source: string) {
+    const crit = upgradeEffects.critChance + critTemp;
+    if (
+      crit > 0 &&
+      (weaponIdForSource(source) ?? SYNERGY_SOURCE_OWNER[source]) &&
+      Math.random() < crit
+    ) {
+      amount *= 2;
+    }
+    if (e.kind === "knight") amount *= KNIGHT_DAMAGE_TAKEN;
     // Phase 16B: "Shield Wall" — 2+ adjacent skeletons take reduced damage
     // while grouped, see runSynergyScan().
     const finalAmount = e.shieldWalled
@@ -1698,8 +1888,14 @@ export function startGame(
       spawnGem(e.x, e.y);
       maybeSpawnCoin(e);
       if (e.kind === "reaper" || e.kind === "lich") {
+        bossDefeated = true;
         log.log("boss:defeated", { variant: e.kind });
       }
+      const healPerKill = upgradeEffects.killHeal + killHealTemp;
+      if (healPerKill > 0) {
+        player.hp = Math.min(effectiveMaxHp(), player.hp + healPerKill);
+      }
+      if (e.kind === "slime" && !e.mini) spawnSlimelets(e);
       // Phase 16C: "Vampiric Might" — Might at VAMPIRIC_MIGHT_MIN_LEVEL+ and
       // the killing weapon at its Lv6 evolution heals a small flat amount.
       const wid = weaponIdForSource(source);
@@ -1964,6 +2160,7 @@ export function startGame(
         }
       }
     }
+    amount *= 1 - Math.min(0.6, upgradeEffects.armor + armorTemp);
     player.hp = Math.max(0, player.hp - amount);
     playerHitFlashUntil = elapsedMs + HIT_FLASH_MS;
     if (fromX !== undefined && fromY !== undefined) {
@@ -1979,6 +2176,33 @@ export function startGame(
     }
     lastDamageSource = source;
     log.log("player:damaged", { amount, source, hpRemaining: player.hp });
+    if (player.hp <= 0 && revivesLeft > 0) {
+      // Phoenix Feather: rise again once, and shove the crowd back.
+      revivesLeft -= 1;
+      player.hp = effectiveMaxHp() * upgradeEffects.reviveHpFrac;
+      player.lastHitAt = elapsedMs + 1500; // brief grace
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        const d = distance(player, e);
+        if (d < 160 && e.kind !== "reaper" && e.kind !== "lich") {
+          const a = Math.atan2(e.y - player.y, e.x - player.x);
+          e.x += Math.cos(a) * 90;
+          e.y += Math.sin(a) * 90;
+        }
+      }
+      banners.push({
+        text: "SECOND WIND",
+        sub: "the phoenix feather burns away",
+        at: elapsedMs,
+        color: "#fdba74",
+      });
+      if (!reduceMotion) {
+        ringPop(particles, player.x, player.y, "#fb923c", 150);
+        burst(particles, player.x, player.y, "#fde047", 26, 260);
+      }
+      log.log("player:revived", { hp: player.hp });
+      return;
+    }
     if (player.hp <= 0) {
       playDeath();
       endGame("death");
@@ -2027,6 +2251,21 @@ export function startGame(
         break;
       case "luckyStar":
         extraCoinChance += 0.1;
+        break;
+      case "ironSkin":
+        armorTemp += 0.04;
+        break;
+      case "quickDraw":
+        hasteTemp += 0.06;
+        break;
+      case "keenEye":
+        critTemp += 0.05;
+        break;
+      case "bloodthirst":
+        killHealTemp += 0.2;
+        break;
+      case "chill":
+        slowTemp += 0.04;
         break;
     }
   }
@@ -2430,6 +2669,14 @@ export function startGame(
             SKELETON_BONE_DAMAGE,
             "skeleton-bone",
           );
+        } else if (e.kind === "imp") {
+          fireEnemyProjectile(
+            e,
+            angle,
+            IMP_FIREBALL_SPEED,
+            IMP_FIREBALL_DAMAGE,
+            "imp-fire",
+          );
         } else {
           fireEnemyProjectile(
             e,
@@ -2645,6 +2892,11 @@ export function startGame(
       sy = 0.8;
       tilt = 0.25 * Math.sign(e.dashDx ?? 1);
     }
+    if (e.fuseAt && e.fuseStartedAt != null) {
+      const p = Math.min(1, (t - e.fuseStartedAt) / BOMBER_FUSE_MS);
+      const pulse = 1 + 0.14 * Math.sin(p * 38);
+      sx = sy = (1 + 0.35 * p) * pulse;
+    }
     // Anticipation: coil up before a swing, a shot or a slam.
     const sw = e.swing;
     if (sw && !sw.struck) {
@@ -2855,6 +3107,56 @@ export function startGame(
       e.y += Math.sin(angle) * def.speed * dt;
       return;
     }
+    if (e.kind === "slime" || e.kind === "knight") {
+      const def = ENEMY_DEFS.find((d) => d.kind === e.kind)!;
+      const angle = Math.atan2(player.y - e.y, player.x - e.x);
+      // Slimelets scurry; a full slime wobbles forward.
+      const speed = e.mini ? def.speed * 1.5 : def.speed;
+      e.x += Math.cos(angle) * speed * dt;
+      e.y += Math.sin(angle) * speed * dt;
+      return;
+    }
+    if (e.kind === "imp") {
+      const def = ENEMY_DEFS.find((d) => d.kind === "imp")!;
+      const d = distance(player, e);
+      const toward = Math.atan2(player.y - e.y, player.x - e.x);
+      // Close in to its range, then circle the hero and back off if crowded.
+      const spin = (e.wigglePhase ?? 0) > Math.PI ? 1 : -1;
+      const angle =
+        d > IMP_ORBIT_DISTANCE * 1.15
+          ? toward
+          : d < IMP_ORBIT_DISTANCE * 0.8
+            ? toward + Math.PI
+            : toward + spin * (Math.PI / 2);
+      e.x += Math.cos(angle) * def.speed * dt;
+      e.y += Math.sin(angle) * def.speed * dt;
+      if (elapsedMs - (e.lastRangedAt ?? 0) >= IMP_FIRE_INTERVAL_MS) {
+        e.lastRangedAt = elapsedMs;
+        e.swing = {
+          kind: "shoot",
+          startedAt: elapsedMs,
+          angle: toward,
+          struck: false,
+        };
+      }
+      return;
+    }
+    if (e.kind === "bomber") {
+      const def = ENEMY_DEFS.find((d) => d.kind === "bomber")!;
+      if (e.fuseAt) {
+        if (elapsedMs >= e.fuseAt) detonateBomber(e);
+        return; // stands still while the fuse burns
+      }
+      if (distance(player, e) <= BOMBER_TRIGGER_PX) {
+        e.fuseStartedAt = elapsedMs;
+        e.fuseAt = elapsedMs + BOMBER_FUSE_MS;
+        return;
+      }
+      const angle = Math.atan2(player.y - e.y, player.x - e.x);
+      e.x += Math.cos(angle) * def.speed * dt;
+      e.y += Math.sin(angle) * def.speed * dt;
+      return;
+    }
     if (e.kind === "ogre") {
       const def = ENEMY_DEFS.find((d) => d.kind === "ogre")!;
       const d = distance(player, e);
@@ -3003,6 +3305,8 @@ export function startGame(
       level: playerLevel,
       coinsEarned,
       cause,
+      won: reason === "timer",
+      bossDefeated,
     });
   }
 
@@ -3122,7 +3426,10 @@ export function startGame(
       // --- enemy movement/attacks + contact damage ---
       for (const e of enemies) {
         if (!e.alive) continue;
-        updateEnemyBehavior(e, dt);
+        updateEnemyBehavior(
+          e,
+          dt * (1 - Math.min(0.5, upgradeEffects.enemySlow + slowTemp)),
+        );
         if (training) {
           const minDist = PLAYER_RADIUS + e.radius + training.standoffPx;
           const dx = e.x - player.x;
@@ -3139,19 +3446,21 @@ export function startGame(
         if (distance(player, e) < PLAYER_RADIUS + e.radius) {
           if (elapsedMs - player.lastHitAt >= PLAYER_HIT_COOLDOWN_MS) {
             player.lastHitAt = elapsedMs;
-            damagePlayer(
-              e.contactDamage || CONTACT_DAMAGE,
-              `contact:${e.kind}`,
-              e.x,
-              e.y,
-            );
+            const contact = e.contactDamage || CONTACT_DAMAGE;
+            damagePlayer(contact, `contact:${e.kind}`, e.x, e.y);
             if (status !== "running") return;
+            if (upgradeEffects.thorns > 0 && e.alive) {
+              damageEnemy(e, contact * upgradeEffects.thorns, "thorns");
+            }
           }
         }
       }
 
       // --- weapons (Phase 3: all owned weapons act every frame) ---
+      const haste = upgradeEffects.haste + hasteTemp;
       for (const w of ownedWeapons) {
+        // Haste: age the cooldown faster than the clock does.
+        if (haste > 0) w.lastActionAt -= dt * 1000 * haste;
         const before = w.lastActionAt;
         updateWeapon(w, dt);
         if (w.lastActionAt !== before) noteAttack(w);
@@ -3493,6 +3802,15 @@ export function startGame(
               Math.max(1, e.chargeUntil - e.chargeStartedAt),
           );
         }
+        if (e.kind === "bomber" && e.fuseAt && e.fuseStartedAt != null) {
+          drawSlamWarning(
+            context,
+            e.x,
+            e.y,
+            BOMBER_BLAST_RADIUS,
+            (elapsedMs - e.fuseStartedAt) / BOMBER_FUSE_MS,
+          );
+        }
         const sw = e.swing;
         if (sw && !sw.struck) {
           if (sw.kind === "melee") {
@@ -3586,8 +3904,16 @@ export function startGame(
             e.color,
           );
         }
+        // A lit bomber blinks white, faster as the fuse runs down.
+        const fuseBlink =
+          e.kind === "bomber" && e.fuseStartedAt != null
+            ? Math.sin(((elapsedMs - e.fuseStartedAt) / BOMBER_FUSE_MS) * 40) >
+              0
+              ? 0.55
+              : 0
+            : 0;
         drawEnemy(context, e.kind, e.x, e.y, e.radius, e.color, {
-          flashAlpha,
+          flashAlpha: Math.max(flashAlpha, fuseBlink),
           pose: enemyPose(e),
           t: elapsedMs + (e.seed ?? 0) * 997,
           armed: e.swing?.kind !== "melee",

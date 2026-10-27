@@ -133,6 +133,15 @@ const BADGE_BG: Record<string, string> = {
   amanuensis: "bg-emerald-300",
   recovery: "bg-emerald-300",
   quickRecovery: "bg-emerald-300",
+  bulwark: "bg-slate-300",
+  ironSkin: "bg-slate-300",
+  haste: "bg-amber-300",
+  quickDraw: "bg-amber-300",
+  precision: "bg-pink-300",
+  keenEye: "bg-pink-300",
+  siphon: "bg-red-300",
+  bloodthirst: "bg-red-300",
+  chill: "bg-cyan-300",
 };
 
 export function badgeClass(id: string | undefined, fallback = "bg-sky-300") {
@@ -149,6 +158,11 @@ export const STAT_ICON: Record<string, string> = {
   wideReach: ICON_MAGNET,
   quickRecovery: ICON_REGEN,
   luckyStar: ICON_COIN,
+  ironSkin: ICON_SHIELD,
+  quickDraw: ICON_BOLT,
+  keenEye: ICON_DART,
+  bloodthirst: ICON_HEART,
+  chill: ICON_PULSE,
 };
 
 // Keyed by shop.ts's UPGRADES ids.
@@ -160,6 +174,32 @@ export const UPGRADE_ICON: Record<string, string> = {
   greed: ICON_COIN,
   amanuensis: ICON_BOOK,
   recovery: ICON_REGEN,
+  bulwark: ICON_SHIELD,
+  haste: ICON_BOLT,
+  precision: ICON_DART,
+  siphon: ICON_HEART,
+};
+
+// A treasure chest, and the relic glyphs that come out of it. Relics reuse the
+// concept icons above wherever they mean the same thing.
+const ICON_CHEST = `<svg ${ICON_ATTRS}><path d="M4 11V8a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v3"/><rect x="3" y="11" width="18" height="9" rx="2"/><line x1="3" y1="15" x2="21" y2="15"/><rect x="10.5" y="13" width="3" height="4" rx="0.6" fill="currentColor"/></svg>`;
+
+export const RELIC_ICON: Record<string, string> = {
+  giantsHeart: ICON_HEART,
+  windBoots: ICON_SPEED,
+  whetstone: ICON_FLAME,
+  lodestone: ICON_MAGNET,
+  luckyCoin: ICON_COIN,
+  scholarsQuill: ICON_BOOK,
+  ironPlate: ICON_SHIELD,
+  hourglass: ICON_CLOCK,
+  eagleEye: ICON_DART,
+  leechFang: ICON_HEART,
+  thornRing: ICON_PULSE,
+  emberHeart: ICON_REGEN,
+  frostCharm: ICON_PULSE,
+  phoenixFeather: ICON_SPARKLE,
+  crownOfAges: ICON_STAR,
 };
 
 // HUD/lobby/results/toolbar icons — one lookup for index.astro's client
@@ -172,6 +212,7 @@ export const UI_ICON = {
   coins: ICON_COIN,
   level: ICON_STAR,
   tokens: ICON_TICKET,
+  chest: ICON_CHEST,
   trophy: ICON_TROPHY,
   soundOn: ICON_SOUND_ON,
   soundOff: ICON_SOUND_OFF,

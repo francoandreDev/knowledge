@@ -16,6 +16,10 @@ export const ENEMY_SHAPE: Record<EnemyKind, Shape> = {
   skeleton: "square",
   ghost: "ghost",
   ogre: "square",
+  slime: "circle",
+  imp: "bat",
+  bomber: "circle",
+  knight: "square",
   reaper: "hood",
   lich: "diamond",
 };
@@ -248,7 +252,11 @@ export function drawSwingArm(
   const r = radius * ENEMY_SCALE;
   const a = angle + offset;
   const reach =
-    kind === "reaper" ? r * 2.6 : kind === "skeleton" ? r * 2 : r * 1.7;
+    kind === "reaper"
+      ? r * 2.6
+      : kind === "skeleton" || kind === "knight"
+        ? r * 2
+        : r * 1.7;
   const sx = x + Math.cos(a) * r * 0.7;
   const sy = y + Math.sin(a) * r * 0.7;
   const ex = x + Math.cos(a) * reach;
@@ -269,6 +277,34 @@ export function drawSwingArm(
     ctx.lineWidth = r * 0.28;
     ctx.stroke();
     ctx.restore();
+  } else if (kind === "knight") {
+    // A broad blade with a guard.
+    drawLine(
+      ctx,
+      ex,
+      ey,
+      ex + Math.cos(a) * r * 0.9,
+      ey + Math.sin(a) * r * 0.9,
+      r * 0.42,
+    );
+    drawLine(
+      ctx,
+      ex,
+      ey,
+      ex + Math.cos(a) * r * 0.9,
+      ey + Math.sin(a) * r * 0.9,
+      r * 0.24,
+      "#e2e8f0",
+    );
+    drawLine(
+      ctx,
+      ex + Math.cos(a + Math.PI / 2) * r * 0.4,
+      ey + Math.sin(a + Math.PI / 2) * r * 0.4,
+      ex - Math.cos(a + Math.PI / 2) * r * 0.4,
+      ey - Math.sin(a + Math.PI / 2) * r * 0.4,
+      r * 0.2,
+      "#fbbf24",
+    );
   } else if (kind === "skeleton") {
     drawDot(ctx, ex, ey, r * 0.38, "#f8fafc", Math.max(1.5, r * 0.15));
   } else {
@@ -553,6 +589,37 @@ export function drawProjectile(
     ctx.beginPath();
     ctx.arc(radius * 0.55, -radius * 0.3, radius * 0.22, 0, Math.PI * 2);
     ctx.arc(radius * 0.55, radius * 0.4, radius * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (source === "imp-fire") {
+    // A fireball with licking flames behind it.
+    ctx.rotate(heading);
+    ctx.beginPath();
+    ctx.moveTo(-radius * 3.2, 0);
+    ctx.quadraticCurveTo(
+      -radius * 1.6,
+      -radius * 0.4,
+      -radius * 1.1,
+      -radius * 1.3,
+    );
+    ctx.quadraticCurveTo(
+      -radius * 0.4,
+      -radius * 1.8,
+      radius * 0.6,
+      -radius * 1.4,
+    );
+    ctx.arc(radius * 0.4, 0, radius * 1.4, -Math.PI / 2, Math.PI / 2);
+    ctx.quadraticCurveTo(
+      -radius * 0.4,
+      radius * 1.8,
+      -radius * 1.1,
+      radius * 1.3,
+    );
+    ctx.quadraticCurveTo(-radius * 1.6, radius * 0.4, -radius * 3.2, 0);
+    ctx.closePath();
+    inkFill(ctx, "#fb923c", lw);
+    ctx.fillStyle = "#fde047";
+    ctx.beginPath();
+    ctx.arc(radius * 0.4, 0, radius * 0.85, 0, Math.PI * 2);
     ctx.fill();
   } else if (source === "lich-curse") {
     // A dark orb ringed in violet, with a skull's eyes glaring out of it.

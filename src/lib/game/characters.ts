@@ -766,6 +766,322 @@ function ogre(ctx: Ctx, r: number, color: string) {
   });
 }
 
+function slime(ctx: Ctx, r: number, color: string, t: number) {
+  const wob = Math.sin(t * 0.008) * r * 0.05;
+  const hi = lighten(color, 0.5);
+  shadow(ctx, r, 0.95);
+  part(
+    ctx,
+    () => {
+      ctx.moveTo(-0.95 * r, 0.9 * r);
+      ctx.bezierCurveTo(
+        -1.05 * r,
+        -0.2 * r,
+        -0.55 * r,
+        -0.95 * r + wob,
+        0,
+        -0.95 * r + wob,
+      );
+      ctx.bezierCurveTo(
+        0.55 * r,
+        -0.95 * r + wob,
+        1.05 * r,
+        -0.2 * r,
+        0.95 * r,
+        0.9 * r,
+      );
+      ctx.quadraticCurveTo(0.5 * r, 1.0 * r, 0, 0.92 * r);
+      ctx.quadraticCurveTo(-0.5 * r, 1.0 * r, -0.95 * r, 0.9 * r);
+      ctx.closePath();
+    },
+    color,
+  );
+  face(() => {
+    ctx.fillStyle = hi;
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.ellipse(-0.45 * r, -0.5 * r, 0.22 * r, 0.12 * r, -0.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    // Bubbles suspended inside.
+    inkDot(ctx, 0.5 * r, 0.45 * r, 0.1 * r, hi);
+    inkDot(ctx, 0.3 * r, 0.7 * r, 0.06 * r, hi);
+    eye(ctx, -0.3 * r, -0.12 * r, 0.22 * r, 0.04 * r, 0.04 * r);
+    eye(ctx, 0.3 * r, -0.12 * r, 0.22 * r, 0.04 * r, 0.04 * r);
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = Math.max(1.2, lw * 0.9);
+    ctx.beginPath();
+    ctx.moveTo(-0.3 * r, 0.28 * r);
+    ctx.quadraticCurveTo(0, 0.55 * r, 0.3 * r, 0.28 * r);
+    ctx.stroke();
+  });
+}
+
+function imp(ctx: Ctx, r: number, color: string, t: number) {
+  const dark = darken(color, 0.4);
+  const flap = Math.sin(t * 0.02);
+  shadow(ctx, r, 0.7, 1.05);
+  // Pointed tail with an arrowhead.
+  part(
+    ctx,
+    () => {
+      ctx.moveTo(0.2 * r, 0.6 * r);
+      ctx.quadraticCurveTo(1.1 * r, 0.7 * r, 0.95 * r, 0.1 * r);
+      ctx.lineTo(1.15 * r, 0.2 * r);
+      ctx.lineTo(1.0 * r, -0.15 * r);
+      ctx.lineTo(0.78 * r, 0.1 * r);
+      ctx.quadraticCurveTo(0.85 * r, 0.5 * r, 0.1 * r, 0.45 * r);
+      ctx.closePath();
+    },
+    dark,
+  );
+  for (const s of [-1, 1]) {
+    part(
+      ctx,
+      () => {
+        ctx.moveTo(s * 0.25 * r, 0.0);
+        ctx.quadraticCurveTo(
+          s * 1.0 * r,
+          -0.9 * r - flap * 0.3 * r,
+          s * 1.15 * r,
+          -0.4 * r - flap * 0.3 * r,
+        );
+        ctx.lineTo(s * 0.8 * r, -0.15 * r);
+        ctx.lineTo(s * 0.9 * r, 0.2 * r);
+        ctx.lineTo(s * 0.45 * r, 0.15 * r);
+        ctx.closePath();
+      },
+      dark,
+    );
+  }
+  ell(ctx, 0, 0.32 * r, 0.4 * r, 0.45 * r, color);
+  for (const s of [-1, 1]) {
+    limb(ctx, s * 0.12 * r, 0.62 * r, s * 0.24 * r, 0.92 * r, 0.16 * r, color);
+  }
+  face(() => {
+    ctx.fillStyle = lighten(color, 0.45);
+    ctx.beginPath();
+    ctx.ellipse(0, 0.4 * r, 0.22 * r, 0.28 * r, 0, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  // Head with horns.
+  for (const s of [-1, 1]) {
+    poly(
+      ctx,
+      [
+        [s * 0.22 * r, -0.6 * r],
+        [s * 0.5 * r, -1.15 * r],
+        [s * 0.55 * r, -0.5 * r],
+      ],
+      "#fde68a",
+    );
+  }
+  dot(ctx, 0, -0.3 * r, 0.62 * r, color);
+  face(() => {
+    for (const s of [-1, 1]) {
+      eye(ctx, s * 0.25 * r, -0.36 * r, 0.16 * r, 0, 0.02 * r, "#f59e0b");
+      ink(
+        ctx,
+        [
+          [s * 0.42 * r, -0.62 * r],
+          [s * 0.08 * r, -0.5 * r],
+        ],
+        Math.max(1.2, lw),
+      );
+    }
+    // A wide fanged grin.
+    part(
+      ctx,
+      () => {
+        ctx.moveTo(-0.3 * r, -0.04 * r);
+        ctx.quadraticCurveTo(0, 0.28 * r, 0.3 * r, -0.04 * r);
+        ctx.closePath();
+      },
+      OUTLINE,
+      Math.max(1, lw * 0.6),
+    );
+    for (const s of [-1, 1]) {
+      poly(
+        ctx,
+        [
+          [s * 0.18 * r, -0.03 * r],
+          [s * 0.08 * r, -0.03 * r],
+          [s * 0.13 * r, 0.1 * r],
+        ],
+        "#ffffff",
+      );
+    }
+  });
+}
+
+function bomber(ctx: Ctx, r: number, color: string, t: number) {
+  shadow(ctx, r, 0.85);
+  for (const s of [-1, 1]) {
+    limb(ctx, s * 0.3 * r, 0.7 * r, s * 0.36 * r, 0.95 * r, 0.2 * r, "#334155");
+  }
+  // The bomb: a heavy black sphere with a hazard band.
+  dot(ctx, 0, 0.05 * r, 0.9 * r, "#1e293b");
+  face(() => {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, 0.05 * r, 0.9 * r, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.fillStyle = color;
+    ctx.fillRect(-r, 0.28 * r, 2 * r, 0.22 * r);
+    ctx.restore();
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = Math.max(1, lw * 0.7);
+    ctx.beginPath();
+    ctx.moveTo(-0.9 * r, 0.28 * r);
+    ctx.lineTo(0.9 * r, 0.28 * r);
+    ctx.moveTo(-0.9 * r, 0.5 * r);
+    ctx.lineTo(0.9 * r, 0.5 * r);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    ctx.beginPath();
+    ctx.ellipse(-0.4 * r, -0.4 * r, 0.2 * r, 0.12 * r, -0.7, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  // Cap and fuse.
+  rr(ctx, -0.2 * r, -1.0 * r, 0.4 * r, 0.22 * r, 0.06 * r, "#475569");
+  const flicker = 0.7 + 0.3 * Math.sin(t * 0.04);
+  ink(
+    ctx,
+    [
+      [0, -1.0 * r],
+      [0.15 * r, -1.25 * r],
+      [0.35 * r, -1.28 * r],
+    ],
+    Math.max(1.4, lw),
+  );
+  face(() => {
+    ctx.save();
+    ctx.shadowColor = "#fde047";
+    ctx.shadowBlur = r * 0.4;
+    inkDot(ctx, 0.38 * r, -1.3 * r, 0.14 * r * flicker, "#fef08a");
+    ctx.restore();
+    for (const s of [-1, 1]) {
+      eye(ctx, s * 0.3 * r, -0.2 * r, 0.2 * r, 0, 0.03 * r, "#dc2626");
+      ink(
+        ctx,
+        [
+          [s * 0.52 * r, -0.5 * r],
+          [s * 0.1 * r, -0.34 * r],
+        ],
+        Math.max(1.4, lw * 1.1),
+      );
+    }
+    ink(
+      ctx,
+      [
+        [-0.22 * r, 0.12 * r],
+        [0, 0.04 * r],
+        [0.22 * r, 0.12 * r],
+      ],
+      Math.max(1.2, lw),
+    );
+  });
+}
+
+function knight(ctx: Ctx, r: number, color: string) {
+  const dark = darken(color, 0.35);
+  shadow(ctx, r, 1.0);
+  for (const s of [-1, 1]) {
+    rr(ctx, s * 0.36 * r - 0.2 * r, 0.62 * r, 0.4 * r, 0.34 * r, 0.1 * r, dark);
+  }
+  // Cuirass, belt and tabard.
+  rr(ctx, -0.65 * r, 0.0, 1.3 * r, 0.8 * r, 0.22 * r, color);
+  rr(ctx, -0.65 * r, 0.56 * r, 1.3 * r, 0.14 * r, 0.04 * r, "#475569");
+  poly(
+    ctx,
+    [
+      [-0.22 * r, 0.7 * r],
+      [0.22 * r, 0.7 * r],
+      [0.16 * r, 1.0 * r],
+      [-0.16 * r, 1.0 * r],
+    ],
+    "#b91c1c",
+  );
+  face(() => {
+    ink(
+      ctx,
+      [
+        [0, 0.04 * r],
+        [0, 0.52 * r],
+      ],
+      Math.max(1, lw * 0.7),
+    );
+    ctx.fillStyle = "rgba(255,255,255,0.3)";
+    ctx.beginPath();
+    ctx.ellipse(-0.35 * r, 0.22 * r, 0.14 * r, 0.22 * r, 0, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  // Big round pauldrons.
+  for (const s of [-1, 1]) dot(ctx, s * 0.72 * r, 0.06 * r, 0.3 * r, dark);
+  // A round shield on the off arm.
+  limb(ctx, -0.8 * r, 0.2 * r, -0.95 * r, 0.5 * r, 0.22 * r, dark);
+  dot(ctx, -1.0 * r, 0.52 * r, 0.42 * r, "#64748b");
+  face(() => {
+    dot(ctx, -1.0 * r, 0.52 * r, 0.16 * r, "#fbbf24");
+    ink(
+      ctx,
+      [
+        [-1.0 * r, 0.2 * r],
+        [-1.0 * r, 0.84 * r],
+      ],
+      Math.max(1, lw * 0.6),
+    );
+  });
+  // Helmet with visor slit and a plume.
+  part(
+    ctx,
+    () => {
+      ctx.moveTo(-0.5 * r, -0.2 * r);
+      ctx.lineTo(-0.5 * r, -0.62 * r);
+      ctx.arc(0, -0.62 * r, 0.5 * r, Math.PI, 0);
+      ctx.lineTo(0.5 * r, -0.2 * r);
+      ctx.quadraticCurveTo(0, -0.05 * r, -0.5 * r, -0.2 * r);
+      ctx.closePath();
+    },
+    lighten(color, 0.15),
+  );
+  face(() => {
+    rr(ctx, -0.38 * r, -0.54 * r, 0.76 * r, 0.14 * r, 0.05 * r, OUTLINE);
+    ink(
+      ctx,
+      [
+        [0, -1.1 * r],
+        [0, -0.72 * r],
+      ],
+      Math.max(1, lw * 0.7),
+    );
+    for (const s of [-1, 1]) {
+      inkDot(ctx, s * 0.14 * r, -0.47 * r, 0.04 * r, "#fde047");
+    }
+    // Vents.
+    for (const vy of [-0.3, -0.22]) {
+      ink(
+        ctx,
+        [
+          [-0.2 * r, vy * r],
+          [0.2 * r, vy * r],
+        ],
+        Math.max(1, lw * 0.6),
+      );
+    }
+  });
+  poly(
+    ctx,
+    [
+      [-0.12 * r, -1.08 * r],
+      [0.0, -1.42 * r],
+      [0.38 * r, -1.2 * r],
+      [0.12 * r, -1.05 * r],
+    ],
+    "#dc2626",
+  );
+}
+
 function reaper(ctx: Ctx, r: number, color: string, t: number, armed: boolean) {
   const dark = darken(color, 0.4);
   const sway = Math.sin(t * 0.005) * r * 0.08;
@@ -1023,6 +1339,18 @@ export function drawEnemyArt(
       break;
     case "ogre":
       ogre(ctx, r, color);
+      break;
+    case "slime":
+      slime(ctx, r, color, t);
+      break;
+    case "imp":
+      imp(ctx, r, color, t);
+      break;
+    case "bomber":
+      bomber(ctx, r, color, t);
+      break;
+    case "knight":
+      knight(ctx, r, color);
       break;
     case "reaper":
       reaper(ctx, r, color, t, armed);
