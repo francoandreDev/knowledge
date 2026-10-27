@@ -718,6 +718,19 @@ import Layout from "../../layouts/Layout.astro";
     </div>
   </div>
 
+  <div
+    data-wipe
+    aria-hidden="true"
+    class="pointer-events-none fixed inset-0 z-[60] hidden overflow-hidden"
+  >
+    <div
+      data-wipe-panel
+      class="absolute inset-y-0 -left-[30%] w-[130%] -skew-x-12 bg-slate-900"
+      style="box-shadow: 28px 0 0 #fb7185, 56px 0 0 #fde047, 84px 0 0 #38bdf8;"
+    >
+    </div>
+  </div>
+
   <script>
     import { startGame, type TrainingOptions } from "../../lib/game/engine";
     import { maxRecoveryHps } from "../../lib/game/balance";
@@ -1128,6 +1141,35 @@ import Layout from "../../layouts/Layout.astro";
             },
           },
         );
+      }
+
+      let shownLevel = 1;
+      // Screen change cover: a sticker-coloured panel sweeps across, the
+      // change happens behind it, then it sweeps off. Skipped with reduced
+      // motion; a second click while one is running is ignored.
+      let wiping = false;
+      function wipeTo(change: () => void) {
+        const wipeEl = document.querySelector<HTMLElement>("[data-wipe]");
+        const panel = wipeEl?.firstElementChild as HTMLElement | undefined;
+        if (!wipeEl || !panel || isReducedMotion()) {
+          change();
+          return;
+        }
+        if (wiping) return;
+        wiping = true;
+        wipeEl.classList.remove("hidden");
+        panel.classList.remove("wipe-reveal");
+        panel.classList.add("wipe-cover");
+        setTimeout(() => {
+          change();
+          panel.classList.remove("wipe-cover");
+          panel.classList.add("wipe-reveal");
+          setTimeout(() => {
+            wipeEl.classList.add("hidden");
+            panel.classList.remove("wipe-reveal");
+            wiping = false;
+          }, 420);
+        }, 340);
       }
 
       function showLobby() {
@@ -1700,6 +1742,7 @@ import Layout from "../../layouts/Layout.astro";
           String(worldW / 500),
         );
         activeGame?.stop();
+        shownLevel = 1;
         activeGame = startGame(
           canvas,
           {
@@ -1714,6 +1757,14 @@ import Layout from "../../layouts/Layout.astro";
               killsEl.textContent = String(state.kills);
               gemsEl.textContent = String(state.gems);
               coinsEl.textContent = String(state.coins);
+              if (state.level > shownLevel) {
+                shownLevel = state.level;
+                for (const el of [xpBarEl.parentElement!, levelEl]) {
+                  el.classList.remove("animate-xp-pop");
+                  void el.offsetWidth;
+                  el.classList.add("animate-xp-pop");
+                }
+              }
               levelEl.textContent = String(state.level);
               threatEl.textContent = String(state.threatTier);
               setLowHp(state.lowHp);
@@ -1880,36 +1931,44 @@ import Layout from "../../layouts/Layout.astro";
         );
       };
 
-      startButton.addEventListener("click", () => launch(null));
+      startButton.addEventListener("click", () => wipeTo(() => launch(null)));
       trainingStart.addEventListener("click", () => {
-        launch({
-          weaponId: trainingSelect("weapon")!
-            .value as TrainingOptions["weaponId"],
-          weaponLevel: Number(trainingSelect("level")!.value),
-          standoffPx: Number(trainingSelect("standoff")!.value),
-          drainPerS: Number(trainingSelect("drain")!.value),
-        });
+        wipeTo(() =>
+          launch({
+            weaponId: trainingSelect("weapon")!
+              .value as TrainingOptions["weaponId"],
+            weaponLevel: Number(trainingSelect("level")!.value),
+            standoffPx: Number(trainingSelect("standoff")!.value),
+            drainPerS: Number(trainingSelect("drain")!.value),
+          }),
+        );
       });
       trainingStop.addEventListener("click", () => {
-        activeGame?.stop();
-        activeGame = null;
-        showLobby();
+        wipeTo(() => {
+          activeGame?.stop();
+          activeGame = null;
+          showLobby();
+        });
       });
 
       document
         .querySelector("[data-duel-start]")!
-        .addEventListener("click", startDuelMatch);
+        .addEventListener("click", () => wipeTo(startDuelMatch));
       document
         .querySelector("[data-duel-again]")!
-        .addEventListener("click", startDuelMatch);
+        .addEventListener("click", () => wipeTo(startDuelMatch));
       for (const q of ["[data-duel-quit]", "[data-duel-leave]"]) {
-        document.querySelector(q)!.addEventListener("click", showLobby);
+        document
+          .querySelector(q)!
+          .addEventListener("click", () => wipeTo(showLobby));
       }
       renderDuelRecord();
       backToLobbyButton.addEventListener("click", () => {
-        activeGame?.stop();
-        activeGame = null;
-        showLobby();
+        wipeTo(() => {
+          activeGame?.stop();
+          activeGame = null;
+          showLobby();
+        });
       });
 
       showLobby();

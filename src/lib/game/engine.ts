@@ -143,6 +143,7 @@ import {
   type GameObject,
 } from "kontra";
 import { createLogger } from "./logger";
+import { BIOMES, createBackdrop, type Biome } from "./scenery";
 import type { UpgradeEffects } from "./shop";
 import {
   playPickup,
@@ -155,6 +156,10 @@ import {
   drawPlayer,
   drawShape,
   drawEnemy,
+  drawSwingArm,
+  drawWeaponGlyph,
+  WEAPON_COLOR,
+  type EnemyPose,
   drawGem,
   drawCoin,
   drawProjectile,
@@ -180,7 +185,13 @@ import {
 import {
   burst,
   drawBolt,
+  drawBossAura,
+  drawBossIntro,
   drawDamageNumber,
+  drawHeartRing,
+  drawHitIndicator,
+  drawSlamText,
+  drawWeaponSlot,
   drawDangerHalo,
   drawBigTime,
   drawBossBar,
@@ -194,6 +205,7 @@ import {
   drawParticles,
   drawSlamWarning,
   drawSlash,
+  drawSwingWarning,
   drawWindup,
   ringPop,
   stepParticles,
@@ -411,6 +423,54 @@ const ZOMBIE_LUNGE_COOLDOWN_MS = 3000;
 const ZOMBIE_LUNGE_DURATION_MS = 350;
 const ZOMBIE_LUNGE_SPEED_MULT = 2.6;
 const ZOMBIE_LUNGE_AWAY_DOT_THRESHOLD = 0.4; // how "away" the player must be moving to trigger
+
+// Enemy melee swings: Zombies claw, Skeletons club, the Reaper sweeps its
+// scythe. Each stops, winds up (a readable tell on the ground and in the
+// body), then hits whatever is still inside the cone. Sidestepping dodges it.
+interface SwingCfg {
+  minTier: number;
+  range: number; // reach beyond the two bodies touching
+  half: number; // half-width of the cone, radians
+  windupMs: number;
+  recoverMs: number;
+  cooldownMs: number;
+  damageMult: number; // of the enemy's contact damage
+  source: string;
+}
+const MELEE_SWING: Partial<Record<EnemyKind, SwingCfg>> = {
+  zombie: {
+    minTier: 1,
+    range: 30,
+    half: 0.85,
+    windupMs: 380,
+    recoverMs: 260,
+    cooldownMs: 2200,
+    damageMult: 1.7,
+    source: "zombie-claw",
+  },
+  skeleton: {
+    minTier: 2,
+    range: 38,
+    half: 0.6,
+    windupMs: 520,
+    recoverMs: 320,
+    cooldownMs: 2800,
+    damageMult: 2.1,
+    source: "skeleton-club",
+  },
+  reaper: {
+    minTier: 1,
+    range: 84,
+    half: 1.5,
+    windupMs: 560,
+    recoverMs: 300,
+    cooldownMs: 3400,
+    damageMult: 1.8,
+    source: "reaper-sweep",
+  },
+};
+const SHOOT_WINDUP_MS = 300; // ghosts and skeletons gather a shot before firing
+const STRIKE_FOLLOW_MS = 260; // how long the body keeps reacting to a blow
 
 const SKELETON_BONE_MIN_TIER = 3;
 const SKELETON_BONE_INTERVAL_MS = 2600;
@@ -744,6 +804,8 @@ export interface GameOptions {
   spawnRateMult?: number;
   /** Backing-store pixels per world pixel (default 1). */
   renderScale?: number;
+  /** The ground this run is fought on; random when omitted. */
+  biome?: Biome;
 }
 
 export interface TrainingOptions {
@@ -800,6 +862,32 @@ interface Enemy extends GameObject {
   hypedByBats?: boolean; // ogre: halved slam cooldown
   shieldWalled?: boolean; // skeleton: reduced damage taken
   chorusBuffed?: boolean; // zombie: speed boost
+  // Melee swings and gathered shots (see MELEE_SWING / SHOOT_WINDUP_MS)
+  swing?: {
+    kind: "melee" | "shoot";
+    startedAt: number;
+    angle: number;
+    struck: boolean;
+  };
+  swingReadyAt?: number;
+  strikeAt?: number; // when the last blow or shot landed, for the body's follow-through
+  seed?: number; // desyncs the idle animation of neighbours
+  spawnedAt?: number; // for the pop-in
+  phase?: number; // bosses: 1-3, rises as HP falls
+}
+
+// What is left behind where an enemy died: it plays out a death animation.
+interface Corpse {
+  kind: EnemyKind;
+  x: number;
+  y: number;
+  radius: number;
+  color: string;
+  at: number;
+  life: number;
+  dir: number;
+  boss: boolean;
+  nextBlastAt: number;
 }
 interface Projectile extends GameObject {
   ttl: number;
@@ -991,6 +1079,9 @@ const DEATH_CAUSE_BY_SOURCE: Record<string, string> = {
   "reaper-ring": "Caught in the Reaper's ring",
   "lich-curse": "Cursed by the Lich",
   "skeleton-bone": "Struck by a thrown bone", // Phase 16A
+  "zombie-claw": "Clawed by a Zombie",
+  "skeleton-club": "Clubbed by a Skeleton",
+  "reaper-sweep": "Cut down by the Reaper's scythe",
 };
 
 function describeDeathCause(
@@ -1022,6 +1113,15 @@ export function startGame(
   const WORLD_W = canvas.width / renderScale;
   const WORLD_H = canvas.height / renderScale;
   const runDurationS = options.durationS ?? DEFAULT_RUN_DURATION_S;
+  const biome: Biome =
+    options.biome ?? BIOMES[Math.floor(Math.random() * BIOMES.length)];
+  const backdrop = createBackdrop(
+    WORLD_W,
+    WORLD_H,
+    renderScale,
+    biome,
+    Math.floor(Math.random() * 1e9),
+  );
   const upgradeEffects: UpgradeEffects = options.upgradeEffects ?? {
     maxHpMult: 1,
     speedMult: 1,
@@ -1138,6 +1238,20 @@ export function startGame(
   const gems: Gem[] = [];
   const coinPickups: CoinPickup[] = [];
   const arcEffects: ArcEffect[] = [];
+  const corpses: Corpse[] = [];
+  const hitIndicators: { angle: number; at: number }[] = [];
+  const banners: { text: string; sub: string; at: number; color: string }[] =
+    [];
+  let lastAttack: { id: WeaponId; at: number; angle: number } | null = null;
+  let bossIntro: { name: string; sub: string; at: number } | null = null;
+  const enemyStrikes: {
+    x: number;
+    y: number;
+    range: number;
+    angle: number;
+    half: number;
+    at: number;
+  }[] = [];
   const pulseEffects: PulseEffect[] = [];
   const orbitTrails: OrbitTrailPoint[] = [];
   const hitSparks: HitSpark[] = [];
@@ -1306,7 +1420,12 @@ export function startGame(
     sprite.slamReadyAt = elapsedMs;
     sprite.baseWidth = sprite.width;
     sprite.baseHeight = sprite.height;
+    sprite.spawnedAt = elapsedMs;
     enemies.push(sprite);
+    if (!reduceMotion) {
+      ringPop(particles, x, y, def.color, def.radius * 2.4);
+      burst(particles, x, y, def.color, 3, 70);
+    }
     log.log("spawn:enemy", {
       kind: def.kind,
       tier,
@@ -1346,8 +1465,19 @@ export function startGame(
     sprite.lastDashAt = elapsedMs; // reaper dash timer
     sprite.lastRangedAt = elapsedMs; // lich curse-bolt timer (shared field, see Enemy interface)
     sprite.lastSummonAt = elapsedMs; // lich summon timer
+    sprite.phase = 1;
+    sprite.spawnedAt = elapsedMs;
     enemies.push(sprite);
     bossSpawned = true;
+    bossIntro = {
+      name: isLich ? "THE LICH" : "THE REAPER",
+      sub: isLich ? "master of the dead" : "your time is up",
+      at: elapsedMs,
+    };
+    if (feedbackOn) {
+      shakeMag = 6;
+      shakeUntil = elapsedMs + 520;
+    }
     // Phase 13: ring/curse damage now also reflects the time-based ramp, not
     // just powerIndex — folded into this one scale so
     // updateEnemyBehavior()'s existing `... * bossPowerScale` reads need no
@@ -1390,6 +1520,7 @@ export function startGame(
     sprite.wigglePhase = Math.random() * Math.PI * 2;
     sprite.lastRangedAt = elapsedMs;
     sprite.slamReadyAt = elapsedMs;
+    sprite.spawnedAt = elapsedMs;
     enemies.push(sprite);
     log.log("lich:summon", { x: Math.round(x), y: Math.round(y) });
   }
@@ -1426,6 +1557,55 @@ export function startGame(
     return WEAPON_ID_SOURCES.has(normalized) ? (normalized as WeaponId) : null;
   }
 
+  // Each weapon lands its own kind of hit.
+  function impactFx(e: Enemy, source: string) {
+    switch (weaponIdForSource(source)) {
+      case "bolt":
+        burst(particles, e.x, e.y, "#facc15", 5, 190);
+        break;
+      case "homingDart":
+        burst(particles, e.x, e.y, "#f472b6", 4, 140);
+        ringPop(particles, e.x, e.y, "#f9a8d4", e.radius * 1.4);
+        break;
+      case "chainLightning":
+        burst(particles, e.x, e.y, "#67e8f9", 6, 230);
+        break;
+      case "novaPulse":
+        ringPop(particles, e.x, e.y, "#fb923c", e.radius * 2);
+        burst(particles, e.x, e.y, "#fed7aa", 3, 120);
+        break;
+      case "bladeArc":
+        burst(particles, e.x, e.y, "#f5d0fe", 5, 250);
+        ringPop(particles, e.x, e.y, "#e879f9", e.radius * 1.6);
+        break;
+      case "orbitShield":
+        burst(particles, e.x, e.y, "#fde047", 3, 120);
+        break;
+      default:
+        burst(particles, e.x, e.y, "#ffffff", 2, 90);
+    }
+  }
+
+  function leaveCorpse(e: Enemy, isBoss: boolean) {
+    corpses.push({
+      kind: e.kind,
+      x: e.x,
+      y: e.y,
+      radius: e.radius,
+      color: e.color,
+      at: elapsedMs,
+      life: isBoss ? 1500 : e.kind === "ogre" ? 600 : 420,
+      dir: Math.random() < 0.5 ? -1 : 1,
+      boss: isBoss,
+      nextBlastAt: elapsedMs,
+    });
+    if (reduceMotion) return;
+    if (e.kind === "skeleton") burst(particles, e.x, e.y, "#f8fafc", 8, 210);
+    else if (e.kind === "ogre")
+      ringPop(particles, e.x, e.y, "#d6d3d1", e.radius * 3.2);
+    else if (e.kind === "ghost") burst(particles, e.x, e.y, "#cffafe", 6, 80);
+  }
+
   function damageEnemy(e: Enemy, amount: number, source: string) {
     // Phase 16B: "Shield Wall" — 2+ adjacent skeletons take reduced damage
     // while grouped, see runSynergyScan().
@@ -1443,7 +1623,7 @@ export function startGame(
     }
     e.hitFlashUntil = elapsedMs + HIT_FLASH_MS;
     hitSparks.push({ x: e.x, y: e.y, createdAt: elapsedMs });
-    if (!reduceMotion) burst(particles, e.x, e.y, "#ffffff", 2, 90);
+    if (!reduceMotion) impactFx(e, source);
     damageNumbers.push({
       x: e.x,
       y: e.y - e.radius,
@@ -1452,6 +1632,35 @@ export function startGame(
     });
     playHit();
     log.log("hit:enemy", { kind: e.kind, source, remainingHp: e.hp });
+    if (e.maxHp && e.hp > 0) {
+      const frac = e.hp / e.maxHp;
+      const phase = frac > 0.66 ? 1 : frac > 0.33 ? 2 : 3;
+      if (phase > (e.phase ?? 1)) {
+        e.phase = phase;
+        banners.push({
+          text: phase === 2 ? "PHASE 2" : "ENRAGED!",
+          sub: phase === 2 ? "it is getting serious" : "it will not stop",
+          at: elapsedMs,
+          color: phase === 2 ? "#f0abfc" : "#fb7185",
+        });
+        if (!reduceMotion) {
+          burst(
+            particles,
+            e.x,
+            e.y,
+            phase === 2 ? "#f0abfc" : "#fb7185",
+            24,
+            280,
+          );
+          ringPop(particles, e.x, e.y, "#fde047", e.radius * 5);
+        }
+        if (feedbackOn) {
+          shakeMag = 6;
+          shakeUntil = elapsedMs + 400;
+          hitStopMs = 110;
+        }
+      }
+    }
     if (e.hp <= 0 && e.alive) {
       e.alive = false;
       kills += 1;
@@ -1479,6 +1688,7 @@ export function startGame(
         }
       }
       log.log("kill:enemy", { kind: e.kind, source, totalKills: kills });
+      leaveCorpse(e, isBoss);
       spawnGem(e.x, e.y);
       maybeSpawnCoin(e);
       if (e.kind === "reaper" || e.kind === "lich") {
@@ -1750,6 +1960,12 @@ export function startGame(
     }
     player.hp = Math.max(0, player.hp - amount);
     playerHitFlashUntil = elapsedMs + HIT_FLASH_MS;
+    if (fromX !== undefined && fromY !== undefined) {
+      hitIndicators.push({
+        angle: Math.atan2(fromY - player.y, fromX - player.x),
+        at: elapsedMs,
+      });
+    }
     if (!reduceMotion) burst(particles, player.x, player.y, "#fb7185", 7, 140);
     if (feedbackOn) {
       shakeMag = Math.min(8, 3 + amount / 6);
@@ -2190,8 +2406,317 @@ export function startGame(
     }
   }
 
+  // A swing or gathered shot freezes the enemy in place; the blow lands when
+  // the wind-up ends and the enemy stays committed for a short recovery.
+  function advanceSwing(e: Enemy) {
+    const sw = e.swing!;
+    const t = elapsedMs - sw.startedAt;
+    if (sw.kind === "shoot") {
+      if (!sw.struck && t >= SHOOT_WINDUP_MS) {
+        sw.struck = true;
+        e.strikeAt = elapsedMs;
+        const angle = Math.atan2(player.y - e.y, player.x - e.x);
+        if (e.kind === "skeleton") {
+          fireEnemyProjectile(
+            e,
+            angle,
+            SKELETON_BONE_SPEED,
+            SKELETON_BONE_DAMAGE,
+            "skeleton-bone",
+          );
+        } else {
+          fireEnemyProjectile(
+            e,
+            angle,
+            GHOST_PROJECTILE_SPEED,
+            GHOST_PROJECTILE_DAMAGE,
+            "ghost",
+          );
+        }
+      }
+      if (t >= SHOOT_WINDUP_MS + 160) e.swing = undefined;
+      return;
+    }
+    const cfg = MELEE_SWING[e.kind]!;
+    if (!sw.struck && t >= cfg.windupMs) {
+      sw.struck = true;
+      e.strikeAt = elapsedMs;
+      const reach = e.radius + PLAYER_RADIUS + cfg.range;
+      enemyStrikes.push({
+        x: e.x,
+        y: e.y,
+        range: reach,
+        angle: sw.angle,
+        half: cfg.half,
+        at: elapsedMs,
+      });
+      if (!reduceMotion) {
+        burst(
+          particles,
+          e.x + Math.cos(sw.angle) * reach * 0.8,
+          e.y + Math.sin(sw.angle) * reach * 0.8,
+          "#f8fafc",
+          4,
+          110,
+        );
+      }
+      const bearing = Math.atan2(player.y - e.y, player.x - e.x);
+      let off = Math.abs(bearing - sw.angle) % (Math.PI * 2);
+      if (off > Math.PI) off = Math.PI * 2 - off;
+      if (
+        distance(player, e) <= reach &&
+        off <= cfg.half &&
+        elapsedMs - player.lastHitAt >= PLAYER_HIT_COOLDOWN_MS
+      ) {
+        player.lastHitAt = elapsedMs;
+        damagePlayer(e.contactDamage * cfg.damageMult, cfg.source, e.x, e.y);
+        log.log("enemy:swing-hit", { kind: e.kind });
+      } else {
+        log.log("enemy:swing-miss", { kind: e.kind });
+      }
+    }
+    if (t >= cfg.windupMs + cfg.recoverMs) {
+      e.swing = undefined;
+      e.swingReadyAt = elapsedMs + cfg.cooldownMs;
+    }
+  }
+
+  // Remembers the latest attack so the player's body, held weapon and muzzle
+  // can react to it.
+  function noteAttack(w: WeaponRuntime) {
+    const target = findNearestEnemy();
+    const angle = target
+      ? Math.atan2(target.y - player.y, target.x - player.x)
+      : playerFacingAngle;
+    lastAttack = { id: w.id, at: elapsedMs, angle };
+    if (!reduceMotion && w.id !== "orbitShield" && w.id !== "novaPulse") {
+      burst(
+        particles,
+        player.x + Math.cos(angle) * PLAYER_RADIUS * 2.4,
+        player.y + Math.sin(angle) * PLAYER_RADIUS * 2.4,
+        WEAPON_COLOR[w.id],
+        3,
+        120,
+      );
+    }
+  }
+
+  function weaponIntervalMs(w: WeaponRuntime): number | null {
+    switch (w.id) {
+      case "bolt":
+        return boltShape(w.level).intervalMs;
+      case "homingDart":
+        return homingDartShape(w.level).intervalMs;
+      case "chainLightning":
+        return chainLightningShape(w.level).intervalMs;
+      case "novaPulse":
+        return novaPulseShape(w.level).intervalMs;
+      case "bladeArc":
+        return bladeArcShape(w.level).intervalMs;
+      default:
+        return null;
+    }
+  }
+
+  function playerPose(flash: number): EnemyPose {
+    let sx = 1;
+    let sy = 1;
+    let tilt = 0;
+    const speed = Math.hypot(playerVelX, playerVelY);
+    if (!reduceMotion && speed > 1) {
+      const f = Math.sin(elapsedMs * 0.02);
+      sy = 1 + 0.06 * f;
+      sx = 1 - 0.05 * f;
+      tilt = Math.sign(playerVelX) * 0.1 + f * 0.04;
+    }
+    if (lastAttack) {
+      const since = elapsedMs - lastAttack.at;
+      if (since < 180) {
+        const k = 1 - since / 180;
+        const dir = Math.cos(lastAttack.angle) >= 0 ? 1 : -1;
+        sx *= 1 + 0.18 * k;
+        sy *= 1 - 0.14 * k;
+        tilt += dir * 0.18 * k;
+      }
+    }
+    if (flash > 0) {
+      sx *= 1 - 0.18 * flash;
+      sy *= 1 + 0.22 * flash;
+      tilt += Math.sin(elapsedMs * 0.08) * 0.12 * flash;
+    }
+    return { sx, sy, lift: 0, tilt };
+  }
+
+  // The death animation of each kind.
+  function corpsePose(
+    c: Corpse,
+    p: number,
+  ): { pose: EnemyPose; alpha: number } {
+    switch (c.kind) {
+      case "zombie":
+        return {
+          pose: { sx: 1 + 0.5 * p, sy: 1 - 0.85 * p, lift: 0, tilt: 0 },
+          alpha: 1 - p * p,
+        };
+      case "bat":
+        return {
+          pose: { sx: 1, sy: 1, lift: p * p * 22, tilt: p * 6 * c.dir },
+          alpha: 1 - p,
+        };
+      case "skeleton":
+        return {
+          pose: {
+            sx: 1 + 0.2 * Math.sin(p * 30),
+            sy: 1 - 0.6 * p,
+            lift: 0,
+            tilt: 0,
+          },
+          alpha: 1 - p,
+        };
+      case "ghost":
+        return {
+          pose: { sx: 1 - 0.3 * p, sy: 1 + 0.5 * p, lift: -p * 26, tilt: 0 },
+          alpha: 1 - p,
+        };
+      case "ogre":
+        return {
+          pose: {
+            sx: 1 + 0.3 * p * p,
+            sy: 1 - 0.5 * p * p,
+            lift: 0,
+            tilt: Math.sin(p * 40) * 0.08 * (1 - p),
+          },
+          alpha: 1 - p * p * p,
+        };
+      default:
+        return {
+          pose: {
+            sx: 1 + 0.15 * Math.sin(p * 50),
+            sy: 1 + 0.15 * Math.sin(p * 47),
+            lift: 0,
+            tilt: Math.sin(p * 60) * 0.05,
+          },
+          alpha: 1 - p * p,
+        };
+    }
+  }
+
+  // How an enemy's body moves: an idle bob, an anticipation crouch before a
+  // blow, a stretch on the blow, and the settle afterwards.
+  function enemyPose(e: Enemy): EnemyPose {
+    e.seed ??= Math.random() * Math.PI * 2;
+    const t = elapsedMs;
+    let sx = 1;
+    let sy = 1;
+    let lift = 0;
+    let tilt = 0;
+    if (!reduceMotion) {
+      if (e.kind === "bat") {
+        const f = Math.sin(t * 0.03 + e.seed);
+        sx = 1 + 0.16 * f;
+        sy = 1 - 0.1 * f;
+      } else if (e.kind === "ghost") {
+        lift = Math.sin(t * 0.004 + e.seed) * 3;
+        sy = 1 + 0.04 * Math.sin(t * 0.008 + e.seed);
+      } else {
+        const f = Math.sin(t * (e.kind === "ogre" ? 0.005 : 0.009) + e.seed);
+        sy = 1 + 0.07 * f;
+        sx = 1 - 0.05 * f;
+        tilt = f * 0.05;
+      }
+    }
+    // Mid-move attacks.
+    if (e.diveUntil && t < e.diveUntil) {
+      sx = 0.7;
+      sy = 1.35;
+      tilt = Math.atan2(e.diveDy ?? 0, e.diveDx ?? 0) + Math.PI / 2;
+    } else if (e.lungeUntil && t < e.lungeUntil) {
+      sx = 1.2;
+      sy = 0.85;
+      tilt = 0.3 * Math.sign(e.lungeDx ?? 1);
+    } else if (e.dashUntil && t < e.dashUntil) {
+      sx = 1.35;
+      sy = 0.8;
+      tilt = 0.25 * Math.sign(e.dashDx ?? 1);
+    }
+    // Anticipation: coil up before a swing, a shot or a slam.
+    const sw = e.swing;
+    if (sw && !sw.struck) {
+      const wind =
+        sw.kind === "shoot"
+          ? SHOOT_WINDUP_MS
+          : (MELEE_SWING[e.kind]?.windupMs ?? 400);
+      const p = Math.min(1, (t - sw.startedAt) / wind);
+      if (sw.kind === "shoot") {
+        sx = sy = 1 + 0.2 * p;
+      } else {
+        const dir = Math.cos(sw.angle) >= 0 ? 1 : -1;
+        sy = 1 - 0.22 * p;
+        sx = 1 + 0.16 * p;
+        tilt = -dir * 0.28 * p;
+      }
+    } else if (e.chargeUntil && e.chargeStartedAt != null) {
+      const p = Math.min(
+        1,
+        (t - e.chargeStartedAt) /
+          Math.max(1, e.chargeUntil - e.chargeStartedAt),
+      );
+      sy = 1 + 0.3 * p;
+      sx = 1 - 0.12 * p;
+      lift = -8 * p; // rears up before it comes down
+    }
+    // Follow-through: the body snaps the other way, then settles.
+    const since = t - (e.strikeAt ?? -1e9);
+    if (since >= 0 && since < STRIKE_FOLLOW_MS) {
+      const k = 1 - since / STRIKE_FOLLOW_MS;
+      if (e.kind === "ogre") {
+        sy = 1 - 0.3 * k;
+        sx = 1 + 0.25 * k;
+      } else if (e.swing?.kind === "shoot" || e.kind === "ghost") {
+        sx = 1 - 0.15 * k;
+        sy = 1 - 0.15 * k;
+      } else {
+        const dir = Math.cos(e.swing?.angle ?? 0) >= 0 ? 1 : -1;
+        sy = 1 + 0.2 * k;
+        sx = 1 - 0.14 * k;
+        tilt = dir * 0.32 * k;
+      }
+    }
+    // Pop-in: it scales up from the ground when it appears.
+    const age = t - (e.spawnedAt ?? -1e9);
+    if (age >= 0 && age < 380) {
+      const p = age / 380;
+      const k = 1 + 2.7 * Math.pow(p - 1, 3) + 1.7 * Math.pow(p - 1, 2);
+      sx *= Math.max(0.05, k);
+      sy *= Math.max(0.05, k);
+    }
+    return { sx, sy, lift, tilt };
+  }
+
   function updateEnemyBehavior(e: Enemy, dt: number) {
     const currentTier = computeThreatTier(elapsedMs / 1000); // Phase 16A
+    if (e.swing) {
+      advanceSwing(e);
+      return;
+    }
+    const swingCfg = MELEE_SWING[e.kind];
+    if (
+      swingCfg &&
+      currentTier >= swingCfg.minTier &&
+      elapsedMs >= (e.swingReadyAt ?? 0) &&
+      !(e.dashUntil && elapsedMs < e.dashUntil) &&
+      !(e.lungeUntil && elapsedMs < e.lungeUntil) &&
+      distance(player, e) <= e.radius + PLAYER_RADIUS + swingCfg.range * 0.9
+    ) {
+      e.swing = {
+        kind: "melee",
+        startedAt: elapsedMs,
+        angle: Math.atan2(player.y - e.y, player.x - e.x),
+        struck: false,
+      };
+      log.log("enemy:swing-start", { kind: e.kind });
+      return;
+    }
     if (e.kind === "bat") {
       const def = ENEMY_DEFS.find((d) => d.kind === "bat")!;
       // Phase 16A, tier 4+: one fast straight dive through the player's
@@ -2242,14 +2767,12 @@ export function startGame(
           : GHOST_FIRE_INTERVAL_MS;
       if (elapsedMs - (e.lastRangedAt ?? 0) >= fireInterval) {
         e.lastRangedAt = elapsedMs;
-        const angle = Math.atan2(player.y - e.y, player.x - e.x);
-        fireEnemyProjectile(
-          e,
-          angle,
-          GHOST_PROJECTILE_SPEED,
-          GHOST_PROJECTILE_DAMAGE,
-          "ghost",
-        );
+        e.swing = {
+          kind: "shoot",
+          startedAt: elapsedMs,
+          angle: Math.atan2(player.y - e.y, player.x - e.x),
+          struck: false,
+        };
       }
       return;
     }
@@ -2313,14 +2836,13 @@ export function startGame(
         elapsedMs - (e.lastRangedAt ?? 0) >= SKELETON_BONE_INTERVAL_MS
       ) {
         e.lastRangedAt = elapsedMs;
-        const angle = Math.atan2(player.y - e.y, player.x - e.x);
-        fireEnemyProjectile(
-          e,
-          angle,
-          SKELETON_BONE_SPEED,
-          SKELETON_BONE_DAMAGE,
-          "skeleton-bone",
-        );
+        e.swing = {
+          kind: "shoot",
+          startedAt: elapsedMs,
+          angle: Math.atan2(player.y - e.y, player.x - e.x),
+          struck: false,
+        };
+        return;
       }
       const angle = Math.atan2(player.y - e.y, player.x - e.x);
       e.x += Math.cos(angle) * def.speed * dt;
@@ -2335,6 +2857,7 @@ export function startGame(
           e.chargeUntil = undefined;
           e.width = e.baseWidth ?? e.width;
           e.height = e.baseHeight ?? e.height;
+          e.strikeAt = elapsedMs;
           if (distance(player, e) <= OGRE_SLAM_RANGE) {
             damagePlayer(OGRE_SLAM_DAMAGE, "ogre-slam", e.x, e.y);
             log.log("ogre:slam-hit");
@@ -2623,7 +3146,9 @@ export function startGame(
 
       // --- weapons (Phase 3: all owned weapons act every frame) ---
       for (const w of ownedWeapons) {
+        const before = w.lastActionAt;
         updateWeapon(w, dt);
+        if (w.lastActionAt !== before) noteAttack(w);
       }
 
       // --- Phase 16C: "Twin Fangs" — Bolt and Homing Dart both at Lv4+
@@ -2771,6 +3296,10 @@ export function startGame(
         if (d < GEM_COLLECT_DISTANCE) {
           g.alive = false;
           gemsCollected += 1;
+          if (!reduceMotion) {
+            burst(particles, g.x, g.y, "#c4b5fd", 4, 110);
+            ringPop(particles, player.x, player.y, "#a78bfa", 22);
+          }
           addXp(GEM_XP_VALUE * upgradeEffects.xpMult);
           playPickup();
           log.log("pickup:gem", { totalGems: gemsCollected });
@@ -2793,6 +3322,10 @@ export function startGame(
         if (d < GEM_COLLECT_DISTANCE) {
           c.alive = false;
           coinsCollected += c.value;
+          if (!reduceMotion) {
+            burst(particles, c.x, c.y, "#fde047", 6, 150);
+            ringPop(particles, c.x, c.y, "#fef08a", 18);
+          }
           playPickup();
           log.log("pickup:coin", {
             value: c.value,
@@ -2822,6 +3355,34 @@ export function startGame(
         if (elapsedMs - arcEffects[i].createdAt >= ARC_EFFECT_DURATION_MS) {
           arcEffects.splice(i, 1);
         }
+      }
+      for (let i = corpses.length - 1; i >= 0; i--) {
+        const c = corpses[i];
+        if (c.boss && elapsedMs >= c.nextBlastAt && elapsedMs - c.at < c.life) {
+          // A boss does not go quietly: a chain of blasts across its body.
+          c.nextBlastAt = elapsedMs + 130;
+          if (!reduceMotion) {
+            const bx = c.x + (Math.random() - 0.5) * c.radius * 2.2;
+            const by = c.y + (Math.random() - 0.5) * c.radius * 2.2;
+            burst(particles, bx, by, "#fde047", 10, 240);
+            ringPop(particles, bx, by, "#fb7185", c.radius * 1.6);
+          }
+          if (feedbackOn) {
+            shakeMag = 4;
+            shakeUntil = elapsedMs + 160;
+          }
+        }
+        if (elapsedMs - c.at >= c.life) corpses.splice(i, 1);
+      }
+      for (let i = hitIndicators.length - 1; i >= 0; i--) {
+        if (elapsedMs - hitIndicators[i].at >= 700) hitIndicators.splice(i, 1);
+      }
+      for (let i = banners.length - 1; i >= 0; i--) {
+        if (elapsedMs - banners[i].at >= 1500) banners.splice(i, 1);
+      }
+      if (bossIntro && elapsedMs - bossIntro.at >= 2400) bossIntro = null;
+      for (let i = enemyStrikes.length - 1; i >= 0; i--) {
+        if (elapsedMs - enemyStrikes[i].at >= 220) enemyStrikes.splice(i, 1);
       }
       for (let i = pulseEffects.length - 1; i >= 0; i--) {
         if (elapsedMs - pulseEffects[i].createdAt >= PULSE_EFFECT_DURATION_MS) {
@@ -2877,6 +3438,7 @@ export function startGame(
     render() {
       context.setTransform(renderScale, 0, 0, renderScale, 0, 0);
       context.clearRect(0, 0, WORLD_W, WORLD_H);
+      if (backdrop) context.drawImage(backdrop, 0, 0, WORLD_W, WORLD_H);
       context.save();
       if (feedbackOn && elapsedMs < shakeUntil) {
         const fade = Math.min(1, (shakeUntil - elapsedMs) / 200);
@@ -2925,6 +3487,29 @@ export function startGame(
               Math.max(1, e.chargeUntil - e.chargeStartedAt),
           );
         }
+        const sw = e.swing;
+        if (sw && !sw.struck) {
+          if (sw.kind === "melee") {
+            const cfg = MELEE_SWING[e.kind]!;
+            drawSwingWarning(
+              context,
+              e.x,
+              e.y,
+              e.radius + PLAYER_RADIUS + cfg.range,
+              sw.angle,
+              cfg.half,
+              (elapsedMs - sw.startedAt) / cfg.windupMs,
+            );
+          } else {
+            drawDashLine(
+              context,
+              e.x,
+              e.y,
+              e.x + Math.cos(sw.angle) * 120,
+              e.y + Math.sin(sw.angle) * 120,
+            );
+          }
+        }
         if (
           e.kind === "reaper" &&
           !(e.dashUntil && elapsedMs < e.dashUntil) &&
@@ -2941,11 +3526,33 @@ export function startGame(
           );
         }
       }
+      const pullRadius =
+        GEM_PICKUP_RADIUS * pickupRadiusMult * upgradeEffects.pickupRadiusMult;
+      const pickupAnim = (o: { x: number; y: number }) => {
+        const dx = player.x - o.x;
+        const dy = player.y - o.y;
+        const d = Math.hypot(dx, dy) || 1;
+        return {
+          t: elapsedMs,
+          pulling: d < pullRadius,
+          dirX: dx / d,
+          dirY: dy / d,
+        };
+      };
       for (const g of gems) {
-        drawGem(context, g.x, g.y, GEM_RADIUS, g.color);
+        drawGem(context, g.x, g.y, GEM_RADIUS, g.color, pickupAnim(g));
       }
       for (const c of coinPickups) {
-        drawCoin(context, c.x, c.y, COIN_RADIUS, c.color);
+        drawCoin(context, c.x, c.y, COIN_RADIUS, c.color, pickupAnim(c));
+      }
+      // Death animations play under the living.
+      for (const c of corpses) {
+        const p = Math.min(1, (elapsedMs - c.at) / c.life);
+        const { pose, alpha } = corpsePose(c, p);
+        context.save();
+        context.globalAlpha = Math.max(0, alpha);
+        drawEnemy(context, c.kind, c.x, c.y, c.radius, c.color, { pose });
+        context.restore();
       }
       // Elite/boss get a glow (GAME-DESIGN.md "Distinct glow/aura"); Veteran
       // instead gets a plain color tint, applied at spawn time via
@@ -2958,9 +3565,49 @@ export function startGame(
         const flashAlpha = e.hitFlashUntil
           ? Math.max(0, (e.hitFlashUntil - elapsedMs) / HIT_FLASH_MS)
           : 0;
+        if ((e.kind === "reaper" || e.kind === "lich") && !reduceMotion) {
+          drawBossAura(
+            context,
+            e.x,
+            e.y,
+            e.radius,
+            e.phase ?? 1,
+            elapsedMs,
+            e.color,
+          );
+        }
         drawEnemy(context, e.kind, e.x, e.y, e.radius, e.color, {
           flashAlpha,
+          pose: enemyPose(e),
         });
+        // The arm and weapon of a melee swing: drawn back while winding up,
+        // whipped across on the strike.
+        const meleeCfg = MELEE_SWING[e.kind];
+        if (meleeCfg && e.swing?.kind === "melee") {
+          const sw = e.swing;
+          const since = elapsedMs - (e.strikeAt ?? Infinity);
+          let offset: number;
+          if (!sw.struck) {
+            const p = Math.min(
+              1,
+              (elapsedMs - sw.startedAt) / meleeCfg.windupMs,
+            );
+            offset = -meleeCfg.half * (1 - (1 - p) * (1 - p));
+          } else {
+            const q = Math.min(1, Math.max(0, since) / 110);
+            offset = -meleeCfg.half + 2 * meleeCfg.half * q;
+          }
+          drawSwingArm(
+            context,
+            e.kind,
+            e.x,
+            e.y,
+            e.radius,
+            sw.angle,
+            offset,
+            e.color,
+          );
+        }
         if (isElite) drawEliteMarker(context, e.x, e.y, e.radius, elapsedMs);
         if ((e.kind === "reaper" || e.kind === "lich") && e.maxHp) {
           drawHpBar(
@@ -3025,6 +3672,19 @@ export function startGame(
         0,
         (playerHitFlashUntil - elapsedMs) / HIT_FLASH_MS,
       );
+      if (
+        !reduceMotion &&
+        player.hp > 0 &&
+        player.hp / effectiveMaxHp() <= LOW_HP_THRESHOLD
+      ) {
+        drawHeartRing(
+          context,
+          player.x,
+          player.y,
+          PLAYER_RADIUS * 1.4,
+          elapsedMs,
+        );
+      }
       drawPlayer(
         context,
         player.x,
@@ -3033,7 +3693,43 @@ export function startGame(
         "#38bdf8",
         playerFacingAngle,
         playerFlashAlpha,
+        playerPose(playerFlashAlpha),
       );
+      // The weapon in hand: it points where the player last struck, and the
+      // blade swings through its arc.
+      const heldId =
+        lastAttack?.id ??
+        ownedWeapons.find((w) => w.id !== "orbitShield")?.id ??
+        null;
+      if (heldId && heldId !== "orbitShield") {
+        const since = lastAttack ? elapsedMs - lastAttack.at : Infinity;
+        let a =
+          lastAttack && since < 700 ? lastAttack.angle : playerFacingAngle;
+        if (heldId === "bladeArc" && since < 260) {
+          const q = since / 260;
+          a = lastAttack!.angle - 1.2 + 2.4 * (1 - (1 - q) * (1 - q));
+        }
+        const recoil = since < 120 ? (1 - since / 120) * -3 : 0;
+        drawWeaponGlyph(
+          context,
+          heldId,
+          player.x + Math.cos(a) * (PLAYER_RADIUS * 1.9 + recoil),
+          player.y +
+            idleBobOffset +
+            Math.sin(a) * (PLAYER_RADIUS * 1.9 + recoil),
+          PLAYER_RADIUS * 0.95,
+          a,
+        );
+      }
+      for (const h of hitIndicators) {
+        drawHitIndicator(
+          context,
+          player.x,
+          player.y,
+          h.angle,
+          (elapsedMs - h.at) / 700,
+        );
+      }
 
       // --- Phase 7: joystick visual (base at touch-down point, knob follows) ---
       if (joystick) {
@@ -3109,6 +3805,18 @@ export function startGame(
         );
       }
 
+      for (const st of enemyStrikes) {
+        drawSlash(
+          context,
+          st.x,
+          st.y,
+          st.range,
+          st.angle,
+          st.half,
+          (elapsedMs - st.at) / 220,
+        );
+      }
+
       for (const p of pulseEffects) {
         drawNovaRing(
           context,
@@ -3162,6 +3870,68 @@ export function startGame(
         );
       }
       context.restore();
+
+      // Equipped weapons: icon, cooldown sweep and level, bottom-left.
+      {
+        const slot = 30;
+        const gap = 6;
+        let sx0 = 10;
+        const sy0 = WORLD_H - slot - 10;
+        for (const w of ownedWeapons) {
+          const interval = weaponIntervalMs(w);
+          const ready =
+            interval === null
+              ? 1
+              : Math.min(
+                  1,
+                  Math.max(0, (elapsedMs - w.lastActionAt) / interval),
+                );
+          drawWeaponSlot(
+            context,
+            sx0,
+            sy0,
+            slot,
+            w.id,
+            w.level,
+            ready,
+            w.level >= WEAPON_MAX_LEVEL,
+          );
+          sx0 += slot + gap;
+        }
+      }
+
+      if (bossIntro) {
+        drawBossIntro(
+          context,
+          WORLD_W,
+          WORLD_H,
+          bossIntro.name,
+          bossIntro.sub,
+          Math.min(1, (elapsedMs - bossIntro.at) / 2400),
+        );
+      }
+      for (const b of banners) {
+        const p = Math.min(1, (elapsedMs - b.at) / 1500);
+        drawSlamText(
+          context,
+          b.text,
+          WORLD_W / 2,
+          WORLD_H * 0.3,
+          40,
+          p,
+          b.color,
+          6,
+        );
+        drawSlamText(
+          context,
+          b.sub,
+          WORLD_W / 2,
+          WORLD_H * 0.3 + 30,
+          15,
+          p,
+          "#e2e8f0",
+        );
+      }
 
       for (const e of enemies) {
         if ((e.kind === "reaper" || e.kind === "lich") && e.alive && e.maxHp) {

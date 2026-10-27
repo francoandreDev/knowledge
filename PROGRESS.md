@@ -3259,3 +3259,24 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 - **The charge is the tell.** Both fighters draw their live telegraph (aim line, cone, ring or wedge) plus a charge ring, so the rival's attack can be read and dodged, and so can yours.
 - **The rival is no longer perfect.** It reads the fight every `reactMs` (620/400/250 ms by skill), aims with jitter, leads moving targets only partly, notices a threat only some of the time, takes breathers between attacks, and sometimes charges more than it needs. The default rival weapon is now "Different (random)", never the same as yours; Mirror stays as an option.
 - Simultaneous releases and lunges resolve together (collected before applying), which removed a side-0 bias in the Orbit Shield mirror. Weapon strength is a per-weapon `WEAPON_FACTOR` (replaces the fitted `DUEL_DAMAGE_SCALE`; `scripts/duel-fit.ts` removed). `scripts/duel-lab.ts` still prints the matrix: matchups stay intransitive, fights last ~17–31 s. Not yet played by hand in a browser.
+
+### Enemy attack animation and melee swings (2026-10-27)
+
+- **Bodies animate.** Enemies get a pose (`EnemyPose`: squash/stretch around the feet, lift, tilt) from `enemyPose()` in the engine: an idle bob (bats flap, ghosts float, the rest waddle), a coil-up before a blow, a stretch on the blow, then a settle. Bat dives, Zombie lunges and Reaper dashes stretch the silhouette along the move; the Ogre rears up during its slam telegraph and squashes when it lands.
+- **Own melee attacks.** Zombies claw (tier 1+), Skeletons club (tier 2+) and the Reaper sweeps its scythe (`MELEE_SWING`): the enemy stops, a cone fills on the ground, its arm and weapon (`drawSwingArm`) draw back then whip across, and the hit lands only on whatever is still in the cone, so sidestepping dodges it. Ghosts and Skeletons now gather their ranged shot for 300 ms (the body swells and a line shows the aim) before firing. New death causes: claw, club, scythe.
+- **Duel rival** crouches while charging and snaps on release; the Blade rival draws its scythe back.
+- Balance lab: the circling bot is never hit by swings, but enemies that stop to swing are easier to kill (survival at level 1 is 3–7 s longer), so damage multipliers were set a bit high (1.7 / 2.1 / 1.8) to keep a standing player under pressure.
+
+### Visual pass: player, deaths, ground, hits, pickups, bosses, duel, HUD (2026-10-27)
+
+- **Player body and weapon.** The player squashes while walking, coils and snaps on each attack, and jolts when hit (`playerPose`). The weapon in hand is drawn (`drawWeaponGlyph`): it points where the player last struck, recoils on firing, and the blade swings through its arc. Every attack leaves a muzzle spark in the weapon's colour (`noteAttack`).
+- **Enemy entrances and deaths.** Enemies pop in from the ground with a ring; each kind dies its own way (`corpsePose`): zombies flatten, bats spin and fall, skeletons rattle apart in bone shards, ghosts drift up and fade, ogres shake then slump with a dust ring. Bosses die in a 1.5 s chain of blasts.
+- **Ground.** `scenery.ts` paints one of four biomes (Crypt, Swamp, Ember Pit, Frostfield) once into an offscreen canvas: flagstones, cracks, candles, bones, puddles, lava cracks, ice, plus a vignette. The duel arena gets the same with spawn pads and a centre emblem.
+- **Hits.** Each weapon lands its own impact (`impactFx`: yellow sparks, pink ring, cyan zaps, orange ring, magenta slash sparks) and projectiles trail a tapering streak.
+- **Pickups.** Gems and coins bob and twinkle, coins spin, pulled ones streak toward the player, collecting pops a ring, and the HUD XP bar and level number pop on level-up (`animate-xp-pop`).
+- **Bosses.** A letterboxed entrance with the name slammed in, an aura that burns brighter per phase, and "PHASE 2" / "ENRAGED!" banners with a shake at 66% and 33% HP (visual only; the boss attacks are unchanged).
+- **Duel.** A VS card with both loadouts, name tags and team-coloured ground rings, held weapons for both fighters, hit-stop on heavy hits, and a slow-motion K.O. with a zoom and "K.O."/"TIME!" text.
+- **Transitions.** A sticker-coloured wipe covers lobby ↔ run ↔ duel changes (skipped with reduced motion).
+- **HUD.** Equipped weapons sit bottom-left with a cooldown sweep and level pips (evolved ones gold); a red wedge on the player's ring points at what hit them; a heartbeat ring pulses at low HP.
+- **Legibility.** Danger zones carry diagonal hatching and enemy shots a dashed outline, so they do not rely on colour alone.
+- Verified with offline renders of the run, the boss intro and the duel; not yet seen in a real browser. Mobile widths were not touched.

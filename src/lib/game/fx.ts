@@ -2,6 +2,9 @@
 // flat pastel fills. Pure drawing and particle helpers — the engine decides
 // when each effect fires.
 
+import type { WeaponId } from "./engine";
+import { drawWeaponGlyph, WEAPON_COLOR } from "./sprites";
+
 const INK = "#0f172a";
 
 export interface Particle {
@@ -254,6 +257,32 @@ export function drawBolt(
 // --- Danger tells --------------------------------------------------------
 
 /** Ogre slam: the danger zone fills up until the hit lands. */
+/** Diagonal stripes inside the current path. Danger zones carry this texture
+ * on top of their red, so they read without relying on colour alone. */
+function hatchFill(
+  ctx: CanvasRenderingContext2D,
+  trace: () => void,
+  x: number,
+  y: number,
+  reach: number,
+  alpha: number,
+) {
+  ctx.save();
+  ctx.beginPath();
+  trace();
+  ctx.clip();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let d = -reach * 2; d < reach * 2; d += 9) {
+    ctx.moveTo(x + d - reach, y + reach);
+    ctx.lineTo(x + d + reach, y - reach);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
 export function drawSlamWarning(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -266,6 +295,9 @@ export function drawSlamWarning(
   ctx.arc(x, y, range, 0, Math.PI * 2);
   ctx.fillStyle = "rgba(251,113,133,0.12)";
   ctx.fill();
+  hatchFill(ctx, () => ctx.arc(x, y, range, 0, Math.PI * 2), x, y, range, 0.22);
+  ctx.beginPath();
+  ctx.arc(x, y, range, 0, Math.PI * 2);
   ctx.setLineDash([6, 5]);
   ctx.lineWidth = 2;
   ctx.strokeStyle = INK;
@@ -274,6 +306,49 @@ export function drawSlamWarning(
   ctx.beginPath();
   ctx.arc(x, y, range * Math.min(1, progress), 0, Math.PI * 2);
   ctx.fillStyle = `rgba(251,113,133,${0.25 + progress * 0.3})`;
+  ctx.fill();
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = "#fb7185";
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** The cone a melee swing is about to cover; it fills as the blow comes. */
+export function drawSwingWarning(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  range: number,
+  angle: number,
+  halfArc: number,
+  progress: number,
+) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.arc(x, y, range, angle - halfArc, angle + halfArc);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(251,113,133,0.12)";
+  ctx.fill();
+  const wedge = () => {
+    ctx.moveTo(x, y);
+    ctx.arc(x, y, range, angle - halfArc, angle + halfArc);
+    ctx.closePath();
+  };
+  hatchFill(ctx, wedge, x, y, range, 0.22);
+  ctx.beginPath();
+  wedge();
+  ctx.setLineDash([6, 5]);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = INK;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  const p = Math.min(1, progress);
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.arc(x, y, range * p, angle - halfArc, angle + halfArc);
+  ctx.closePath();
+  ctx.fillStyle = `rgba(251,113,133,${0.25 + p * 0.3})`;
   ctx.fill();
   ctx.lineWidth = 2.5;
   ctx.strokeStyle = "#fb7185";
@@ -350,9 +425,15 @@ export function drawDangerHalo(
   nowMs: number,
 ) {
   ctx.save();
-  ctx.globalAlpha = 0.55 + Math.sin(nowMs / 80) * 0.25;
+  ctx.globalAlpha = 0.6 + Math.sin(nowMs / 80) * 0.25;
   ctx.beginPath();
   ctx.arc(x, y, radius + 3.5, 0, Math.PI * 2);
+  ctx.lineWidth = 4.5;
+  ctx.strokeStyle = INK;
+  ctx.stroke();
+  // Dashed, so a hostile shot is told apart by its outline and not only its
+  // colour.
+  ctx.setLineDash([3, 3]);
   ctx.lineWidth = 2;
   ctx.strokeStyle = "#fb7185";
   ctx.stroke();
@@ -577,5 +658,254 @@ export function drawCoverArc(
   ctx.lineWidth = 3.5;
   ctx.strokeStyle = "#fde047";
   ctx.stroke();
+  ctx.restore();
+}
+
+// --- HUD and cinematic helpers -------------------------------------------
+
+/** A heartbeat ring around the player while HP is low. */
+export function drawHeartRing(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  nowMs: number,
+) {
+  const beat = (nowMs % 900) / 900;
+  const k = beat < 0.2 ? beat / 0.2 : Math.max(0, 1 - (beat - 0.2) / 0.5);
+  ctx.save();
+  ctx.globalAlpha = 0.25 + 0.55 * k;
+  ctx.beginPath();
+  ctx.arc(x, y, radius + 4 + k * 7, 0, Math.PI * 2);
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = INK;
+  ctx.stroke();
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = "#fb7185";
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** A red wedge on the player's ring pointing at what just hit them. */
+export function drawHitIndicator(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  angle: number,
+  progress: number,
+) {
+  const r = 38 + progress * 6;
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, 1 - progress);
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.arc(x, y, r, angle - 0.42, angle + 0.42);
+  ctx.lineWidth = 9;
+  ctx.strokeStyle = INK;
+  ctx.stroke();
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = "#fb7185";
+  ctx.stroke();
+  const tx = x + Math.cos(angle) * (r + 9);
+  const ty = y + Math.sin(angle) * (r + 9);
+  ctx.beginPath();
+  ctx.moveTo(tx, ty);
+  ctx.lineTo(tx + Math.cos(angle + 2.5) * 8, ty + Math.sin(angle + 2.5) * 8);
+  ctx.lineTo(tx + Math.cos(angle - 2.5) * 8, ty + Math.sin(angle - 2.5) * 8);
+  ctx.closePath();
+  ctx.fillStyle = "#fb7185";
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = INK;
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** One equipped weapon in the HUD row: its icon, a cooldown sweep and its level. */
+export function drawWeaponSlot(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+  id: WeaponId,
+  level: number,
+  ready: number, // 0..1, 1 = ready to act
+  evolved: boolean,
+) {
+  ctx.save();
+  ctx.fillStyle = "rgba(15,23,42,0.72)";
+  ctx.strokeStyle = evolved ? "#fde047" : INK;
+  ctx.lineWidth = evolved ? 3 : 2.5;
+  ctx.beginPath();
+  ctx.roundRect(x, y, size, size, 7);
+  ctx.fill();
+  ctx.stroke();
+  drawWeaponGlyph(
+    ctx,
+    id,
+    x + size / 2,
+    y + size / 2,
+    size * 0.28,
+    -Math.PI / 4,
+  );
+  if (ready < 1) {
+    // A clock-wise sweep covering what is still recharging.
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(x, y, size, size, 7);
+    ctx.clip();
+    ctx.beginPath();
+    ctx.moveTo(x + size / 2, y + size / 2);
+    ctx.arc(
+      x + size / 2,
+      y + size / 2,
+      size * 0.75,
+      -Math.PI / 2 + ready * Math.PI * 2,
+      Math.PI * 1.5,
+    );
+    ctx.closePath();
+    ctx.fillStyle = "rgba(2,6,23,0.6)";
+    ctx.fill();
+    ctx.restore();
+  } else {
+    ctx.strokeStyle = WEAPON_COLOR[id];
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(x + 2, y + 2, size - 4, size - 4, 5);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  // Level pips along the bottom.
+  const pips = Math.min(level, 6);
+  for (let i = 0; i < pips; i++) {
+    ctx.fillStyle = evolved ? "#fde047" : "#e2e8f0";
+    ctx.fillRect(
+      x + 4 + i * ((size - 8) / 6),
+      y + size - 5,
+      (size - 8) / 6 - 1.5,
+      3,
+    );
+  }
+  ctx.restore();
+}
+
+/** Big sticker text that slams in (scales down from large) and fades out. */
+export function drawSlamText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  size: number,
+  progress: number, // 0..1 over the whole display
+  color = "#f8fafc",
+  shake = 0,
+) {
+  const inP = Math.min(1, progress / 0.16);
+  const outP = progress > 0.75 ? (progress - 0.75) / 0.25 : 0;
+  const scale = 1 + (1 - inP) * (1 - inP) * 1.2;
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, inP * 1.4) * (1 - outP);
+  ctx.translate(x + (shake ? (Math.random() - 0.5) * shake * (1 - inP) : 0), y);
+  ctx.scale(scale, scale);
+  ctx.font = `900 ${size}px sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = Math.max(5, size / 4);
+  ctx.strokeStyle = INK;
+  ctx.strokeText(text, 0, 0);
+  ctx.fillStyle = INK;
+  ctx.fillText(text, 0, size * 0.07);
+  ctx.fillStyle = color;
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
+
+/** Boss entrance: letterbox bars slide in, the name slams down. */
+export function drawBossIntro(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  name: string,
+  sub: string,
+  progress: number,
+) {
+  const bar = h * 0.11;
+  const slide =
+    Math.min(1, progress / 0.12) *
+    (progress > 0.88 ? (1 - progress) / 0.12 : 1);
+  ctx.save();
+  ctx.fillStyle = "rgba(2,6,23,0.92)";
+  ctx.fillRect(0, 0, w, bar * slide);
+  ctx.fillRect(0, h - bar * slide, w, bar * slide);
+  // Red wash that pulses once as the boss lands.
+  ctx.globalAlpha = Math.max(0, 0.22 - progress * 0.3);
+  ctx.fillStyle = "#be123c";
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+  drawSlamText(
+    ctx,
+    name,
+    w / 2,
+    h * 0.44,
+    Math.min(54, w * 0.1),
+    progress,
+    "#fb7185",
+    8,
+  );
+  if (progress > 0.14) {
+    drawSlamText(
+      ctx,
+      sub,
+      w / 2,
+      h * 0.44 + Math.min(54, w * 0.1) * 0.85,
+      Math.min(20, w * 0.04),
+      Math.min(1, (progress - 0.14) / 0.86),
+      "#e2e8f0",
+    );
+  }
+}
+
+/** A boss's aura: it burns brighter and faster with each phase. */
+export function drawBossAura(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  phase: number,
+  nowMs: number,
+  color: string,
+) {
+  const speed = 0.004 * phase;
+  ctx.save();
+  for (let i = 0; i < phase; i++) {
+    const k = (nowMs * speed * 0.25 + i / phase) % 1;
+    ctx.globalAlpha = (1 - k) * (0.22 + phase * 0.07);
+    ctx.beginPath();
+    ctx.arc(x, y, radius * (1.1 + k * 0.9), 0, Math.PI * 2);
+    ctx.lineWidth = 3 + phase;
+    ctx.strokeStyle = phase === 3 ? "#fb7185" : color;
+    ctx.stroke();
+  }
+  if (phase >= 2) {
+    // Flame ticks flickering round the body.
+    ctx.globalAlpha = 0.8;
+    ctx.fillStyle = phase === 3 ? "#fb7185" : "#f0abfc";
+    for (let i = 0; i < 6 + phase * 2; i++) {
+      const a = (i / (6 + phase * 2)) * Math.PI * 2 + nowMs * 0.0012 * phase;
+      const flick = 0.5 + 0.5 * Math.sin(nowMs * 0.02 + i * 2.3);
+      const rr = radius * 1.15;
+      ctx.beginPath();
+      ctx.arc(
+        x + Math.cos(a) * rr,
+        y + Math.sin(a) * rr,
+        1.5 + flick * 2.5,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fill();
+    }
+  }
   ctx.restore();
 }
