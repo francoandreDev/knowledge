@@ -3301,3 +3301,8 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 - `/game` lobby is now a title screen: Dela Gothic One wordmark with a hard coral shadow, a cursor menu (Start run, Duel, Upgrades, Chests, Relics) whose tags say what is waiting behind each row, credits as `CREDITS 02 + 1 FREE`, score leaders (best run, run length, coins) and a stage with the hero fighting every enemy, including the four new ones. The panels below keep their content and are reached from the menu by anchor.
 - The best-survival card was folded into the score leaders. Font: `@fontsource/dela-gothic-one` (latin subset only).
 - Verified by DOM inspection only (layout, texts, font load, no horizontal overflow); screenshots timed out three times in the browser tool, so the look has not been seen.
+
+### Lobby pass: real chest and picture menu (2026-10-27)
+
+- `icons.ts` gains `chestArt(tier, {open})` (planked wooden chest with iron bands, golden one with a ruby lock, and an open version with light spilling out), `MENU_ICON` (one picture per lobby row) and `SCORE_ICON`.
+- The lobby menu rows are now picture tiles with a number badge (free/credits, buyable upgrades, chests, relics found) instead of text pills; the best/length/coins leaders became three icon chips; the stage chest is the real chest, bobbing, with a count badge, and opens the chest modal directly. Chest rows, the opening modal (closed then open art) and the results box use the same art. Bubble copy cut to a few words.

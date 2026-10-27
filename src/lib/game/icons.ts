@@ -243,3 +243,80 @@ export function sizedIcon(svg: string, className: string): string {
   if (!svg) return "";
   return svg.replace("<svg ", `<svg class="${className}" `);
 }
+
+// --- Illustrations ----------------------------------------------------------
+// Filled, inked art for the lobby (a real chest, one picture per menu row).
+// These are pictures, not the outline glyphs above: they carry their own colours.
+
+const INK = "#0f172a";
+
+const CHEST_PAINT = {
+  wooden: {
+    body: "#a2602a",
+    lid: "#bf7632",
+    band: "#9aa5b8",
+    lock: "#f5c542",
+    shine: "rgba(255,255,255,0.35)",
+  },
+  golden: {
+    body: "#e9a823",
+    lid: "#ffd24f",
+    band: "#fff1b8",
+    lock: "#ef4444",
+    shine: "rgba(255,255,255,0.6)",
+  },
+} as const;
+
+/** A treasure chest: planked wood with iron bands, or gold with a ruby lock.
+ * `open` lifts the lid back and lets light pour out. */
+export function chestArt(
+  tier: "wooden" | "golden",
+  opts: { open?: boolean; className?: string } = {},
+): string {
+  const c = CHEST_PAINT[tier];
+  const cls = opts.className ? ` class="${opts.className}"` : "";
+  const bands = (y: number, h: number) =>
+    `<rect x="22" y="${y}" width="12" height="${h}" fill="${c.band}" stroke="${INK}" stroke-width="3"/><rect x="66" y="${y}" width="12" height="${h}" fill="${c.band}" stroke="${INK}" stroke-width="3"/>`;
+  const lid = `<path d="M10 40 V28 Q10 10 50 10 Q90 10 90 28 V40 Z" fill="${c.lid}" stroke="${INK}" stroke-width="4" stroke-linejoin="round"/>${bands(17, 23)}<path d="M18 27 Q22 17 40 15" fill="none" stroke="${c.shine}" stroke-width="3" stroke-linecap="round"/>`;
+  const body = `<rect x="10" y="38" width="80" height="38" rx="6" fill="${c.body}" stroke="${INK}" stroke-width="4"/><path d="M12 52 H88 M12 64 H88" stroke="rgba(15,23,42,0.3)" stroke-width="2"/>${bands(38, 38)}`;
+  const lock = `<rect x="42" y="36" width="16" height="19" rx="4" fill="${c.lock}" stroke="${INK}" stroke-width="3.5"/><circle cx="50" cy="43" r="2.8" fill="${INK}"/><rect x="48.8" y="44" width="2.4" height="6" fill="${INK}"/>`;
+  const sparkle = (x: number, y: number, r: number) =>
+    `<path d="M${x} ${y - r} L${x + r * 0.3} ${y - r * 0.3} L${x + r} ${y} L${x + r * 0.3} ${y + r * 0.3} L${x} ${y + r} L${x - r * 0.3} ${y + r * 0.3} L${x - r} ${y} L${x - r * 0.3} ${y - r * 0.3} Z" fill="#fff6c9"/>`;
+  const inner = opts.open
+    ? `<ellipse cx="50" cy="16" rx="44" ry="30" fill="#ffd24f" opacity="0.35"/><ellipse cx="50" cy="20" rx="30" ry="20" fill="#ffe27a" opacity="0.7"/>${sparkle(26, 2, 7)}${sparkle(76, -2, 9)}${sparkle(50, -12, 6)}<g transform="translate(0 -26) scale(1 .6)">${lid}</g>${body}<ellipse cx="50" cy="39" rx="39" ry="6" fill="#2a1608" stroke="${INK}" stroke-width="3"/><ellipse cx="50" cy="38" rx="30" ry="3" fill="#ffe27a"/>${lock}`
+    : `${body}${lid}${lock}`;
+  return `<svg viewBox="0 -22 100 106"${cls} role="img" aria-label="${tier === "golden" ? "Golden" : "Wooden"} chest"><ellipse cx="50" cy="78" rx="42" ry="5" fill="rgba(15,23,42,0.35)"/>${inner}</svg>`;
+}
+
+const tile = (inner: string) =>
+  `<svg viewBox="0 0 48 48" fill="none" stroke="${INK}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">${inner}</svg>`;
+
+/** One picture per lobby menu row. */
+export const MENU_ICON = {
+  start: tile(`<path d="M16 9 L39 24 L16 39Z" fill="#fff"/>`),
+  duel: tile(
+    `<path d="M10 38 L34 12" stroke-width="8"/><path d="M10 38 L34 12" stroke="#e2e8f0" stroke-width="3.5"/><path d="M38 38 L14 12" stroke-width="8"/><path d="M38 38 L14 12" stroke="#e2e8f0" stroke-width="3.5"/><path d="M8 30 L18 40 M40 30 L30 40" stroke="#fbbf24" stroke-width="5"/>`,
+  ),
+  upgrades: tile(
+    `<path d="M24 7 L39 24 H30 V40 H18 V24 H9 Z" fill="#fff"/><path d="M24 14 L31 22" stroke="#bae6fd" stroke-width="3"/>`,
+  ),
+  chests: tile(
+    `<path d="M8 22 V18 Q8 9 24 9 Q40 9 40 18 V22Z" fill="#bf7632"/><rect x="8" y="22" width="32" height="17" rx="3" fill="#a2602a"/><rect x="21" y="20" width="6" height="8" rx="1.5" fill="#f5c542"/>`,
+  ),
+  relics: tile(
+    `<path d="M24 6 L39 17 L24 42 L9 17 Z" fill="#c4b5fd"/><path d="M9 17 H39 M24 6 L18 17 L24 42 L30 17 Z" stroke-width="2.5"/>`,
+  ),
+};
+
+/** Small pictures for the lobby's score chips. */
+export const SCORE_ICON = {
+  trophy: tile(
+    `<path d="M14 8 H34 V20 Q34 30 24 30 Q14 30 14 20Z" fill="#fde047"/><path d="M14 12 H8 Q8 22 15 23 M34 12 H40 Q40 22 33 23"/><path d="M24 30 V37 M17 41 H31"/>`,
+  ),
+  clock: tile(
+    `<circle cx="24" cy="25" r="16" fill="#fff"/><path d="M24 15 V25 L31 29"/>`,
+  ),
+  coin: tile(
+    `<circle cx="24" cy="24" r="16" fill="#fde047"/><path d="M18 24 H30"/>`,
+  ),
+};
