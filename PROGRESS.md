@@ -3295,3 +3295,9 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 - **More upgrades**: four new shop upgrades (Bulwark, Haste, Precision, Siphon) and five new level-up cards (Iron Skin, Quick Draw, Keen Eye, Bloodthirst, Chill).
 - **Four new enemies**: Slime (splits into slimelets), Imp (circles and throws fireballs), Bomber (runs in, lit fuse, blast) and Knight (takes 40% less damage, shield bash). Unlock at 75/130/190/260 s; art, death causes, projectile and telegraphs included.
 - Tests: `relics.test.ts` (effects, chest odds, maxed duplicates, daily renewal). Not yet balance-tested by hand: the new enemies' HP/damage and relic magnitudes are first guesses.
+
+### Lobby redesign: attract mode (2026-10-27)
+
+- `/game` lobby is now a title screen: Dela Gothic One wordmark with a hard coral shadow, a cursor menu (Start run, Duel, Upgrades, Chests, Relics) whose tags say what is waiting behind each row, credits as `CREDITS 02 + 1 FREE`, score leaders (best run, run length, coins) and a stage with the hero fighting every enemy, including the four new ones. The panels below keep their content and are reached from the menu by anchor.
+- The best-survival card was folded into the score leaders. Font: `@fontsource/dela-gothic-one` (latin subset only).
+- Verified by DOM inspection only (layout, texts, font load, no horizontal overflow); screenshots timed out three times in the browser tool, so the look has not been seen.
