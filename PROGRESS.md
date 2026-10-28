@@ -3306,3 +3306,9 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 
 - `icons.ts` gains `chestArt(tier, {open})` (planked wooden chest with iron bands, golden one with a ruby lock, and an open version with light spilling out), `MENU_ICON` (one picture per lobby row) and `SCORE_ICON`.
 - The lobby menu rows are now picture tiles with a number badge (free/credits, buyable upgrades, chests, relics found) instead of text pills; the best/length/coins leaders became three icon chips; the stage chest is the real chest, bobbing, with a count badge, and opens the chest modal directly. Chest rows, the opening modal (closed then open art) and the results box use the same art. Bubble copy cut to a few words.
+
+### Lobby pass: pictures instead of text across the panels (2026-10-28)
+
+- Menu rows fixed (the picture tiles overlapped the labels: the icon column was too narrow).
+- Upgrades are picture tiles (big icon, level pips, price with a coin; the whole tile buys, the effect is a tooltip). Unlocks are icon rows with a price or OWNED. The duel setup shows a hero-vs-rival picture with the chosen weapons and is configured with icon buttons for weapon, rival, level and skill (the selects stay underneath, hidden). Panel headings are picture tiles with screen-reader labels; the explanatory paragraphs under chests and relics are gone.
+- Not yet seen in a browser: the local preview server would not start, so this needs a look on the deployed page.
