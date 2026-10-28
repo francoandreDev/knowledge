@@ -3312,3 +3312,7 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 - Menu rows fixed (the picture tiles overlapped the labels: the icon column was too narrow).
 - Upgrades are picture tiles (big icon, level pips, price with a coin; the whole tile buys, the effect is a tooltip). Unlocks are icon rows with a price or OWNED. The duel setup shows a hero-vs-rival picture with the chosen weapons and is configured with icon buttons for weapon, rival, level and skill (the selects stay underneath, hidden). Panel headings are picture tiles with screen-reader labels; the explanatory paragraphs under chests and relics are gone.
 - Not yet seen in a browser: the local preview server would not start, so this needs a look on the deployed page.
+
+### Lobby zones as modals (2026-10-28)
+
+- Each menu row (Duel, Upgrades, Chests, Relics) and a new lab button in the title bar open their own native `<dialog>` instead of scrolling to a panel lower on the page; Esc, the close button or a click on the backdrop closes it. Unlocks live inside the Upgrades dialog. The chest-opening modal is a dialog too, so it stacks above the Chests dialog. Starting a run, a duel or a lab session closes any open panel first, and the duel picture redraws when its dialog opens (it cannot measure itself while hidden).

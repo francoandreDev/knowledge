@@ -44,6 +44,10 @@ const ICON_NECROMANCY = `<svg ${ICON_ATTRS}><path d="M6 21V11a6 6 0 0 1 12 0v10Z
 // icon-first convention as everything else in this file.
 const ICON_LOCK = `<svg ${ICON_ATTRS}><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`;
 
+const ICON_X = `<svg ${ICON_ATTRS}><path d="M6 6l12 12M18 6 6 18"/></svg>`;
+
+const ICON_LAB = `<svg ${ICON_ATTRS}><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3"/><path d="M7.5 15h9"/></svg>`;
+
 const ICON_SPARKLE = `<svg ${ICON_ATTRS} stroke-linejoin="round"><path d="M12 2 L13.5 9 L21 12 L13.5 15 L12 22 L10.5 15 L3 12 L10.5 9 Z" fill="currentColor" stroke="none"/></svg>`;
 
 // heart — HP-related (Vigor / Thick Skin)
@@ -213,6 +217,8 @@ export const UI_ICON = {
   level: ICON_STAR,
   tokens: ICON_TICKET,
   chest: ICON_CHEST,
+  close: ICON_X,
+  lab: ICON_LAB,
   trophy: ICON_TROPHY,
   soundOn: ICON_SOUND_ON,
   soundOff: ICON_SOUND_OFF,
