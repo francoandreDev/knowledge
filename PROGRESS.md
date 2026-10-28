@@ -3321,3 +3321,7 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 
 - The base menu is no longer a dashed list: Start run is a gold sticker card and Duel / Upgrades / Chests / Relics are a 2×2 grid of tiles with large illustrated icons and number badges on the corner. Toolbar buttons are sticker tiles too.
 - Modals share one shell: violet panel, ink border and hard shadow, a header with the picture tile, a title, the relevant chip (coins, duel record, relic count) and a red close button, and a scrolling body. Everything inside is pastel-on-violet sticker art (upgrade tiles, unlock rows, chest rows, relic grid, duel pickers); the balance lab sits in a light card so its form controls stay readable. The look no longer depends on the site's light/dark theme.
+
+- Lobby polish (2026-10-28): the duel picture draws larger weapon glyphs, and the Chests modal shows a timer → trophy → chest hint when there is nothing to open. Checked on the deployed page: menu cards, Upgrades, Duel and Chests modals render as intended.
+
+- Lobby polish (2026-10-28): the duel picture draws larger weapon glyphs, and the Chests modal shows a timer, trophy, chest hint when there is nothing to open. Checked on the deployed page: menu cards, Upgrades, Duel and Chests modals render as intended.
