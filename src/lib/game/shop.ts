@@ -132,7 +132,7 @@ export const UPGRADES: UpgradeDef[] = [
 // purchased, can appear as a one-time level-up card whose pick swaps the
 // run's boss from the Reaper to the Lich (different stats/attack pattern —
 // see engine.ts's `spawnBoss()`/`bossVariant`).
-export type UnlockId = "chainLightning" | "necromancy";
+export type UnlockId = "chainLightning" | "meteorRain" | "necromancy";
 
 export interface UnlockDef {
   id: UnlockId;
@@ -147,6 +147,12 @@ export const UNLOCKS: UnlockDef[] = [
     label: "Chain Lightning",
     effectLabel: "Unlocks a 6th weapon — arcs between nearby enemies",
     cost: 200,
+  },
+  {
+    id: "meteorRain",
+    label: "Meteor Rain",
+    effectLabel: "Unlocks a 7th weapon — rocks fall on marked ground",
+    cost: 500,
   },
   {
     id: "necromancy",

@@ -20,6 +20,9 @@ export const ENEMY_SHAPE: Record<EnemyKind, Shape> = {
   imp: "bat",
   bomber: "circle",
   knight: "square",
+  boar: "square",
+  shaman: "ghost",
+  wasp: "bat",
   reaper: "hood",
   lich: "diamond",
 };
@@ -756,6 +759,7 @@ export const WEAPON_COLOR: Record<WeaponId, string> = {
   bolt: "#facc15",
   homingDart: "#f472b6",
   chainLightning: "#67e8f9",
+  meteorRain: "#f97316",
   novaPulse: "#fb923c",
   orbitShield: "#fde047",
   bladeArc: "#e879f9",
@@ -816,6 +820,27 @@ export function drawWeaponGlyph(
         ctx.lineTo(s * 0.85, 0);
         ctx.lineTo(s * 0.35, s * 0.28);
       });
+      break;
+    case "meteorRain":
+      stroke(() => {
+        ctx.moveTo(-s * 0.95, -s * 0.3);
+        ctx.lineTo(-s * 0.2, -s * 0.05);
+      });
+      stroke(() => {
+        ctx.moveTo(-s * 0.95, s * 0.3);
+        ctx.lineTo(-s * 0.2, s * 0.05);
+      });
+      ctx.beginPath();
+      ctx.arc(s * 0.35, 0, s * 0.5, 0, Math.PI * 2);
+      ctx.fillStyle = "#fed7aa";
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = OUTLINE;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(s * 0.45, 0, s * 0.2, 0, Math.PI * 2);
+      ctx.fillStyle = col;
+      ctx.fill();
       break;
     case "chainLightning":
       stroke(() => {

@@ -1071,3 +1071,52 @@ export function drawBossAura(
   }
   ctx.restore();
 }
+
+/** Meteor Rain's mark: a ring that tightens and fills while the rock falls in
+ * from above. `t` runs 0 (marked) to 1 (impact). */
+export function drawMeteorWarning(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  t: number,
+) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.globalAlpha = 0.1 + 0.28 * t;
+  ctx.fillStyle = "#fb923c";
+  ctx.fill();
+  ctx.globalAlpha = 0.9;
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = "#7c2d12";
+  ctx.setLineDash([7, 6]);
+  ctx.lineDashOffset = -t * 40;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // The rock: drops from 280px up, brightening as it arrives.
+  const drop = (1 - t) * (1 - t) * 280;
+  const ry = y - drop;
+  const r = 7 + radius * 0.16;
+  ctx.globalAlpha = 0.45;
+  ctx.strokeStyle = "#fdba74";
+  ctx.lineWidth = r * 0.9;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(x + 6, ry - 46);
+  ctx.lineTo(x, ry);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.beginPath();
+  ctx.arc(x, ry, r, 0, Math.PI * 2);
+  ctx.fillStyle = "#fed7aa";
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "#1f1235";
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x, ry, r * 0.45, 0, Math.PI * 2);
+  ctx.fillStyle = "#f97316";
+  ctx.fill();
+  ctx.restore();
+}

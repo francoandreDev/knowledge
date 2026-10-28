@@ -178,6 +178,7 @@ import {
   bladeArcShape,
   boltShape,
   chainLightningShape,
+  meteorRainShape,
   homingDartShape,
   novaPulseShape,
   orbitCover,
@@ -202,6 +203,7 @@ import {
   drawHpBar,
   drawDashLine,
   drawEliteMarker,
+  drawMeteorWarning,
   drawNovaRing,
   drawOffscreenArrow,
   drawParticles,
@@ -259,6 +261,9 @@ export type EnemyKind =
   | "imp"
   | "bomber"
   | "knight"
+  | "boar"
+  | "shaman"
+  | "wasp"
   | "reaper"
   | "lich";
 
@@ -435,6 +440,36 @@ const ENEMY_DEFS: EnemyDef[] = [
     weight: 3,
   },
   {
+    kind: "wasp",
+    unlockAtS: 90,
+    radius: 6,
+    speed: 125,
+    hp: 4,
+    contactDamage: 4,
+    color: "#facc15",
+    weight: 3,
+  },
+  {
+    kind: "boar",
+    unlockAtS: 100,
+    radius: 14,
+    speed: 40,
+    hp: 34,
+    contactDamage: 11,
+    color: "#b45309",
+    weight: 3,
+  },
+  {
+    kind: "shaman",
+    unlockAtS: 150,
+    radius: 11,
+    speed: 34,
+    hp: 22,
+    contactDamage: 4,
+    color: "#16a34a",
+    weight: 2,
+  },
+  {
     kind: "knight",
     unlockAtS: 260,
     radius: 16,
@@ -450,6 +485,16 @@ const ENEMY_DEFS: EnemyDef[] = [
 // fire, a bomber that runs in and detonates, a knight that shrugs off blows.
 const SLIME_SPLIT_COUNT = 2;
 const SLIMELET_RADIUS = 7;
+const WASP_PACK_SIZE = 4; // one spawn brings the whole swarm
+const BOAR_RUSH_TRIGGER_PX = 230;
+const BOAR_RUSH_COOLDOWN_MS = 3600;
+const BOAR_TELEGRAPH_MS = 650;
+const BOAR_RUSH_MS = 480;
+const BOAR_RUSH_SPEED = 330;
+const SHAMAN_KEEP_PX = 170;
+const SHAMAN_HEAL_INTERVAL_MS = 4200;
+const SHAMAN_HEAL_RADIUS = 125;
+const SHAMAN_HEAL_FRAC = 0.35; // of the healed enemy's full health
 const IMP_ORBIT_DISTANCE = 125;
 const IMP_FIRE_INTERVAL_MS = 2100;
 const IMP_FIREBALL_SPEED = 150;
@@ -625,7 +670,8 @@ export type WeaponId =
   | "orbitShield"
   | "novaPulse"
   | "homingDart"
-  | "chainLightning";
+  | "chainLightning"
+  | "meteorRain";
 
 // The 5 weapons every run starts eligible for, per the original roster.
 // Chain Lightning is deliberately excluded — it only joins a run's
@@ -649,6 +695,7 @@ const WEAPON_NAMES: Record<WeaponId, string> = {
   novaPulse: "Nova Pulse",
   homingDart: "Homing Dart",
   chainLightning: "Chain Lightning",
+  meteorRain: "Meteor Rain",
 };
 
 const WEAPON_FLAVOR: Record<WeaponId, string> = {
@@ -659,6 +706,7 @@ const WEAPON_FLAVOR: Record<WeaponId, string> = {
   novaPulse: "Periodic AoE burst centered on you.",
   homingDart: "Seeking projectile that homes in on a random enemy.",
   chainLightning: "Strikes the nearest enemy, then arcs to nearby enemies.",
+  meteorRain: "Marks ground under enemies; a rock lands there a beat later.",
 };
 
 const UPGRADE_BLURB: Record<WeaponId, string> = {
@@ -668,6 +716,7 @@ const UPGRADE_BLURB: Record<WeaponId, string> = {
   novaPulse: "+radius, +damage, +frequency",
   homingDart: "+dart, +damage, -cooldown",
   chainLightning: "+damage, +fire rate, +chain jumps",
+  meteorRain: "+damage, +faster fall, +rocks, +blast size",
 };
 
 const EVOLVED_NAMES: Record<WeaponId, string> = {
@@ -677,6 +726,7 @@ const EVOLVED_NAMES: Record<WeaponId, string> = {
   novaPulse: "Shockwave",
   homingDart: "Swarm",
   chainLightning: "Storm Chain",
+  meteorRain: "Starfall",
 };
 
 const EVOLUTION_BLURB: Record<WeaponId, string> = {
@@ -686,6 +736,7 @@ const EVOLUTION_BLURB: Record<WeaponId, string> = {
   novaPulse: "2x damage + knockback on burst",
   homingDart: "Fires 5 homing darts in a spread",
   chainLightning: "Unlimited chain jumps within range",
+  meteorRain: "Five huge rocks per volley, with a tremor on landing",
 };
 
 const MAX_EQUIPPED_WEAPONS = 4;
@@ -700,6 +751,7 @@ const ORBIT_TRAIL_VISUAL_RADIUS = 5;
 const SHOCKWAVE_KNOCKBACK = 40; // Nova Pulse evolution (Lv6)
 
 const PULSE_EFFECT_DURATION_MS = 300;
+const METEOR_RANGE = 420; // enemies further than this are not marked
 
 // Phase 11: shared "just got hit" feedback — a brief white flash on the hit
 // entity itself, plus a small radiating spark burst at the hit point. Same
@@ -800,6 +852,18 @@ const TEMP_STATS: TempStatDef[] = [
     id: "chill",
     label: "Chill",
     effect: "Enemies move 4% slower",
+    maxStacks: 4,
+  },
+  {
+    id: "scholar",
+    label: "Scholar",
+    effect: "+6% XP from gems",
+    maxStacks: 5,
+  },
+  {
+    id: "spikes",
+    label: "Spikes",
+    effect: "Reflect 10% of contact damage",
     maxStacks: 4,
   },
 ];
@@ -987,6 +1051,14 @@ interface Enemy extends GameObject {
   mini?: boolean; // slimelets from a split slime don't split again
   fuseAt?: number; // bomber: when the lit fuse goes off
   fuseStartedAt?: number;
+  // boar: telegraphed straight-line rush
+  rushAt?: number; // end of the telegraph
+  rushUntil?: number;
+  lastRushAt?: number;
+  rushDx?: number;
+  rushDy?: number;
+  // shaman: heal pulse timer
+  lastHealAt?: number;
 }
 
 // What is left behind where an enemy died: it plays out a death animation.
@@ -1048,6 +1120,7 @@ interface PulseEffect {
   y: number;
   radius: number;
   createdAt: number;
+  color?: string;
 }
 
 interface OrbitTrailPoint {
@@ -1190,6 +1263,9 @@ const DEATH_CAUSE_BY_SOURCE: Record<string, string> = {
   "contact:imp": "Scorched by an Imp",
   "contact:bomber": "Caught by a Bomber",
   "contact:knight": "Crushed by a Knight",
+  "contact:boar": "Gored by a Boar",
+  "contact:shaman": "Caught by a Shaman",
+  "contact:wasp": "Stung by a Wasp",
   "bomber-blast": "Blown up by a Bomber",
   "imp-fire": "Burned by imp fire",
   "knight-bash": "Bashed by a Knight",
@@ -1366,6 +1442,15 @@ export function startGame(
     at: number;
   }[] = [];
   const pulseEffects: PulseEffect[] = [];
+  // Meteor Rain: marked ground waiting for its rock to land.
+  const meteorStrikes: {
+    x: number;
+    y: number;
+    radius: number;
+    damage: number;
+    startedAt: number;
+    delayMs: number;
+  }[] = [];
   const orbitTrails: OrbitTrailPoint[] = [];
   const hitSparks: HitSpark[] = [];
   const damageNumbers: DamageNumber[] = []; // Phase 14
@@ -1433,6 +1518,8 @@ export function startGame(
   let critTemp = 0;
   let killHealTemp = 0;
   let slowTemp = 0;
+  let xpTemp = 0;
+  let thornsTemp = 0;
   let revivesLeft = upgradeEffects.reviveHpFrac > 0 ? 1 : 0;
   let bossDefeated = false;
 
@@ -1506,18 +1593,22 @@ export function startGame(
     });
   }
 
-  function spawnEnemy(elapsedS: number) {
+  function spawnEnemy(
+    elapsedS: number,
+    packMate?: { def: EnemyDef; x: number; y: number },
+  ) {
     if (enemies.length >= MAX_ALIVE_ENEMIES) {
       log.log("spawn skipped, at MAX_ALIVE_ENEMIES cap", enemies.length);
       return;
     }
-    const def = pickEnemyDef(elapsedS);
+    const def = packMate?.def ?? pickEnemyDef(elapsedS);
     if (!unlockedPools.has(def.kind)) {
       unlockedPools.add(def.kind);
       log.log("pool:unlocked", { kind: def.kind, atS: elapsedS.toFixed(1) });
     }
     const tier = pickEnemyTier(powerIndex);
-    const { x, y } = spawnEdgePosition({ width: WORLD_W, height: WORLD_H });
+    const { x, y } =
+      packMate ?? spawnEdgePosition({ width: WORLD_W, height: WORLD_H });
     const sizeMult = TIER_SIZE_MULT[tier];
     const timeHpScale = enemyTimeScale(elapsedS, ENEMY_HP_SCALE_CAP);
     const timeDamageScale = enemyTimeScale(elapsedS, ENEMY_DAMAGE_SCALE_CAP);
@@ -1546,6 +1637,15 @@ export function startGame(
     if (!reduceMotion) {
       ringPop(particles, x, y, def.color, def.radius * 2.4);
       burst(particles, x, y, def.color, 3, 70);
+    }
+    if (def.kind === "wasp" && !packMate) {
+      for (let i = 1; i < WASP_PACK_SIZE; i++) {
+        spawnEnemy(elapsedS, {
+          def,
+          x: x + (Math.random() - 0.5) * 60,
+          y: y + (Math.random() - 0.5) * 60,
+        });
+      }
     }
     log.log("spawn:enemy", {
       kind: def.kind,
@@ -1646,6 +1746,32 @@ export function startGame(
     log.log("lich:summon", { x: Math.round(x), y: Math.round(y) });
   }
 
+  // The shaman's pulse: every hurt enemy near it regains a share of its health.
+  function healAround(shaman: Enemy) {
+    const elapsedS = elapsedMs / 1000;
+    const timeHpScale = enemyTimeScale(elapsedS, ENEMY_HP_SCALE_CAP);
+    for (const o of enemies) {
+      if (!o.alive || o === shaman || o.kind === "reaper" || o.kind === "lich")
+        continue;
+      if (distance(shaman, o) > SHAMAN_HEAL_RADIUS) continue;
+      const def = ENEMY_DEFS.find((d) => d.kind === o.kind);
+      if (!def) continue;
+      const full =
+        def.hp * TIER_HP_MULT[o.tier] * timeHpScale * (o.mini ? 0.3 : 1);
+      if (o.hp >= full) continue;
+      o.hp = Math.min(full, o.hp + full * SHAMAN_HEAL_FRAC);
+      if (!reduceMotion)
+        burst(particles, o.x, o.y - o.radius, "#86efac", 4, 90);
+    }
+    pulseEffects.push({
+      x: shaman.x,
+      y: shaman.y,
+      radius: SHAMAN_HEAL_RADIUS,
+      createdAt: elapsedMs,
+      color: "#4ade80",
+    });
+  }
+
   // A slime that dies splits into smaller, weaker ones that fan outward.
   function spawnSlimelets(from: Enemy) {
     const def = ENEMY_DEFS.find((d) => d.kind === "slime")!;
@@ -1733,6 +1859,7 @@ export function startGame(
     "novaPulse",
     "homingDart",
     "chainLightning",
+    "meteorRain",
   ]);
   function weaponIdForSource(source: string): WeaponId | null {
     const normalized = source === "orbitShield-trail" ? "orbitShield" : source;
@@ -1751,6 +1878,9 @@ export function startGame(
         break;
       case "chainLightning":
         burst(particles, e.x, e.y, "#67e8f9", 6, 230);
+        break;
+      case "meteorRain":
+        burst(particles, e.x, e.y, "#fdba74", 7, 210);
         break;
       case "novaPulse":
         ringPop(particles, e.x, e.y, "#fb923c", e.radius * 2);
@@ -2267,6 +2397,12 @@ export function startGame(
       case "chill":
         slowTemp += 0.04;
         break;
+      case "scholar":
+        xpTemp += 0.06;
+        break;
+      case "spikes":
+        thornsTemp += 0.1;
+        break;
     }
   }
 
@@ -2632,6 +2768,40 @@ export function startGame(
         }
         break;
       }
+      case "meteorRain": {
+        const {
+          intervalMs: interval,
+          count,
+          radius,
+          delayMs,
+        } = meteorRainShape(w.level);
+        if (elapsedMs - w.lastActionAt >= interval) {
+          const pool = enemies.filter(
+            (e) => e.alive && distance(player, e) <= METEOR_RANGE,
+          );
+          if (pool.length > 0) {
+            w.lastActionAt = elapsedMs;
+            const damage =
+              weaponDamage("meteorRain", w.level) * totalDamageMult();
+            for (let i = 0; i < count; i++) {
+              const target = pool.splice(
+                Math.floor(Math.random() * pool.length),
+                1,
+              )[0];
+              meteorStrikes.push({
+                x: target.x,
+                y: target.y,
+                radius,
+                damage,
+                startedAt: elapsedMs + i * 120,
+                delayMs,
+              });
+              if (pool.length === 0) break;
+            }
+          }
+        }
+        break;
+      }
       case "chainLightning": {
         const { intervalMs: interval, maxJumps: shapeJumps } =
           chainLightningShape(w.level);
@@ -2762,6 +2932,8 @@ export function startGame(
         return homingDartShape(w.level).intervalMs;
       case "chainLightning":
         return chainLightningShape(w.level).intervalMs;
+      case "meteorRain":
+        return meteorRainShape(w.level).intervalMs;
       case "novaPulse":
         return novaPulseShape(w.level).intervalMs;
       case "bladeArc":
@@ -3141,6 +3313,72 @@ export function startGame(
       }
       return;
     }
+    if (e.kind === "wasp") {
+      const def = ENEMY_DEFS.find((d) => d.kind === "wasp")!;
+      // A jittery weave: the swarm never flies a straight line at you.
+      const angle =
+        Math.atan2(player.y - e.y, player.x - e.x) +
+        Math.sin(elapsedMs * 0.009 + (e.wigglePhase ?? 0)) * 0.9;
+      e.x += Math.cos(angle) * def.speed * dt;
+      e.y += Math.sin(angle) * def.speed * dt;
+      return;
+    }
+    if (e.kind === "boar") {
+      const def = ENEMY_DEFS.find((d) => d.kind === "boar")!;
+      if (e.rushUntil && elapsedMs < e.rushUntil) {
+        e.x += (e.rushDx ?? 0) * dt;
+        e.y += (e.rushDy ?? 0) * dt;
+        if (!reduceMotion)
+          burst(particles, e.x, e.y + e.radius, "#d6d3d1", 1, 60);
+        return;
+      }
+      e.rushUntil = undefined;
+      if (e.rushAt) {
+        // Paws the ground, locked on where you were; sidestep it.
+        if (elapsedMs >= e.rushAt) {
+          e.rushAt = undefined;
+          e.rushUntil = elapsedMs + BOAR_RUSH_MS;
+          e.strikeAt = elapsedMs;
+        }
+        return;
+      }
+      const angle = Math.atan2(player.y - e.y, player.x - e.x);
+      if (
+        distance(player, e) <= BOAR_RUSH_TRIGGER_PX &&
+        elapsedMs - (e.lastRushAt ?? -1e9) >= BOAR_RUSH_COOLDOWN_MS
+      ) {
+        e.lastRushAt = elapsedMs;
+        e.rushAt = elapsedMs + BOAR_TELEGRAPH_MS;
+        e.rushDx = Math.cos(angle) * BOAR_RUSH_SPEED;
+        e.rushDy = Math.sin(angle) * BOAR_RUSH_SPEED;
+        return;
+      }
+      e.x += Math.cos(angle) * def.speed * dt;
+      e.y += Math.sin(angle) * def.speed * dt;
+      return;
+    }
+    if (e.kind === "shaman") {
+      const def = ENEMY_DEFS.find((d) => d.kind === "shaman")!;
+      const d = distance(player, e);
+      const toward = Math.atan2(player.y - e.y, player.x - e.x);
+      // Stays behind the line and mends whatever is hurt around it.
+      const angle =
+        d > SHAMAN_KEEP_PX * 1.2
+          ? toward
+          : d < SHAMAN_KEEP_PX * 0.7
+            ? toward + Math.PI
+            : toward + Math.PI / 2;
+      e.x += Math.cos(angle) * def.speed * dt;
+      e.y += Math.sin(angle) * def.speed * dt;
+      if (
+        elapsedMs - (e.lastHealAt ?? e.spawnedAt ?? 0) >=
+        SHAMAN_HEAL_INTERVAL_MS
+      ) {
+        e.lastHealAt = elapsedMs;
+        healAround(e);
+      }
+      return;
+    }
     if (e.kind === "bomber") {
       const def = ENEMY_DEFS.find((d) => d.kind === "bomber")!;
       if (e.fuseAt) {
@@ -3449,8 +3687,9 @@ export function startGame(
             const contact = e.contactDamage || CONTACT_DAMAGE;
             damagePlayer(contact, `contact:${e.kind}`, e.x, e.y);
             if (status !== "running") return;
-            if (upgradeEffects.thorns > 0 && e.alive) {
-              damageEnemy(e, contact * upgradeEffects.thorns, "thorns");
+            const thorns = upgradeEffects.thorns + thornsTemp;
+            if (thorns > 0 && e.alive) {
+              damageEnemy(e, contact * thorns, "thorns");
             }
           }
         }
@@ -3615,7 +3854,7 @@ export function startGame(
             burst(particles, g.x, g.y, "#c4b5fd", 4, 110);
             ringPop(particles, player.x, player.y, "#a78bfa", 22);
           }
-          addXp(GEM_XP_VALUE * upgradeEffects.xpMult);
+          addXp(GEM_XP_VALUE * (upgradeEffects.xpMult + xpTemp));
           playPickup();
           log.log("pickup:gem", { totalGems: gemsCollected });
           continue;
@@ -3698,6 +3937,28 @@ export function startGame(
       if (bossIntro && elapsedMs - bossIntro.at >= 2400) bossIntro = null;
       for (let i = enemyStrikes.length - 1; i >= 0; i--) {
         if (elapsedMs - enemyStrikes[i].at >= 220) enemyStrikes.splice(i, 1);
+      }
+      for (let i = meteorStrikes.length - 1; i >= 0; i--) {
+        const m = meteorStrikes[i];
+        if (elapsedMs - m.startedAt < m.delayMs) continue;
+        meteorStrikes.splice(i, 1);
+        for (const e of enemies) {
+          if (e.alive && distance(m, e) <= m.radius + e.radius) {
+            damageEnemy(e, m.damage, "meteorRain");
+          }
+        }
+        pulseEffects.push({
+          x: m.x,
+          y: m.y,
+          radius: m.radius,
+          createdAt: elapsedMs,
+        });
+        burst(particles, m.x, m.y, "#fb923c", 12, 260);
+        burst(particles, m.x, m.y, "#fde68a", 6, 140);
+        if (m.radius >= 60) {
+          shakeMag = 3;
+          shakeUntil = elapsedMs + 140;
+        }
       }
       for (let i = pulseEffects.length - 1; i >= 0; i--) {
         if (elapsedMs - pulseEffects[i].createdAt >= PULSE_EFFECT_DURATION_MS) {
@@ -3833,6 +4094,16 @@ export function startGame(
               e.y + Math.sin(sw.angle) * 120,
             );
           }
+        }
+        if (e.kind === "boar" && e.rushAt) {
+          const a = Math.atan2(e.rushDy ?? 0, e.rushDx ?? 0);
+          drawDashLine(
+            context,
+            e.x,
+            e.y,
+            e.x + Math.cos(a) * 190,
+            e.y + Math.sin(a) * 190,
+          );
         }
         if (
           e.kind === "reaper" &&
@@ -4174,6 +4445,12 @@ export function startGame(
         );
       }
 
+      for (const m of meteorStrikes) {
+        const t = (elapsedMs - m.startedAt) / m.delayMs;
+        if (t < 0) continue;
+        drawMeteorWarning(context, m.x, m.y, m.radius, Math.min(1, t));
+      }
+
       for (const p of pulseEffects) {
         drawNovaRing(
           context,
@@ -4181,6 +4458,7 @@ export function startGame(
           p.y,
           p.radius,
           Math.min(1, (elapsedMs - p.createdAt) / PULSE_EFFECT_DURATION_MS),
+          p.color,
         );
       }
 

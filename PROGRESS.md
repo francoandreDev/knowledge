@@ -3327,3 +3327,11 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 - Lobby polish (2026-10-28): the duel picture draws larger weapon glyphs, and the Chests modal shows a timer, trophy, chest hint when there is nothing to open. Checked on the deployed page: menu cards, Upgrades, Duel and Chests modals render as intended.
 
 - Lobby clarity and coin sink (2026-10-28): the score chips are one labelled row (Best / Length / Coins); the Start run badge reads "free today" or "N left"; the Upgrades and Chests tiles bob and ping when something is buyable or waiting. The six stat upgrades (Vigor, Fleetness, Might, Magnetism, Greed, Amanuensis) now go to level 8 (cost 20·n^1.5 keeps climbing, roughly 6,700 more coins to max them) so a large balance has somewhere to go. New enemy, relic and swing numbers are still untuned first guesses: they need real play, not more edits from the code.
+
+### Expansion 2: Meteor Rain, three enemies, two cards, animations (2026-10-28)
+
+- Weapon: **Meteor Rain** (shop unlock, 500 coins). Marks ground under up to five enemies; a rock falls a beat later (650 ms) and blasts everything in the ring. Evolves into Starfall (five huge rocks and a tremor). Balanced like Chain Lightning (exposure 0.1, derived from the shared budget); also a duel weapon (charge, release, the blast lands on the rival).
+- Enemies: **Wasp** (90 s, arrives as a swarm of four, weaves), **Boar** (100 s, paws the ground for 650 ms with a dash line, then rushes in a straight line and kicks up dust), **Shaman** (150 s, stays back and every 4.2 s heals hurt enemies within 125 px by 35% of their health, with a green pulse; kill it first).
+- Cards: **Scholar** (+6% XP) and **Spikes** (reflect 10% of contact damage).
+- Animation: meteor warning ring, falling rock with a trail, impact burst and ring; the lobby menu cards rise in one after another; the lobby stage kills now pop coins; the new foes appear on the title stage.
+- Numbers for the new weapon, enemies and cards are first guesses; they need real play.

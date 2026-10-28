@@ -32,6 +32,7 @@ const ICON_DART = `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="3"/><circle cx=
 // (the locked 6th weapon). Distinct from ICON_BOLT (a single filled
 // lightning-bolt shape) since this weapon's whole identity is jumping
 // between multiple targets, not a straight single-target shot.
+const ICON_METEOR = `<svg ${ICON_ATTRS}><circle cx="16" cy="16" r="4" fill="currentColor" stroke="none"/><path d="M13 13 4 4"/><path d="M12 17 5 12"/><path d="M17 12 12 5"/></svg>`;
 const ICON_CHAIN = `<svg ${ICON_ATTRS}><circle cx="4" cy="19" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="6" r="2" fill="currentColor" stroke="none"/><circle cx="20" cy="16" r="2" fill="currentColor" stroke="none"/><polyline points="4 19 9 11 12 8"/><polyline points="12 8 16 14 20 16"/></svg>`;
 
 // Phase 15 — a tombstone with a small rising wisp, "necromancy" (the locked
@@ -109,7 +110,8 @@ export const WEAPON_ICON: Record<
   | "orbitShield"
   | "novaPulse"
   | "homingDart"
-  | "chainLightning",
+  | "chainLightning"
+  | "meteorRain",
   string
 > = {
   bladeArc: ICON_BLADE,
@@ -118,6 +120,7 @@ export const WEAPON_ICON: Record<
   novaPulse: ICON_PULSE,
   homingDart: ICON_DART,
   chainLightning: ICON_CHAIN,
+  meteorRain: ICON_METEOR,
 };
 
 // Pastel badge fill per concept, shared by the shop rows and the level-up
@@ -146,6 +149,8 @@ const BADGE_BG: Record<string, string> = {
   siphon: "bg-red-300",
   bloodthirst: "bg-red-300",
   chill: "bg-cyan-300",
+  scholar: "bg-emerald-300",
+  spikes: "bg-slate-300",
 };
 
 export function badgeClass(id: string | undefined, fallback = "bg-sky-300") {
@@ -167,6 +172,8 @@ export const STAT_ICON: Record<string, string> = {
   keenEye: ICON_DART,
   bloodthirst: ICON_HEART,
   chill: ICON_PULSE,
+  scholar: ICON_BOOK,
+  spikes: ICON_SHIELD,
 };
 
 // Keyed by shop.ts's UPGRADES ids.

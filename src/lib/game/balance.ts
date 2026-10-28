@@ -38,6 +38,8 @@ export function exposure(id: WeaponId, level: number): number {
       return 0; // unlimited range, but you can't choose the target
     case "chainLightning":
       return 0.1; // first hit is free, full value needs a cluster
+    case "meteorRain":
+      return 0.1; // lands from anywhere, but the rocks take a beat to fall
     case "novaPulse":
       return 0.7 - (level - 1) * 0.04; // centered on you; radius grows with level
     case "orbitShield":
@@ -134,6 +136,16 @@ export function chainLightningShape(level: number) {
   };
 }
 
+export function meteorRainShape(level: number) {
+  const evolved = level >= WEAPON_MAX_LEVEL; // Starfall
+  return {
+    intervalMs: evolved ? 1700 : 2800 - (level - 1) * 230,
+    count: evolved ? 5 : level >= 5 ? 3 : level >= 3 ? 2 : 1,
+    radius: evolved ? 70 : 42 + (level - 1) * 4,
+    delayMs: 650,
+  };
+}
+
 // --- Damage per hit, derived from the budget ---------------------------
 
 // How many "full hits" worth of damage one point of per-hit damage turns into
@@ -146,6 +158,7 @@ const NOVA_NOMINAL_TARGETS = 3;
 // lap, which with the 400ms hit cooldown is about two hits per lap, i.e. the
 // orbiter lands ~0.75 hits/s on it: 0.3 of the cooldown-limited ceiling.
 const ORBIT_CONTACT_UPTIME = 0.3;
+const METEOR_NOMINAL_HITS = 1.4; // a blast usually catches a small cluster
 const CHAIN_NOMINAL_HIT_CAP = 5; // "unlimited" jumps rarely find more
 
 function pierceTargets(pierce: number): number {
@@ -179,6 +192,10 @@ export function damageMultiplierPerS(id: WeaponId, level: number): number {
       const s = homingDartShape(level);
       return (1000 / s.intervalMs) * s.count;
     }
+    case "meteorRain": {
+      const s = meteorRainShape(level);
+      return (1000 / s.intervalMs) * s.count * METEOR_NOMINAL_HITS;
+    }
     case "chainLightning": {
       const s = chainLightningShape(level);
       const hits = Math.min(s.maxJumps, CHAIN_NOMINAL_HIT_CAP);
@@ -199,6 +216,7 @@ export const CALIBRATION: Record<WeaponId, number[]> = {
   bolt: [1, 1, 1, 1, 1, 1],
   homingDart: [1, 1, 1, 1, 1, 1],
   chainLightning: [1, 1, 1, 1, 1, 1],
+  meteorRain: [1, 1, 1, 1, 1, 1],
   novaPulse: [1, 1, 1, 1, 1, 1],
   orbitShield: [1, 1, 1, 1, 1, 1],
   // The blade pays the most exposure for the shortest reach, so it has to

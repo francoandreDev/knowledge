@@ -1307,6 +1307,147 @@ function lich(ctx: Ctx, r: number, color: string, t: number) {
   });
 }
 
+function boar(ctx: Ctx, r: number, color: string, t: number) {
+  shadow(ctx, r, 0.95);
+  for (const s of [-1, 1]) {
+    limb(
+      ctx,
+      s * 0.45 * r,
+      0.6 * r,
+      s * 0.5 * r,
+      0.98 * r,
+      0.26 * r,
+      darken(color, 0.3),
+    );
+  }
+  // Heavy shoulders and a head thrust forward.
+  ell(ctx, 0, 0.05 * r, 1.0 * r, 0.82 * r, color);
+  ell(ctx, 0, -0.35 * r, 0.62 * r, 0.5 * r, lighten(color, 0.12));
+  for (const s of [-1, 1]) {
+    poly(
+      ctx,
+      [
+        [s * 0.42 * r, -0.72 * r],
+        [s * 0.78 * r, -1.08 * r],
+        [s * 0.7 * r, -0.5 * r],
+      ],
+      darken(color, 0.25),
+    );
+  }
+  // Snout and tusks.
+  ell(ctx, 0, -0.18 * r, 0.34 * r, 0.24 * r, "#fda4af");
+  for (const s of [-1, 1]) {
+    poly(
+      ctx,
+      [
+        [s * 0.22 * r, -0.12 * r],
+        [s * 0.5 * r, -0.42 * r],
+        [s * 0.34 * r, -0.04 * r],
+      ],
+      "#fefce8",
+    );
+  }
+  face(() => {
+    inkDot(ctx, -0.1 * r, -0.2 * r, 0.05 * r);
+    inkDot(ctx, 0.1 * r, -0.2 * r, 0.05 * r);
+    for (const s of [-1, 1]) {
+      eye(ctx, s * 0.3 * r, -0.52 * r, 0.14 * r, 0, 0.02 * r, "#dc2626");
+      ink(
+        ctx,
+        [
+          [s * 0.52 * r, -0.74 * r],
+          [s * 0.1 * r, -0.6 * r],
+        ],
+        Math.max(1.4, lw * 1.2),
+      );
+    }
+    // Dust kicked up at its heels.
+    ctx.fillStyle = "rgba(226,232,240,0.5)";
+    const puff = 0.5 + 0.5 * Math.sin(t * 0.02);
+    inkDot(ctx, -0.8 * r, 0.9 * r, 0.12 * r * puff, "rgba(226,232,240,0.5)");
+  });
+}
+
+function shaman(ctx: Ctx, r: number, color: string, t: number) {
+  shadow(ctx, r, 0.8);
+  // Robe that flares at the hem.
+  poly(
+    ctx,
+    [
+      [-0.5 * r, -0.2 * r],
+      [0.5 * r, -0.2 * r],
+      [0.85 * r, 0.98 * r],
+      [-0.85 * r, 0.98 * r],
+    ],
+    darken(color, 0.25),
+  );
+  rr(ctx, -0.4 * r, 0.3 * r, 0.8 * r, 0.16 * r, 0.06 * r, "#fde047");
+  // Staff with a glowing leaf-green orb.
+  limb(ctx, 0.78 * r, -0.7 * r, 0.7 * r, 0.95 * r, 0.12 * r, "#92400e");
+  const glow = 0.75 + 0.25 * Math.sin(t * 0.006);
+  ctx.save();
+  ctx.shadowColor = "#86efac";
+  ctx.shadowBlur = r * 0.7 * glow;
+  dot(ctx, 0.78 * r, -0.85 * r, 0.26 * r * glow, "#bbf7d0");
+  ctx.restore();
+  // Hood and a face deep in it.
+  dot(ctx, 0, -0.45 * r, 0.62 * r, color);
+  poly(
+    ctx,
+    [
+      [-0.5 * r, -0.7 * r],
+      [0, -1.25 * r],
+      [0.5 * r, -0.7 * r],
+    ],
+    color,
+  );
+  ell(ctx, 0, -0.4 * r, 0.36 * r, 0.3 * r, "#052e16");
+  face(() => {
+    for (const s of [-1, 1]) {
+      inkDot(ctx, s * 0.14 * r, -0.42 * r, 0.07 * r, "#bbf7d0");
+    }
+  });
+}
+
+function wasp(ctx: Ctx, r: number, color: string, t: number) {
+  shadow(ctx, r, 0.6, 1.2);
+  const flap = Math.sin(t * 0.09);
+  for (const s of [-1, 1]) {
+    ctx.save();
+    ctx.globalAlpha = 0.75;
+    ell(
+      ctx,
+      s * 0.8 * r,
+      -0.5 * r,
+      0.7 * r,
+      0.3 * r * (0.5 + 0.5 * Math.abs(flap)),
+      "#e0f2fe",
+      s * (0.5 + 0.25 * flap),
+    );
+    ctx.restore();
+  }
+  // Striped abdomen ending in a stinger, then thorax and head.
+  ell(ctx, 0, 0.5 * r, 0.6 * r, 0.75 * r, color);
+  for (const y of [0.3, 0.62]) {
+    rr(ctx, -0.5 * r, y * r, 1.0 * r, 0.16 * r, 0.05 * r, "#1e1b4b");
+  }
+  poly(
+    ctx,
+    [
+      [-0.1 * r, 1.1 * r],
+      [0.1 * r, 1.1 * r],
+      [0, 1.42 * r],
+    ],
+    "#1e1b4b",
+  );
+  dot(ctx, 0, -0.15 * r, 0.5 * r, darken(color, 0.15));
+  face(() => {
+    for (const s of [-1, 1]) {
+      eye(ctx, s * 0.2 * r, -0.2 * r, 0.16 * r, 0, 0.02 * r, "#dc2626");
+    }
+  });
+}
+
 export function drawEnemyArt(
   ctx: Ctx,
   kind: EnemyKind,
@@ -1351,6 +1492,15 @@ export function drawEnemyArt(
       break;
     case "knight":
       knight(ctx, r, color);
+      break;
+    case "boar":
+      boar(ctx, r, color, t);
+      break;
+    case "shaman":
+      shaman(ctx, r, color, t);
+      break;
+    case "wasp":
+      wasp(ctx, r, color, t);
       break;
     case "reaper":
       reaper(ctx, r, color, t, armed);
