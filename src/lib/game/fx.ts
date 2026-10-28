@@ -1095,15 +1095,15 @@ export function drawMeteorWarning(
   ctx.stroke();
   ctx.setLineDash([]);
   // The rock: drops from 280px up, brightening as it arrives.
-  const drop = (1 - t) * (1 - t) * 280;
+  const drop = (1 - t) * (1 - t) * Math.min(280, radius * 4);
   const ry = y - drop;
-  const r = 7 + radius * 0.16;
+  const r = 4 + radius * 0.14;
   ctx.globalAlpha = 0.45;
   ctx.strokeStyle = "#fdba74";
   ctx.lineWidth = r * 0.9;
   ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.moveTo(x + 6, ry - 46);
+  ctx.moveTo(x + 4, ry - Math.min(46, radius * 1.2));
   ctx.lineTo(x, ry);
   ctx.stroke();
   ctx.globalAlpha = 1;

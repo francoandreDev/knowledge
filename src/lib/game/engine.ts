@@ -881,6 +881,30 @@ export interface LevelUpCard {
   isEvolution?: boolean;
   title: string;
   description: string;
+  /** Weapon cards: the level now (0 when the weapon is not owned yet). */
+  fromLevel?: number;
+  /** Stat cards: stacks owned now and the most it can reach. */
+  stacks?: number;
+  maxStacks?: number;
+}
+
+/** What the run has so far, shown beside the level-up cards. */
+export interface LevelUpBuild {
+  level: number;
+  weapons: {
+    id: WeaponId;
+    name: string;
+    level: number;
+    maxLevel: number;
+    evolvedName: string;
+  }[];
+  stats: {
+    id: string;
+    label: string;
+    effect: string;
+    stacks: number;
+    maxStacks: number;
+  }[];
 }
 
 export interface GameHudState {
@@ -930,7 +954,11 @@ export interface GameCallbacks {
     /** The boss fell during the run: a golden chest instead of a wooden one. */
     bossDefeated: boolean;
   }) => void;
-  onLevelUp: (cards: LevelUpCard[], choose: (cardId: string) => void) => void;
+  onLevelUp: (
+    cards: LevelUpCard[],
+    choose: (cardId: string) => void,
+    build: LevelUpBuild,
+  ) => void;
   /** Phase 13: fired once per threat tier crossed (1→2, 2→3, ...) — lets the
    * page show a brief "getting harder" toast at the moment it happens. */
   onThreatTierUp?: (tier: number) => void;
@@ -2530,29 +2558,58 @@ export function startGame(
       isEvolution: c.isEvolution,
       title: c.title,
       description: c.description,
+      fromLevel:
+        c.kind === "weaponUpgrade" || c.kind === "newWeapon"
+          ? (ownedWeapons.find((w) => w.id === c.weaponId)?.level ?? 0)
+          : undefined,
+      stacks: c.statId ? (statStacks[c.statId] ?? 0) : undefined,
+      maxStacks: c.statId
+        ? TEMP_STATS.find((s) => s.id === c.statId)?.maxStacks
+        : undefined,
     }));
+    const build: LevelUpBuild = {
+      level: playerLevel,
+      weapons: ownedWeapons.map((w) => ({
+        id: w.id,
+        name: WEAPON_NAMES[w.id],
+        level: w.level,
+        maxLevel: WEAPON_MAX_LEVEL,
+        evolvedName: EVOLVED_NAMES[w.id],
+      })),
+      stats: TEMP_STATS.filter((s) => (statStacks[s.id] ?? 0) > 0).map((s) => ({
+        id: s.id,
+        label: s.label,
+        effect: s.effect,
+        stacks: statStacks[s.id] ?? 0,
+        maxStacks: s.maxStacks,
+      })),
+    };
     log.log("levelup:cards", {
       level: playerLevel,
       cardIds: external.map((c) => c.id),
     });
     pushHud();
-    callbacks.onLevelUp(external, (chosenId: string) => {
-      const card = lastDrawnCards.get(chosenId);
-      if (!card) {
-        log.error("chooseCard: unknown id", chosenId);
-        return;
-      }
-      applyCard(card);
-      pendingLevelUps -= 1;
-      log.log("levelup:chosen", { id: chosenId, remaining: pendingLevelUps });
-      if (pendingLevelUps > 0) {
-        presentLevelUp();
-      } else {
-        status = "running";
-        pushHud();
-        log.log("levelup:resume");
-      }
-    });
+    callbacks.onLevelUp(
+      external,
+      (chosenId: string) => {
+        const card = lastDrawnCards.get(chosenId);
+        if (!card) {
+          log.error("chooseCard: unknown id", chosenId);
+          return;
+        }
+        applyCard(card);
+        pendingLevelUps -= 1;
+        log.log("levelup:chosen", { id: chosenId, remaining: pendingLevelUps });
+        if (pendingLevelUps > 0) {
+          presentLevelUp();
+        } else {
+          status = "running";
+          pushHud();
+          log.log("levelup:resume");
+        }
+      },
+      build,
+    );
   }
 
   function updateWeapon(w: WeaponRuntime, dt: number) {

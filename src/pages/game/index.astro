@@ -675,6 +675,12 @@ import {
           >
             Level up!
           </p>
+          <div
+            data-levelup-build
+            class="flex w-full flex-col gap-1.5 rounded-xl border-2 border-slate-700 bg-slate-900/80 p-2"
+            style="font-size: clamp(12px, 2.4cqw, 18px)"
+          >
+          </div>
           <p class="text-xs font-bold tracking-widest text-slate-300 uppercase">
             Pick one
           </p>
@@ -1647,7 +1653,14 @@ import {
       badgeClass,
       sizedIcon,
     } from "../../lib/game/icons";
-    import type { WeaponId } from "../../lib/game/engine";
+    import type { WeaponId, LevelUpBuild } from "../../lib/game/engine";
+    import {
+      DEMO_W,
+      DEMO_H,
+      drawCardDemo,
+      idealCase,
+      type DemoSpec,
+    } from "../../lib/game/cardDemo";
 
     const log = createLogger("page");
 
@@ -2183,6 +2196,61 @@ import {
           for (const f of foes) f.x = w * (0.35 + Math.random() * 0.3);
         }
         requestAnimationFrame(frame);
+      }
+
+      // The level-up screen's "what you have" strip: weapons with level pips,
+      // boosts with their stacks. Hovering a card rings the chip it changes.
+      function renderBuildPanel(build: LevelUpBuild) {
+        const el = document.querySelector<HTMLElement>("[data-levelup-build]");
+        if (!el) return;
+        const weapons = build.weapons
+          .map((w) => {
+            const pips = Array.from({ length: w.maxLevel }, (_, k) =>
+              k < w.level
+                ? `<span class="h-1.5 w-1.5 rounded-full ${w.level >= w.maxLevel ? "bg-amber-400" : "bg-slate-800"}"></span>`
+                : `<span class="h-1.5 w-1.5 rounded-full border border-slate-500"></span>`,
+            ).join("");
+            const name = w.level >= w.maxLevel ? w.evolvedName : w.name;
+            return `<span data-build-chip="${w.id}" class="flex items-center gap-1.5 rounded-lg border-2 border-slate-900 bg-emerald-200 px-1.5 py-1 text-slate-900" title="${w.name}: level ${w.level} of ${w.maxLevel}">${sizedIcon(WEAPON_ICON[w.id as keyof typeof WEAPON_ICON] ?? "", "h-[1.1em] w-[1.1em]")}<span class="flex flex-col leading-tight"><span class="font-extrabold">${name}</span><span class="flex gap-0.5">${pips}</span></span></span>`;
+          })
+          .join("");
+        const stats = build.stats
+          .map(
+            (st) =>
+              `<span data-build-chip="${st.id}" class="flex items-center gap-1 rounded-lg border-2 border-slate-900 bg-violet-200 px-1.5 py-1 text-slate-900" title="${st.label} ×${st.stacks}: ${st.effect} each">${sizedIcon(STAT_ICON[st.id] ?? "", "h-[1.1em] w-[1.1em]")}<span class="flex flex-col leading-tight"><span class="font-extrabold">${st.label} ×${st.stacks}</span><span class="text-[0.8em] font-semibold text-slate-700">${st.effect}</span></span></span>`,
+          )
+          .join("");
+        el.innerHTML = `
+          <span class="text-[0.7em] font-black tracking-widest text-slate-400 uppercase">Your build · level ${build.level}</span>
+          <span class="flex flex-wrap gap-1.5">${weapons}</span>
+          ${stats ? `<span class="flex flex-wrap gap-1.5">${stats}</span>` : `<span class="text-[0.8em] font-semibold text-slate-400">No boosts yet</span>`}
+        `;
+      }
+
+      // One loop animates every card's scene while the overlay is open.
+      let cardDemoRaf = 0;
+      function runCardDemos(
+        demos: { canvas: HTMLCanvasElement; spec: DemoSpec }[],
+      ) {
+        cancelAnimationFrame(cardDemoRaf);
+        const ctxs = demos.map((d) => {
+          const ctx = d.canvas.getContext("2d")!;
+          ctx.setTransform(2, 0, 0, 2, 0, 0);
+          return ctx;
+        });
+        const paint = (now: number) => {
+          demos.forEach((d, i) => drawCardDemo(ctxs[i], now, d.spec));
+        };
+        if (isReducedMotion()) {
+          paint(1400);
+          return;
+        }
+        const frame = (now: number) => {
+          if (levelUpOverlay!.classList.contains("hidden")) return;
+          paint(now);
+          cardDemoRaf = requestAnimationFrame(frame);
+        };
+        cardDemoRaf = requestAnimationFrame(frame);
       }
 
       function renderLobby() {
@@ -2925,9 +2993,11 @@ import {
               results!.classList.remove("hidden");
               results!.classList.add("flex");
             },
-            onLevelUp(cards, choose) {
+            onLevelUp(cards, choose, build) {
               log.log("onLevelUp callback", cards);
               levelUpCardsEl.innerHTML = "";
+              renderBuildPanel(build);
+              const demos: { canvas: HTMLCanvasElement; spec: DemoSpec }[] = [];
               let chosen = false;
               for (const card of cards) {
                 const btn = document.createElement("button");
@@ -2980,13 +3050,47 @@ import {
                       ? UI_ICON.necromancy
                       : (WEAPON_ICON[card.weaponId ?? "bolt"] ?? "");
                 const i = levelUpCardsEl.children.length;
+                const spec: DemoSpec = {
+                  kind: card.kind,
+                  weaponId: card.weaponId,
+                  statId: card.statId,
+                };
+                const pipsTotal =
+                  card.kind === "stat"
+                    ? (card.maxStacks ?? 0)
+                    : card.kind === "ability"
+                      ? 0
+                      : 6;
+                const pipsOwned =
+                  card.kind === "stat"
+                    ? (card.stacks ?? 0)
+                    : (card.fromLevel ?? 0);
+                const pips = Array.from({ length: pipsTotal }, (_, k) =>
+                  k < pipsOwned
+                    ? `<span class="h-2 w-2 rounded-full border border-slate-900 bg-slate-800"></span>`
+                    : k === pipsOwned
+                      ? `<span class="animate-pulse h-2 w-2 rounded-full border border-slate-900 bg-yellow-300 ring-2 ring-yellow-400"></span>`
+                      : `<span class="h-2 w-2 rounded-full border border-slate-500 bg-transparent"></span>`,
+                ).join("");
+                const pipsLabel =
+                  card.kind === "stat"
+                    ? `${pipsOwned} → ${pipsOwned + 1} of ${pipsTotal}`
+                    : card.kind === "newWeapon"
+                      ? "New slot"
+                      : card.kind === "weaponUpgrade"
+                        ? `Lv ${pipsOwned} → ${pipsOwned + 1}`
+                        : "";
+                btn.dataset.buildId = card.weaponId ?? card.statId ?? "";
                 btn.className = `animate-fade-slide-in w-full rounded-xl border-2 border-slate-900 ${kind.bg} px-[0.9em] py-[0.7em] text-left text-[1em] text-slate-900 shadow-[0_4px_0_#020617] transition-transform hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_1px_0_#020617] ${card.isEvolution ? "ring-4 ring-amber-300/60" : ""}`;
                 btn.style.animationDelay = `${i * 90}ms`;
                 btn.style.animationFillMode = "backwards";
                 btn.innerHTML = `
                   <span class="flex items-center gap-[0.8em]">
-                    <span class="flex h-[2.8em] w-[2.8em] shrink-0 items-center justify-center rounded-xl ${iconBg}">
-                      ${sizedIcon(icon, "h-[1.4em] w-[1.4em]")}
+                    <span class="relative shrink-0">
+                      <canvas data-card-demo class="block rounded-lg border-2 border-slate-900" style="width:9.6em;height:${(9.6 * DEMO_H) / DEMO_W}em" aria-hidden="true"></canvas>
+                      <span class="absolute -top-2 -left-2 flex h-[2em] w-[2em] items-center justify-center rounded-lg ${iconBg}">
+                        ${sizedIcon(icon, "h-[1em] w-[1em]")}
+                      </span>
                     </span>
                     <span class="min-w-0 flex-1">
                       <span class="flex items-center gap-1.5">
@@ -2999,9 +3103,33 @@ import {
                         }
                       </span>
                       <span class="block text-[0.8em] font-medium text-slate-700">${card.description}</span>
+                      <span class="mt-0.5 block text-[0.72em] font-bold text-slate-900/80 italic">${idealCase(spec)}</span>
+                      ${
+                        pipsTotal > 0 || pipsLabel
+                          ? `<span class="mt-1 flex items-center gap-1">${pips}<span class="ml-1 text-[0.68em] font-black tracking-wide text-slate-700 uppercase">${pipsLabel}</span></span>`
+                          : ""
+                      }
                     </span>
                   </span>
                 `;
+                const demoCanvas =
+                  btn.querySelector<HTMLCanvasElement>("[data-card-demo]")!;
+                demoCanvas.width = DEMO_W * 2;
+                demoCanvas.height = DEMO_H * 2;
+                demos.push({ canvas: demoCanvas, spec });
+                const highlight = (on: boolean) => {
+                  const id = btn.dataset.buildId;
+                  if (!id) return;
+                  document
+                    .querySelectorAll<HTMLElement>(
+                      `[data-levelup-build] [data-build-chip="${id}"]`,
+                    )
+                    .forEach((chip) => chip.classList.toggle("ring-4", on));
+                };
+                btn.addEventListener("pointerenter", () => highlight(true));
+                btn.addEventListener("pointerleave", () => highlight(false));
+                btn.addEventListener("focus", () => highlight(true));
+                btn.addEventListener("blur", () => highlight(false));
                 btn.addEventListener("click", () => {
                   if (chosen) return;
                   chosen = true;
@@ -3014,6 +3142,7 @@ import {
               }
               levelUpOverlay!.classList.remove("hidden");
               levelUpOverlay!.classList.add("flex");
+              runCardDemos(demos);
             },
           },
           {

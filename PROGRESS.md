@@ -3335,3 +3335,5 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 - Cards: **Scholar** (+6% XP) and **Spikes** (reflect 10% of contact damage).
 - Animation: meteor warning ring, falling rock with a trail, impact burst and ring; the lobby menu cards rise in one after another; the lobby stage kills now pop coins; the new foes appear on the title stage.
 - Numbers for the new weapon, enemies and cards are first guesses; they need real play.
+
+- Level-up menu (2026-10-28): every card has a looping demo of its ideal case (21 scenes in `src/lib/game/cardDemo.ts`: seven weapons, thirteen boosts, the Necromancy ability), a "Best when…" line and pips showing the step (Lv 2 → 3, 1 → 2 of 5). A "Your build" strip above the cards lists owned weapons with level pips and boosts with their stacks and effect; hovering a card rings the chip it would change. The engine passes `fromLevel`, `stacks`, `maxStacks` on each card and a `LevelUpBuild` as a third `onLevelUp` argument. Checked offline on a rendered contact sheet, not yet in the live game.
