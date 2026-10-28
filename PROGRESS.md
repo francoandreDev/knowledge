@@ -3325,3 +3325,5 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 - Lobby polish (2026-10-28): the duel picture draws larger weapon glyphs, and the Chests modal shows a timer → trophy → chest hint when there is nothing to open. Checked on the deployed page: menu cards, Upgrades, Duel and Chests modals render as intended.
 
 - Lobby polish (2026-10-28): the duel picture draws larger weapon glyphs, and the Chests modal shows a timer, trophy, chest hint when there is nothing to open. Checked on the deployed page: menu cards, Upgrades, Duel and Chests modals render as intended.
+
+- Lobby clarity and coin sink (2026-10-28): the score chips are one labelled row (Best / Length / Coins); the Start run badge reads "free today" or "N left"; the Upgrades and Chests tiles bob and ping when something is buyable or waiting. The six stat upgrades (Vigor, Fleetness, Might, Magnetism, Greed, Amanuensis) now go to level 8 (cost 20·n^1.5 keeps climbing, roughly 6,700 more coins to max them) so a large balance has somewhere to go. New enemy, relic and swing numbers are still untuned first guesses: they need real play, not more edits from the code.
