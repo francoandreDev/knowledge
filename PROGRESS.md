@@ -3316,3 +3316,8 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 ### Lobby zones as modals (2026-10-28)
 
 - Each menu row (Duel, Upgrades, Chests, Relics) and a new lab button in the title bar open their own native `<dialog>` instead of scrolling to a panel lower on the page; Esc, the close button or a click on the backdrop closes it. Unlocks live inside the Upgrades dialog. The chest-opening modal is a dialog too, so it stacks above the Chests dialog. Starting a run, a duel or a lab session closes any open panel first, and the duel picture redraws when its dialog opens (it cannot measure itself while hidden).
+
+### Lobby style unification: menu cards and modal shells (2026-10-28)
+
+- The base menu is no longer a dashed list: Start run is a gold sticker card and Duel / Upgrades / Chests / Relics are a 2×2 grid of tiles with large illustrated icons and number badges on the corner. Toolbar buttons are sticker tiles too.
+- Modals share one shell: violet panel, ink border and hard shadow, a header with the picture tile, a title, the relevant chip (coins, duel record, relic count) and a red close button, and a scrolling body. Everything inside is pastel-on-violet sticker art (upgrade tiles, unlock rows, chest rows, relic grid, duel pickers); the balance lab sits in a light card so its form controls stay readable. The look no longer depends on the site's light/dark theme.
