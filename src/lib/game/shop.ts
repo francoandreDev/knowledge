@@ -35,7 +35,6 @@ export interface UpgradeDef {
   id: UpgradeId;
   label: string;
   effectLabel: string; // shown per-level in the shop UI
-  maxLevel: number;
   baseCost: number;
 }
 
@@ -50,91 +49,78 @@ export const UPGRADES: UpgradeDef[] = [
     id: "vigor",
     label: "Vigor",
     effectLabel: "+10% max HP",
-    maxLevel: 8,
     baseCost: 20,
   },
   {
     id: "fleetness",
     label: "Fleetness",
     effectLabel: "+5% movement speed",
-    maxLevel: 8,
     baseCost: 20,
   },
   {
     id: "might",
     label: "Might",
     effectLabel: "+5% damage, all weapons",
-    maxLevel: 8,
     baseCost: 20,
   },
   {
     id: "magnetism",
     label: "Magnetism",
     effectLabel: "+15% pickup radius",
-    maxLevel: 8,
     baseCost: 20,
   },
   {
     id: "greed",
     label: "Greed",
     effectLabel: "+10% coins earned per run",
-    maxLevel: 8,
     baseCost: 20,
   },
   {
     id: "amanuensis",
     label: "Amanuensis",
     effectLabel: "+5% XP earned",
-    maxLevel: 8,
     baseCost: 20,
   },
   {
     id: "recovery",
     label: "Recovery",
     effectLabel: `+${SHOP_RECOVERY_HPS_PER_LEVEL} HP/s passive regen`,
-    maxLevel: 3,
     baseCost: 30,
   },
   {
     id: "bulwark",
     label: "Bulwark",
     effectLabel: "Ignore 3% of damage taken",
-    maxLevel: 5,
     baseCost: 25,
   },
   {
     id: "haste",
     label: "Haste",
     effectLabel: "+4% weapon speed",
-    maxLevel: 5,
     baseCost: 25,
   },
   {
     id: "precision",
     label: "Precision",
     effectLabel: "+3% chance of a double-damage hit",
-    maxLevel: 5,
     baseCost: 25,
   },
   {
     id: "siphon",
     label: "Siphon",
     effectLabel: "Heal 0.1 HP per kill",
-    maxLevel: 5,
     baseCost: 25,
   },
   {
     id: "thornmail",
     label: "Thornmail",
     effectLabel: "Reflect 4% of contact damage",
-    maxLevel: 5,
     baseCost: 30,
   },
   {
     id: "frostbite",
     label: "Frostbite",
     effectLabel: "Enemies move 2% slower",
-    maxLevel: 5,
     baseCost: 30,
   },
 ];
@@ -234,12 +220,13 @@ export function getUpgradeLevel(id: UpgradeId): number {
 }
 
 /** Cost to go from the current level to current+1, per GAME-DESIGN.md's
- * `cost = base * (current_level + 1)^1.5`. Returns null once maxed. */
+ * `cost = base * (current_level + 1)^1.5`. Upgrades have no top level: the
+ * price keeps climbing, and the effects below flatten out instead. Returns
+ * null only for an unknown id. */
 export function upgradeCost(id: UpgradeId): number | null {
   const def = UPGRADES.find((u) => u.id === id);
   if (!def) return null;
   const level = getUpgradeLevel(id);
-  if (level >= def.maxLevel) return null;
   return Math.ceil(def.baseCost * Math.pow(level + 1, 1.5));
 }
 
@@ -281,21 +268,33 @@ export function setRelicLevel(id: string, level: number): void {
 
 /** Aggregates owned shop upgrade levels and relics into the numbers
  * engine.ts applies for the duration of one run. */
+/** Diminishing returns for the stats that would break the game if they grew
+ * forever: it starts exactly as `perLevel` per level and bends toward `cap`,
+ * so the first levels feel the same and the hundredth cannot make you
+ * untouchable. */
+function soft(levels: number, perLevel: number, cap: number): number {
+  return cap * (1 - Math.exp((-perLevel * levels) / cap));
+}
+
 export function getUpgradeEffects(): UpgradeEffects {
   const fx = noEffects();
   fx.maxHpMult += 0.1 * getUpgradeLevel("vigor");
-  fx.speedMult += 0.05 * getUpgradeLevel("fleetness");
+  fx.speedMult += soft(getUpgradeLevel("fleetness"), 0.05, 1);
   fx.damageMult += 0.05 * getUpgradeLevel("might");
-  fx.pickupRadiusMult += 0.15 * getUpgradeLevel("magnetism");
+  fx.pickupRadiusMult += soft(getUpgradeLevel("magnetism"), 0.15, 6);
   fx.coinMult += 0.1 * getUpgradeLevel("greed");
   fx.xpMult += 0.05 * getUpgradeLevel("amanuensis");
-  fx.regenPerS += SHOP_RECOVERY_HPS_PER_LEVEL * getUpgradeLevel("recovery");
-  fx.armor += 0.03 * getUpgradeLevel("bulwark");
-  fx.haste += 0.04 * getUpgradeLevel("haste");
-  fx.critChance += 0.03 * getUpgradeLevel("precision");
-  fx.killHeal += 0.1 * getUpgradeLevel("siphon");
-  fx.thorns += 0.04 * getUpgradeLevel("thornmail");
-  fx.enemySlow += 0.02 * getUpgradeLevel("frostbite");
+  fx.regenPerS += soft(
+    getUpgradeLevel("recovery"),
+    SHOP_RECOVERY_HPS_PER_LEVEL,
+    8,
+  );
+  fx.armor += soft(getUpgradeLevel("bulwark"), 0.03, 0.6);
+  fx.haste += soft(getUpgradeLevel("haste"), 0.04, 1);
+  fx.critChance += soft(getUpgradeLevel("precision"), 0.03, 0.8);
+  fx.killHeal += soft(getUpgradeLevel("siphon"), 0.1, 3);
+  fx.thorns += soft(getUpgradeLevel("thornmail"), 0.04, 2);
+  fx.enemySlow += soft(getUpgradeLevel("frostbite"), 0.02, 0.45);
   // Relics stack additively on top of the shop's levels.
   const rel = relicEffects(getRelicLevels());
   fx.maxHpMult += rel.maxHpMult - 1;

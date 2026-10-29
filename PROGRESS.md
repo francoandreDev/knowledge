@@ -3345,3 +3345,5 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 - **Enemies**: Spitter (130 s; keeps its distance and marks the ground where you stand, then leaves an acid puddle that burns for 5 s) and Phantom (170 s; blinks next to you every 3.6 s).
 - **Shop upgrades**: Thornmail (reflect 4% of contact damage per level) and Frostbite (enemies 2% slower per level).
 - Everything here is an untested first guess; the endless ramp especially needs a long real run.
+
+- Endless upgrades (2026-10-29): shop upgrades have no top level any more (the price keeps following `base · (level+1)^1.5`), so endless mode never hits a ceiling. The stats that would break the game if they grew forever bend toward a cap instead of rising linearly (same slope at the start): speed +100%, pickup radius ×7, regeneration 8 HP/s, armor 60%, weapon speed +100%, crit 80%, kill heal 3 HP, thorns 200%, enemy slow 45%. Max HP, damage, coins and XP stay linear. The tiles show a level badge, and the five pips turn gold and start over after each lap. Note that `computePowerIndex` is the sum of levels, so boss strength also keeps climbing with them.
