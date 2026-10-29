@@ -179,6 +179,9 @@ import {
   boltShape,
   chainLightningShape,
   gravityWellShape,
+  flameTrailShape,
+  OVERDRIVE_DAMAGE_PER_LEVEL,
+  sentryTotemShape,
   meteorRainShape,
   homingDartShape,
   novaPulseShape,
@@ -267,6 +270,8 @@ export type EnemyKind =
   | "wasp"
   | "phantom"
   | "spitter"
+  | "cultist"
+  | "golem"
   | "reaper"
   | "lich";
 
@@ -275,12 +280,17 @@ type EnemyTier = "normal" | "veteran" | "elite";
 const TIER_HP_MULT: Record<EnemyTier, number> = {
   normal: 1,
   veteran: 1.5,
-  elite: 2.2,
+  elite: 4.5,
 };
+// Elites also run a little faster and thin out the ordinary spawns while any
+// of them is alive (see the spawn check in update()).
+const ELITE_SPEED_MULT = 1.2;
+const ELITE_SPAWN_DELAY_PER = 0.2; // +20% spawn interval per live elite
+const ELITE_SPAWN_DELAY_CAP = 0.6;
 const TIER_DAMAGE_MULT: Record<EnemyTier, number> = {
   normal: 1,
   veteran: 1.3,
-  elite: 1.6,
+  elite: 1.8,
 };
 const TIER_SIZE_MULT: Record<EnemyTier, number> = {
   normal: 1,
@@ -501,6 +511,26 @@ const ENEMY_DEFS: EnemyDef[] = [
     weight: 2,
   },
   {
+    kind: "cultist",
+    unlockAtS: 210,
+    radius: 11,
+    speed: 32,
+    hp: 26,
+    contactDamage: 4,
+    color: "#be123c",
+    weight: 2,
+  },
+  {
+    kind: "golem",
+    unlockAtS: 320,
+    radius: 18,
+    speed: 22,
+    hp: 85,
+    contactDamage: 14,
+    color: "#a8a29e",
+    weight: 1,
+  },
+  {
     kind: "knight",
     unlockAtS: 260,
     radius: 16,
@@ -531,6 +561,12 @@ const ACID_POOL_RADIUS = 34;
 const ACID_POOL_MS = 5200;
 const ACID_TICK_MS = 500;
 const ACID_TICK_DAMAGE = 4;
+const CULTIST_KEEP_PX = 200;
+const CULTIST_SUMMON_MS = 6200;
+const CULTIST_SUMMON_COUNT = 2;
+const GOLEM_DAMAGE_TAKEN = 0.5; // quarried stone: half of every hit
+const GOLEM_ENRAGE_FRAC = 0.5; // below this share of its HP it runs
+const GOLEM_ENRAGE_SPEED = 2.4;
 const SHAMAN_KEEP_PX = 170;
 const SHAMAN_HEAL_INTERVAL_MS = 4200;
 const SHAMAN_HEAL_RADIUS = 125;
@@ -712,7 +748,9 @@ export type WeaponId =
   | "homingDart"
   | "chainLightning"
   | "meteorRain"
-  | "gravityWell";
+  | "gravityWell"
+  | "flameTrail"
+  | "sentryTotem";
 
 // The 5 weapons every run starts eligible for, per the original roster.
 // Chain Lightning is deliberately excluded — it only joins a run's
@@ -738,9 +776,11 @@ const WEAPON_NAMES: Record<WeaponId, string> = {
   chainLightning: "Chain Lightning",
   meteorRain: "Meteor Rain",
   gravityWell: "Gravity Well",
+  flameTrail: "Flame Trail",
+  sentryTotem: "Sentry Totem",
 };
 
-const WEAPON_FLAVOR: Record<WeaponId, string> = {
+export const WEAPON_FLAVOR: Record<WeaponId, string> = {
   bladeArc: "Melee sweep toward the nearest enemy.",
   bolt: "Straight projectile at the nearest enemy, pierces at higher levels.",
   orbitShield:
@@ -750,6 +790,10 @@ const WEAPON_FLAVOR: Record<WeaponId, string> = {
   chainLightning: "Strikes the nearest enemy, then arcs to nearby enemies.",
   meteorRain: "Marks ground under enemies; a rock lands there a beat later.",
   gravityWell: "Opens a well on the thickest crowd that drags enemies in.",
+  flameTrail:
+    "Leaves burning ground behind you that scorches anything chasing.",
+  sentryTotem:
+    "Plants a totem that shoots the nearest enemy until it crumbles.",
 };
 
 const UPGRADE_BLURB: Record<WeaponId, string> = {
@@ -761,9 +805,11 @@ const UPGRADE_BLURB: Record<WeaponId, string> = {
   chainLightning: "+damage, +fire rate, +chain jumps",
   meteorRain: "+damage, +faster fall, +rocks, +blast size",
   gravityWell: "+damage, +reach, +duration, -cooldown",
+  flameTrail: "+damage, +flame size, +burn time, -cooldown",
+  sentryTotem: "+damage, +totem time, +fire rate",
 };
 
-const EVOLVED_NAMES: Record<WeaponId, string> = {
+export const EVOLVED_NAMES: Record<WeaponId, string> = {
   bladeArc: "Whirlwind",
   bolt: "Piercing Lance",
   orbitShield: "Barrier Storm",
@@ -772,6 +818,8 @@ const EVOLVED_NAMES: Record<WeaponId, string> = {
   chainLightning: "Storm Chain",
   meteorRain: "Starfall",
   gravityWell: "Singularity",
+  flameTrail: "Scorched Earth",
+  sentryTotem: "Twin Obelisks",
 };
 
 const EVOLUTION_BLURB: Record<WeaponId, string> = {
@@ -783,6 +831,8 @@ const EVOLUTION_BLURB: Record<WeaponId, string> = {
   chainLightning: "Unlimited chain jumps within range",
   meteorRain: "Five huge rocks per volley, with a tremor on landing",
   gravityWell: "A huge, long-lived well that crushes everything inward",
+  flameTrail: "Wide, long-burning fire laid down twice as often",
+  sentryTotem: "Two obelisks planted at once, standing longer",
 };
 
 const MAX_EQUIPPED_WEAPONS = 4;
@@ -797,6 +847,8 @@ const ORBIT_TRAIL_VISUAL_RADIUS = 5;
 const SHOCKWAVE_KNOCKBACK = 40; // Nova Pulse evolution (Lv6)
 
 const PULSE_EFFECT_DURATION_MS = 300;
+const TOTEM_RANGE = 270; // a totem shoots enemies within this of itself
+const TOTEM_SPREAD_PX = 56; // how far from the hero a totem is planted
 const WELL_RANGE = 380; // wells open on crowds within this of the player
 const METEOR_RANGE = 420; // enemies further than this are not marked
 
@@ -929,6 +981,10 @@ export interface LevelUpCard {
   title: string;
   description: string;
   /** Weapon cards: the level now (0 when the weapon is not owned yet). */
+  specialId?: SpecialId;
+  /** How well the card fits the run's style (set by the opening weapon). */
+  fit?: CardFit;
+  style?: RunStyle;
   fromLevel?: number;
   /** Stat cards: stacks owned now and the most it can reach. */
   stacks?: number;
@@ -938,6 +994,8 @@ export interface LevelUpCard {
 /** What the run has so far, shown beside the level-up cards. */
 export interface LevelUpBuild {
   level: number;
+  style: RunStyle;
+  special: SpecialId | null;
   weapons: {
     id: WeaponId;
     name: string;
@@ -983,6 +1041,8 @@ export interface GameHudState {
   /** Phase 14: true once HP drops to LOW_HP_THRESHOLD of effective max HP —
    * drives index.astro's pulsing screen vignette. */
   lowHp: boolean;
+  /** The special move held, and how recharged it is (1 = ready). */
+  special: { id: SpecialId; charge: number } | null;
 }
 
 export interface GameCallbacks {
@@ -1139,6 +1199,9 @@ interface Enemy extends GameObject {
   lastHealAt?: number;
   // phantom: next blink
   lastBlinkAt?: number;
+  // golem: HP when it spawned (maxHp is boss-only)
+  fullHp?: number;
+  frozenUntil?: number; // Time Freeze: nearly stopped until then
 }
 
 // What is left behind where an enemy died: it plays out a death animation.
@@ -1238,6 +1301,78 @@ interface ChainEffect {
   createdAt: number;
 }
 
+// --- Run styles: the opening weapon sets how the run plays ---------------
+// Cards that fit the style come up more often and weapons of the style hit
+// a little harder; cards from another style still appear, just rarely.
+export type RunStyle = "brawler" | "sharpshooter" | "arcanist";
+export const STYLE_NAMES: Record<RunStyle, string> = {
+  brawler: "Brawler",
+  sharpshooter: "Sharpshooter",
+  arcanist: "Arcanist",
+};
+export const WEAPON_STYLE: Record<WeaponId, RunStyle> = {
+  bladeArc: "brawler",
+  orbitShield: "brawler",
+  flameTrail: "brawler",
+  bolt: "sharpshooter",
+  homingDart: "sharpshooter",
+  chainLightning: "sharpshooter",
+  sentryTotem: "sharpshooter",
+  novaPulse: "arcanist",
+  meteorRain: "arcanist",
+  gravityWell: "arcanist",
+};
+const STAT_STYLE: Record<string, RunStyle | undefined> = {
+  adrenaline: "sharpshooter",
+  keenEye: "sharpshooter",
+  thickSkin: "brawler",
+  quickRecovery: "brawler",
+  ironSkin: "brawler",
+  bloodthirst: "brawler",
+  spikes: "brawler",
+  quickDraw: "arcanist",
+  chill: "arcanist",
+};
+const STYLE_MATCH_DAMAGE = 1.1;
+const FIT_WEIGHT = { match: 3, neutral: 1, off: 0.35 } as const;
+export type CardFit = keyof typeof FIT_WEIGHT;
+
+// --- Special moves: one at a time, used on demand, then recharge ---------
+export type SpecialId = "dash" | "slam" | "freeze" | "barrier";
+export const SPECIALS: Record<
+  SpecialId,
+  { name: string; blurb: string; cooldownMs: number; style?: RunStyle }
+> = {
+  dash: {
+    name: "Dash",
+    blurb: "Burst forward, untouchable for a moment",
+    cooldownMs: 4500,
+    style: "sharpshooter",
+  },
+  slam: {
+    name: "Ground Slam",
+    blurb: "Smash everything around you and shove it back",
+    cooldownMs: 9000,
+    style: "brawler",
+  },
+  freeze: {
+    name: "Time Freeze",
+    blurb: "Everything nearby nearly stops for 2.5 s",
+    cooldownMs: 13000,
+    style: "arcanist",
+  },
+  barrier: {
+    name: "Aegis",
+    blurb: "Take no damage for 2 s",
+    cooldownMs: 16000,
+  },
+};
+const DASH_DISTANCE = 120;
+const SLAM_RADIUS = 130;
+const SLAM_KNOCKBACK = 70;
+const FREEZE_RADIUS = 260;
+const FREEZE_MS = 2500;
+
 interface InternalCard {
   id: string;
   kind: "weaponUpgrade" | "newWeapon" | "stat" | "ability";
@@ -1246,6 +1381,9 @@ interface InternalCard {
   isEvolution?: boolean;
   title: string;
   description: string;
+  specialId?: SpecialId;
+  fit?: CardFit;
+  style?: RunStyle;
 }
 
 function distance(a: { x: number; y: number }, b: { x: number; y: number }) {
@@ -1257,15 +1395,6 @@ function normalizeAngle(a: number): number {
   while (angle > Math.PI) angle -= Math.PI * 2;
   while (angle < -Math.PI) angle += Math.PI * 2;
   return angle;
-}
-
-function shuffle<T>(arr: T[]): T[] {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
 }
 
 function xpForNextLevel(level: number): number {
@@ -1348,6 +1477,8 @@ const DEATH_CAUSE_BY_SOURCE: Record<string, string> = {
   "contact:wasp": "Stung by a Wasp",
   "contact:phantom": "Haunted by a Phantom",
   "contact:spitter": "Caught by a Spitter",
+  "contact:cultist": "Sacrificed by a Cultist",
+  "contact:golem": "Flattened by a Golem",
   "acid-pool": "Dissolved in acid",
   "bomber-blast": "Blown up by a Bomber",
   "imp-fire": "Burned by imp fire",
@@ -1550,6 +1681,30 @@ export function startGame(
     pullPxPerS: number;
     lastTickAt: number;
   }[] = [];
+  // Flame Trail: ground left burning where the hero walked.
+  const firePatches: {
+    x: number;
+    y: number;
+    radius: number;
+    damage: number;
+    startedAt: number;
+    endsAt: number;
+    tickMs: number;
+    lastTickAt: number;
+  }[] = [];
+  // Sentry Totem: planted turrets that shoot the nearest enemy.
+  const totems: {
+    x: number;
+    y: number;
+    damage: number;
+    startedAt: number;
+    endsAt: number;
+    tickMs: number;
+    lastTickAt: number;
+    shotX: number;
+    shotY: number;
+    shotAt: number;
+  }[] = [];
   const acidShots: { x: number; y: number; startedAt: number }[] = [];
   const acidPools: {
     x: number;
@@ -1607,6 +1762,10 @@ export function startGame(
       lastActionAt: 0,
     },
   ];
+  const runStyle: RunStyle = WEAPON_STYLE[startingWeapon.id];
+  let special: { id: SpecialId; readyAt: number; cooldownMs: number } | null =
+    null;
+  let invulnUntil = 0;
   // Per-weapon kill and damage counters. Synergy hits with no single owner
   // (Storm Web, Overcharge) are credited to the weapon that triggered them.
   const weaponStats: Partial<
@@ -1710,6 +1869,18 @@ export function startGame(
       regenPerS: hpRegenPerS + upgradeEffects.regenPerS,
       threatTier: computeThreatTier(elapsedMs / 1000),
       lowHp: player.hp > 0 && player.hp / effectiveMaxHp() <= LOW_HP_THRESHOLD,
+      special: special
+        ? {
+            id: special.id,
+            charge: Math.min(
+              1,
+              Math.max(
+                0,
+                1 - (special.readyAt - elapsedMs) / special.cooldownMs,
+              ),
+            ),
+          }
+        : null,
     });
   }
 
@@ -1930,6 +2101,43 @@ export function startGame(
     if (!reduceMotion) burst(particles, from.x, from.y, def.color, 8, 150);
   }
 
+  // The cultist calls up a couple of weak zombies around itself.
+  function summonMinions(from: Enemy) {
+    const def = ENEMY_DEFS.find((d) => d.kind === "zombie")!;
+    const elapsedS = elapsedMs / 1000;
+    const timeHpScale = hpScaleAt(elapsedS);
+    const timeDamageScale = damageScaleAt(elapsedS);
+    const start = Math.random() * Math.PI * 2;
+    for (let i = 0; i < CULTIST_SUMMON_COUNT; i++) {
+      if (enemies.length >= MAX_ALIVE_ENEMIES) return;
+      const a = start + (i / CULTIST_SUMMON_COUNT) * Math.PI * 2;
+      const sprite = Sprite({
+        x: from.x + Math.cos(a) * 26,
+        y: from.y + Math.sin(a) * 26,
+        width: 12,
+        height: 12,
+        anchor: { x: 0.5, y: 0.5 },
+        color: def.color,
+      }) as unknown as Enemy;
+      sprite.kind = "zombie";
+      sprite.mini = true;
+      sprite.tier = "normal";
+      sprite.hp = def.hp * 0.6 * timeHpScale;
+      sprite.alive = true;
+      sprite.radius = 6;
+      sprite.contactDamage = def.contactDamage * 0.7 * timeDamageScale;
+      sprite.wigglePhase = Math.random() * Math.PI * 2;
+      sprite.lastRangedAt = elapsedMs;
+      sprite.slamReadyAt = elapsedMs;
+      sprite.spawnedAt = elapsedMs;
+      enemies.push(sprite);
+      if (!reduceMotion)
+        burst(particles, sprite.x, sprite.y, "#be123c", 5, 100);
+    }
+    if (!reduceMotion)
+      ringPop(particles, from.x, from.y, "#be123c", from.radius * 2.6);
+  }
+
   // The bomber's blast: hurts the hero if close, and flings the rest of the
   // crowd a little — the bomber itself is spent.
   function detonateBomber(e: Enemy) {
@@ -1984,6 +2192,8 @@ export function startGame(
     "chainLightning",
     "meteorRain",
     "gravityWell",
+    "flameTrail",
+    "sentryTotem",
   ]);
   function weaponIdForSource(source: string): WeaponId | null {
     const normalized = source === "orbitShield-trail" ? "orbitShield" : source;
@@ -2008,6 +2218,12 @@ export function startGame(
         break;
       case "gravityWell":
         burst(particles, e.x, e.y, "#c4b5fd", 2, 70);
+        break;
+      case "flameTrail":
+        burst(particles, e.x, e.y, "#fb923c", 2, 80);
+        break;
+      case "sentryTotem":
+        burst(particles, e.x, e.y, "#fde68a", 4, 150);
         break;
       case "novaPulse":
         ringPop(particles, e.x, e.y, "#fb923c", e.radius * 2);
@@ -2054,7 +2270,11 @@ export function startGame(
     ) {
       amount *= 2;
     }
+    const styled = weaponIdForSource(source);
+    if (styled && WEAPON_STYLE[styled] === runStyle)
+      amount *= STYLE_MATCH_DAMAGE;
     if (e.kind === "knight") amount *= KNIGHT_DAMAGE_TAKEN;
+    if (e.kind === "golem") amount *= GOLEM_DAMAGE_TAKEN;
     // Phase 16B: "Shield Wall" — 2+ adjacent skeletons take reduced damage
     // while grouped, see runSynergyScan().
     const finalAmount = e.shieldWalled
@@ -2403,6 +2623,7 @@ export function startGame(
     fromY?: number,
   ) {
     if (training) return; // the lab never hurts the player
+    if (elapsedMs < invulnUntil) return; // Dash and Aegis
     // The Orbit Shield soaks hits that arrive from an orbiter's side.
     if (orbitCoverNow && fromX !== undefined && fromY !== undefined) {
       const bearing = Math.atan2(fromY - player.y, fromX - player.x);
@@ -2541,6 +2762,95 @@ export function startGame(
     }
   }
 
+  function useSpecial() {
+    if (status !== "running" || !special || elapsedMs < special.readyAt) return;
+    const def = SPECIALS[special.id];
+    switch (special.id) {
+      case "dash": {
+        const a = playerFacingAngle;
+        const x0 = player.x;
+        const y0 = player.y;
+        player.x = Math.min(
+          Math.max(player.x + Math.cos(a) * DASH_DISTANCE, PLAYER_RADIUS),
+          WORLD_W - PLAYER_RADIUS,
+        );
+        player.y = Math.min(
+          Math.max(player.y + Math.sin(a) * DASH_DISTANCE, PLAYER_RADIUS),
+          WORLD_H - PLAYER_RADIUS,
+        );
+        invulnUntil = elapsedMs + 350;
+        if (!reduceMotion) {
+          for (let k = 0; k <= 4; k++) {
+            const f = k / 4;
+            burst(
+              particles,
+              x0 + (player.x - x0) * f,
+              y0 + (player.y - y0) * f,
+              "#7dd3fc",
+              3,
+              60,
+            );
+          }
+        }
+        break;
+      }
+      case "slam": {
+        const dmg =
+          (30 + elapsedMs / 3000) * totalDamageMult() * (endless ? 1.5 : 1);
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          const d = distance(player, e);
+          if (d > SLAM_RADIUS + e.radius) continue;
+          damageEnemy(e, dmg, "slam");
+          if (e.alive && e.kind !== "reaper" && e.kind !== "lich" && d > 0) {
+            e.x += ((e.x - player.x) / d) * SLAM_KNOCKBACK;
+            e.y += ((e.y - player.y) / d) * SLAM_KNOCKBACK;
+          }
+        }
+        pulseEffects.push({
+          x: player.x,
+          y: player.y,
+          radius: SLAM_RADIUS,
+          createdAt: elapsedMs,
+          color: "#fbbf24",
+        });
+        if (feedbackOn) {
+          shakeMag = 6;
+          shakeUntil = elapsedMs + 220;
+        }
+        break;
+      }
+      case "freeze": {
+        for (const e of enemies) {
+          if (e.alive && distance(player, e) <= FREEZE_RADIUS)
+            e.frozenUntil = elapsedMs + FREEZE_MS;
+        }
+        pulseEffects.push({
+          x: player.x,
+          y: player.y,
+          radius: FREEZE_RADIUS,
+          createdAt: elapsedMs,
+          color: "#7dd3fc",
+        });
+        break;
+      }
+      case "barrier":
+        invulnUntil = elapsedMs + 2000;
+        pulseEffects.push({
+          x: player.x,
+          y: player.y,
+          radius: 60,
+          createdAt: elapsedMs,
+          color: "#fde047",
+        });
+        break;
+    }
+    special.cooldownMs =
+      def.cooldownMs / (1 + upgradeEffects.haste + hasteTemp);
+    special.readyAt = elapsedMs + special.cooldownMs;
+    log.log("special:used", { id: special.id });
+  }
+
   function applyCard(card: InternalCard) {
     if (card.kind === "weaponUpgrade" && card.weaponId) {
       const w = ownedWeapons.find((w) => w.id === card.weaponId);
@@ -2575,6 +2885,14 @@ export function startGame(
         hpRegenPerS,
         extraCoinChance,
       });
+    } else if (card.kind === "ability" && card.specialId) {
+      // One special at a time: a new pick replaces the old one.
+      special = {
+        id: card.specialId,
+        readyAt: elapsedMs,
+        cooldownMs: SPECIALS[card.specialId].cooldownMs,
+      };
+      log.log("card:special", { id: card.specialId });
     } else if (card.kind === "ability" && card.id === "ability:necromancy") {
       // Phase 15: one-time, non-stacking pick — swaps which boss
       // spawnBoss() spawns for the rest of this run. buildCardPool() stops
@@ -2588,6 +2906,17 @@ export function startGame(
   function buildCardPool(): InternalCard[] {
     const pool: InternalCard[] = [];
     for (const w of ownedWeapons) {
+      if (w.level >= WEAPON_MAX_LEVEL && endless) {
+        // Past the evolution, endless runs keep levelling: no ceiling.
+        const gain = Math.round((OVERDRIVE_DAMAGE_PER_LEVEL - 1) * 100);
+        pool.push({
+          id: `weaponUpgrade:${w.id}`,
+          kind: "weaponUpgrade",
+          weaponId: w.id,
+          title: `Overdrive ${EVOLVED_NAMES[w.id]} — Lv ${w.level + 1}`,
+          description: `+${gain}% damage, stacks with no limit`,
+        });
+      }
       if (w.level < WEAPON_MAX_LEVEL) {
         const isEvolution = w.level + 1 === WEAPON_MAX_LEVEL;
         pool.push({
@@ -2622,12 +2951,15 @@ export function startGame(
     }
     for (const stat of TEMP_STATS) {
       const stacks = statStacks[stat.id] ?? 0;
-      if (stacks < stat.maxStacks) {
+      if (stacks < stat.maxStacks || endless) {
         pool.push({
           id: `stat:${stat.id}`,
           kind: "stat",
           statId: stat.id,
-          title: `${stat.label} (${stacks + 1}/${stat.maxStacks})`,
+          title:
+            stacks < stat.maxStacks
+              ? `${stat.label} (${stacks + 1}/${stat.maxStacks})`
+              : `${stat.label} (${stacks + 1})`,
           description: stat.effect,
         });
       }
@@ -2646,11 +2978,61 @@ export function startGame(
           "This run's boss becomes the Lich instead of the Reaper — lower HP, no dash, but a homing curse bolt and summoned minions.",
       });
     }
+    if (playerLevel >= 3) {
+      for (const id of Object.keys(SPECIALS) as SpecialId[]) {
+        if (special?.id === id) continue;
+        pool.push({
+          id: `special:${id}`,
+          kind: "ability",
+          specialId: id,
+          title: special
+            ? `Swap to ${SPECIALS[id].name}`
+            : `Learn ${SPECIALS[id].name}`,
+          description: SPECIALS[id].blurb,
+        });
+      }
+    }
+    for (const c of pool) {
+      let style: RunStyle | undefined;
+      let fit: CardFit = "neutral";
+      if (c.weaponId) {
+        style = WEAPON_STYLE[c.weaponId];
+        fit =
+          style === runStyle
+            ? "match"
+            : c.kind === "newWeapon"
+              ? "off"
+              : "neutral";
+      } else {
+        style = c.statId
+          ? STAT_STYLE[c.statId]
+          : c.specialId
+            ? SPECIALS[c.specialId].style
+            : undefined;
+        if (style) fit = style === runStyle ? "match" : "off";
+      }
+      c.style = style;
+      c.fit = fit;
+    }
     return pool;
   }
 
+  // Weighted pick of four without repeats: cards that fit the run's style are
+  // likelier, off-style ones rare but never gone.
   function drawCards(): InternalCard[] {
-    return shuffle(buildCardPool()).slice(0, 4);
+    const rest = buildCardPool();
+    const out: InternalCard[] = [];
+    while (out.length < 4 && rest.length > 0) {
+      const weights = rest.map((c) => FIT_WEIGHT[c.fit ?? "neutral"]);
+      let r = Math.random() * weights.reduce((a, b) => a + b, 0);
+      let idx = 0;
+      for (; idx < rest.length - 1; idx++) {
+        r -= weights[idx];
+        if (r <= 0) break;
+      }
+      out.push(rest.splice(idx, 1)[0]);
+    }
+    return out;
   }
 
   function presentLevelUp() {
@@ -2662,6 +3044,9 @@ export function startGame(
       kind: c.kind,
       weaponId: c.weaponId,
       statId: c.statId,
+      specialId: c.specialId,
+      fit: c.fit,
+      style: c.style,
       isEvolution: c.isEvolution,
       title: c.title,
       description: c.description,
@@ -2671,11 +3056,16 @@ export function startGame(
           : undefined,
       stacks: c.statId ? (statStacks[c.statId] ?? 0) : undefined,
       maxStacks: c.statId
-        ? TEMP_STATS.find((s) => s.id === c.statId)?.maxStacks
+        ? Math.max(
+            TEMP_STATS.find((s) => s.id === c.statId)?.maxStacks ?? 0,
+            (statStacks[c.statId] ?? 0) + 1,
+          )
         : undefined,
     }));
     const build: LevelUpBuild = {
       level: playerLevel,
+      style: runStyle,
+      special: special?.id ?? null,
       weapons: ownedWeapons.map((w) => ({
         id: w.id,
         name: WEAPON_NAMES[w.id],
@@ -2932,6 +3322,55 @@ export function startGame(
         }
         break;
       }
+      case "flameTrail": {
+        const shape = flameTrailShape(w.level);
+        if (elapsedMs - w.lastActionAt >= shape.intervalMs) {
+          w.lastActionAt = elapsedMs;
+          firePatches.push({
+            x: player.x,
+            y: player.y + 6,
+            radius: shape.radius,
+            damage: weaponDamage("flameTrail", w.level) * totalDamageMult(),
+            startedAt: elapsedMs,
+            endsAt: elapsedMs + shape.durationMs,
+            tickMs: shape.tickMs,
+            lastTickAt: elapsedMs,
+          });
+        }
+        break;
+      }
+      case "sentryTotem": {
+        const shape = sentryTotemShape(w.level);
+        if (elapsedMs - w.lastActionAt >= shape.intervalMs) {
+          w.lastActionAt = elapsedMs;
+          const start = Math.random() * Math.PI * 2;
+          for (let k = 0; k < shape.count; k++) {
+            const a = start + (k * Math.PI * 2) / shape.count;
+            const x = Math.max(
+              12,
+              Math.min(WORLD_W - 12, player.x + Math.cos(a) * TOTEM_SPREAD_PX),
+            );
+            const y = Math.max(
+              12,
+              Math.min(WORLD_H - 12, player.y + Math.sin(a) * TOTEM_SPREAD_PX),
+            );
+            totems.push({
+              x,
+              y,
+              damage: weaponDamage("sentryTotem", w.level) * totalDamageMult(),
+              startedAt: elapsedMs,
+              endsAt: elapsedMs + shape.durationMs,
+              tickMs: shape.tickMs,
+              lastTickAt: elapsedMs,
+              shotX: x,
+              shotY: y,
+              shotAt: -9999,
+            });
+            if (!reduceMotion) ringPop(particles, x, y, "#fde68a", 26);
+          }
+        }
+        break;
+      }
       case "gravityWell": {
         const shape = gravityWellShape(w.level);
         if (elapsedMs - w.lastActionAt >= shape.intervalMs) {
@@ -3136,6 +3575,10 @@ export function startGame(
         return meteorRainShape(w.level).intervalMs;
       case "gravityWell":
         return gravityWellShape(w.level).intervalMs;
+      case "flameTrail":
+        return flameTrailShape(w.level).intervalMs;
+      case "sentryTotem":
+        return sentryTotemShape(w.level).intervalMs;
       case "novaPulse":
         return novaPulseShape(w.level).intervalMs;
       case "bladeArc":
@@ -3559,6 +4002,37 @@ export function startGame(
       e.y += Math.sin(angle) * def.speed * dt;
       return;
     }
+    if (e.kind === "cultist") {
+      const def = ENEMY_DEFS.find((d) => d.kind === "cultist")!;
+      const d = distance(player, e);
+      const toward = Math.atan2(player.y - e.y, player.x - e.x);
+      const angle =
+        d > CULTIST_KEEP_PX * 1.2
+          ? toward
+          : d < CULTIST_KEEP_PX * 0.7
+            ? toward + Math.PI
+            : toward + Math.PI / 2;
+      e.x += Math.cos(angle) * def.speed * dt;
+      e.y += Math.sin(angle) * def.speed * dt;
+      if (
+        elapsedMs - (e.lastSummonAt ?? e.spawnedAt ?? 0) >=
+        CULTIST_SUMMON_MS
+      ) {
+        e.lastSummonAt = elapsedMs;
+        summonMinions(e);
+      }
+      return;
+    }
+    if (e.kind === "golem") {
+      const def = ENEMY_DEFS.find((d) => d.kind === "golem")!;
+      e.fullHp ??= e.hp;
+      const enraged = e.hp < e.fullHp * GOLEM_ENRAGE_FRAC;
+      const angle = Math.atan2(player.y - e.y, player.x - e.x);
+      const speed = def.speed * (enraged ? GOLEM_ENRAGE_SPEED : 1);
+      e.x += Math.cos(angle) * speed * dt;
+      e.y += Math.sin(angle) * speed * dt;
+      return;
+    }
     if (e.kind === "shaman") {
       const def = ENEMY_DEFS.find((d) => d.kind === "shaman")!;
       const d = distance(player, e);
@@ -3863,6 +4337,7 @@ export function startGame(
           moveMagnitude = 1;
         }
       }
+      if (keyPressed(["space", "e"])) useSpecial();
       playerIsIdle = moveMagnitude === 0;
       if (playerIsIdle) {
         playerBobPhase += dt * 3.2; // Phase 11: gentle idle-only bob, see render()
@@ -3904,8 +4379,14 @@ export function startGame(
       }
 
       // --- spawning (exponential-ish ramp, floored — see file header) ---
+      let eliteAlive = 0;
+      for (const e of enemies) {
+        if (e.alive && e.tier === "elite") eliteAlive++;
+      }
       const spawnIntervalMs =
-        currentSpawnIntervalMs(elapsedS) / (options.spawnRateMult ?? 1);
+        (currentSpawnIntervalMs(elapsedS) / (options.spawnRateMult ?? 1)) *
+        (1 +
+          Math.min(ELITE_SPAWN_DELAY_CAP, eliteAlive * ELITE_SPAWN_DELAY_PER));
       if (elapsedMs - lastSpawnAt >= spawnIntervalMs) {
         lastSpawnAt = elapsedMs;
         spawnEnemy(elapsedS);
@@ -3914,9 +4395,13 @@ export function startGame(
       // --- enemy movement/attacks + contact damage ---
       for (const e of enemies) {
         if (!e.alive) continue;
+        const frozen = e.frozenUntil !== undefined && elapsedMs < e.frozenUntil;
         updateEnemyBehavior(
           e,
-          dt * (1 - Math.min(0.5, upgradeEffects.enemySlow + slowTemp)),
+          dt *
+            (1 - Math.min(0.5, upgradeEffects.enemySlow + slowTemp)) *
+            (e.tier === "elite" ? ELITE_SPEED_MULT : 1) *
+            (frozen ? 0.05 : 1),
         );
         if (training) {
           const minDist = PLAYER_RADIUS + e.radius + training.standoffPx;
@@ -4201,13 +4686,56 @@ export function startGame(
           const d = distance(g, e);
           if (d > g.radius * 1.25) continue;
           // Bosses are only hurt, never dragged.
-          if (e.kind !== "reaper" && e.kind !== "lich" && d > 4) {
+          if (
+            e.kind !== "reaper" &&
+            e.kind !== "lich" &&
+            e.kind !== "golem" &&
+            d > 4
+          ) {
             const step = Math.min(d, g.pullPxPerS * dt);
             e.x += ((g.x - e.x) / d) * step;
             e.y += ((g.y - e.y) / d) * step;
           }
           if (tick && d <= g.radius) damageEnemy(e, g.damage, "gravityWell");
         }
+      }
+      for (let i = firePatches.length - 1; i >= 0; i--) {
+        const f = firePatches[i];
+        if (elapsedMs >= f.endsAt) {
+          firePatches.splice(i, 1);
+          continue;
+        }
+        if (elapsedMs - f.lastTickAt < f.tickMs) continue;
+        f.lastTickAt = elapsedMs;
+        for (const e of enemies) {
+          if (e.alive && distance(f, e) <= f.radius + e.radius * 0.5)
+            damageEnemy(e, f.damage, "flameTrail");
+        }
+      }
+      for (let i = totems.length - 1; i >= 0; i--) {
+        const t = totems[i];
+        if (elapsedMs >= t.endsAt) {
+          if (!reduceMotion) burst(particles, t.x, t.y, "#a8a29e", 6, 90);
+          totems.splice(i, 1);
+          continue;
+        }
+        if (elapsedMs - t.lastTickAt < t.tickMs) continue;
+        let target: Enemy | null = null;
+        let best = TOTEM_RANGE;
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          const d = distance(t, e);
+          if (d < best) {
+            best = d;
+            target = e;
+          }
+        }
+        if (!target) continue;
+        t.lastTickAt = elapsedMs;
+        t.shotX = target.x;
+        t.shotY = target.y;
+        t.shotAt = elapsedMs;
+        damageEnemy(target, t.damage, "sentryTotem");
       }
       for (let i = acidShots.length - 1; i >= 0; i--) {
         const a = acidShots[i];
@@ -4518,6 +5046,16 @@ export function startGame(
           );
         }
         if (isElite) drawEliteMarker(context, e.x, e.y, e.radius, elapsedMs);
+        if (e.frozenUntil !== undefined && elapsedMs < e.frozenUntil) {
+          context.save();
+          context.strokeStyle = "#7dd3fc";
+          context.globalAlpha = 0.85;
+          context.lineWidth = 2;
+          context.beginPath();
+          context.arc(e.x, e.y, e.radius + 3, 0, Math.PI * 2);
+          context.stroke();
+          context.restore();
+        }
         if ((e.kind === "reaper" || e.kind === "lich") && e.maxHp) {
           drawHpBar(
             context,
@@ -4611,6 +5149,16 @@ export function startGame(
           PLAYER_RADIUS * 1.4,
           elapsedMs,
         );
+      }
+      if (elapsedMs < invulnUntil) {
+        context.save();
+        context.strokeStyle = "#fde047";
+        context.globalAlpha = 0.5 + 0.4 * Math.sin(elapsedMs / 60);
+        context.lineWidth = 3;
+        context.beginPath();
+        context.arc(player.x, player.y, PLAYER_RADIUS * 1.9, 0, Math.PI * 2);
+        context.stroke();
+        context.restore();
       }
       drawPlayer(
         context,
@@ -4745,6 +5293,59 @@ export function startGame(
         );
       }
 
+      for (const f of firePatches) {
+        const life = (elapsedMs - f.startedAt) / (f.endsAt - f.startedAt);
+        const fade = Math.min(1, life * 8, (1 - life) * 4);
+        context.save();
+        context.globalAlpha = 0.32 * fade;
+        context.fillStyle = "#9a3412";
+        context.beginPath();
+        context.ellipse(f.x, f.y, f.radius, f.radius * 0.7, 0, 0, Math.PI * 2);
+        context.fill();
+        context.globalAlpha = 0.9 * fade;
+        for (let k = 0; k < 5; k++) {
+          const a = (k / 5) * Math.PI * 2 + f.x;
+          const fx = f.x + Math.cos(a) * f.radius * 0.55;
+          const fy = f.y + Math.sin(a) * f.radius * 0.38;
+          const h =
+            (5 + 4 * Math.sin(elapsedMs / 110 + k * 1.7)) * (f.radius / 30);
+          context.fillStyle = k % 2 ? "#fb923c" : "#fbbf24";
+          context.beginPath();
+          context.moveTo(fx - 3, fy);
+          context.quadraticCurveTo(fx, fy - h * 1.6, fx + 3, fy);
+          context.closePath();
+          context.fill();
+        }
+        context.restore();
+      }
+      for (const t of totems) {
+        const life = (elapsedMs - t.startedAt) / (t.endsAt - t.startedAt);
+        const fade = Math.min(1, life * 10, (1 - life) * 6);
+        context.save();
+        context.globalAlpha = fade;
+        context.fillStyle = "rgba(0,0,0,0.3)";
+        context.beginPath();
+        context.ellipse(t.x, t.y + 8, 10, 4, 0, 0, Math.PI * 2);
+        context.fill();
+        context.fillStyle = "#78716c";
+        context.fillRect(t.x - 6, t.y - 14, 12, 22);
+        context.fillStyle = "#a8a29e";
+        context.fillRect(t.x - 6, t.y - 14, 4, 22);
+        const hot = elapsedMs - t.shotAt < 140;
+        context.fillStyle = hot ? "#fef08a" : "#f59e0b";
+        context.beginPath();
+        context.arc(t.x, t.y - 6, hot ? 4.5 : 3, 0, Math.PI * 2);
+        context.fill();
+        if (hot) {
+          context.strokeStyle = "#fde047";
+          context.lineWidth = 2;
+          context.beginPath();
+          context.moveTo(t.x, t.y - 6);
+          context.lineTo(t.shotX, t.shotY);
+          context.stroke();
+        }
+        context.restore();
+      }
       for (const g of gravityWells) {
         const life = (elapsedMs - g.startedAt) / (g.endsAt - g.startedAt);
         const fade = Math.min(1, life * 6, (1 - life) * 6);
@@ -5002,8 +5603,21 @@ export function startGame(
   });
   loop.start();
 
+  let loopPaused = false;
   return {
+    useSpecial,
+    pause() {
+      if (loopPaused || status !== "running") return;
+      loopPaused = true;
+      loop.stop();
+    },
+    resume() {
+      if (!loopPaused) return;
+      loopPaused = false;
+      loop.start();
+    },
     stop() {
+      loopPaused = false;
       log.log("loop stopped manually");
       loop.stop();
       canvas.removeEventListener("pointerdown", handlePointerDown);

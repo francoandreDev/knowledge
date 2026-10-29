@@ -33,6 +33,8 @@ const ICON_DART = `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="3"/><circle cx=
 // lightning-bolt shape) since this weapon's whole identity is jumping
 // between multiple targets, not a straight single-target shot.
 const ICON_METEOR = `<svg ${ICON_ATTRS}><circle cx="16" cy="16" r="4" fill="currentColor" stroke="none"/><path d="M13 13 4 4"/><path d="M12 17 5 12"/><path d="M17 12 12 5"/></svg>`;
+const ICON_FLAME_TRAIL = `<svg ${ICON_ATTRS}><path d="M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 .3 1.2 1 2 2 2.2C10.5 8.5 11 5.5 12 3z"/></svg>`;
+const ICON_TOTEM = `<svg ${ICON_ATTRS}><path d="M8 21V7l4-4 4 4v14z"/><circle cx="12" cy="11" r="1.6" fill="currentColor" stroke="none"/><line x1="6" y1="21" x2="18" y2="21"/></svg>`;
 const ICON_WELL = `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/><path d="M12 4a8 8 0 0 1 8 8"/><path d="M12 20a8 8 0 0 1-8-8"/><path d="M12 7.5a4.5 4.5 0 0 1 4.5 4.5"/><path d="M12 16.5A4.5 4.5 0 0 1 7.5 12"/></svg>`;
 const ICON_CHAIN = `<svg ${ICON_ATTRS}><circle cx="4" cy="19" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="6" r="2" fill="currentColor" stroke="none"/><circle cx="20" cy="16" r="2" fill="currentColor" stroke="none"/><polyline points="4 19 9 11 12 8"/><polyline points="12 8 16 14 20 16"/></svg>`;
 
@@ -105,6 +107,26 @@ const ICON_TRENDING_UP = `<svg ${ICON_ATTRS}><polyline points="3 17 9 11 13 15 2
 // a tally of what already did.
 const ICON_WARNING = `<svg ${ICON_ATTRS}><path d="M12 3 L22 20 L2 20 Z"/><line x1="12" y1="9" x2="12" y2="14"/><circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="currentColor"/></svg>`;
 
+// Run styles (set by the opening weapon) and special moves.
+export const STYLE_ICON: Record<
+  "brawler" | "sharpshooter" | "arcanist",
+  string
+> = {
+  brawler: `<svg ${ICON_ATTRS}><line x1="4" y1="20" x2="16" y2="8"/><line x1="20" y1="20" x2="8" y2="8"/><line x1="13" y1="5" x2="19" y2="5"/><line x1="5" y1="5" x2="11" y2="5"/></svg>`,
+  sharpshooter: `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="6"/><line x1="12" y1="2" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="22"/><line x1="2" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="22" y2="12"/></svg>`,
+  arcanist: `<svg ${ICON_ATTRS}><path d="M12 3 L14 10 L21 12 L14 14 L12 21 L10 14 L3 12 L10 10 Z"/></svg>`,
+};
+
+export const SPECIAL_ICON: Record<
+  "dash" | "slam" | "freeze" | "barrier",
+  string
+> = {
+  dash: `<svg ${ICON_ATTRS}><path d="M4 6l7 6-7 6"/><path d="M13 6l7 6-7 6"/></svg>`,
+  slam: `<svg ${ICON_ATTRS}><line x1="12" y1="3" x2="12" y2="14"/><path d="M7 10l5 5 5-5"/><path d="M3 20h18"/><path d="M6 17l-3 3M18 17l3 3"/></svg>`,
+  freeze: `<svg ${ICON_ATTRS}><line x1="12" y1="3" x2="12" y2="21"/><line x1="4.2" y1="7.5" x2="19.8" y2="16.5"/><line x1="4.2" y1="16.5" x2="19.8" y2="7.5"/></svg>`,
+  barrier: `<svg ${ICON_ATTRS}><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>`,
+};
+
 export const WEAPON_ICON: Record<
   | "bladeArc"
   | "bolt"
@@ -113,7 +135,9 @@ export const WEAPON_ICON: Record<
   | "homingDart"
   | "chainLightning"
   | "meteorRain"
-  | "gravityWell",
+  | "gravityWell"
+  | "flameTrail"
+  | "sentryTotem",
   string
 > = {
   bladeArc: ICON_BLADE,
@@ -124,6 +148,8 @@ export const WEAPON_ICON: Record<
   chainLightning: ICON_CHAIN,
   meteorRain: ICON_METEOR,
   gravityWell: ICON_WELL,
+  flameTrail: ICON_FLAME_TRAIL,
+  sentryTotem: ICON_TOTEM,
 };
 
 // Pastel badge fill per concept, shared by the shop rows and the level-up

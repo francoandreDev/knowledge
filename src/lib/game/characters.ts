@@ -1368,6 +1368,75 @@ function boar(ctx: Ctx, r: number, color: string, t: number) {
   });
 }
 
+function cultist(ctx: Ctx, r: number, color: string, t: number) {
+  shadow(ctx, r, 0.8);
+  // Long crimson robe, hem swaying.
+  const sway = 0.06 * r * Math.sin(t * 0.005);
+  poly(
+    ctx,
+    [
+      [-0.5 * r, -0.2 * r],
+      [0.5 * r, -0.2 * r],
+      [0.9 * r + sway, 0.98 * r],
+      [-0.9 * r + sway, 0.98 * r],
+    ],
+    darken(color, 0.2),
+  );
+  rr(ctx, -0.45 * r, 0.25 * r, 0.9 * r, 0.14 * r, 0.05 * r, "#fbbf24");
+  // Raised hands over a glowing sigil.
+  const glow = 0.7 + 0.3 * Math.sin(t * 0.007);
+  ctx.save();
+  ctx.shadowColor = "#fb7185";
+  ctx.shadowBlur = r * 0.8 * glow;
+  dot(ctx, 0, -1.25 * r, 0.22 * r * glow, "#fecdd3");
+  ctx.restore();
+  limb(ctx, -0.5 * r, 0.0, -0.7 * r, -0.85 * r, 0.12 * r, darken(color, 0.3));
+  limb(ctx, 0.5 * r, 0.0, 0.7 * r, -0.85 * r, 0.12 * r, darken(color, 0.3));
+  // Deep hood.
+  dot(ctx, 0, -0.45 * r, 0.62 * r, color);
+  dot(ctx, 0, -0.38 * r, 0.4 * r, "#1c0a12");
+  dot(ctx, -0.14 * r, -0.4 * r, 0.07 * r, "#fda4af");
+  dot(ctx, 0.14 * r, -0.4 * r, 0.07 * r, "#fda4af");
+}
+
+function golem(ctx: Ctx, r: number, color: string, t: number) {
+  shadow(ctx, r, 1.1);
+  const dark = darken(color, 0.35);
+  // Stubby legs, a boulder torso, heavy fists.
+  for (const s of [-1, 1]) {
+    rr(
+      ctx,
+      s * 0.45 * r - 0.25 * r,
+      0.6 * r,
+      0.5 * r,
+      0.42 * r,
+      0.12 * r,
+      dark,
+    );
+    dot(ctx, s * 1.0 * r, 0.25 * r, 0.34 * r, dark);
+  }
+  rr(ctx, -0.8 * r, -0.55 * r, 1.6 * r, 1.3 * r, 0.35 * r, color);
+  rr(ctx, -0.3 * r, -0.95 * r, 0.6 * r, 0.5 * r, 0.18 * r, darken(color, 0.12));
+  // Cracks and a glowing core that brightens as it breaks.
+  const pulse = 0.6 + 0.4 * Math.sin(t * 0.006);
+  ink(
+    ctx,
+    [
+      [-0.5 * r, -0.4 * r],
+      [-0.2 * r, 0.0],
+      [-0.4 * r, 0.4 * r],
+    ],
+    Math.max(1, lw * 0.7),
+  );
+  ctx.save();
+  ctx.shadowColor = "#fb923c";
+  ctx.shadowBlur = r * 0.6 * pulse;
+  dot(ctx, 0.1 * r, 0.1 * r, 0.22 * r * pulse, "#fdba74");
+  ctx.restore();
+  dot(ctx, -0.1 * r, -0.72 * r, 0.07 * r, "#fdba74");
+  dot(ctx, 0.1 * r, -0.72 * r, 0.07 * r, "#fdba74");
+}
+
 function shaman(ctx: Ctx, r: number, color: string, t: number) {
   shadow(ctx, r, 0.8);
   // Robe that flares at the hem.
@@ -1568,6 +1637,12 @@ export function drawEnemyArt(
       break;
     case "spitter":
       spitter(ctx, r, color, t);
+      break;
+    case "cultist":
+      cultist(ctx, r, color, t);
+      break;
+    case "golem":
+      golem(ctx, r, color, t);
       break;
     case "shaman":
       shaman(ctx, r, color, t);

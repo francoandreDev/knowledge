@@ -135,7 +135,12 @@ export const UPGRADES: UpgradeDef[] = [
 // run's boss from the Reaper to the Lich (different stats/attack pattern —
 // see engine.ts's `spawnBoss()`/`bossVariant`).
 export type UnlockId =
-  "chainLightning" | "meteorRain" | "gravityWell" | "necromancy";
+  | "chainLightning"
+  | "meteorRain"
+  | "gravityWell"
+  | "flameTrail"
+  | "sentryTotem"
+  | "necromancy";
 
 export interface UnlockDef {
   id: UnlockId;
@@ -162,6 +167,18 @@ export const UNLOCKS: UnlockDef[] = [
     label: "Gravity Well",
     effectLabel: "Unlocks an 8th weapon — drags enemies into a crushing clump",
     cost: 650,
+  },
+  {
+    id: "flameTrail",
+    label: "Flame Trail",
+    effectLabel: "Unlocks a 9th weapon — burning ground left behind you",
+    cost: 550,
+  },
+  {
+    id: "sentryTotem",
+    label: "Sentry Totem",
+    effectLabel: "Unlocks a 10th weapon — a turret that guards your spot",
+    cost: 700,
   },
   {
     id: "necromancy",

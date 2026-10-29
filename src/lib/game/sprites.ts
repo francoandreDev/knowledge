@@ -25,6 +25,8 @@ export const ENEMY_SHAPE: Record<EnemyKind, Shape> = {
   wasp: "bat",
   phantom: "ghost",
   spitter: "circle",
+  cultist: "ghost",
+  golem: "square",
   reaper: "hood",
   lich: "diamond",
 };
@@ -763,6 +765,8 @@ export const WEAPON_COLOR: Record<WeaponId, string> = {
   chainLightning: "#67e8f9",
   meteorRain: "#f97316",
   gravityWell: "#a78bfa",
+  flameTrail: "#fb923c",
+  sentryTotem: "#d6d3d1",
   novaPulse: "#fb923c",
   orbitShield: "#fde047",
   bladeArc: "#e879f9",
@@ -823,6 +827,28 @@ export function drawWeaponGlyph(
         ctx.lineTo(s * 0.85, 0);
         ctx.lineTo(s * 0.35, s * 0.28);
       });
+      break;
+    case "flameTrail":
+      stroke(() => {
+        ctx.moveTo(0, -s * 0.85);
+        ctx.quadraticCurveTo(s * 0.9, -s * 0.1, s * 0.45, s * 0.55);
+        ctx.quadraticCurveTo(0, s * 0.95, -s * 0.45, s * 0.55);
+        ctx.quadraticCurveTo(-s * 0.8, 0, 0, -s * 0.85);
+      });
+      break;
+    case "sentryTotem":
+      stroke(() => {
+        ctx.moveTo(-s * 0.4, s * 0.8);
+        ctx.lineTo(-s * 0.4, -s * 0.3);
+        ctx.lineTo(0, -s * 0.8);
+        ctx.lineTo(s * 0.4, -s * 0.3);
+        ctx.lineTo(s * 0.4, s * 0.8);
+        ctx.closePath();
+      });
+      ctx.beginPath();
+      ctx.arc(0, -s * 0.1, s * 0.16, 0, Math.PI * 2);
+      ctx.fillStyle = col;
+      ctx.fill();
       break;
     case "gravityWell":
       stroke(() => ctx.arc(0, 0, s * 0.75, 0.4, Math.PI * 1.4));

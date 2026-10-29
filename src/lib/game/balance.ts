@@ -42,6 +42,10 @@ export function exposure(id: WeaponId, level: number): number {
       return 0.1; // lands from anywhere, but the rocks take a beat to fall
     case "gravityWell":
       return 0.1; // dropped on a distant cluster; it does the walking
+    case "flameTrail":
+      return 0.4; // laid behind you, so the chasers walk into it
+    case "sentryTotem":
+      return 0.08; // shoots from where it stands, out of the crowd
     case "novaPulse":
       return 0.7 - (level - 1) * 0.04; // centered on you; radius grows with level
     case "orbitShield":
@@ -71,6 +75,10 @@ export function reachPx(id: WeaponId, level: number): number {
     }
     case "novaPulse":
       return novaPulseShape(level).radius;
+    case "flameTrail":
+      return 200; // it burns where you have been, not out ahead
+    case "sentryTotem":
+      return 270; // the totem's own range
     default:
       return Infinity;
   }
@@ -159,6 +167,26 @@ export function gravityWellShape(level: number) {
   };
 }
 
+export function flameTrailShape(level: number) {
+  const evolved = level >= WEAPON_MAX_LEVEL; // Scorched Earth
+  return {
+    intervalMs: evolved ? 700 : 1500 - (level - 1) * 120,
+    radius: evolved ? 46 : 26 + (level - 1) * 3,
+    durationMs: evolved ? 4200 : 2600 + level * 150,
+    tickMs: 350,
+  };
+}
+
+export function sentryTotemShape(level: number) {
+  const evolved = level >= WEAPON_MAX_LEVEL; // Twin Obelisks
+  return {
+    intervalMs: evolved ? 5000 : 7000 - (level - 1) * 500,
+    count: evolved ? 2 : 1,
+    durationMs: evolved ? 6500 : 5000 + level * 300,
+    tickMs: evolved ? 700 : 700 - (level - 1) * 40,
+  };
+}
+
 // --- Damage per hit, derived from the budget ---------------------------
 
 // How many "full hits" worth of damage one point of per-hit damage turns into
@@ -172,6 +200,7 @@ const NOVA_NOMINAL_TARGETS = 3;
 // orbiter lands ~0.75 hits/s on it: 0.3 of the cooldown-limited ceiling.
 const ORBIT_CONTACT_UPTIME = 0.3;
 const WELL_NOMINAL_TARGETS = 3; // the pull packs them into one clump
+const FIRE_NOMINAL_TARGETS = 1.5; // chasers bunch up on the trail
 const METEOR_NOMINAL_HITS = 1.4; // a blast usually catches a small cluster
 const CHAIN_NOMINAL_HIT_CAP = 5; // "unlimited" jumps rarely find more
 
@@ -212,6 +241,16 @@ export function damageMultiplierPerS(id: WeaponId, level: number): number {
         (1000 / s.intervalMs) * (s.durationMs / s.tickMs) * WELL_NOMINAL_TARGETS
       );
     }
+    case "flameTrail": {
+      const s = flameTrailShape(level);
+      return (
+        (1000 / s.intervalMs) * (s.durationMs / s.tickMs) * FIRE_NOMINAL_TARGETS
+      );
+    }
+    case "sentryTotem": {
+      const s = sentryTotemShape(level);
+      return (1000 / s.intervalMs) * s.count * (s.durationMs / s.tickMs);
+    }
     case "meteorRain": {
       const s = meteorRainShape(level);
       return (1000 / s.intervalMs) * s.count * METEOR_NOMINAL_HITS;
@@ -238,6 +277,8 @@ export const CALIBRATION: Record<WeaponId, number[]> = {
   chainLightning: [1, 1, 1, 1, 1, 1],
   meteorRain: [1, 1, 1, 1, 1, 1],
   gravityWell: [1, 1, 1, 1, 1, 1],
+  flameTrail: [1, 1, 1, 1, 1, 1],
+  sentryTotem: [1, 1, 1, 1, 1, 1],
   novaPulse: [1, 1, 1, 1, 1, 1],
   orbitShield: [1, 1, 1, 1, 1, 1],
   // The blade pays the most exposure for the shortest reach, so it has to
@@ -268,15 +309,32 @@ export function oneSwingFloor(id: WeaponId, level: number): number {
   return BASIC_ENEMY_HP * (1 + ONE_SWING_HP_GROWTH_PER_LEVEL * (level - 1));
 }
 
+// Endless mode lets a weapon keep levelling past its evolved form. Each extra
+// level multiplies its per-hit damage, so the curve has no ceiling and can
+// keep pace with enemy health, which also grows without one.
+export const OVERDRIVE_DAMAGE_PER_LEVEL = 1.18;
+
+export function overdriveMult(level: number): number {
+  return OVERDRIVE_DAMAGE_PER_LEVEL ** Math.max(0, level - WEAPON_MAX_LEVEL);
+}
+
 // Per-hit damage before the run's damage multipliers.
 export function weaponDamage(id: WeaponId, level: number): number {
-  const raw = targetDps(id, level) / damageMultiplierPerS(id, level);
-  return Math.round(Math.max(raw, oneSwingFloor(id, level)) * 10) / 10;
+  const base = Math.min(level, WEAPON_MAX_LEVEL);
+  const raw = targetDps(id, base) / damageMultiplierPerS(id, base);
+  return (
+    Math.round(
+      Math.max(raw, oneSwingFloor(id, base)) * overdriveMult(level) * 10,
+    ) / 10
+  );
 }
 
 // What a weapon actually delivers at its authored damage, per second.
 export function effectiveDps(id: WeaponId, level: number): number {
-  return weaponDamage(id, level) * damageMultiplierPerS(id, level);
+  return (
+    weaponDamage(id, level) *
+    damageMultiplierPerS(id, Math.min(level, WEAPON_MAX_LEVEL))
+  );
 }
 
 // --- Recovery ----------------------------------------------------------

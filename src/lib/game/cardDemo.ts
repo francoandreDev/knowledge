@@ -1,7 +1,7 @@
 // Tiny looping scenes for the level-up cards: each pick shows itself working
 // in the case it was designed for, so the choice is made by looking, not by
 // reading a stat line. Pure drawing; the page owns the animation loop.
-import type { EnemyKind, WeaponId } from "./engine";
+import type { EnemyKind, SpecialId, WeaponId } from "./engine";
 import { drawBolt, drawMeteorWarning, drawNovaRing, drawSlash } from "./fx";
 import {
   drawCoin,
@@ -24,6 +24,7 @@ export interface DemoSpec {
   kind: "weaponUpgrade" | "newWeapon" | "stat" | "ability";
   weaponId?: WeaponId;
   statId?: string;
+  specialId?: SpecialId;
 }
 
 /** The one-line "best when" shown under each pick. */
@@ -37,6 +38,8 @@ const IDEAL: Record<string, string> = {
   chainLightning: "Best on a cluster: one strike jumps from foe to foe.",
   meteorRain: "Best on slow crowds: marked ground, then a rock lands on it.",
   gravityWell: "Best on a spread-out swarm: the well packs it into one spot.",
+  flameTrail: "Best while retreating: whatever chases you walks through fire.",
+  sentryTotem: "Best when you hold a spot: the totem keeps shooting for you.",
   powerSurge: "Every hit from every weapon lands harder.",
   adrenaline: "Outrun a pack: you pull away from what is chasing you.",
   thickSkin: "More health, and some of it healed on the spot.",
@@ -50,11 +53,16 @@ const IDEAL: Record<string, string> = {
   chill: "Enemies move slower: easier to kite and to dodge.",
   scholar: "Gems fill the level bar faster: more picks like this one.",
   spikes: "Whatever touches you gets hurt too.",
+  dash: "Best to escape a closing pack: slip through them untouched.",
+  slam: "Best when surrounded: everything near you is hit and shoved back.",
+  freeze: "Best against a rush: the crowd stops while you shoot or leave.",
+  barrier: "Best against a big hit: two seconds when nothing hurts you.",
   necromancy: "This run's boss becomes a Lich: weaker body, more tricks.",
 };
 
 export function idealCase(spec: DemoSpec): string {
-  if (spec.kind === "ability") return IDEAL.necromancy;
+  if (spec.kind === "ability")
+    return IDEAL[spec.specialId ?? "necromancy"] ?? IDEAL.necromancy;
   return IDEAL[spec.weaponId ?? spec.statId ?? ""] ?? "";
 }
 
@@ -299,6 +307,72 @@ const WEAPON_SCENE: Partial<Record<WeaponId, Scene>> = {
       c.restore();
     }
   },
+  flameTrail(c, p, t) {
+    const hx = 30 + seg(p, 0, 0.5) * 40;
+    hero(c, t, hx, HERO.y);
+    const flames: [number, number][] = [
+      [26, 0.1],
+      [42, 0.25],
+      [58, 0.4],
+    ];
+    for (const [fx, at] of flames) {
+      if (p < at || p > 0.93) continue;
+      c.save();
+      c.fillStyle = "rgba(154,52,18,0.4)";
+      c.beginPath();
+      c.ellipse(fx, 58, 12, 6, 0, 0, Math.PI * 2);
+      c.fill();
+      for (let k = 0; k < 3; k++) {
+        const h = 6 + 4 * Math.sin(t / 110 + k * 1.7 + fx);
+        c.fillStyle = k % 2 ? "#fb923c" : "#fbbf24";
+        c.beginPath();
+        c.moveTo(fx - 7 + k * 7 - 3, 58);
+        c.quadraticCurveTo(
+          fx - 7 + k * 7,
+          58 - h * 1.6,
+          fx - 7 + k * 7 + 3,
+          58,
+        );
+        c.fill();
+      }
+      c.restore();
+    }
+    target(c, p, 0.62, "zombie", 36, 54, t);
+    target(c, p, 0.7, "zombie", 22, 56, t);
+  },
+  sentryTotem(c, p, t) {
+    hero(c, t);
+    const tx = 62;
+    const grow = seg(p, 0, 0.12);
+    c.save();
+    c.globalAlpha = grow;
+    c.fillStyle = "#78716c";
+    c.fillRect(tx - 5, 40, 10, 20);
+    c.fillStyle = "#a8a29e";
+    c.fillRect(tx - 5, 40, 3, 20);
+    const shot = [0.3, 0.5, 0.7].some((a) => p > a && p < a + 0.06);
+    c.fillStyle = shot ? "#fef08a" : "#f59e0b";
+    c.beginPath();
+    c.arc(tx, 48, shot ? 4 : 3, 0, Math.PI * 2);
+    c.fill();
+    c.restore();
+    const foes: [number, number, number][] = [
+      [118, 40, 0.3],
+      [128, 58, 0.5],
+      [112, 66, 0.7],
+    ];
+    for (const [fx, fy, at] of foes) {
+      if (p > at && p < at + 0.06) {
+        c.strokeStyle = "#fde047";
+        c.lineWidth = 2;
+        c.beginPath();
+        c.moveTo(tx, 48);
+        c.lineTo(fx, fy);
+        c.stroke();
+      }
+      target(c, p, at, "zombie", fx, fy, t);
+    }
+  },
   meteorRain(c, p, t) {
     hero(c, t);
     const x = 100;
@@ -494,6 +568,77 @@ const STAT_SCENE: Record<string, Scene> = {
   },
 };
 
+const SPECIAL_SCENE: Record<SpecialId, Scene> = {
+  dash(c, p, t) {
+    const x = 26 + seg(p, 0.35, 0.5) * 70;
+    if (p > 0.35 && p < 0.7) {
+      c.save();
+      c.globalAlpha = 0.5 * (1 - seg(p, 0.5, 0.7));
+      c.fillStyle = "#7dd3fc";
+      c.fillRect(26, 44, x - 26, 10);
+      c.restore();
+    }
+    hero(c, t, p < 0.35 ? 26 : x, HERO.y);
+    foe(c, "zombie", 80 + Math.sin(t / 400) * 2, 52, t);
+    foe(c, "zombie", 64, 58, t);
+  },
+  slam(c, p, t) {
+    hero(c, t, 70, HERO.y);
+    const hit = seg(p, 0.3, 0.45);
+    const push = seg(p, 0.35, 0.6) * 18;
+    foe(c, "zombie", 104 + push, 52, t);
+    foe(c, "zombie", 36 - push, 56, t);
+    if (p > 0.3 && p < 0.75) {
+      drawNovaRing(c, 70, 56, 38, hit, "#fbbf24");
+    }
+  },
+  freeze(c, p, t) {
+    hero(c, t);
+    const frozen = p > 0.3 && p < 0.85;
+    const tt = frozen ? 0 : t;
+    for (const [x, y] of [
+      [92, 40],
+      [110, 56],
+      [78, 58],
+    ] as const) {
+      foe(c, "zombie", x - (frozen ? 0 : seg(p, 0.85, 1) * 10), y, tt);
+      if (frozen) {
+        c.strokeStyle = "#7dd3fc";
+        c.lineWidth = 2;
+        c.beginPath();
+        c.arc(x, y, 11, 0, Math.PI * 2);
+        c.stroke();
+      }
+    }
+    if (p > 0.25 && p < 0.5)
+      drawNovaRing(c, 30, 52, 70, seg(p, 0.25, 0.5), "#7dd3fc");
+  },
+  barrier(c, p, t) {
+    hero(c, t);
+    const on = p > 0.25 && p < 0.8;
+    if (on) {
+      c.save();
+      c.strokeStyle = "#fde047";
+      c.lineWidth = 3;
+      c.globalAlpha = 0.6 + 0.4 * Math.sin(t / 60);
+      c.beginPath();
+      c.arc(HERO.x, HERO.y, 17, 0, Math.PI * 2);
+      c.stroke();
+      c.restore();
+    }
+    const bump = seg(p, 0.45, 0.6);
+    foe(
+      c,
+      "ogre",
+      100 - bump * 52 + (p > 0.6 ? seg(p, 0.6, 0.8) * 14 : 0),
+      48,
+      t,
+      "#f97316",
+      11,
+    );
+  },
+};
+
 const ABILITY_SCENE: Scene = (c, p, t) => {
   hero(c, t);
   c.save();
@@ -518,7 +663,9 @@ export function drawCardDemo(c: Ctx, t: number, spec: DemoSpec) {
   c.setLineDash([]);
   const scene =
     spec.kind === "ability"
-      ? ABILITY_SCENE
+      ? spec.specialId
+        ? SPECIAL_SCENE[spec.specialId]
+        : ABILITY_SCENE
       : spec.kind === "stat"
         ? STAT_SCENE[spec.statId ?? ""]
         : WEAPON_SCENE[spec.weaponId as WeaponId];

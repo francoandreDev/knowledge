@@ -3347,3 +3347,25 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 - Everything here is an untested first guess; the endless ramp especially needs a long real run.
 
 - Endless upgrades (2026-10-29): shop upgrades have no top level any more (the price keeps following `base · (level+1)^1.5`), so endless mode never hits a ceiling. The stats that would break the game if they grew forever bend toward a cap instead of rising linearly (same slope at the start): speed +100%, pickup radius ×7, regeneration 8 HP/s, armor 60%, weapon speed +100%, crit 80%, kill heal 3 HP, thorns 200%, enemy slow 45%. Max HP, damage, coins and XP stay linear. The tiles show a level badge, and the five pips turn gold and start over after each lap. Note that `computePowerIndex` is the sum of levels, so boss strength also keeps climbing with them.
+
+### Expansion 4: Flame Trail, Sentry Totem, Cultist, Golem (2026-10-29)
+
+- **Flame Trail** weapon (shop unlock, 550 coins): drops burning ground at your feet that ticks damage on whatever stands in it. Evolves into Scorched Earth (wider fire laid twice as often).
+- **Sentry Totem** weapon (shop unlock, 700 coins): plants a totem beside you that shoots the nearest enemy within 270 px until it crumbles. Evolves into Twin Obelisks (two fast-firing totems).
+- **Enemies**: Cultist (210 s; keeps its distance and summons two weak zombies every 6.2 s) and Golem (320 s; takes half damage, cannot be dragged by a Gravity Well, and runs 2.4x faster once below half HP).
+- Both weapons have card demos, duel stand-ins, icons and sprite glyphs. All numbers are first guesses.
+
+### Run setup, endless scaling, HUD (2026-10-29)
+
+- **Starting weapon**: the lobby has an icon row (base five plus every unlocked weapon) under the Endless toggle; the pick is saved in `game:startWeapon` and passed to `startGame` as `startingWeapon`.
+- **Weapons scale without a ceiling in endless mode**: past the evolved form (Lv 6) the level-up pool offers "Overdrive" cards, each +18% damage (`overdriveMult` in `balance.ts`). Run boosts also stack without a limit in endless; armor, enemy slow and the other hard caps on the consuming side stay, since they are asymptotes.
+- **Pause**: a button in the HUD, Esc or P, and the tab losing focus; overlay with Resume and Quit run (`pause()`/`resume()` on the engine handle).
+- **HUD**: the top panel and the weapon chips moved out of the canvas so they no longer cover the map; the chips now show the weapon name, its level (Lv N, Evolved, Evolved +N) and kills in words.
+
+### Pick-one menu, special moves, elites, run styles (2026-10-29)
+
+- **Pick-one menu**: four icon tiles in a row; hover, focus, arrow keys, 1-4 or a first tap select one and a detail pane shows its looping demo, text and a "Take it" button (second tap, Enter or Space also takes it). Tiles carry a short badge (`2 → 3`, `NEW`, `×1 → 2`, `SPECIAL`), a style icon and a fit mark. The build strip is icons plus a number.
+- **Special moves** (level 3+, one held at a time, a new pick swaps it, Space/E or the HUD button, recharge shown as a fill): Dash (invulnerable burst forward), Ground Slam (damage and knockback around you), Time Freeze (nearby enemies nearly stop for 2.5 s), Aegis (2 s invulnerable).
+- **Elites** (the gold ring with a crown): 4.5x HP (was 2.2x), 1.8x contact damage (was 1.6x), 20% faster, and each living elite stretches the spawn interval by 20% (up to 60%).
+- **Run styles**: the opening weapon sets Brawler (Blade Arc, Orbit Shield, Flame Trail), Sharpshooter (Bolt, Homing Dart, Chain Lightning, Sentry Totem) or Arcanist (Nova Pulse, Meteor Rain, Gravity Well). Weapons of the style deal +10%; cards that fit it are drawn 3x as often, off-style ones 0.35x, neutral ones 1x; each card shows a match or off-style mark.
+- All numbers here are first guesses.
