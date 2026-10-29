@@ -400,6 +400,7 @@ import {
           <div class="panel-body">
             <div data-weapon-grid class="wp-grid"></div>
             <p data-weapon-desc class="wp-desc"></p>
+            <button type="button" data-weapon-buy class="wp-buy hidden">Unlock</button>
             <button type="button" data-weapon-go class="wp-go">Start</button>
           </div>
         </div>
@@ -1536,6 +1537,26 @@ import {
       color: #c9c2ff;
       font-size: 13px;
       font-weight: 600;
+    }
+    .wp-buy {
+      width: 100%;
+      margin-bottom: 8px;
+      padding: 10px;
+      color: #0d0a24;
+      background: #ffd23f;
+      border: 3px solid #0d0a24;
+      border-radius: 14px;
+      box-shadow: 0 3px 0 #0d0a24;
+      font-family: "Dela Gothic One", sans-serif;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    .wp-buy:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .wp-grid :global(.wp-tile.is-locked) {
+      opacity: 0.55;
     }
     .wp-go {
       width: 100%;
@@ -2692,6 +2713,7 @@ import {
         "flameTrail",
         "sentryTotem",
       ];
+      let inspected: WeaponId | null = null;
       function renderWeaponPicker() {
         const grid =
           weaponDialog?.querySelector<HTMLElement>("[data-weapon-grid]");
@@ -2703,13 +2725,31 @@ import {
         grid.innerHTML = ALL_START_WEAPONS.map((id) => {
           const locked = !owned.includes(id);
           const style = WEAPON_STYLE[id];
-          return `<button type="button" class="wp-tile" data-pick-weapon="${id}" aria-pressed="${id === startWeapon}" ${locked ? 'disabled title="Unlock it in Upgrades"' : ""}>${WEAPON_ICON[id] ?? ""}<span>${WEAPON_LABEL[id] ?? id}</span><span class="wp-tag">${STYLE_ICON[style]}${locked ? "Locked" : STYLE_NAMES[style]}</span></button>`;
+          return `<button type="button" class="wp-tile${locked ? " is-locked" : ""}" data-pick-weapon="${id}" aria-pressed="${id === startWeapon}" ${locked ? 'data-locked="true"' : ""}>${WEAPON_ICON[id] ?? ""}<span>${WEAPON_LABEL[id] ?? id}</span><span class="wp-tag">${STYLE_ICON[style]}${locked ? "Locked" : STYLE_NAMES[style]}</span></button>`;
         }).join("");
-        const style = WEAPON_STYLE[startWeapon];
-        desc.textContent = `${WEAPON_FLAVOR[startWeapon]} ${STYLE_NAMES[style]} style: its weapons hit 10% harder and matching boosts come up more often.`;
+        const shown = inspected ?? startWeapon;
+        const shownLocked = !owned.includes(shown);
+        const style = WEAPON_STYLE[shown];
+        const buy = weaponDialog?.querySelector<HTMLButtonElement>(
+          "[data-weapon-buy]",
+        );
+        if (shownLocked) {
+          const cost = UNLOCKS.find((u) => u.id === shown)?.cost ?? 0;
+          desc.textContent = `${WEAPON_LABEL[shown]} is locked. ${WEAPON_FLAVOR[shown]}`;
+          if (buy) {
+            buy.classList.remove("hidden");
+            buy.textContent = `Unlock for ${cost} coins`;
+            buy.disabled = getCoinBalance() < cost;
+            buy.dataset.id = shown;
+          }
+        } else {
+          desc.textContent = `${WEAPON_FLAVOR[shown]} ${STYLE_NAMES[style]} style: its weapons hit 10% harder and matching boosts come up more often.`;
+          buy?.classList.add("hidden");
+        }
       }
       function openWeaponPicker() {
         if (!weaponDialog) return wipeTo(() => launch(null));
+        inspected = null;
         renderWeaponPicker();
         weaponDialog.showModal();
         weaponDialog.querySelector<HTMLElement>("[data-weapon-go]")?.focus();
@@ -2720,7 +2760,13 @@ import {
           const btn = (e.target as HTMLElement).closest<HTMLButtonElement>(
             "[data-pick-weapon]",
           );
-          if (!btn || btn.disabled) return;
+          if (!btn) return;
+          if (btn.dataset.locked === "true") {
+            inspected = btn.dataset.pickWeapon as WeaponId;
+            renderWeaponPicker();
+            return;
+          }
+          inspected = null;
           startWeapon = btn.dataset.pickWeapon as WeaponId;
           try {
             localStorage.setItem(START_WEAPON_KEY, startWeapon);
@@ -2729,6 +2775,22 @@ import {
           }
           renderWeaponPicker();
           renderStartWeapon();
+        });
+      weaponDialog
+        ?.querySelector("[data-weapon-buy]")
+        ?.addEventListener("click", (e) => {
+          const id = (e.currentTarget as HTMLElement).dataset.id as WeaponId;
+          if (!id || !purchaseUnlock(id as never)) return;
+          inspected = null;
+          startWeapon = id;
+          try {
+            localStorage.setItem(START_WEAPON_KEY, startWeapon);
+          } catch {
+            /* a private window just forgets the pick */
+          }
+          renderWeaponPicker();
+          renderStartWeapon();
+          renderLobby();
         });
       weaponDialog
         ?.querySelector("[data-weapon-go]")

@@ -18,8 +18,6 @@
 const ICON_ATTRS =
   'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"';
 
-const ICON_BLADE = `<svg ${ICON_ATTRS}><line x1="5" y1="19" x2="19" y2="5"/><line x1="14" y1="5" x2="19" y2="5"/><line x1="19" y1="5" x2="19" y2="10"/><line x1="5" y1="19" x2="10" y2="19"/></svg>`;
-
 const ICON_BOLT = `<svg ${ICON_ATTRS} stroke-linejoin="round"><polygon points="13 2 4 14 11 14 9 22 20 10 13 10 13 2" fill="currentColor" stroke="none"/></svg>`;
 
 const ICON_SHIELD = `<svg ${ICON_ATTRS}><path d="M12 2 L20 6 L20 12 C20 17 16.5 20.5 12 22 C7.5 20.5 4 17 4 12 L4 6 Z"/><ellipse cx="12" cy="12" rx="7" ry="3" transform="rotate(20 12 12)"/></svg>`;
@@ -32,12 +30,6 @@ const ICON_DART = `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="3"/><circle cx=
 // (the locked 6th weapon). Distinct from ICON_BOLT (a single filled
 // lightning-bolt shape) since this weapon's whole identity is jumping
 // between multiple targets, not a straight single-target shot.
-const ICON_METEOR = `<svg ${ICON_ATTRS}><circle cx="16" cy="16" r="4" fill="currentColor" stroke="none"/><path d="M13 13 4 4"/><path d="M12 17 5 12"/><path d="M17 12 12 5"/></svg>`;
-const ICON_FLAME_TRAIL = `<svg ${ICON_ATTRS}><path d="M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 .3 1.2 1 2 2 2.2C10.5 8.5 11 5.5 12 3z"/></svg>`;
-const ICON_TOTEM = `<svg ${ICON_ATTRS}><path d="M8 21V7l4-4 4 4v14z"/><circle cx="12" cy="11" r="1.6" fill="currentColor" stroke="none"/><line x1="6" y1="21" x2="18" y2="21"/></svg>`;
-const ICON_WELL = `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/><path d="M12 4a8 8 0 0 1 8 8"/><path d="M12 20a8 8 0 0 1-8-8"/><path d="M12 7.5a4.5 4.5 0 0 1 4.5 4.5"/><path d="M12 16.5A4.5 4.5 0 0 1 7.5 12"/></svg>`;
-const ICON_CHAIN = `<svg ${ICON_ATTRS}><circle cx="4" cy="19" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="6" r="2" fill="currentColor" stroke="none"/><circle cx="20" cy="16" r="2" fill="currentColor" stroke="none"/><polyline points="4 19 9 11 12 8"/><polyline points="12 8 16 14 20 16"/></svg>`;
-
 // Phase 15 — a tombstone with a small rising wisp, "necromancy" (the locked
 // run-time ability). Distinct from ICON_SKULL (the kills stat, a literal
 // skull) — this represents raising the dead, not a body count.
@@ -107,6 +99,24 @@ const ICON_TRENDING_UP = `<svg ${ICON_ATTRS}><polyline points="3 17 9 11 13 15 2
 // a tally of what already did.
 const ICON_WARNING = `<svg ${ICON_ATTRS}><path d="M12 3 L22 20 L2 20 Z"/><line x1="12" y1="9" x2="12" y2="14"/><circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="currentColor"/></svg>`;
 
+// Weapon pictures: two-tone (a soft fill under the outline) and drawn to
+// read at a glance, each with the one detail that tells it from the rest.
+const WI =
+  'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
+const SOFT = 'fill="currentColor" fill-opacity="0.3"';
+const W_ICON = {
+  bladeArc: `<svg ${WI}><path d="M3 9c1-4 4-6.5 8-7" stroke-width="2.2"/><polygon points="18.5,3.5 20.5,5.5 10.5,15.5 8.5,13.5" ${SOFT}/><line x1="6" y1="13" x2="11" y2="18"/><line x1="8.5" y1="15.5" x2="4.5" y2="19.5"/><circle cx="3.8" cy="20.2" r="1.3" fill="currentColor"/></svg>`,
+  bolt: `<svg ${WI}><line x1="2" y1="9" x2="7" y2="9"/><line x1="1" y1="12" x2="7" y2="12"/><line x1="2" y1="15" x2="7" y2="15"/><polygon points="22,12 13,5.5 14.2,10 8.5,10 8.5,14 14.2,14 13,18.5" ${SOFT}/></svg>`,
+  orbitShield: `<svg ${WI}><ellipse cx="12" cy="12" rx="10" ry="5" transform="rotate(-28 12 12)" stroke-dasharray="2 2.4"/><circle cx="3.6" cy="15.5" r="1.9" fill="currentColor"/><circle cx="20.4" cy="8.5" r="1.9" fill="currentColor"/><path d="M12 6.5l4.2 1.6v3.6c0 3-2 4.6-4.2 5.6-2.2-1-4.2-2.6-4.2-5.6V8.1z" ${SOFT}/></svg>`,
+  novaPulse: `<svg ${WI}><circle cx="12" cy="12" r="2.6" fill="currentColor"/><circle cx="12" cy="12" r="6" ${SOFT}/><circle cx="12" cy="12" r="10" stroke-dasharray="3 2.6"/></svg>`,
+  homingDart: `<svg ${WI}><path d="M3 20C3.5 7 16 3.5 18.5 11.5" stroke-dasharray="1.2 3"/><polygon points="18.6,15.5 15.8,10.5 21.4,10.5" ${SOFT}/><circle cx="18.6" cy="20" r="2.2"/><circle cx="18.6" cy="20" r="0.7" fill="currentColor"/></svg>`,
+  chainLightning: `<svg ${WI}><path d="M6 17l2.6-4-1.4-.9 3.6-4.6"/><path d="M13.2 7.2l3.4 4.8-1.5 1 2.9 4"/><circle cx="4.5" cy="18.5" r="2.2" ${SOFT}/><circle cx="12" cy="5.5" r="2.2" ${SOFT}/><circle cx="19.5" cy="18.5" r="2.2" ${SOFT}/></svg>`,
+  meteorRain: `<svg ${WI}><line x1="12.5" y1="12.5" x2="3.5" y2="3.5"/><line x1="10" y1="15.5" x2="2.5" y2="11"/><line x1="15.5" y1="10" x2="11" y2="2.5"/><circle cx="16.5" cy="16.5" r="4.6" ${SOFT}/><circle cx="15.4" cy="15.4" r="0.9" fill="currentColor"/><circle cx="18" cy="17.8" r="0.7" fill="currentColor"/><circle cx="5.5" cy="19.5" r="1.4" fill="currentColor"/></svg>`,
+  gravityWell: `<svg ${WI}><path d="M12 12a1.5 1.5 0 0 1 3 0a3.5 3.5 0 0 1-7 0a5.5 5.5 0 0 1 11 0a7.5 7.5 0 0 1-15 0a9.5 9.5 0 0 1 19 0" stroke-width="1.9"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/></svg>`,
+  flameTrail: `<svg ${WI}><path d="M12 2c1.5 4.5 6 6.5 6 11.5a6 6 0 0 1-12 0c0-2.3 1.2-3.8 2.5-5 .4 1.6 1.2 2.6 2.2 3C10.4 8 10.8 5 12 2z" ${SOFT}/><path d="M12 20a2.8 2.8 0 0 1-2.8-2.8c0-1.5 1.2-2.2 1.8-3.4 1 .8 3.8 2 3.8 3.4A2.8 2.8 0 0 1 12 20z" fill="currentColor"/><circle cx="3.5" cy="21" r="1" fill="currentColor"/><circle cx="20.5" cy="21" r="1" fill="currentColor"/></svg>`,
+  sentryTotem: `<svg ${WI}><path d="M7 21V8l5-5 5 5v13z" ${SOFT}/><circle cx="12" cy="11" r="2" fill="currentColor"/><line x1="9.5" y1="16" x2="14.5" y2="16"/><line x1="4.5" y1="21" x2="19.5" y2="21"/><line x1="19.5" y1="9" x2="22.5" y2="7.5"/><line x1="19.5" y1="12" x2="22.5" y2="12"/></svg>`,
+};
+
 // Run styles (set by the opening weapon) and special moves.
 export const STYLE_ICON: Record<
   "brawler" | "sharpshooter" | "arcanist",
@@ -140,16 +150,16 @@ export const WEAPON_ICON: Record<
   | "sentryTotem",
   string
 > = {
-  bladeArc: ICON_BLADE,
-  bolt: ICON_BOLT,
-  orbitShield: ICON_SHIELD,
-  novaPulse: ICON_PULSE,
-  homingDart: ICON_DART,
-  chainLightning: ICON_CHAIN,
-  meteorRain: ICON_METEOR,
-  gravityWell: ICON_WELL,
-  flameTrail: ICON_FLAME_TRAIL,
-  sentryTotem: ICON_TOTEM,
+  bladeArc: W_ICON.bladeArc,
+  bolt: W_ICON.bolt,
+  orbitShield: W_ICON.orbitShield,
+  novaPulse: W_ICON.novaPulse,
+  homingDart: W_ICON.homingDart,
+  chainLightning: W_ICON.chainLightning,
+  meteorRain: W_ICON.meteorRain,
+  gravityWell: W_ICON.gravityWell,
+  flameTrail: W_ICON.flameTrail,
+  sentryTotem: W_ICON.sentryTotem,
 };
 
 // Pastel badge fill per concept, shared by the shop rows and the level-up
