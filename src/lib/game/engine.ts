@@ -1496,10 +1496,11 @@ const DEATH_CAUSE_BY_SOURCE: Record<string, string> = {
 };
 
 function describeDeathCause(
-  reason: "death" | "timer",
+  reason: "death" | "timer" | "quit",
   source: string | null,
 ): string {
   if (reason === "timer") return "Survived the full run";
+  if (reason === "quit") return "Ended the run";
   return (source && DEATH_CAUSE_BY_SOURCE[source]) || "Defeated";
 }
 
@@ -4242,7 +4243,7 @@ export function startGame(
     }
   }
 
-  function endGame(reason: "death" | "timer") {
+  function endGame(reason: "death" | "timer" | "quit") {
     if (status === "gameover") return;
     status = "gameover";
     const survivedS = Math.min(elapsedMs / 1000, runDurationS);
@@ -5615,6 +5616,14 @@ export function startGame(
       if (!loopPaused) return;
       loopPaused = false;
       loop.start();
+    },
+    /** The player ends the run from the pause menu: scored like a death. */
+    finish() {
+      if (loopPaused) {
+        loopPaused = false;
+        loop.start();
+      }
+      endGame("quit");
     },
     stop() {
       loopPaused = false;
