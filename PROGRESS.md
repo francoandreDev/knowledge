@@ -3369,3 +3369,5 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 - **Elites** (the gold ring with a crown): 4.5x HP (was 2.2x), 1.8x contact damage (was 1.6x), 20% faster, and each living elite stretches the spawn interval by 20% (up to 60%).
 - **Run styles**: the opening weapon sets Brawler (Blade Arc, Orbit Shield, Flame Trail), Sharpshooter (Bolt, Homing Dart, Chain Lightning, Sentry Totem) or Arcanist (Nova Pulse, Meteor Rain, Gravity Well). Weapons of the style deal +10%; cards that fit it are drawn 3x as often, off-style ones 0.35x, neutral ones 1x; each card shows a match or off-style mark.
 - All numbers here are first guesses.
+
+- Start weapon and touch (2026-10-29): pressing Start now opens a "Choose your weapon" dialog (big tiles with style tags, locked weapons dimmed, last pick preselected) before the run begins; the lobby icon row stays in sync. On touch devices a large floating special-move button with a recharge fill appears over the canvas corner, the pause button is bigger, and a "Drag anywhere to move" hint shows for a few seconds at the start.
