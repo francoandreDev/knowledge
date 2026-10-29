@@ -11,6 +11,7 @@ import {
   WEAPON_MAX_LEVEL,
   bladeArcShape,
   boltShape,
+  gravityWellShape,
   homingDartShape,
   meteorRainShape,
   novaPulseShape,
@@ -51,6 +52,7 @@ const WEAPON_FACTOR: Record<WeaponId, number> = {
   homingDart: 0.6,
   chainLightning: 0.75,
   meteorRain: 0.9,
+  gravityWell: 0.8,
   novaPulse: 1.6,
   orbitShield: 0.85,
   bladeArc: 3.2,
@@ -231,6 +233,8 @@ export function attackRange(weaponId: WeaponId, level: number, c: number) {
       return 100 + 220 * c;
     case "meteorRain":
       return 120 + 300 * c;
+    case "gravityWell":
+      return 110 + 280 * c;
     case "novaPulse":
       return novaPulseShape(level).radius * (0.6 + 0.9 * c);
     case "bladeArc":
@@ -397,6 +401,21 @@ function release(state: DuelState, f: Fighter, foe: Fighter, c: number) {
         y2: landed ? foe.y : f.y + Math.sin(f.aim) * reach,
       });
       if (landed) hit(state, foe, f, dmg, f.x, f.y);
+      return;
+    }
+    case "gravityWell": {
+      const r = gravityWellShape(f.level).radius * 0.7;
+      const landed = dist <= reach + FIGHTER_RADIUS;
+      const tx = landed ? foe.x : f.x + Math.cos(f.aim) * reach;
+      const ty = landed ? foe.y : f.y + Math.sin(f.aim) * reach;
+      state.events.push({
+        type: "nova",
+        side: f.side,
+        x: tx,
+        y: ty,
+        radius: r,
+      });
+      if (landed) hit(state, foe, f, dmg, tx, ty);
       return;
     }
     case "meteorRain": {
@@ -680,7 +699,8 @@ const isRanged = (id: WeaponId) =>
   id === "bolt" ||
   id === "homingDart" ||
   id === "chainLightning" ||
-  id === "meteorRain";
+  id === "meteorRain" ||
+  id === "gravityWell";
 
 /** A fighter that keeps its weapon's range, strafes, charges and lets go. */
 export function aiInput(

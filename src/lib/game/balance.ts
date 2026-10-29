@@ -40,6 +40,8 @@ export function exposure(id: WeaponId, level: number): number {
       return 0.1; // first hit is free, full value needs a cluster
     case "meteorRain":
       return 0.1; // lands from anywhere, but the rocks take a beat to fall
+    case "gravityWell":
+      return 0.1; // dropped on a distant cluster; it does the walking
     case "novaPulse":
       return 0.7 - (level - 1) * 0.04; // centered on you; radius grows with level
     case "orbitShield":
@@ -146,6 +148,17 @@ export function meteorRainShape(level: number) {
   };
 }
 
+export function gravityWellShape(level: number) {
+  const evolved = level >= WEAPON_MAX_LEVEL; // Singularity
+  return {
+    intervalMs: evolved ? 3000 : 5200 - (level - 1) * 400,
+    radius: evolved ? 120 : 62 + (level - 1) * 8,
+    durationMs: evolved ? 3400 : 1800 + level * 150,
+    tickMs: 300,
+    pullPxPerS: 70,
+  };
+}
+
 // --- Damage per hit, derived from the budget ---------------------------
 
 // How many "full hits" worth of damage one point of per-hit damage turns into
@@ -158,6 +171,7 @@ const NOVA_NOMINAL_TARGETS = 3;
 // lap, which with the 400ms hit cooldown is about two hits per lap, i.e. the
 // orbiter lands ~0.75 hits/s on it: 0.3 of the cooldown-limited ceiling.
 const ORBIT_CONTACT_UPTIME = 0.3;
+const WELL_NOMINAL_TARGETS = 3; // the pull packs them into one clump
 const METEOR_NOMINAL_HITS = 1.4; // a blast usually catches a small cluster
 const CHAIN_NOMINAL_HIT_CAP = 5; // "unlimited" jumps rarely find more
 
@@ -192,6 +206,12 @@ export function damageMultiplierPerS(id: WeaponId, level: number): number {
       const s = homingDartShape(level);
       return (1000 / s.intervalMs) * s.count;
     }
+    case "gravityWell": {
+      const s = gravityWellShape(level);
+      return (
+        (1000 / s.intervalMs) * (s.durationMs / s.tickMs) * WELL_NOMINAL_TARGETS
+      );
+    }
     case "meteorRain": {
       const s = meteorRainShape(level);
       return (1000 / s.intervalMs) * s.count * METEOR_NOMINAL_HITS;
@@ -217,6 +237,7 @@ export const CALIBRATION: Record<WeaponId, number[]> = {
   homingDart: [1, 1, 1, 1, 1, 1],
   chainLightning: [1, 1, 1, 1, 1, 1],
   meteorRain: [1, 1, 1, 1, 1, 1],
+  gravityWell: [1, 1, 1, 1, 1, 1],
   novaPulse: [1, 1, 1, 1, 1, 1],
   orbitShield: [1, 1, 1, 1, 1, 1],
   // The blade pays the most exposure for the shortest reach, so it has to

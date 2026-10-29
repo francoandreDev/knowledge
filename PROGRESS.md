@@ -3337,3 +3337,11 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 - Numbers for the new weapon, enemies and cards are first guesses; they need real play.
 
 - Level-up menu (2026-10-28): every card has a looping demo of its ideal case (21 scenes in `src/lib/game/cardDemo.ts`: seven weapons, thirteen boosts, the Necromancy ability), a "Best when…" line and pips showing the step (Lv 2 → 3, 1 → 2 of 5). A "Your build" strip above the cards lists owned weapons with level pips and boosts with their stacks and effect; hovering a card rings the chip it would change. The engine passes `fromLevel`, `stacks`, `maxStacks` on each card and a `LevelUpBuild` as a third `onLevelUp` argument. Checked offline on a rendered contact sheet, not yet in the live game.
+
+### Expansion 3: endless mode, Gravity Well, two enemies, two upgrades (2026-10-29)
+
+- **Endless mode**: a toggle under Start run. No timer; the HUD counts up. A boss arrives at 2:00 and again 150 s after each one falls (Reaper and Lich alternate, each 60% tougher and hitting 30% harder). Past 4:00 enemy HP keeps rising (+100% per extra 4 min, damage +50%), and veteran/elite enemies get more common. The run ends only on death; surviving 5:00 earns a chest. It has its own best time, shown on the lobby chips and the toggle.
+- **Gravity Well** weapon (shop unlock, 650 coins): opens a vortex on the thickest crowd within reach, drags enemies to its centre (bosses are hurt, not moved) and ticks damage. Evolves into Singularity (huge, long-lived). Duel weapon too.
+- **Enemies**: Spitter (130 s; keeps its distance and marks the ground where you stand, then leaves an acid puddle that burns for 5 s) and Phantom (170 s; blinks next to you every 3.6 s).
+- **Shop upgrades**: Thornmail (reflect 4% of contact damage per level) and Frostbite (enemies 2% slower per level).
+- Everything here is an untested first guess; the endless ramp especially needs a long real run.

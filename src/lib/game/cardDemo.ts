@@ -36,6 +36,7 @@ const IDEAL: Record<string, string> = {
   homingDart: "Best against the far, hard-to-aim enemy: the dart curves to it.",
   chainLightning: "Best on a cluster: one strike jumps from foe to foe.",
   meteorRain: "Best on slow crowds: marked ground, then a rock lands on it.",
+  gravityWell: "Best on a spread-out swarm: the well packs it into one spot.",
   powerSurge: "Every hit from every weapon lands harder.",
   adrenaline: "Outrun a pack: you pull away from what is chasing you.",
   thickSkin: "More health, and some of it healed on the spot.",
@@ -254,6 +255,48 @@ const WEAPON_SCENE: Partial<Record<WeaponId, Scene>> = {
         }
         from = [x, y];
       });
+    }
+  },
+  gravityWell(c, p, t) {
+    hero(c, t);
+    const cx = 100;
+    const cy = 48;
+    const grow = seg(p, 0.1, 0.25);
+    const spots: [number, number][] = [
+      [74, 24],
+      [130, 30],
+      [76, 66],
+      [128, 62],
+    ];
+    const pull = seg(p, 0.2, 0.7);
+    for (const [x, y] of spots) {
+      const px = x + (cx - x) * pull * 0.8;
+      const py = y + (cy - y) * pull * 0.8;
+      if (p < 0.78 || p > 0.93) {
+        c.save();
+        c.globalAlpha = p > 0.93 ? seg(p, 0.93, 1) : 1;
+        foe(c, "bat", px, py, t, "#f472b6");
+        c.restore();
+      } else drawImpactBurst(c, px, py, seg(p, 0.78, 0.93), "#c4b5fd");
+    }
+    if (p > 0.1 && p < 0.85) {
+      c.save();
+      c.globalAlpha = 0.9;
+      c.lineWidth = 3;
+      for (const [rad, col] of [
+        [30, "#c4b5fd"],
+        [18, "#a78bfa"],
+        [8, "#ddd6fe"],
+      ] as const) {
+        c.strokeStyle = col;
+        for (let k = 0; k < 3; k++) {
+          const a0 = t / 450 + (k * Math.PI * 2) / 3 + rad / 50;
+          c.beginPath();
+          c.arc(cx, cy, rad * (0.4 + 0.6 * grow), a0, a0 + 0.9);
+          c.stroke();
+        }
+      }
+      c.restore();
     }
   },
   meteorRain(c, p, t) {

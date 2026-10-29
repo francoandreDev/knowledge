@@ -27,7 +27,9 @@ export type UpgradeId =
   | "bulwark"
   | "haste"
   | "precision"
-  | "siphon";
+  | "siphon"
+  | "thornmail"
+  | "frostbite";
 
 export interface UpgradeDef {
   id: UpgradeId;
@@ -121,6 +123,20 @@ export const UPGRADES: UpgradeDef[] = [
     maxLevel: 5,
     baseCost: 25,
   },
+  {
+    id: "thornmail",
+    label: "Thornmail",
+    effectLabel: "Reflect 4% of contact damage",
+    maxLevel: 5,
+    baseCost: 30,
+  },
+  {
+    id: "frostbite",
+    label: "Frostbite",
+    effectLabel: "Enemies move 2% slower",
+    maxLevel: 5,
+    baseCost: 30,
+  },
 ];
 
 // Phase 15 — one-time "unlock" purchases, distinct from the leveled
@@ -132,7 +148,8 @@ export const UPGRADES: UpgradeDef[] = [
 // purchased, can appear as a one-time level-up card whose pick swaps the
 // run's boss from the Reaper to the Lich (different stats/attack pattern —
 // see engine.ts's `spawnBoss()`/`bossVariant`).
-export type UnlockId = "chainLightning" | "meteorRain" | "necromancy";
+export type UnlockId =
+  "chainLightning" | "meteorRain" | "gravityWell" | "necromancy";
 
 export interface UnlockDef {
   id: UnlockId;
@@ -153,6 +170,12 @@ export const UNLOCKS: UnlockDef[] = [
     label: "Meteor Rain",
     effectLabel: "Unlocks a 7th weapon — rocks fall on marked ground",
     cost: 500,
+  },
+  {
+    id: "gravityWell",
+    label: "Gravity Well",
+    effectLabel: "Unlocks an 8th weapon — drags enemies into a crushing clump",
+    cost: 650,
   },
   {
     id: "necromancy",
@@ -271,6 +294,8 @@ export function getUpgradeEffects(): UpgradeEffects {
   fx.haste += 0.04 * getUpgradeLevel("haste");
   fx.critChance += 0.03 * getUpgradeLevel("precision");
   fx.killHeal += 0.1 * getUpgradeLevel("siphon");
+  fx.thorns += 0.04 * getUpgradeLevel("thornmail");
+  fx.enemySlow += 0.02 * getUpgradeLevel("frostbite");
   // Relics stack additively on top of the shop's levels.
   const rel = relicEffects(getRelicLevels());
   fx.maxHpMult += rel.maxHpMult - 1;

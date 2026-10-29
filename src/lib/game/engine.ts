@@ -178,6 +178,7 @@ import {
   bladeArcShape,
   boltShape,
   chainLightningShape,
+  gravityWellShape,
   meteorRainShape,
   homingDartShape,
   novaPulseShape,
@@ -264,6 +265,8 @@ export type EnemyKind =
   | "boar"
   | "shaman"
   | "wasp"
+  | "phantom"
+  | "spitter"
   | "reaper"
   | "lich";
 
@@ -326,6 +329,14 @@ const LOW_HP_THRESHOLD = 0.25; // fraction of effective max HP
 
 // --- Phase 14: boss telegraph, mirrors the Phase 13 threat-toast pattern ---
 const BOSS_WARNING_LEAD_S = 4;
+
+// --- Endless mode ---
+const ENDLESS_FIRST_BOSS_S = 120;
+const ENDLESS_BOSS_GAP_S = 150;
+const ENDLESS_RAMP_START_S = 240; // past this the usual caps stop holding
+const ENDLESS_RAMP_S = 240; // +100% HP (and +50% damage) per this much more
+const ENDLESS_BOSS_HP_PER_CYCLE = 0.6;
+const ENDLESS_WON_AFTER_S = 300; // surviving this long earns a chest
 
 // 0..1, asymptotically approaching 1 — the shared curve shape driving both
 // enemy stat scaling and the threat-tier readout below.
@@ -450,6 +461,26 @@ const ENEMY_DEFS: EnemyDef[] = [
     weight: 3,
   },
   {
+    kind: "spitter",
+    unlockAtS: 130,
+    radius: 11,
+    speed: 30,
+    hp: 22,
+    contactDamage: 4,
+    color: "#65a30d",
+    weight: 2,
+  },
+  {
+    kind: "phantom",
+    unlockAtS: 170,
+    radius: 11,
+    speed: 58,
+    hp: 24,
+    contactDamage: 9,
+    color: "#8b5cf6",
+    weight: 2,
+  },
+  {
     kind: "boar",
     unlockAtS: 100,
     radius: 14,
@@ -491,6 +522,15 @@ const BOAR_RUSH_COOLDOWN_MS = 3600;
 const BOAR_TELEGRAPH_MS = 650;
 const BOAR_RUSH_MS = 480;
 const BOAR_RUSH_SPEED = 330;
+const PHANTOM_BLINK_MS = 3600;
+const PHANTOM_BLINK_DIST = 105;
+const SPITTER_KEEP_PX = 210;
+const SPITTER_INTERVAL_MS = 3400;
+const SPITTER_LAND_MS = 900;
+const ACID_POOL_RADIUS = 34;
+const ACID_POOL_MS = 5200;
+const ACID_TICK_MS = 500;
+const ACID_TICK_DAMAGE = 4;
 const SHAMAN_KEEP_PX = 170;
 const SHAMAN_HEAL_INTERVAL_MS = 4200;
 const SHAMAN_HEAL_RADIUS = 125;
@@ -671,7 +711,8 @@ export type WeaponId =
   | "novaPulse"
   | "homingDart"
   | "chainLightning"
-  | "meteorRain";
+  | "meteorRain"
+  | "gravityWell";
 
 // The 5 weapons every run starts eligible for, per the original roster.
 // Chain Lightning is deliberately excluded — it only joins a run's
@@ -696,6 +737,7 @@ const WEAPON_NAMES: Record<WeaponId, string> = {
   homingDart: "Homing Dart",
   chainLightning: "Chain Lightning",
   meteorRain: "Meteor Rain",
+  gravityWell: "Gravity Well",
 };
 
 const WEAPON_FLAVOR: Record<WeaponId, string> = {
@@ -707,6 +749,7 @@ const WEAPON_FLAVOR: Record<WeaponId, string> = {
   homingDart: "Seeking projectile that homes in on a random enemy.",
   chainLightning: "Strikes the nearest enemy, then arcs to nearby enemies.",
   meteorRain: "Marks ground under enemies; a rock lands there a beat later.",
+  gravityWell: "Opens a well on the thickest crowd that drags enemies in.",
 };
 
 const UPGRADE_BLURB: Record<WeaponId, string> = {
@@ -717,6 +760,7 @@ const UPGRADE_BLURB: Record<WeaponId, string> = {
   homingDart: "+dart, +damage, -cooldown",
   chainLightning: "+damage, +fire rate, +chain jumps",
   meteorRain: "+damage, +faster fall, +rocks, +blast size",
+  gravityWell: "+damage, +reach, +duration, -cooldown",
 };
 
 const EVOLVED_NAMES: Record<WeaponId, string> = {
@@ -727,6 +771,7 @@ const EVOLVED_NAMES: Record<WeaponId, string> = {
   homingDart: "Swarm",
   chainLightning: "Storm Chain",
   meteorRain: "Starfall",
+  gravityWell: "Singularity",
 };
 
 const EVOLUTION_BLURB: Record<WeaponId, string> = {
@@ -737,6 +782,7 @@ const EVOLUTION_BLURB: Record<WeaponId, string> = {
   homingDart: "Fires 5 homing darts in a spread",
   chainLightning: "Unlimited chain jumps within range",
   meteorRain: "Five huge rocks per volley, with a tremor on landing",
+  gravityWell: "A huge, long-lived well that crushes everything inward",
 };
 
 const MAX_EQUIPPED_WEAPONS = 4;
@@ -751,6 +797,7 @@ const ORBIT_TRAIL_VISUAL_RADIUS = 5;
 const SHOCKWAVE_KNOCKBACK = 40; // Nova Pulse evolution (Lv6)
 
 const PULSE_EFFECT_DURATION_MS = 300;
+const WELL_RANGE = 380; // wells open on crowds within this of the player
 const METEOR_RANGE = 420; // enemies further than this are not marked
 
 // Phase 11: shared "just got hit" feedback — a brief white flash on the hit
@@ -973,6 +1020,9 @@ export interface GameCallbacks {
 
 export interface GameOptions {
   /** Total run length in seconds — see tokens.ts's computeRunDurationS(). */
+  /** Endless mode: no timer, bosses return every few minutes and enemies keep
+   * getting tougher; the run ends only when you fall. */
+  endless?: boolean;
   durationS?: number;
   /** Permanent shop upgrade multipliers — see shop.ts's getUpgradeEffects(). */
   upgradeEffects?: UpgradeEffects;
@@ -1087,6 +1137,8 @@ interface Enemy extends GameObject {
   rushDy?: number;
   // shaman: heal pulse timer
   lastHealAt?: number;
+  // phantom: next blink
+  lastBlinkAt?: number;
 }
 
 // What is left behind where an enemy died: it plays out a death animation.
@@ -1294,6 +1346,9 @@ const DEATH_CAUSE_BY_SOURCE: Record<string, string> = {
   "contact:boar": "Gored by a Boar",
   "contact:shaman": "Caught by a Shaman",
   "contact:wasp": "Stung by a Wasp",
+  "contact:phantom": "Haunted by a Phantom",
+  "contact:spitter": "Caught by a Spitter",
+  "acid-pool": "Dissolved in acid",
   "bomber-blast": "Blown up by a Bomber",
   "imp-fire": "Burned by imp fire",
   "knight-bash": "Bashed by a Knight",
@@ -1337,7 +1392,18 @@ export function startGame(
   const renderScale = options.renderScale ?? 1;
   const WORLD_W = canvas.width / renderScale;
   const WORLD_H = canvas.height / renderScale;
-  const runDurationS = options.durationS ?? DEFAULT_RUN_DURATION_S;
+  const endless = options.endless ?? false;
+  // Past the usual ramp, endless keeps climbing: nothing is ever "late game".
+  const endlessExtra = (elapsedS: number) =>
+    endless ? Math.max(0, elapsedS - ENDLESS_RAMP_START_S) / ENDLESS_RAMP_S : 0;
+  const hpScaleAt = (elapsedS: number) =>
+    enemyTimeScale(elapsedS, ENEMY_HP_SCALE_CAP) + endlessExtra(elapsedS);
+  const damageScaleAt = (elapsedS: number) =>
+    enemyTimeScale(elapsedS, ENEMY_DAMAGE_SCALE_CAP) +
+    endlessExtra(elapsedS) * 0.5;
+  const runDurationS = endless
+    ? Infinity
+    : (options.durationS ?? DEFAULT_RUN_DURATION_S);
   const biome: Biome =
     options.biome ?? BIOMES[Math.floor(Math.random() * BIOMES.length)];
   const backdrop = createBackdrop(
@@ -1470,6 +1536,27 @@ export function startGame(
     at: number;
   }[] = [];
   const pulseEffects: PulseEffect[] = [];
+  // Spitter acid: a marked landing spot, then a puddle that burns whoever
+  // stands in it.
+  // Gravity Well: a vortex that drags the crowd in while it ticks damage.
+  const gravityWells: {
+    x: number;
+    y: number;
+    radius: number;
+    damage: number;
+    startedAt: number;
+    endsAt: number;
+    tickMs: number;
+    pullPxPerS: number;
+    lastTickAt: number;
+  }[] = [];
+  const acidShots: { x: number; y: number; startedAt: number }[] = [];
+  const acidPools: {
+    x: number;
+    y: number;
+    until: number;
+    lastTickAt: number;
+  }[] = [];
   // Meteor Rain: marked ground waiting for its rock to land.
   const meteorStrikes: {
     x: number;
@@ -1568,7 +1655,12 @@ export function startGame(
   let hudAccumulatorMs = 0;
   const HUD_UPDATE_INTERVAL_MS = 100; // throttle DOM writes, not every frame
 
-  const bossSpawnAtS = Math.max(20, runDurationS - 20);
+  // Endless: the first boss at 2 minutes, then one after each fall (or 3
+  // minutes after the last arrival), each tougher than the one before.
+  let bossSpawnAtS = endless
+    ? ENDLESS_FIRST_BOSS_S
+    : Math.max(20, runDurationS - 20);
+  let bossCycle = 0;
   let bossSpawned = false;
   let bossWarned = false; // Phase 14
   let bossPowerScale = 1; // set by spawnBoss(), used to scale ring damage too
@@ -1634,12 +1726,12 @@ export function startGame(
       unlockedPools.add(def.kind);
       log.log("pool:unlocked", { kind: def.kind, atS: elapsedS.toFixed(1) });
     }
-    const tier = pickEnemyTier(powerIndex);
+    const tier = pickEnemyTier(powerIndex + (endless ? elapsedS / 12 : 0));
     const { x, y } =
       packMate ?? spawnEdgePosition({ width: WORLD_W, height: WORLD_H });
     const sizeMult = TIER_SIZE_MULT[tier];
-    const timeHpScale = enemyTimeScale(elapsedS, ENEMY_HP_SCALE_CAP);
-    const timeDamageScale = enemyTimeScale(elapsedS, ENEMY_DAMAGE_SCALE_CAP);
+    const timeHpScale = hpScaleAt(elapsedS);
+    const timeDamageScale = damageScaleAt(elapsedS);
     const sprite = Sprite({
       x,
       y,
@@ -1687,8 +1779,8 @@ export function startGame(
   function spawnBoss() {
     const powerScale = 1 + BOSS_POWER_SCALING_PER_POINT * powerIndex;
     const elapsedS = elapsedMs / 1000;
-    const timeHpScale = enemyTimeScale(elapsedS, ENEMY_HP_SCALE_CAP);
-    const timeDamageScale = enemyTimeScale(elapsedS, ENEMY_DAMAGE_SCALE_CAP);
+    const timeHpScale = hpScaleAt(elapsedS);
+    const timeDamageScale = damageScaleAt(elapsedS);
     const isLich = bossVariant === "lich";
     const radius = isLich ? LICH_RADIUS : REAPER_RADIUS;
     const baseHp = isLich ? LICH_HP : REAPER_HP;
@@ -1705,7 +1797,11 @@ export function startGame(
     }) as unknown as Enemy;
     sprite.kind = isLich ? "lich" : "reaper";
     sprite.tier = "normal"; // the boss is unique per run, not tiered
-    sprite.hp = baseHp * powerScale * timeHpScale;
+    sprite.hp =
+      baseHp *
+      powerScale *
+      timeHpScale *
+      (1 + ENDLESS_BOSS_HP_PER_CYCLE * bossCycle);
     sprite.maxHp = sprite.hp;
     sprite.alive = true;
     sprite.radius = radius;
@@ -1731,7 +1827,7 @@ export function startGame(
     // just powerIndex — folded into this one scale so
     // updateEnemyBehavior()'s existing `... * bossPowerScale` reads need no
     // per-variant change.
-    bossPowerScale = powerScale * timeDamageScale;
+    bossPowerScale = powerScale * timeDamageScale * (1 + 0.3 * bossCycle);
     log.log("boss:spawned", {
       variant: bossVariant,
       hp: sprite.hp,
@@ -1749,8 +1845,8 @@ export function startGame(
   function spawnMinion(x: number, y: number, elapsedS: number) {
     if (enemies.length >= MAX_ALIVE_ENEMIES) return;
     const def = ENEMY_DEFS.find((d) => d.kind === "zombie")!;
-    const timeHpScale = enemyTimeScale(elapsedS, ENEMY_HP_SCALE_CAP);
-    const timeDamageScale = enemyTimeScale(elapsedS, ENEMY_DAMAGE_SCALE_CAP);
+    const timeHpScale = hpScaleAt(elapsedS);
+    const timeDamageScale = damageScaleAt(elapsedS);
     const sprite = Sprite({
       x,
       y,
@@ -1777,7 +1873,7 @@ export function startGame(
   // The shaman's pulse: every hurt enemy near it regains a share of its health.
   function healAround(shaman: Enemy) {
     const elapsedS = elapsedMs / 1000;
-    const timeHpScale = enemyTimeScale(elapsedS, ENEMY_HP_SCALE_CAP);
+    const timeHpScale = hpScaleAt(elapsedS);
     for (const o of enemies) {
       if (!o.alive || o === shaman || o.kind === "reaper" || o.kind === "lich")
         continue;
@@ -1804,8 +1900,8 @@ export function startGame(
   function spawnSlimelets(from: Enemy) {
     const def = ENEMY_DEFS.find((d) => d.kind === "slime")!;
     const elapsedS = elapsedMs / 1000;
-    const timeHpScale = enemyTimeScale(elapsedS, ENEMY_HP_SCALE_CAP);
-    const timeDamageScale = enemyTimeScale(elapsedS, ENEMY_DAMAGE_SCALE_CAP);
+    const timeHpScale = hpScaleAt(elapsedS);
+    const timeDamageScale = damageScaleAt(elapsedS);
     const start = Math.random() * Math.PI * 2;
     for (let i = 0; i < SLIME_SPLIT_COUNT; i++) {
       if (enemies.length >= MAX_ALIVE_ENEMIES) return;
@@ -1842,8 +1938,7 @@ export function startGame(
     const reach = BOMBER_BLAST_RADIUS + PLAYER_RADIUS;
     if (distance(player, e) <= reach) {
       damagePlayer(
-        BOMBER_BLAST_DAMAGE *
-          enemyTimeScale(elapsedMs / 1000, ENEMY_DAMAGE_SCALE_CAP),
+        BOMBER_BLAST_DAMAGE * damageScaleAt(elapsedMs / 1000),
         "bomber-blast",
         e.x,
         e.y,
@@ -1888,6 +1983,7 @@ export function startGame(
     "homingDart",
     "chainLightning",
     "meteorRain",
+    "gravityWell",
   ]);
   function weaponIdForSource(source: string): WeaponId | null {
     const normalized = source === "orbitShield-trail" ? "orbitShield" : source;
@@ -1909,6 +2005,9 @@ export function startGame(
         break;
       case "meteorRain":
         burst(particles, e.x, e.y, "#fdba74", 7, 210);
+        break;
+      case "gravityWell":
+        burst(particles, e.x, e.y, "#c4b5fd", 2, 70);
         break;
       case "novaPulse":
         ringPop(particles, e.x, e.y, "#fb923c", e.radius * 2);
@@ -2048,6 +2147,14 @@ export function startGame(
       if (e.kind === "reaper" || e.kind === "lich") {
         bossDefeated = true;
         log.log("boss:defeated", { variant: e.kind });
+        if (endless) {
+          // The next one is already on its way, and it is not the same boss.
+          bossCycle += 1;
+          bossSpawned = false;
+          bossWarned = false;
+          bossSpawnAtS = elapsedMs / 1000 + ENDLESS_BOSS_GAP_S;
+          bossVariant = bossVariant === "reaper" ? "lich" : "reaper";
+        }
       }
       const healPerKill = upgradeEffects.killHeal + killHealTemp;
       if (healPerKill > 0) {
@@ -2825,6 +2932,42 @@ export function startGame(
         }
         break;
       }
+      case "gravityWell": {
+        const shape = gravityWellShape(w.level);
+        if (elapsedMs - w.lastActionAt >= shape.intervalMs) {
+          // The thickest clump in reach: the enemy with the most company.
+          let best: Enemy | null = null;
+          let bestCount = 0;
+          for (const a of enemies) {
+            if (!a.alive || distance(player, a) > WELL_RANGE) continue;
+            let near = 0;
+            for (const o of enemies) {
+              if (o.alive && distance(a, o) <= shape.radius) near++;
+            }
+            if (near > bestCount) {
+              bestCount = near;
+              best = a;
+            }
+          }
+          if (best) {
+            w.lastActionAt = elapsedMs;
+            gravityWells.push({
+              x: best.x,
+              y: best.y,
+              radius: shape.radius,
+              damage: weaponDamage("gravityWell", w.level) * totalDamageMult(),
+              startedAt: elapsedMs,
+              endsAt: elapsedMs + shape.durationMs,
+              tickMs: shape.tickMs,
+              pullPxPerS: shape.pullPxPerS,
+              lastTickAt: elapsedMs,
+            });
+            if (!reduceMotion)
+              ringPop(particles, best.x, best.y, "#a78bfa", shape.radius);
+          }
+        }
+        break;
+      }
       case "meteorRain": {
         const {
           intervalMs: interval,
@@ -2991,6 +3134,8 @@ export function startGame(
         return chainLightningShape(w.level).intervalMs;
       case "meteorRain":
         return meteorRainShape(w.level).intervalMs;
+      case "gravityWell":
+        return gravityWellShape(w.level).intervalMs;
       case "novaPulse":
         return novaPulseShape(w.level).intervalMs;
       case "bladeArc":
@@ -3436,6 +3581,51 @@ export function startGame(
       }
       return;
     }
+    if (e.kind === "phantom") {
+      const def = ENEMY_DEFS.find((d) => d.kind === "phantom")!;
+      const angle = Math.atan2(player.y - e.y, player.x - e.x);
+      e.x += Math.cos(angle) * def.speed * dt;
+      e.y += Math.sin(angle) * def.speed * dt;
+      // It does not walk the whole way: it slips out and reappears close.
+      if (elapsedMs - (e.lastBlinkAt ?? e.spawnedAt ?? 0) >= PHANTOM_BLINK_MS) {
+        e.lastBlinkAt = elapsedMs;
+        if (!reduceMotion)
+          ringPop(particles, e.x, e.y, def.color, e.radius * 2.4);
+        const a = Math.random() * Math.PI * 2;
+        e.x = Math.max(
+          10,
+          Math.min(WORLD_W - 10, player.x + Math.cos(a) * PHANTOM_BLINK_DIST),
+        );
+        e.y = Math.max(
+          10,
+          Math.min(WORLD_H - 10, player.y + Math.sin(a) * PHANTOM_BLINK_DIST),
+        );
+        if (!reduceMotion) {
+          ringPop(particles, e.x, e.y, def.color, e.radius * 2.6);
+          burst(particles, e.x, e.y, def.color, 6, 120);
+        }
+      }
+      return;
+    }
+    if (e.kind === "spitter") {
+      const def = ENEMY_DEFS.find((d) => d.kind === "spitter")!;
+      const d = distance(player, e);
+      const toward = Math.atan2(player.y - e.y, player.x - e.x);
+      const angle =
+        d > SPITTER_KEEP_PX * 1.15
+          ? toward
+          : d < SPITTER_KEEP_PX * 0.75
+            ? toward + Math.PI
+            : toward + Math.PI / 2;
+      e.x += Math.cos(angle) * def.speed * dt;
+      e.y += Math.sin(angle) * def.speed * dt;
+      if (elapsedMs - (e.lastRangedAt ?? 0) >= SPITTER_INTERVAL_MS) {
+        e.lastRangedAt = elapsedMs;
+        // Aimed where you stand now: keep moving and it lands behind you.
+        acidShots.push({ x: player.x, y: player.y, startedAt: elapsedMs });
+      }
+      return;
+    }
     if (e.kind === "bomber") {
       const def = ENEMY_DEFS.find((d) => d.kind === "bomber")!;
       if (e.fuseAt) {
@@ -3582,6 +3772,9 @@ export function startGame(
     if (status === "gameover") return;
     status = "gameover";
     const survivedS = Math.min(elapsedMs / 1000, runDurationS);
+    const earnedChest = endless
+      ? survivedS >= ENDLESS_WON_AFTER_S
+      : reason === "timer";
     const coinsEarned = Math.round(coinsCollected * upgradeEffects.coinMult);
     const cause = describeDeathCause(reason, lastDamageSource);
     log.log("game:over", {
@@ -3600,7 +3793,7 @@ export function startGame(
       level: playerLevel,
       coinsEarned,
       cause,
-      won: reason === "timer",
+      won: earnedChest,
       bossDefeated,
     });
   }
@@ -3995,6 +4188,54 @@ export function startGame(
       for (let i = enemyStrikes.length - 1; i >= 0; i--) {
         if (elapsedMs - enemyStrikes[i].at >= 220) enemyStrikes.splice(i, 1);
       }
+      for (let i = gravityWells.length - 1; i >= 0; i--) {
+        const g = gravityWells[i];
+        if (elapsedMs >= g.endsAt) {
+          gravityWells.splice(i, 1);
+          continue;
+        }
+        const tick = elapsedMs - g.lastTickAt >= g.tickMs;
+        if (tick) g.lastTickAt = elapsedMs;
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          const d = distance(g, e);
+          if (d > g.radius * 1.25) continue;
+          // Bosses are only hurt, never dragged.
+          if (e.kind !== "reaper" && e.kind !== "lich" && d > 4) {
+            const step = Math.min(d, g.pullPxPerS * dt);
+            e.x += ((g.x - e.x) / d) * step;
+            e.y += ((g.y - e.y) / d) * step;
+          }
+          if (tick && d <= g.radius) damageEnemy(e, g.damage, "gravityWell");
+        }
+      }
+      for (let i = acidShots.length - 1; i >= 0; i--) {
+        const a = acidShots[i];
+        if (elapsedMs - a.startedAt < SPITTER_LAND_MS) continue;
+        acidShots.splice(i, 1);
+        acidPools.push({
+          x: a.x,
+          y: a.y,
+          until: elapsedMs + ACID_POOL_MS,
+          lastTickAt: elapsedMs,
+        });
+        if (!reduceMotion) burst(particles, a.x, a.y, "#84cc16", 8, 130);
+      }
+      for (let i = acidPools.length - 1; i >= 0; i--) {
+        const pool = acidPools[i];
+        if (elapsedMs >= pool.until) {
+          acidPools.splice(i, 1);
+          continue;
+        }
+        if (
+          distance(player, pool) < ACID_POOL_RADIUS &&
+          elapsedMs - pool.lastTickAt >= ACID_TICK_MS
+        ) {
+          pool.lastTickAt = elapsedMs;
+          damagePlayer(ACID_TICK_DAMAGE, "acid-pool", pool.x, pool.y);
+          if (status !== "running") return;
+        }
+      }
       for (let i = meteorStrikes.length - 1; i >= 0; i--) {
         const m = meteorStrikes[i];
         if (elapsedMs - m.startedAt < m.delayMs) continue;
@@ -4084,13 +4325,15 @@ export function startGame(
       // swells in and out; in the last 30 s a stopwatch pulses, faster and
       // redder as the end nears.
       {
-        const left = Math.max(0, runDurationS - elapsedMs / 1000);
+        const left = endless
+          ? elapsedMs / 1000
+          : Math.max(0, runDurationS - elapsedMs / 1000);
         if (beatMs > 0) {
           const t = 1 - beatMs / beatTotalMs;
           const env = Math.sin(Math.PI * Math.min(1, t));
           drawBigTime(context, WORLD_W, WORLD_H, left, 0.2 * env, "#e2e8f0");
         }
-        if (feedbackOn && left <= 30 && left > 0) {
+        if (feedbackOn && !endless && left <= 30 && left > 0) {
           const urgent = left <= 10;
           const beatsPerS = urgent ? 2 : 1;
           const pulse = Math.pow(
@@ -4502,6 +4745,97 @@ export function startGame(
         );
       }
 
+      for (const g of gravityWells) {
+        const life = (elapsedMs - g.startedAt) / (g.endsAt - g.startedAt);
+        const fade = Math.min(1, life * 6, (1 - life) * 6);
+        context.save();
+        context.globalAlpha = 0.28 * fade;
+        context.fillStyle = "#4c1d95";
+        context.beginPath();
+        context.arc(g.x, g.y, g.radius, 0, Math.PI * 2);
+        context.fill();
+        context.globalAlpha = 0.9 * fade;
+        context.lineCap = "round";
+        for (let k = 0; k < 3; k++) {
+          const a0 = elapsedMs / 450 + (k * Math.PI * 2) / 3;
+          for (const [rr, w, col] of [
+            [g.radius * 0.92, 4, "#c4b5fd"],
+            [g.radius * 0.6, 3, "#a78bfa"],
+            [g.radius * 0.3, 2.5, "#ddd6fe"],
+          ] as const) {
+            context.lineWidth = w;
+            context.strokeStyle = col;
+            context.beginPath();
+            context.arc(g.x, g.y, rr, a0 + rr / 50, a0 + rr / 50 + 0.9);
+            context.stroke();
+          }
+        }
+        context.fillStyle = "#1e1b4b";
+        context.beginPath();
+        context.arc(g.x, g.y, g.radius * 0.12, 0, Math.PI * 2);
+        context.fill();
+        context.restore();
+      }
+      for (const pool of acidPools) {
+        const left = Math.min(1, (pool.until - elapsedMs) / 900);
+        context.save();
+        context.globalAlpha = 0.55 * left;
+        context.fillStyle = "#84cc16";
+        context.beginPath();
+        context.ellipse(
+          pool.x,
+          pool.y,
+          ACID_POOL_RADIUS,
+          ACID_POOL_RADIUS * 0.7,
+          0,
+          0,
+          Math.PI * 2,
+        );
+        context.fill();
+        context.globalAlpha = 0.9 * left;
+        context.lineWidth = 2;
+        context.strokeStyle = "#365314";
+        context.stroke();
+        context.fillStyle = "#d9f99d";
+        for (let k = 0; k < 3; k++) {
+          const ph = (elapsedMs / 700 + k / 3) % 1;
+          context.globalAlpha = (1 - ph) * left;
+          context.beginPath();
+          context.arc(
+            pool.x + (k - 1) * 12,
+            pool.y + 4 - ph * 10,
+            2.5,
+            0,
+            Math.PI * 2,
+          );
+          context.fill();
+        }
+        context.restore();
+      }
+      for (const a of acidShots) {
+        const t = Math.min(1, (elapsedMs - a.startedAt) / SPITTER_LAND_MS);
+        context.save();
+        context.setLineDash([5, 5]);
+        context.lineWidth = 2;
+        context.strokeStyle = "rgba(190,242,100,0.95)";
+        context.beginPath();
+        context.ellipse(
+          a.x,
+          a.y,
+          ACID_POOL_RADIUS * (1.25 - 0.25 * t),
+          ACID_POOL_RADIUS * (1.25 - 0.25 * t) * 0.7,
+          0,
+          0,
+          Math.PI * 2,
+        );
+        context.stroke();
+        context.setLineDash([]);
+        context.fillStyle = "#65a30d";
+        context.beginPath();
+        context.arc(a.x, a.y - (1 - t) * (1 - t) * 110, 5, 0, Math.PI * 2);
+        context.fill();
+        context.restore();
+      }
       for (const m of meteorStrikes) {
         const t = (elapsedMs - m.startedAt) / m.delayMs;
         if (t < 0) continue;

@@ -70,9 +70,35 @@ import {
               <button type="button" data-start-button class="ts-start">
                 <span class="ts-ico ts-ico-sky" set:html={MENU_ICON.start} />
                 <span class="ts-label ts-label-start"
-                  ><span data-icon-play class="hidden"></span>Start run</span
+                  ><span data-icon-play class="hidden"></span><span
+                    data-start-label>Start run</span
+                  ></span
                 >
                 <span data-start-tag class="ts-tag ts-green">free</span>
+              </button>
+              <button
+                type="button"
+                data-mode-toggle
+                class="ts-mode"
+                aria-pressed="false"
+              >
+                <svg
+                  viewBox="0 0 32 16"
+                  width="30"
+                  height="15"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="3.2"
+                  stroke-linecap="round"
+                  aria-hidden="true"
+                  ><path
+                    d="M16 8c-3-6-11-6-11 0s8 6 11 0c3-6 11-6 11 0s-8 6-11 0Z"
+                  ></path></svg
+                >
+                <span data-mode-label>Endless: off</span>
+                <span class="ts-mode-hint" data-mode-hint
+                  >no timer, bosses keep coming</span
+                >
               </button>
               <div class="ts-grid">
                 <button type="button" data-open-panel="duel" class="ts-tile">
@@ -270,7 +296,7 @@ import {
                       value="homingDart">Homing Dart</option
                     ><option value="chainLightning">Chain Lightning</option
                     ><option value="meteorRain">Meteor Rain</option><option
-                      value="meteorRain">Meteor Rain</option
+                      value="gravityWell">Gravity Well</option
                     ><option value="novaPulse">Nova Pulse</option><option
                       value="orbitShield">Orbit Shield</option
                     ><option value="bladeArc">Blade Arc</option></select
@@ -304,6 +330,8 @@ import {
                       >Bolt</option
                     ><option value="homingDart">Homing Dart</option><option
                       value="chainLightning">Chain Lightning</option
+                    ><option value="meteorRain">Meteor Rain</option><option
+                      value="gravityWell">Gravity Well</option
                     ><option value="novaPulse">Nova Pulse</option><option
                       value="orbitShield">Orbit Shield</option
                     ><option value="bladeArc">Blade Arc</option>
@@ -427,6 +455,7 @@ import {
                     <option value="homingDart">Homing Dart</option>
                     <option value="chainLightning">Chain Lightning</option>
                     <option value="meteorRain">Meteor Rain</option>
+                    <option value="gravityWell">Gravity Well</option>
                     <option value="novaPulse">Nova Pulse</option>
                     <option value="orbitShield">Orbit Shield</option>
                     <option value="bladeArc">Blade Arc</option>
@@ -1308,6 +1337,39 @@ import {
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 16px;
     }
+    .ts-mode {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      color: #c9c2ff;
+      background: transparent;
+      border: 3px dashed #5a4ca8;
+      border-radius: 16px;
+      font-family: "Dela Gothic One", sans-serif;
+      font-size: 15px;
+      cursor: pointer;
+      transition:
+        background 0.12s,
+        color 0.12s;
+    }
+    .ts-mode:hover {
+      background: rgba(90, 76, 168, 0.25);
+    }
+    .ts-mode[aria-pressed="true"] {
+      color: #0d0a24;
+      background: #43e0a0;
+      border: 3px solid #0d0a24;
+      box-shadow: 0 4px 0 #0d0a24;
+    }
+    .ts-mode-hint {
+      margin-left: auto;
+      font-family: system-ui, sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      opacity: 0.8;
+      text-align: right;
+    }
     .ts-tile {
       position: relative;
       display: flex;
@@ -1604,6 +1666,10 @@ import {
     import {
       getTokenCount,
       getBestTimeS,
+      getBestEndlessS,
+      recordEndlessResult,
+      getEndlessMode,
+      setEndlessMode,
       computeRunDurationS,
       consumeToken,
       recordRunResult,
@@ -1692,6 +1758,7 @@ import {
       );
       const lobbyBestEl =
         document.querySelector<HTMLElement>("[data-lobby-best]");
+      let endlessOn = getEndlessMode();
       const lobbyZeroMessage = document.querySelector<HTMLElement>(
         "[data-lobby-zero-message]",
       );
@@ -1874,6 +1941,7 @@ import {
         homingDart: "Homing Dart",
         chainLightning: "Chain Lightning",
         meteorRain: "Meteor Rain",
+        gravityWell: "Gravity Well",
         novaPulse: "Nova Pulse",
         orbitShield: "Orbit Shield",
         bladeArc: "Blade Arc",
@@ -2086,6 +2154,8 @@ import {
           ["boar", "#b45309"],
           ["shaman", "#16a34a"],
           ["wasp", "#facc15"],
+          ["phantom", "#8b5cf6"],
+          ["spitter", "#65a30d"],
         ] as const;
         const foes: {
           kind: (typeof KINDS)[number][0];
@@ -2253,6 +2323,14 @@ import {
         cardDemoRaf = requestAnimationFrame(frame);
       }
 
+      document
+        .querySelector<HTMLElement>("[data-mode-toggle]")
+        ?.addEventListener("click", () => {
+          endlessOn = !endlessOn;
+          setEndlessMode(endlessOn);
+          renderLobby();
+        });
+
       function renderLobby() {
         const tokens = getTokenCount();
         const daily = dailyFreeAvailable();
@@ -2260,8 +2338,26 @@ import {
         const best = getBestTimeS();
         const balance = getCoinBalance();
         lobbyTokensEl!.textContent = String(tokens).padStart(2, "0");
-        lobbyDurationEl!.textContent = `${duration} s`;
-        lobbyBestEl!.textContent = best > 0 ? formatTime(best) : "--";
+        const bestEndless = getBestEndlessS();
+        lobbyDurationEl!.textContent = endlessOn ? "∞" : `${duration} s`;
+        const shownBest = endlessOn ? bestEndless : best;
+        lobbyBestEl!.textContent = shownBest > 0 ? formatTime(shownBest) : "--";
+        document
+          .querySelector<HTMLElement>("[data-start-label]")!
+          .replaceChildren(endlessOn ? "Start endless" : "Start run");
+        const modeToggle =
+          document.querySelector<HTMLElement>("[data-mode-toggle]");
+        if (modeToggle) {
+          modeToggle.setAttribute("aria-pressed", String(endlessOn));
+          modeToggle.querySelector("[data-mode-label]")!.textContent = endlessOn
+            ? "Endless: on"
+            : "Endless: off";
+          modeToggle.querySelector("[data-mode-hint]")!.textContent = endlessOn
+            ? bestEndless > 0
+              ? `best ${formatTime(bestEndless)}`
+              : "until you fall"
+            : "no timer, bosses keep coming";
+        }
         lobbyCoinsEl!.textContent = String(balance);
         const coinsScore = document.querySelector<HTMLElement>(
           "[data-lobby-coins-score]",
@@ -2548,6 +2644,7 @@ import {
       const UNLOCK_ICON: Record<string, string> = {
         chainLightning: WEAPON_ICON.chainLightning,
         meteorRain: WEAPON_ICON.meteorRain,
+        gravityWell: WEAPON_ICON.gravityWell,
         necromancy: UI_ICON.necromancy,
       };
       function renderUnlocks() {
@@ -2837,6 +2934,7 @@ import {
         results!.classList.add("hidden");
         results!.classList.remove("flex");
 
+        const endless = !training && endlessOn;
         const durationS = training ? 120 : computeRunDurationS();
         const upgradeEffects = getUpgradeEffects();
         const powerIndex = computePowerIndex();
@@ -2847,6 +2945,7 @@ import {
             ? (["chainLightning"] as const)
             : []),
           ...(isUnlocked("meteorRain") ? (["meteorRain"] as const) : []),
+          ...(isUnlocked("gravityWell") ? (["gravityWell"] as const) : []),
         ];
         const abilityUnlocked = isUnlocked("necromancy");
         // Phase 16C: "Vampiric Might" needs the shop's raw Might level, not
@@ -2882,7 +2981,11 @@ import {
             onHudUpdate(state) {
               hpEl.textContent = `${Math.round(state.hp)}/${Math.round(state.maxHp)}`;
               hpBarEl.style.width = `${Math.max(0, Math.min(100, (state.hp / state.maxHp) * 100))}%`;
-              timerEl.textContent = `${state.timeRemaining.toFixed(1)}s`;
+              if (Number.isFinite(state.timeRemaining)) {
+                timerEl.textContent = `${state.timeRemaining.toFixed(1)}s`;
+              } else {
+                timerEl.textContent = `∞ ${formatTime(state.elapsedS)}`;
+              }
               timerEl.classList.toggle(
                 "animate-timer-urgent",
                 state.timeRemaining <= 30 && state.timeRemaining > 0,
@@ -2934,7 +3037,9 @@ import {
               log.log("onGameOver callback", summary);
               const isRecord = activeTraining
                 ? false
-                : recordRunResult(summary.survivedS);
+                : endless
+                  ? recordEndlessResult(summary.survivedS)
+                  : recordRunResult(summary.survivedS);
               if (!activeTraining) addCoins(summary.coinsEarned);
               if (activeTraining) {
                 resultsTraining.innerHTML = lastTrainingHtml;
@@ -2951,7 +3056,9 @@ import {
               countUp(resultsLevel, summary.level);
               countUp(resultsCoins, summary.coinsEarned);
               renderStars(
-                activeTraining ? -1 : starsFor(summary.survivedS, durationS),
+                activeTraining || endless
+                  ? -1
+                  : starsFor(summary.survivedS, durationS),
               );
               resultsRecord.classList.toggle("hidden", !isRecord);
               // Surviving the whole run wins a chest — golden if the boss fell.
@@ -3147,6 +3254,7 @@ import {
           },
           {
             durationS,
+            endless,
             renderScale: 2,
             upgradeEffects,
             powerIndex,

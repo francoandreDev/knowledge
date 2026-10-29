@@ -22,6 +22,7 @@ const WEAPONS: WeaponId[] = [
   "homingDart",
   "chainLightning",
   "meteorRain",
+  "gravityWell",
   "novaPulse",
   "orbitShield",
   "bladeArc",

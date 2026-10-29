@@ -1448,6 +1448,73 @@ function wasp(ctx: Ctx, r: number, color: string, t: number) {
   });
 }
 
+function phantom(ctx: Ctx, r: number, color: string, t: number) {
+  const sway = Math.sin(t * 0.005) * 0.12 * r;
+  // A tattered wraith: hood, ragged hem that ripples, two pale eyes.
+  poly(
+    ctx,
+    [
+      [-0.8 * r, -0.2 * r],
+      [0.8 * r, -0.2 * r],
+      [0.9 * r + sway, 1.0 * r],
+      [0.5 * r, 0.75 * r],
+      [0.2 * r - sway, 1.1 * r],
+      [-0.1 * r, 0.78 * r],
+      [-0.45 * r + sway, 1.08 * r],
+      [-0.9 * r, 0.9 * r],
+    ],
+    darken(color, 0.15),
+  );
+  dot(ctx, 0, -0.35 * r, 0.8 * r, color);
+  poly(
+    ctx,
+    [
+      [-0.55 * r, -0.8 * r],
+      [0, -1.4 * r],
+      [0.55 * r, -0.8 * r],
+    ],
+    color,
+  );
+  ell(ctx, 0, -0.3 * r, 0.46 * r, 0.4 * r, "#1e1b4b");
+  face(() => {
+    ctx.save();
+    ctx.shadowColor = "#ddd6fe";
+    ctx.shadowBlur = r * 0.5;
+    for (const s of [-1, 1])
+      inkDot(ctx, s * 0.18 * r, -0.32 * r, 0.1 * r, "#f5f3ff");
+    ctx.restore();
+  });
+}
+
+function spitter(ctx: Ctx, r: number, color: string, t: number) {
+  shadow(ctx, r, 0.9);
+  const puff = 1 + 0.08 * Math.sin(t * 0.008);
+  for (const s of [-1, 1]) {
+    ell(ctx, s * 0.6 * r, 0.8 * r, 0.3 * r, 0.18 * r, darken(color, 0.2));
+  }
+  // A squat toad with a swelling throat sac.
+  ell(ctx, 0, 0.2 * r, 0.95 * r, 0.75 * r, color);
+  ell(ctx, 0, 0.5 * r, 0.5 * r * puff, 0.38 * r * puff, "#d9f99d");
+  for (const s of [-1, 1]) {
+    dot(ctx, s * 0.5 * r, -0.4 * r, 0.3 * r, color);
+  }
+  face(() => {
+    for (const s of [-1, 1]) {
+      eye(ctx, s * 0.5 * r, -0.42 * r, 0.2 * r, 0, 0.03 * r, "#facc15");
+    }
+    for (const x of [-0.3, 0.3]) inkDot(ctx, x * r, 0.05 * r, 0.05 * r);
+    ink(
+      ctx,
+      [
+        [-0.3 * r, 0.3 * r],
+        [0, 0.34 * r],
+        [0.3 * r, 0.3 * r],
+      ],
+      Math.max(1.4, lw),
+    );
+  });
+}
+
 export function drawEnemyArt(
   ctx: Ctx,
   kind: EnemyKind,
@@ -1495,6 +1562,12 @@ export function drawEnemyArt(
       break;
     case "boar":
       boar(ctx, r, color, t);
+      break;
+    case "phantom":
+      phantom(ctx, r, color, t);
+      break;
+    case "spitter":
+      spitter(ctx, r, color, t);
       break;
     case "shaman":
       shaman(ctx, r, color, t);

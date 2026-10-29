@@ -23,6 +23,8 @@ import { pStorage } from "../profile";
 
 const TOKENS_KEY = "game:tokens";
 const BEST_TIME_KEY = "game:bestTimeS";
+const BEST_ENDLESS_KEY = "game:bestEndlessS";
+const ENDLESS_MODE_KEY = "game:endlessMode";
 
 const BASE_RUN_DURATION_S = 60;
 const RUN_DURATION_BONUS_PER_UNIT_S = 30;
@@ -88,4 +90,27 @@ export function recordRunResult(survivedS: number): boolean {
     return true;
   }
   return false;
+}
+
+/** Endless mode keeps its own record: its runs never compete with timed ones. */
+export function getBestEndlessS(): number {
+  const raw = pStorage.getItem(BEST_ENDLESS_KEY);
+  const n = raw ? parseFloat(raw) : 0;
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+export function recordEndlessResult(survivedS: number): boolean {
+  if (survivedS > getBestEndlessS()) {
+    pStorage.setItem(BEST_ENDLESS_KEY, String(survivedS));
+    return true;
+  }
+  return false;
+}
+
+export function getEndlessMode(): boolean {
+  return pStorage.getItem(ENDLESS_MODE_KEY) === "1";
+}
+
+export function setEndlessMode(on: boolean): void {
+  pStorage.setItem(ENDLESS_MODE_KEY, on ? "1" : "0");
 }
