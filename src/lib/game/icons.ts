@@ -117,6 +117,24 @@ const W_ICON = {
   sentryTotem: `<svg ${WI}><path d="M7 21V8l5-5 5 5v13z" ${SOFT}/><circle cx="12" cy="11" r="2" fill="currentColor"/><line x1="9.5" y1="16" x2="14.5" y2="16"/><line x1="4.5" y1="21" x2="19.5" y2="21"/><line x1="19.5" y1="9" x2="22.5" y2="7.5"/><line x1="19.5" y1="12" x2="22.5" y2="12"/></svg>`,
 };
 
+// Neon look for weapon pictures: each weapon glows in its own colour.
+export const WEAPON_NEON: Record<string, string> = {
+  bladeArc: "#e879f9",
+  bolt: "#facc15",
+  orbitShield: "#fde047",
+  novaPulse: "#fb923c",
+  homingDart: "#f472b6",
+  chainLightning: "#67e8f9",
+  meteorRain: "#f97316",
+  gravityWell: "#a78bfa",
+  flameTrail: "#fb923c",
+  sentryTotem: "#d6d3d1",
+};
+export function neonStyle(id: string): string {
+  const c = WEAPON_NEON[id] ?? "#c4b5fd";
+  return `color:${c};filter:drop-shadow(0 0 4px ${c})`;
+}
+
 // Run styles (set by the opening weapon) and special moves.
 export const STYLE_ICON: Record<
   "brawler" | "sharpshooter" | "arcanist",

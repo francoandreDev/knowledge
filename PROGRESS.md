@@ -3375,3 +3375,11 @@ Next: play the lab at levels 1 to 3 and say which weapons feel off; tune `EXPOSU
 - Weapon pictures and unlocking from the picker (2026-10-29): all ten weapon icons were redrawn two-tone with one telling detail each (sword with a slash, arrow with speed lines, orbiting shield, rings, curved dart to a target, linked nodes, meteor with tail, spiral, flame, totem with an eye). In the "Choose your weapon" dialog a locked weapon can now be clicked to see why it is locked and buy it with coins on the spot, then it becomes the pick.
 
 - End run (2026-10-29): the pause menu has an **End run** button (asks for a second tap) that finishes the run in either mode and scores it like a death: results screen, coins, best time, and in endless mode the chest after 5:00. The old exit is now "Abandon (no rewards)". Engine: `finish()` on the game handle, cause "Ended the run".
+
+### Option B everywhere (2026-10-29)
+
+Picked from the design canvas (icons B, HUD B, UI B):
+
+- **Icons (Neon)**: weapon pictures glow in their own colour (`WEAPON_NEON`, `neonStyle()` in `icons.ts`) on the HUD, level-up tiles, build strip, weapon picker and lobby row.
+- **HUD (Corners)**: HP as a ring around a portrait with the level badge, timer and threat pips top centre, pause and kills/gems/coins top right, weapons as a left column (icon with a recharge sweep, name, level, kills), XP as a thin bar along the bottom. The in-canvas weapon slots were removed (the engine now reports `ready` per weapon). The special-move button is the single round button bottom right on every device.
+- **UI (Dark glass)**: Chakra Petch font (`@fontsource/chakra-petch`), translucent blurred panels with thin light borders, neon accents on the lobby, panels, weapon picker, pause menu and the level-up screen.

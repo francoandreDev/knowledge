@@ -198,7 +198,6 @@ import {
   drawHeartRing,
   drawHitIndicator,
   drawSlamText,
-  drawWeaponSlot,
   drawDangerHalo,
   drawBigTime,
   drawBossBar,
@@ -1030,6 +1029,8 @@ export interface GameHudState {
     kills: number;
     /** Damage this weapon has actually dealt (overkill excluded). */
     damage: number;
+    /** 0..1: how recharged the weapon is (1 = ready to act). */
+    ready: number;
   }[];
   /** Seconds survived so far — lets the lab turn totals into rates. */
   elapsedS: number;
@@ -1865,6 +1866,12 @@ export function startGame(
         level: w.level,
         kills: weaponStats[w.id]?.kills ?? 0,
         damage: Math.round(weaponStats[w.id]?.damage ?? 0),
+        ready: (() => {
+          const interval = weaponIntervalMs(w);
+          return interval === null
+            ? 1
+            : Math.min(1, Math.max(0, (elapsedMs - w.lastActionAt) / interval));
+        })(),
       })),
       elapsedS: elapsedMs / 1000,
       regenPerS: hpRegenPerS + upgradeEffects.regenPerS,
@@ -5498,35 +5505,6 @@ export function startGame(
         );
       }
       context.restore();
-
-      // Equipped weapons: icon, cooldown sweep and level, bottom-left.
-      {
-        const slot = 30;
-        const gap = 6;
-        let sx0 = 10;
-        const sy0 = WORLD_H - slot - 10;
-        for (const w of ownedWeapons) {
-          const interval = weaponIntervalMs(w);
-          const ready =
-            interval === null
-              ? 1
-              : Math.min(
-                  1,
-                  Math.max(0, (elapsedMs - w.lastActionAt) / interval),
-                );
-          drawWeaponSlot(
-            context,
-            sx0,
-            sy0,
-            slot,
-            w.id,
-            w.level,
-            ready,
-            w.level >= WEAPON_MAX_LEVEL,
-          );
-          sx0 += slot + gap;
-        }
-      }
 
       if (bossIntro) {
         drawBossIntro(
