@@ -1,119 +1,88 @@
 ---
-title: "L3 — Proving the Scenario's folder-size function correct, and diagnosing a real bug with induction"
+title: "L3 — Proving a folder-size function correct, diagnosing a real bug, and writing recursion by induction"
 ---
 
+import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L2 established the shape of an inductive argument in the abstract —
-a base case, an inductive step, and the hidden conditions both depend
-on. L3 applies that structure to the Scenario's actual code, then uses
-it to diagnose a genuine bug without re-tracing anything.
+export const unit = {
+  track: "logic",
+  unitSlug: "induction",
+};
+
+<Scenario label="The folder-size function works on every tree in the test suite, and crashes for one customer.">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Tests</strong> — three hand-built trees, all totals right</div>
+      <div class="flex items-center gap-1.5"><span>💥</span> <strong>Production</strong> — one customer's account throws an error</div>
+      <div class="flex items-center gap-1.5"><span>🔎</span> <strong>The clue</strong> — that account has an empty folder somewhere</div>
+    </div>
+  </Fragment>
+
+The function sums a nested folder. The tests were three trees, each traced by
+hand, and every total matched. Then one customer's account throws an error.
+Re-tracing the function from the top shows nothing wrong. **If the tests
+passed and the logic reads correctly, what does the base case and step
+structure let you ask that re-tracing does not?**
+
+</Scenario>
 
 <LevelIntro
   items={[
     "The proof applied to real code",
-    "Diagnosing a bug via which part breaks",
-    "When induction doesn't apply yet",
+    "Diagnosing a bug by which part breaks",
+    "Writing recursion from the two facts",
   ]}
 />
 
-## The function, and its inductive proof
+## What are the base case and step in the real function?
 
-**Here's the Scenario's actual function. What are its base case and
-inductive step, concretely?**
-
-The data model is intentionally small:
-
-```js
-// A file is a leaf: it has a size and no children.
-{ type: "file", size: 10 }
-
-// A folder contains zero or more child files/folders.
-{ type: "folder", children: [...] }
-```
+**Here is the function. Where, concretely, are the two facts?** The data model
+is intentionally small: a file is `type: "file"` with a `size`, and a folder is
+`type: "folder"` with a `children` array.
 
 ```js
 function folderSize(node) {
-  if (node.type === "file") {
-    return node.size; // base case
-  }
-  return node.children.reduce((sum, child) => sum + folderSize(child), 0); // inductive step
+  if (node.type === "file") return node.size; // base case
+  return node.children.reduce((sum, child) => sum + folderSize(child), 0); // step
 }
 ```
 
-**Base case:** a file node has no children — `folderSize` returns its
-`size` directly, with no recursion. This is trivially correct, since
-"total size" for a single file is just that file's size; there are no
-smaller parts left to add.
+**Base case:** a file has no children, so it returns its size with no
+recursion. **Inductive step:** for a folder, assume each child's call already
+returns that child's correct total; the sum of correct sub-totals is the
+correct total for the folder. That argument never mentions how deep any
+particular child is.
 
-**Inductive step:** for a folder node, the function calls
-`folderSize` on each child and sums the results. By the inductive
-hypothesis, each recursive call on a child (which is a smaller
-sub-tree than the current node) already returns that child's correct
-total size. Summing correct sub-totals gives the correct total for
-the parent folder — this is a straightforward, one-level argument
-that never had to think about how deep any particular child actually
-is.
+For this tree the call structure is:
 
-If `reduce` is new, here is the same inductive step written with a
-plain loop. The proof is the same; only the JavaScript helper changed:
-
-```js
-function folderSizeWithLoop(node) {
-  if (node.type === "file") return node.size;
-
-  let total = 0;
-  for (const child of node.children) {
-    total += folderSizeWithLoop(child);
-  }
-  return total;
-}
+```mermaid
+flowchart TD
+    R["folder: root = 35"] --> F1["file 10"]
+    R --> S["folder: sub = 25"]
+    S --> F2["file 20"]
+    S --> F3["file 5"]
+    S --> E["folder: empty = 0"]
 ```
 
-```js
-const tree = {
-  type: "folder",
-  children: [
-    { type: "file", size: 10 },
-    {
-      type: "folder",
-      children: [
-        { type: "file", size: 20 },
-        { type: "file", size: 5 },
-        { type: "folder", children: [] },
-      ],
-    },
-  ],
-};
+Result: `10 + (20 + 5 + 0) = 35`. The proof did not need that trace; 35 falls out
+as one instance of the general guarantee.
 
-folderSize(tree); // 35
-```
+<Checkpoint question="This tree contains an empty folder. From the base case and step alone, what must folderSize return for it, and why?">
 
-One trace of this specific tree says: `10 + (20 + 5 + 0) = 35`.
-Notice the proof above never depended on tracing this specific tree —
-it argued
-correctness for _any_ tree shape, and this particular result (35)
-falls out as one instance of that general guarantee, not something
-that had to be separately verified by hand.
-
-<Checkpoint question="Before reading the buggy version below: this tree includes an empty folder (`{ type: 'folder', children: [] }`). Purely from the base case and inductive step just defined, what does the inductive argument say `folderSize` must return for an empty folder, and why?">
-
-It must return `0`. An empty folder's `children` array has zero
-elements, so the inductive step sums zero sub-totals — and a sum of
-zero elements is `0` by definition, the same way an empty shopping
-cart totals `$0`. This isn't a special case bolted onto the proof; it
-falls straight out of "sum the children's correct sub-totals" applied
-to a children list with nothing in it. Any implementation that
-doesn't return `0` for an empty folder is violating the inductive
-step's own logic, not introducing some separate new rule.
+It must return `0`. An empty folder has zero children, so the step sums zero
+sub-totals, and a sum of nothing is `0`, the same way an empty cart totals
+nothing. This is not a special case added to the proof; it falls straight out of
+"sum the children's correct totals" with an empty list of children. Any
+implementation that does not return `0` is violating the step itself.
 
 </Checkpoint>
 
-## A real bug, diagnosed by asking which part of the argument breaks
+## Which part of the argument does the bug break?
 
-**Here's a version with a genuine bug. Which part of the inductive
-argument does it actually violate?**
+**The customer's account crashes. Which of the two facts is it violating?**
 
 ```js
 function folderSizeBuggy(node) {
@@ -122,105 +91,106 @@ function folderSizeBuggy(node) {
 }
 ```
 
-```js
-folderSizeBuggy(tree); // throws: Reduce of empty array with no initial value
-```
+The only difference is the missing `0` after the callback. With no initial
+value, `reduce` on an empty array throws "Reduce of empty array with no initial
+value." Trees with no empty folder never reach that line, which is exactly why
+hand-picked examples missed it.
 
-The example `tree` contains `{ type: "folder", children: [] }`, so
-`folderSizeBuggy(tree)` eventually reaches an empty folder and throws.
-The bug is a missing initial value on `reduce`. Tracing wouldn't
-necessarily catch this — plenty of trees have no empty folders
-anywhere, and would trace through fine. Framing it through induction
-finds it immediately: the **base case for an empty folder's
-children array** (an empty list has no elements, so the "total" of
-nothing should be `0`) was never actually handled — `reduce` with no
-initial value throws on an empty array instead of returning `0`. This
-isn't a deep-recursion bug at all; it's a base-case gap that only
-shows up on a specific kind of input (an empty folder), which is
-exactly the kind of thing hand-tracing a few "normal-looking" example
-trees is likely to miss entirely.
+Asking "which part breaks?" finds it immediately. The combining logic is fine.
+What is missing is the behavior for a folder with zero children: a base case
+hiding inside what looked like the step. Adding the `0` fixes both the crash and
+the proof.
 
-**Why does asking "which part of the argument does this violate" find
-the bug faster than re-tracing?** Because it narrows the search
-immediately: this bug isn't in how results are combined (the
-inductive step's logic is fine) — it's specifically that one input
-shape (empty children) was never given a correct base-case behavior.
-Knowing the argument's structure tells you exactly where to look,
-instead of re-walking the whole function from scratch.
+| Symptom                                | Part of the argument to inspect         |
+| -------------------------------------- | --------------------------------------- |
+| Wrong on the smallest inputs           | Base case                               |
+| Right on small inputs, wrong on bigger | The step that combines child results    |
+| Never terminates                       | Strictly smaller calls / finiteness     |
+| Wrong only on oddly shaped input       | Hidden conditions about the input shape |
 
-## Confirming the fix restores both parts of the argument
+<Checkpoint question="A function finds the deepest nesting level: 0 for a file, and for a folder 1 + Math.max over its children's depths. What does it return for an empty folder, and which part of the argument is at fault?">
 
-```js
-function folderSizeFixed(node) {
-  if (node.type === "file") return node.size;
-  return node.children.reduce((sum, child) => sum + folderSizeFixed(child), 0);
-}
-```
-
-Adding the `0` initial value gives `reduce` a correct answer for the
-empty-array case: summing zero elements starting from `0` correctly
-returns `0`, which is exactly what an empty folder's total size
-should be. The inductive step's logic (sum the children's correct
-sub-totals) was never wrong — it just needed a correct answer for the
-special case of _zero_ children, which is really a base case hiding
-inside what looked like the inductive step.
-
-<Checkpoint question="A different recursive function that finds the deepest nesting level in the same folder/file tree returns 0 for a single file and, for a folder, `1 + max(deepest of each child)`. Using the same 'which part of the argument does this violate' approach: what should this function return for an empty folder, and what happens if the code instead calls `Math.max()` with no arguments there?">
-
-It should return `1` — an empty folder is one level deeper than
-nothing, even though it has no children to recurse into; the "deepest
-child" contribution for an empty children list is genuinely absent,
-not zero. If the code calls `Math.max()` with no arguments to get
-"the deepest of zero children," it gets `-Infinity` back (JavaScript's
-identity value for `Math.max` with nothing to compare), which would
-make an empty folder's depth compute as `1 + -Infinity`, silently
-producing `-Infinity` instead of `1`. Same failure category as the
-`reduce` bug: an empty-children base case was assumed to be handled by
-the general combining logic when it actually needed its own explicit
+`Math.max()` with no arguments returns `-Infinity`, so an empty folder computes
+`1 + -Infinity`, which is `-Infinity`, silently wrong rather than a crash. An
+empty folder is one level deep, so the right answer is `1`. It is the same
+failure category as the `reduce` bug: an empty-children base case was assumed
+to be covered by the general combining logic when it needed its own explicit
 answer.
 
 </Checkpoint>
 
-## When induction does not apply yet
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="diagnose-with-induction"
+/>
 
-Sometimes the right conclusion is not "the proof failed," but "the
-input model is not ready for this proof."
+## How do you write a recursive function from the two facts?
+
+**If the proof pattern is "base case plus step," can you run it backwards to
+write the code?** Yes, and it is the reliable way to write recursion without
+tracing. Ask two questions in order:
+
+1. **What is the simplest input, and what is the answer for it?** That is the
+   base case. Include "nothing there" inputs: empty folder, empty list, zero.
+2. **If a call on every smaller piece already returns the right answer, how do I
+   combine those answers into mine?** That is the step.
+
+For the deepest-level function above, the two answers are: a file is `0`; a
+folder is `1` more than its deepest child, and `1` alone when there are no
+children. Written down, the second answer needs its own line:
+
+```js
+function maxDepth(node) {
+  if (node.type === "file") return 0;
+  if (node.children.length === 0) return 1; // the hidden base case
+  return 1 + Math.max(...node.children.map(maxDepth));
+}
+```
+
+Each recursive call takes a child, which is strictly smaller than `node`, so
+the descent ends at files and empty folders.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="recursive-code"
+/>
+
+## When does induction not apply yet?
+
+Sometimes the conclusion is not "the proof failed" but "the input model is not
+ready for this proof."
 
 | Input problem                               | What must happen first                                 |
 | ------------------------------------------- | ------------------------------------------------------ |
-| A folder can reference one of its ancestors | Detect/reject cycles or change the algorithm           |
+| A folder can reference one of its ancestors | Detect or reject cycles, or change the algorithm       |
 | A node has no `type`                        | Validate the data before calling `folderSize`          |
-| A file is missing `size`                    | Define how invalid files are handled                   |
+| A file is missing `size`                    | Define how invalid files are handled (it yields `NaN`) |
 | Children can be generated forever           | Add a finite stopping rule before claiming correctness |
 
-This connects to `logic/state-machines`: good models make invalid
-shapes impossible or explicit instead of letting the algorithm discover
-them accidentally.
+This connects to `logic/state-machines`: good models make invalid shapes
+impossible or explicit instead of letting the algorithm find them by accident.
 
-## What generalizes and what doesn't
+## This is a case, not the whole territory
 
-The core lesson — a base case and an inductive step, verified once
-each, give a correctness guarantee that scales to any depth, and
-diagnosing a bug by asking which part of that argument breaks is
-faster and more reliable than re-tracing — generalizes to any
-recursive structure: parsing nested expressions, walking a
-dependency graph, computing over a tree-shaped data model. What's
-specific to this worked example: the exact base case (a file node)
-and inductive step (summing children) are particular to this folder
-model — a different recursive structure (say, one where a node can
-have a _shared_ child referenced from two parents) needs its own,
-different inductive argument, and might not even have a
-well-founded induction at all if cycles are possible. **Try
-extending it yourself:** if a folder's `children` array could
-contain a reference back to one of its own ancestor folders (a
-cycle), would `folderSize`'s inductive argument still hold — and what
-specifically about "smaller sub-problem" would break?
+The worked example is one data model. The lesson that generalizes is that a
+base case and a step, each checked once, scale to any depth, and that a bug is
+found fastest by asking which of the two it violates. What is specific here is
+the shape: files as leaves and folders as sums. A structure where a child can
+be shared between two parents needs a different argument, and one that allows
+cycles may have no valid induction at all.
+
+**Try extending it yourself.** What if the question were "how many folders are
+in this tree," not "how big is it"? What are the base case and the step, and does
+an empty folder count? What if a link could point back to an ancestor: which
+part of "strictly smaller" breaks, and what would you add to restore it?
 
 ## Failure modes
 
-| Failure mode                                                                        | What it gets wrong                                                                                                                                                              |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Treating a few successfully-traced examples as a correctness proof                  | Tracing only covers the specific inputs tried — an inductive argument is what actually generalizes to every input, including ones never tried                                   |
-| Debugging a recursive function by re-tracing from scratch every time                | Asking specifically which part of the base case or inductive step is violated narrows the search far faster than re-walking the whole call chain                                |
-| Missing a base case that's "hiding" inside what looks like ordinary logic           | An empty collection, a zero-length input, or a leaf with unusual properties can be a base case in disguise, easy to miss if it's not treated as one                             |
-| Assuming induction requires every recursive structure to be provably correct at all | Some recursive structures (like ones allowing cycles) genuinely aren't well-founded for induction — recognizing that is itself a useful outcome, not a failure of the technique |
+| Failure mode                                           | What it gets wrong                                                           |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| Treating traced examples as a proof                    | Tracing covers only the inputs tried                                         |
+| Re-tracing from scratch to debug                       | Asking which part breaks narrows the search to the base case or the step     |
+| Missing a base case hidden inside ordinary logic       | Empty collections and zero-length inputs are base cases in disguise          |
+| Applying the proof to inputs that break its conditions | Cycles, infinite structures and malformed nodes need fixing before the proof |
