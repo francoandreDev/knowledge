@@ -1,169 +1,138 @@
 ---
-title: "L2 — Finding boundaries systematically, and what an invariant can (and can't) catch"
+title: "L2 — Mapping an input space, and what an invariant can and cannot catch"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 showed one boundary bug living at a single point — `weight = 5` — and
-named the vocabulary for talking about it precisely: edge case, boundary
-condition, equivalence class, invariant. L2 turns that vocabulary into a
-repeatable process for finding boundaries in any function, and shows where
-an invariant check does and doesn't help.
+export const unit = {
+  track: "logic",
+  unitSlug: "edge-case-reasoning",
+};
+
+L1 showed that the 5 kg bug hides on a single point and that bands of "typical"
+values never touch it. L2 makes that a repeatable method for any rule, then tests
+a popular safety net, the invariant, to see which bugs it really guards against.
 
 <LevelIntro
   items={[
-    "The 5-step process for mapping an input space",
-    "Reading tiers as a number line to see where bugs hide",
-    "What an invariant like monotonicity does and doesn't catch",
+    "A five-step map of any input space",
+    "The edge categories typical tests skip",
+    "What an invariant like monotonicity catches",
   ]}
 />
 
-## From "pick a few values" to "map the input space"
+## If one value per band is not enough, is the fix "more tests"?
 
-**If picking one value per tier isn't enough, is the fix just "write
-more tests"?** No — writing ten more interior values (2.1kg, 3.7kg,
-8.2kg...) would still miss the exact `5.0` boundary; more of the same
-kind of test doesn't cover a different kind of input. The fix is a
-different process, not more repetitions of the same one:
-
-You can do the process by hand for any rule:
-
-1. What data enters the rule?
-2. Which values are valid, invalid, empty, or missing?
-3. Where does the answer change?
-4. Does the exact boundary belong to the lower group or the higher group?
-5. Which value will you test just before, exactly on, and just after the
-   boundary?
+**Would ten more interior weights (2.1, 3.7, 8.2 ...) find the 5.0 bug?** No. Ten
+more tests of the same kind are still the same kind of test. The fix is a
+different process:
 
 ```mermaid
 flowchart TD
-    A["Identify the input space\n(what can this function receive?)"] --> B["Partition into\nequivalence classes\n(under 5, 5-10, over 10)"]
-    B --> C["Identify the boundary\nbetween each class\n(5, 10)"]
-    C --> D["Test the boundary\nitself, and one step\non each side\n(4.99, 5.0, 5.01)"]
-    D --> E["Test values outside\nthe function's assumed\ndomain (negative, zero,\nnon-numeric)"]
+    A["1. What can enter the rule?\n(the input space)"] --> B["2. Split it into groups treated alike\n(under 5, 5 to 10, over 10)"]
+    B --> C["3. Find each line where the answer changes\n(5 and 10)"]
+    C --> D["4. Ask the rule, not the code:\nwhich group owns the line itself?"]
+    D --> E["5. Test just before, exactly on, just after\n(4.99, 5.00, 5.01)"]
+    E --> F["6. Test what should never arrive\n(negative, blank, text, huge)"]
 ```
 
-**Why test the boundary and one step on each side, rather than just
-the boundary value itself?** Because a boundary bug can go either
-direction — the exact value might be handled correctly while the
-step just below or above it isn't (or vice versa) — testing all
-three (`4.99`, `5.0`, `5.01`) is what actually distinguishes a `<`
-bug from a `<=` bug from correct code.
+**Why three values around a line and not just the line?** Because a boundary bug
+can sit on either side of the comparison. Only the three together show the shape
+of the comparison. The step size depends on the data: for weights measured to two
+decimals use 4.99 / 5.00 / 5.01; for whole years of age around 12 use 11 / 12 / 13.
 
-"One step" depends on the kind of value. If the system measures weight
-to two decimals, `4.99`, `5.00`, and `5.01` are useful. If the rule uses
-whole years of age, the useful values around age 12 are `11`, `12`, and
-`13`.
+<Checkpoint question="Step 4 says to ask the rule, not the code, which group owns the line. Why not just read the code's comparison?">
 
-<Checkpoint question="Why does step 5 of the process ask for three values around a boundary (just before, exactly on, just after) instead of just the exact boundary value alone?">
-
-Because a boundary bug can live on either side of the comparison, and
-testing only the exact value can't tell you which side is wrong. If a
-function uses `weightKg < 5` when the rule means "5 and under," testing
-only `5.0` shows you the wrong tier — but you still wouldn't know whether
-the fix is to change `<` to `<=`, or whether the boundary itself should
-sit somewhere else entirely, without also seeing how `4.99` and `5.01`
-behave relative to it. The three values together show the shape of the
-comparison, not just whether one point happens to be wrong.
+Because the code is the thing under suspicion. If the code says `weightKg < 5`
+and the business wording says "5 kg and under", reading the code only tells you
+what the code does, never what it should do. The expected answer for the line
+has to come from the requirement (or from the person who owns it), and then the
+test compares the code against it. That is exactly the comparison that exposes
+the bug.
 
 </Checkpoint>
 
-## Reading the shipping tiers as a number line
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="mapping-input-space"
+/>
 
-**Where exactly does the shipping-cost bug from L1 live, visually?**
-Right at the seam between two equivalence classes — the number line
-makes it obvious once drawn, even though it's easy to miss in code
-that only shows comparison operators:
+## Where does the bug sit on the number line?
+
+The chart shows what the buggy function charges at nine weights. Everything that
+happens in the bands is correct; the error is one step, at one point.
 
 ```mermaid
-flowchart LR
-    A["0kg"] -->|"Tier 1: 4.99"| B["5kg"]
-    B -->|"Tier 2: 8.99"| C["10kg"]
-    C -->|"Tier 3: 14.99"| D["∞"]
-    B -.->|"Which tier owns\nthis exact point?"| E["Business rule:\n5kg is Tier 1\nCode: weight < 5\n→ 5kg falls into Tier 2"]
+xychart-beta
+    title "Price charged by the buggy function (weights in kg)"
+    x-axis ["2", "4.99", "5.00", "5.01", "6", "9.99", "10.00", "10.01", "15"]
+    y-axis "Price" 0 --> 16
+    bar [4.99, 4.99, 8.99, 8.99, 8.99, 8.99, 14.99, 14.99, 14.99]
 ```
 
-The bug isn't anywhere inside `0–5` or `5–10` — every interior value
-of both ranges behaves exactly as intended. It exists at exactly one
-point: `5`, where the code's `<` and the business rule's "and under"
-disagree. **This is why boundary-focused testing finds bugs that
-proportionally more interior testing never will** — the bug's entire
-"surface area" is a single point, and no number of interior samples
-gets closer to hitting it.
+The bars at 5.00 and 10.00 are already one tier too high. The interactive demo
+below plots the buggy and fixed prices against weight: drag the slider onto 5.00
+and 10.00 and watch the "Versions differ" output flip.
 
-Inclusive means the boundary is included: "5kg and under" includes
-exactly `5`. Exclusive means the boundary is not included: "under 5kg"
-stops before `5`.
+## Which inputs do typical tests skip?
 
-## What common edge-case categories actually are
+**Beyond lines between bands, which inputs does "realistic" test data avoid?**
+Realistic data clusters in the middle of ranges by definition. Keep a short
+checklist:
 
-**Beyond boundaries, what other categories of input does "typical
-testing" tend to skip?** A short, memorable checklist — not
-exhaustive, but covering the inputs bugs disproportionately hide in:
+| Category            | Example for the shipping rule | Why it gets skipped                   |
+| ------------------- | ----------------------------- | ------------------------------------- |
+| Zero                | `weightKg = 0`                | Feels too trivial to write down       |
+| Negative            | `weightKg = -3`               | "Nobody would send that"              |
+| Exactly on a line   | `5`, `10`                     | Interior values sit comfortably away  |
+| Just past a line    | `5.01`, `10.01`               | Feels redundant next to the line test |
+| Extreme             | `weightKg = 10000`            | Realistic samples rarely include it   |
+| Empty or wrong type | blank, `"five"`               | Assumed to be checked somewhere else  |
 
-| Category           | Example for the shipping function | Why it's often skipped                                     |
-| ------------------ | --------------------------------- | ---------------------------------------------------------- |
-| Zero               | `weight = 0`                      | Feels "too trivial" to test explicitly                     |
-| Negative           | `weight = -3`                     | Assumed impossible, but nothing stops it at the type level |
-| Exact boundary     | `weight = 5`, `weight = 10`       | Interior test values comfortably avoid it                  |
-| Just past boundary | `weight = 5.01`, `weight = 10.01` | Same reason — feels redundant with the boundary test       |
-| Maximum / extreme  | `weight = 10000`                  | "Realistic" test data rarely includes it                   |
-| Empty / missing    | no weight provided at all         | Often assumed to be validated somewhere else               |
+For a list-based rule the same idea reads: empty list, one item, two items, and a
+list where the first or last item is the unusual one.
 
-For a form, empty/missing means the box was left blank. Non-numeric
-means the box contains text like `"five"` where the rule expects a
-number like `5`.
+## What can an invariant check catch?
 
-## What an invariant catches — and what it doesn't
+**If "price never goes down as weight goes up" holds for the buggy and the fixed
+code, is the check useless?** No, but it guards against a different bug. This
+property is called **monotonicity**: as weight rises, price stays the same or
+rises.
 
-**If "shipping cost should never decrease as weight increases" is
-true for the buggy version _and_ the fixed version, is checking that
-invariant a waste of time?** No — it's still valuable for catching a
-_different_ class of bug (a tier accidentally priced lower than a
-cheaper tier, a sign error, a reversed comparison) — it's just not
-the tool that catches _this specific_ bug, because the boundary bug
-doesn't violate monotonicity at all: `weight < 5` moving `5.0` into
-the next tier still produces a higher (not lower) price, so the
-"never decreases" property holds throughout, even though the price
-charged at exactly `5.0` is still wrong relative to the business
-rule.
+| Bug                                           | Breaks monotonicity?  | Caught by the invariant? |
+| --------------------------------------------- | --------------------- | ------------------------ |
+| Middle band accidentally priced below cheap   | Yes, price drops      | Yes                      |
+| `<` where the rule says `<=` (our bug)        | No, price still rises | **No**                   |
+| Wrong price in the top band, but still higher | No                    | No                       |
 
-That "never decreases" property is often called **monotonicity**. The
-plain-language version is enough here: as weight goes up, price should
-stay the same or go up, never down.
+The 5.0 bug moves one weight from 4.99 up to 8.99. Price still never decreases,
+so the invariant stays green at the exact input where the function is wrong.
 
-**This is the core lesson of this level:** invariants are powerful
-because they hold across an entire input space rather than a handful
-of examples, but a specific invariant only catches the specific class
-of bug it's actually sensitive to — it isn't a substitute for
-identifying and directly testing the boundaries a bug is actually
-likely to hide at.
+<Checkpoint question="A test sweeps weights from 0 to 20 and confirms price never decreases. Does that show every weight lands in the right band?">
 
-<Checkpoint question="A function's output is monotonic across its entire tested range — price never decreases as weight increases. Does that prove the function assigns every weight to the correct tier?">
-
-No. Monotonicity only says the trend goes the right direction overall;
-it says nothing about whether each specific input lands in the tier the
-business rule actually intends. The shipping bug is the proof: `weight
-= 5.0` moving into the more expensive tier still keeps price going up
-as weight goes up, so the invariant holds at exactly the point where the
-function is wrong. An invariant holding increases confidence about the
-one property it actually measures — it doesn't generalize to "therefore
-the logic is correct everywhere," because a different, unrelated bug
-could easily coexist with a perfectly intact invariant.
+No. Monotonicity only says the trend runs the right way. It says nothing about
+whether each individual weight got the band the rule intends. The shipping bug is
+the proof: the invariant holds at the very input where the answer is wrong. An
+invariant raises confidence about the one property it measures; it does not
+generalise to "the logic is correct everywhere", and a boundary test is needed
+for the bugs it cannot see.
 
 </Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="invariants"
+/>
 
 ## Failure modes at this level
 
-- **Treating "I tested one value per case" as equivalent to "I
-  tested every case."** The interior of an equivalence class and its
-  boundary are different inputs with potentially different behavior
-  — one doesn't stand in for the other.
-- **Assuming an invariant that holds proves correctness.** An
-  invariant holding across every tested input increases confidence
-  but only rules out the specific class of bug that invariant is
-  actually capable of detecting.
-- **Testing the boundary value but not one step past it (or vice
-  versa).** A `<` vs. `<=` bug is only visible by comparing behavior
-  _across_ the boundary, not by testing either side alone.
+- **"One value per case" treated as "every case".** The interior and the line are
+  different inputs with possibly different behaviour.
+- **Believing a passing invariant proves correctness.** It rules out only the
+  bugs it is sensitive to.
+- **Testing the line but not a step to either side.** `<` versus `<=` shows up by
+  comparing across the line.

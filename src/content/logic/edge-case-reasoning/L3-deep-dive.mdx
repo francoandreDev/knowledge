@@ -1,52 +1,54 @@
 ---
-title: "L3 — Reproducing the bug, proving an invariant misses it, and building the test that catches it"
+title: "L3 — Reproducing the bug, watching an invariant miss it, and the tests that catch it"
 ---
 
+import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L2 built the process (partition, find boundaries, test around them) and
-showed on paper why monotonicity misses the `5.0` bug. L3 reproduces that
-exact bug in real code, runs the monotonicity check against it to confirm
-the miss directly rather than take it on faith, and then builds the
-boundary-value test suite that does catch it.
+export const unit = {
+  track: "logic",
+  unitSlug: "edge-case-reasoning",
+};
+
+<Scenario label="Run the bug, don't just reason about it">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🐞</span> <strong>buggy</strong> — <code>weightKg &lt; 5</code>, <code>weightKg &lt; 10</code></div>
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>fixed</strong> — <code>weightKg &lt;= 5</code>, <code>weightKg &lt;= 10</code></div>
+      <div class="flex items-center gap-1.5"><span>📈</span> <strong>invariant</strong> — price never decreases as weight rises</div>
+      <div class="flex items-center gap-1.5"><span>❓</span> <strong>question</strong> — does the invariant catch the bug?</div>
+    </div>
+  </Fragment>
+
+L2 argued on paper that a monotonicity check misses the 5.0 bug. **Before running
+anything, predict: will a sweep from 0 to 20 kg report a violation on the buggy
+code? And what is the smallest set of inputs that does expose it?**
+
+</Scenario>
 
 <LevelIntro
   items={[
-    "Reproducing the boundary bug in real code",
-    "Proving an invariant check misses it, by running it",
-    "Building a boundary-value test suite that catches it",
+    "The buggy function reproduced exactly",
+    "Running the invariant and seeing it miss",
+    "The boundary suite and the domain checks",
   ]}
 />
 
-## Reproducing the buggy function, exactly
+## What does the buggy code actually do?
 
-**Before testing anything — what did the developer's original three
-tests actually look like, and why did all three pass despite the
-bug?** Interior values, one per tier, nowhere near the boundary:
-
-Read the code like this if you are new to programming:
-
-| Code piece        | Plain reading                          |
-| ----------------- | -------------------------------------- |
-| `function`        | Name a reusable rule                   |
-| `if (...)`        | If this condition is true              |
-| `return`          | Answer with this value and stop        |
-| `<`               | Less than                              |
-| `<=`              | Less than or equal                     |
-| `throw new Error` | Reject the input because it is invalid |
-
-In plain pseudocode, the buggy rule says:
+**Why did the developer's three tests pass?** Here is the rule in words, then in
+code:
 
 ```text
-If weight is negative, reject it.
+Reject a negative weight.
 If weight is less than 5, charge 4.99.
 If weight is less than 10, charge 8.99.
-Otherwise, charge 14.99.
+Otherwise charge 14.99.
 ```
 
 ```js
-// Tested with weight = 2 (tier 1), 6 (tier 2), 15 (tier 3) — all pass.
 function shippingCostBuggy(weightKg) {
   if (weightKg < 0) throw new Error("weight cannot be negative");
   if (weightKg < 5) return 4.99;
@@ -55,48 +57,32 @@ function shippingCostBuggy(weightKg) {
 }
 ```
 
-```js
-shippingCostBuggy(2); // 4.99 — correct
-shippingCostBuggy(6); // 8.99 — correct
-shippingCostBuggy(15); // 14.99 — correct
-shippingCostBuggy(5); // 8.99 — WRONG, business rule says 5kg is tier 1 (4.99)
-```
+Running it on the original tests and the lines gives:
 
-| Call                    | Expected by business rule | Buggy result | Why it matters        |
-| ----------------------- | ------------------------- | ------------ | --------------------- |
-| `shippingCostBuggy(2)`  | 4.99                      | 4.99         | Interior of tier 1    |
-| `shippingCostBuggy(5)`  | 4.99                      | 8.99         | Exact boundary        |
-| `shippingCostBuggy(6)`  | 8.99                      | 8.99         | Interior of tier 2    |
-| `shippingCostBuggy(10)` | 8.99                      | 14.99        | Second exact boundary |
-| `shippingCostBuggy(15)` | 14.99                     | 14.99        | Interior of tier 3    |
+| Call                    | Rule expects | Buggy returns | Result    |
+| ----------------------- | ------------ | ------------- | --------- |
+| `shippingCostBuggy(2)`  | 4.99         | 4.99          | ok        |
+| `shippingCostBuggy(5)`  | 4.99         | 8.99          | **wrong** |
+| `shippingCostBuggy(6)`  | 8.99         | 8.99          | ok        |
+| `shippingCostBuggy(10)` | 8.99         | 14.99         | **wrong** |
+| `shippingCostBuggy(15)` | 14.99        | 14.99         | ok        |
 
-Every interior test passes because the bug isn't in the interior —
-it's exactly at `weightKg === 5`, where `weightKg < 5` evaluates to
-`false` and control falls through to the next tier.
+`weightKg < 5` asks "strictly below 5?". For exactly 5.0 the answer is no, so
+control falls through to the next rule. That fall-through is the whole bug.
 
-In plain words, `weightKg < 5` asks "is this strictly below 5?" For
-`5.0`, the answer is no, so the function keeps moving to the next rule.
-That movement is what "falls through" means here.
+<Checkpoint question="The three original tests (2, 6, 15) all passed. What single property do they share that let the bug through?">
 
-<Checkpoint question="Looking at the table above, every one of the developer's three original tests (weight 2, 6, 15) passed. What single property do all three of those chosen values share that let the bug slip through unnoticed?">
-
-All three are interior values — comfortably inside their tier, nowhere
-near a tier boundary. `2` sits well inside `0–5`, `6` sits well inside
-`5–10`, and `15` sits well inside `10+`. None of them is the exact
-threshold value or one step away from it, so none of them can ever
-distinguish `weightKg < 5` (buggy) from `weightKg <= 5` (correct) — both
-versions of the function return the identical answer for all three
-inputs. This is exactly L2's point made concrete: picking one
-"representative" value per equivalence class tests the interior, never
-the seam between classes, no matter how many interior values you add.
+All three are interior values, comfortably inside their band and nowhere near a
+line. None can tell `< 5` from `<= 5`, because both comparisons return the same
+answer for them. Adding more interior values would not change that: the bug's
+whole footprint is the line itself.
 
 </Checkpoint>
 
-## Testing the invariant first — and watching it miss the bug
+## What happens when the invariant runs?
 
-**Before writing boundary tests — will the "shipping cost never
-decreases as weight increases" invariant catch this bug on its own?**
-Test it directly rather than assuming either way:
+**Will "price never decreases" flag the buggy function?** Run it instead of
+assuming:
 
 ```js
 function checkMonotonic(fn, maxWeight, step) {
@@ -110,29 +96,25 @@ function checkMonotonic(fn, maxWeight, step) {
 }
 
 checkMonotonic(shippingCostBuggy, 20, 0.5);
-// { violated: false } — the invariant holds across the entire range,
-// bug and all
+// { violated: false }  the bug passes straight through
 ```
 
-This helper walks through weights from `0` to `20` in steps of `0.5`.
-At each step, it checks whether the new price is lower than the previous
-price. It is useful, but it is checking one property only: "does price
-ever go down?"
+The helper walks 0 to 20 kg in half-kilo steps and asks one question: did the
+price ever go down? On the buggy code it never does, because 5.0 jumping up to
+8.99 is still going up. The invariant is well written; it is simply not sensitive
+to this kind of bug. Tested against a different bug (the middle band priced at
+3.99), the same helper reports a violation at 5.5 kg.
 
-This is the exact point L2 made: the boundary bug moves `weightKg === 5`
-from `4.99` _up_ to `8.99` — the price still never _decreases_ as
-weight increases, so monotonicity holds throughout, even at the
-exact input where the function is wrong. **A real, shipped bug, and
-a real, meaningful invariant, and the invariant genuinely does not
-catch it** — not because the invariant was poorly written, but
-because this particular bug isn't the kind of bug that specific
-invariant is sensitive to.
+| Check                      | Buggy `< 5`   | Middle band priced 3.99 |
+| -------------------------- | ------------- | ----------------------- |
+| Monotonic sweep 0 to 20 kg | passes (miss) | **fails at 5.5 kg**     |
+| Boundary test at 5.0       | **fails**     | passes                  |
 
-## Building the test that does catch it
+The two checks catch opposite bugs, which is why one cannot replace the other.
 
-**Given that monotonicity doesn't catch this, what test would?**
-Exactly the boundary-value set L2's flowchart describes — the
-threshold itself, plus one step below and above:
+## The suite that catches it
+
+**Which inputs would have exposed it?** The line plus a step on each side, per L2:
 
 ```js
 function shippingCost(weightKg) {
@@ -142,72 +124,51 @@ function shippingCost(weightKg) {
   return 14.99;
 }
 
-// Boundary-value tests, not interior tests:
-shippingCost(4.99); // 4.99 — just under tier 1's boundary
-shippingCost(5.0); // 4.99 — exactly on the boundary (this is the bug's location)
-shippingCost(5.01); // 8.99 — just over tier 1's boundary
-shippingCost(9.99); // 8.99
-shippingCost(10.0); // 8.99 — exactly on tier 2's boundary
-shippingCost(10.01); // 14.99
+// 4.99 -> 4.99, 5.0 -> 4.99, 5.01 -> 8.99
+// 9.99 -> 8.99, 10.0 -> 8.99, 10.01 -> 14.99
 ```
 
-Run against `shippingCostBuggy`, `shippingCostBuggy(5.0)` returns
-`8.99` — the boundary test catches exactly what the monotonicity
-invariant and the three interior tests both missed. Run against the
-fixed `shippingCost`, all six values return the business-rule-correct
-tier.
+Against `shippingCostBuggy`, the calls at 5.0 and 10.0 return one tier too high.
+Against `shippingCost`, all six match the rule.
 
-## What else the boundary-value process catches
-
-**The same process (identify equivalence classes, test boundaries,
-test one step past) applies beyond pricing tiers — what does it find
-here?**
+The domain checks are a different category from the lines. They test the
+function's assumptions rather than its thresholds:
 
 ```js
-// Zero and negative — a different edge-case category from L2's table
-try {
-  shippingCost(-0.01);
-} catch (e) {
-  // throws "weight cannot be negative" — correct, verified
-}
-shippingCost(0); // 4.99 — zero is valid, falls in tier 1, verified correct
+shippingCost(0); // 4.99, zero is valid and sits in the cheap band
+shippingCost(-0.01); // throws "weight cannot be negative"
 ```
 
-Both of these pass on the fixed function, but they're testing a
-_different_ concern than the tier boundaries — they check whether
-the function's assumed domain (non-negative weight) is actually
-enforced, not whether the tier thresholds are correct. A complete
-test suite needs both categories, because they catch different bugs:
-tier-boundary tests wouldn't have caught a missing negative-weight
-check, and a negative-weight check wouldn't have caught the `5.0`
-tier bug.
+A complete suite needs both groups. Line tests would never have noticed a missing
+negative-weight check, and a negative-weight check would never have noticed the
+5.0 bug.
 
-## What generalizes and what doesn't
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="boundary-test-code"
+/>
 
-The process — partition the input space, find the boundaries between
-partitions, test each boundary plus one step on each side, separately
-check zero/negative/extreme values against the function's assumed
-domain — generalizes to any function with distinct behavior regions:
-date-range logic, discount tiers, pagination bounds, retry-count
-limits. What's specific to this worked example: a three-tier pricing
-function has exactly two internal boundaries, small and easy to
-enumerate by hand; a function with many more regions (a tax bracket
-calculator with 7 brackets, say) has more boundaries to find, and
-finding them systematically (reading the actual conditionals, not
-guessing) matters more as the count grows. **Try extending it
-yourself:** if this shipping function later grew a fourth tier for
-weights over 50kg with a per-kg surcharge instead of a flat rate,
-would the existing boundary tests (at 5 and 10) still be sufficient,
-or does a new kind of boundary — a _rate change_, not just a _price
-change_ — need a different kind of invariant test to verify (say,
-checking that the price at 50.01kg is only marginally more than at
-50kg, not a large jump)?
+## This is one case, not the whole territory
+
+The process (split the input space, find the lines, test each line and a step on
+both sides, test the assumed domain) carries over to date ranges, discount tiers,
+pagination limits and retry counts. What is specific to the worked example is its
+size: two lines, easy to list by hand. A tax table with seven brackets has more
+lines, and reading the actual conditionals matters more than guessing.
+
+**Try extending it yourself.** Suppose a fourth tier is added for packages over
+50 kg that charges a per-kg surcharge instead of a flat price. Do the tests at 5
+and 10 still cover the risk? A rate change is a different kind of boundary from a
+price change: which new invariant (for example, the price at 50.01 kg is only a
+few cents above the price at 50 kg) would you add, and what bug would it catch
+that the line tests would not?
 
 ## Failure modes
 
-| Failure mode                                                                               | What it gets wrong                                                                                                                                                                       |
-| ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Assuming an invariant passing proves the boundary logic is correct                         | Monotonicity holding says nothing about whether values are assigned to the _correct_ tier, only that prices trend the right direction overall                                            |
-| Testing only the exact boundary value, not one step to either side                         | A `<` vs. `<=` bug is only visible by comparing behavior across the boundary — testing `5.0` alone can pass by coincidence if the surrounding logic happens to be symmetric              |
-| Treating boundary-value analysis as a replacement for invariant checks                     | Boundary tests catch off-by-one errors; they don't catch a logic error that's wrong across an entire equivalence class rather than just at its edge — both categories of test are needed |
-| Choosing "realistic" test data instead of deliberately picking boundary and extreme values | Realistic values cluster in the interior of ranges by definition — the inputs most likely to reveal a bug are the ones realistic data naturally avoids                                   |
+| Failure mode                                            | What it gets wrong                                                                |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Treating a passing invariant as proof of correct bands  | Monotonicity holds even when a weight sits in the wrong band                      |
+| Testing only the exact line, not a step on each side    | A single point can pass by coincidence; the comparison shows only across the line |
+| Swapping boundary tests for invariants (or the reverse) | They catch different bug families; dropping either leaves a blind spot            |
+| Choosing "realistic" test data                          | Realistic values cluster in the interior, exactly where the bug is not            |

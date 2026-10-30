@@ -1,117 +1,97 @@
 ---
-title: "L1 — How do I prove my code handles every case, not just the ones I tested? (edge case reasoning, invariants)"
+title: "L1 — Why did every test pass and the bug still ship?"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="A shipping calculator passed every test the developer wrote — and shipped a real pricing bug anyway.">
+export const unit = {
+  track: "logic",
+  unitSlug: "edge-case-reasoning",
+};
+
+<Scenario label="Three green tests, one angry customer">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🧪</span> <strong>Tests written</strong> — weight = 2kg, 6kg, 15kg</div>
-      <div class="flex items-center gap-1.5"><span>✅</span> <strong>All pass</strong> — each lands comfortably inside a pricing tier</div>
-      <div class="flex items-center gap-1.5"><span>💸</span> <strong>Real order</strong> — a package weighing exactly 5.0kg gets overcharged</div>
+      <div class="flex items-center gap-1.5"><span>📏</span> <strong>The rule</strong> — "5 kg and under" is the cheap price</div>
+      <div class="flex items-center gap-1.5"><span>💻</span> <strong>The code</strong> — <code>weightKg &lt; 5</code></div>
+      <div class="flex items-center gap-1.5"><span>🧪</span> <strong>The tests</strong> — 2 kg, 6 kg, 15 kg, all green</div>
+      <div class="flex items-center gap-1.5"><span>💸</span> <strong>The bug</strong> — a package of exactly 5.0 kg is overcharged</div>
     </div>
   </Fragment>
 
-A shipping-cost function has three price tiers: under 5kg, 5–10kg,
-and over 10kg. The developer writes three tests — one weight
-comfortably inside each tier — and all three pass. The function
-ships. A week later, a customer's package weighs exactly 5.0kg and
-gets charged the middle tier's price instead of the cheap tier's,
-because the business rule says "5kg and under" but the code checks
-`weight < 5`. **Every test the developer wrote passed. The bug was
-real. What kind of input does "pick one value from each case" never
-actually test — and how would you have found this one before a
-customer did?**
+A parcel shop charges the cheap price for packages of **"5 kg and under"**. The
+developer types `weightKg < 5`, then writes three tests: 2 kg, 6 kg and 15 kg,
+one comfortably inside each price band. All three pass. A week later a customer
+brings in a package that weighs exactly 5.0 kg and is charged the middle price.
+
+**Every test passed and the bug was real. What kind of input does "pick one
+value from each band" never try?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Edge cases vs. boundary conditions",
-    "Equivalence classes and invariants",
-    "Why '<' vs. '<=' bugs hide at the edges",
+    "Interior values versus the edge between bands",
+    "Why one wrong symbol hides at one exact value",
+    "Inclusive and exclusive wording",
   ]}
 />
 
-## Tiny programming glossary
+## Where did the three tests miss?
 
-| Term       | Plain meaning in this unit                                      |
-| ---------- | --------------------------------------------------------------- |
-| Function   | A rule that receives an input and returns an output             |
-| Input      | The value you give the rule, like `weight = 5.0`                |
-| Output     | The answer the rule gives back, like a shipping price           |
-| Test       | A checked example: "for this input, I expect this output"       |
-| Comparison | A question such as "less than 5?" or "less than or equal to 5?" |
-| `<`        | Less than; `weight < 5` does **not** include exactly `5`        |
-| `<=`       | Less than or equal; `weight <= 5` **does** include exactly `5`  |
+**Which weights does `<` treat differently from `<=`?** Only one: the exact line.
+Look at how the two versions of the rule answer for weights around 5 kg.
 
-## The shape of the problem
+| Weight   | Rule says ("5 kg and under") | Buggy `< 5` | Fixed `<= 5` |
+| -------- | ---------------------------- | ----------- | ------------ |
+| 2.00     | cheap                        | cheap       | cheap        |
+| 4.99     | cheap                        | cheap       | cheap        |
+| **5.00** | **cheap**                    | **middle**  | **cheap**    |
+| 5.01     | middle                       | middle      | middle       |
+| 6.00     | middle                       | middle      | middle       |
 
-- Choosing one test value "from" each tier tests the _interior_ of
-  each case, never the _edges_ between them — and the edges are
-  exactly where an author's mental model (`< 5`) and the actual
-  business rule ("5 and under") most often silently diverge.
-- Off-by-one mistakes (`<` vs. `<=`, `>` vs. `>=`) are invisible from
-  the interior of a range — `4.99` and `5.01` behave identically to
-  `<` and `<=`; only the exact boundary value tells the two apart.
-- Testing every specific value is impossible for most functions —
-  the fix isn't "test more values," it's **reasoning about the
-  structure of the input space**: which values are boundaries,
-  which behaviors should hold across _every_ input (not just the
-  ones tested), and which specific values are worth checking by name.
+Every row except one is identical for the buggy and the fixed code. The developer's
+tests (2, 6, 15) all sit in the identical rows, so they cannot tell the two
+versions apart.
 
-Input space just means "the set of values the function might receive."
-For shipping, that means weights: `0`, `2`, `4.99`, `5.0`, `5.01`,
-`10`, very large weights, and invalid values like negative weight or a
-missing weight.
+```mermaid
+flowchart LR
+    A["0 kg"] -->|"cheap band"| B["5 kg\nthe line"]
+    B -->|"middle band"| C["10 kg\nthe line"]
+    C -->|"top band"| D["and up"]
+    B -.->|"which band owns\nthe line itself?"| Q["the only place\n< and <= disagree"]
+```
 
-| Value | Where it sits           | Business rule says | Buggy `< 5` code says |
-| ----- | ----------------------- | ------------------ | --------------------- |
-| 4.99  | Just below the boundary | Cheap tier         | Cheap tier            |
-| 5.00  | Exactly on the boundary | Cheap tier         | Middle tier           |
-| 5.01  | Just above the boundary | Middle tier        | Middle tier           |
+The bug does not live in a band. It lives on the line between two bands, a single
+point. No number of values chosen from inside the bands ever lands on it.
 
-## Key terms
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="interior-vs-boundary"
+/>
 
-- **Edge case** — an input at the extreme or unusual end of what a
-  function accepts: empty, zero, negative, maximum, exactly on a
-  threshold — as opposed to a "typical" input from the interior of a
-  range.
-- **Boundary condition** — the specific point where a function's
-  behavior is supposed to change (a price tier threshold, an array's
-  first/last index, a loop's start/end) — the single most common
-  place an edge-case bug hides.
-- **Equivalence class** — a group of inputs a function is expected to
-  treat the same way (e.g. "all weights strictly between 0 and 5kg
-  behave identically") — testing one representative value per class
-  is efficient, _if_ the classes and their boundaries are identified
-  correctly.
-- **Valid input** — a value the function is supposed to accept. A
-  positive weight is valid; a missing weight or text like `"five"` may
-  be invalid unless another part of the system converts it first.
-- **Invariant** — a property that should hold true across _every_
-  valid input, not just specific examples (e.g. "shipping cost never
-  decreases as weight increases") — useful for catching bugs example
-  tests don't happen to hit, though not every bug violates an
-  invariant that's easy to state.
-- **Off-by-one error** — a boundary condition using the wrong
-  comparison (`<` instead of `<=`, or an index shifted by one),
-  producing incorrect behavior only exactly at the boundary.
+## The vocabulary, in one table
 
-## What this unit covers
+| Term                  | Plain meaning                                                            |
+| --------------------- | ------------------------------------------------------------------------ |
+| Input space           | Every value the rule might receive: 0, 2, 4.99, 5.0, 5.01, 10, -3, blank |
+| Edge case             | An unusual or extreme input: empty, zero, negative, maximum, on a line   |
+| Boundary              | The exact value where the rule's answer changes (5 kg, 10 kg)            |
+| Equivalence class     | A group of inputs the rule should treat the same way (all of 0 to 5 kg)  |
+| Inclusive / exclusive | "5 kg and under" includes 5; "under 5 kg" leaves it out                  |
+| Off-by-one            | The wrong comparison (`<` for `<=`), wrong only on the boundary itself   |
+| Invariant             | A property that should hold for every valid input, not just tested ones  |
 
-L2 works through how to systematically find the boundaries and
-equivalence classes of a function's input space instead of guessing
-at "a few more test cases," plus what invariants can and can't catch
-on their own. L3 reproduces the shipping-cost bug in real code,
-demonstrates that a plausible-sounding invariant check (monotonicity)
-does _not_ catch this particular bug, and builds the boundary-value
-test suite that does — closing with a question about which category
-of edge case invariant-checking is naturally suited to, and which
-category boundary-value analysis is needed for instead.
+## What the next levels do
 
-For the condition-symbol side, connect this with
-`logic/boolean-logic`. For the habit of splitting one large problem into
-smaller regions, connect it with `logic/problem-decomposition`.
+- **L2** turns "test the edges" into a step-by-step way to map any rule's input
+  space, and shows what an invariant such as "price never goes down as weight
+  goes up" can and cannot catch.
+- **L3** runs the buggy code, runs the invariant check against it to watch it
+  miss, then writes the boundary tests that do catch it.
+
+For the symbols themselves (`<`, `<=`, `&&`), see `logic/boolean-logic`. For
+splitting a big rule into regions, see `logic/problem-decomposition`.
