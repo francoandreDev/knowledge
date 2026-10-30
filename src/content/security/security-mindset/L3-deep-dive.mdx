@@ -2,142 +2,198 @@
 title: "L3 — Running STRIDE on a real endpoint, and a real tampering bug"
 ---
 
+import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L2 turned the security mindset into trust boundaries and the STRIDE
-questions — this level applies both to a real bug and a real endpoint,
-then quantifies why the number of entry points matters as a system
-grows.
+export const unit = {
+  track: "security",
+  unitSlug: "security-mindset",
+};
+
+<Scenario label="The shopper who wrote their own price">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5">
+        <span>🏷️</span> <strong>Shelf label</strong> — 19.99 per item, two items
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span>✍️</span> <strong>Slip</strong> — the shopper writes the price per item on the slip
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span>💰</span> <strong>Till</strong> — charges whatever the slip says
+      </div>
+    </div>
+    <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div class="rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950">
+        <p class="font-semibold text-emerald-600 dark:text-emerald-400">Honest slip</p>
+        19.99 x 2 = 39.98
+      </div>
+      <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
+        <p class="font-semibold text-rose-600 dark:text-rose-400">Rewritten slip</p>
+        0.01 x 2 = 0.02
+      </div>
+    </div>
+
+  </Fragment>
+
+A shop lets shoppers fill in a slip: item, quantity, and price per item. The
+till multiplies and charges. On an ordinary day every slip says 19.99 and
+every sale is correct. One shopper writes 0.01 instead and walks out paying two
+cents for two items.
+
+| Slip              | Charged | Does the shop notice? |
+| ----------------- | ------- | --------------------- |
+| 19.99 per item, 2 | 39.98   | Nothing to notice     |
+| 0.01 per item, 2  | 0.02    | Only on the books     |
+
+**The slip was neatly filled in and the arithmetic was right. Whose job was it to decide the price?**
+
+</Scenario>
+
+An online checkout that reads the price from the browser has exactly this bug.
+This level works that bug through, runs STRIDE on one ordinary endpoint, and
+puts a number on why risk grows faster than the endpoint count.
 
 <LevelIntro
   items={[
-    "A real trust-boundary bug: client-controlled price",
-    "Running STRIDE end-to-end on a file-upload endpoint",
-    "Why risk compounds non-linearly with entry-point count",
+    "Who decides a value: client-chosen price",
+    "STRIDE run end to end on a file upload",
+    "Why risk compounds with entry point count",
   ]}
 />
 
-## A real tampering bug: trusting client-supplied price
+## A tampering bug: who decides the price?
 
-This is the single most common instance of "it works" not meaning "it's safe" — the happy-path test passes because nobody tried sending anything malicious:
-
-In words before code: if the customer's browser sends both "I want two
-items" and "each item costs $0.01," the server must not trust the price
-just because the number has the right shape. The server should look up
-the real price from its own catalog.
-
-```js
-// checkout-vulnerable.mjs — trusts the client's stated price
-function checkout(cartItem) {
-  // cartItem = { productId, quantity, price } — price sent by the client
-  const total = cartItem.price * cartItem.quantity;
-  chargeCard(total);
-  return { charged: total };
-}
-
-// Functional test: passes, because it's testing the happy path.
-console.log(checkout({ productId: "sku-1", quantity: 2, price: 19.99 }));
-// { charged: 39.98 } — looks correct.
-
-// The adversarial test nobody wrote:
-console.log(checkout({ productId: "sku-1", quantity: 2, price: 0.01 }));
-// { charged: 0.02 } — the server just charged 2 cents for a $40 order,
-// because it trusted a number the client fully controls.
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant S as Server
+    participant C as Catalog (server side)
+    Note over B,S: Vulnerable version
+    B->>S: product sku-1, quantity 2, price 0.01
+    S->>S: total = 0.01 x 2 = 0.02
+    Note over B,C: Fixed version
+    B->>S: product sku-1, quantity 2
+    S->>C: price of sku-1?
+    C-->>S: 19.99
+    S->>S: total = 19.99 x 2 = 39.98
 ```
 
-The fix isn't "validate that price is a positive number" — 0.01 _is_ a valid positive number. The fix is recognizing `price` crossed a trust boundary (client → server) and re-deriving it from something the server actually controls instead of trusting the crossing value at all:
+The whole difference between the two versions is one line. The vulnerable total
+takes the price from the request; the fixed total takes it from the catalog:
 
 ```js
-// checkout-fixed.mjs — server is the source of truth for price
-function checkout(cartItem, catalog) {
-  // catalog is server-side data — the client never gets to set price
-  const product = catalog[cartItem.productId];
-  const total = product.price * cartItem.quantity;
-  chargeCard(total);
-  return { charged: total };
-}
-
-const catalog = { "sku-1": { price: 19.99 } };
-console.log(checkout({ productId: "sku-1", quantity: 2 }, catalog));
-// { charged: 39.98 } — correct, and now un-tamperable, because the
-// client no longer has any input that determines the charged amount.
+// vulnerable: the client chose the price
+const total = cartItem.price * cartItem.quantity;
+// fixed: the server owns the price
+const total = catalog[cartItem.productId].price * cartItem.quantity;
 ```
 
-Nothing about the _functional_ behavior changed for a legitimate request — both versions charge $39.98 for 2 units at $19.99. The difference only shows up under adversarial input, which is exactly why "it passed QA" said nothing about whether it was safe.
+An honest customer sees 39.98 either way. The versions only differ under
+adversarial input, which is why "it passed QA" said nothing about safety.
 
-| Check type            | What it proves                          | What it does not prove                               |
-| --------------------- | --------------------------------------- | ---------------------------------------------------- |
-| Validate format       | `price` is a number                     | The client was allowed to choose that number         |
-| Check source of truth | Price came from the server-side catalog | The browser cannot lower the charged amount by lying |
+| Check type            | What it proves                          | What it does not prove                 |
+| --------------------- | --------------------------------------- | -------------------------------------- |
+| Validate format       | `price` is a number                     | The client was allowed to choose it    |
+| Check source of truth | Price came from the server-side catalog | Nothing the browser sends can lower it |
 
-<Checkpoint question="A teammate proposes fixing the checkout bug by adding a rule that rejects any price below $1.00. Why doesn't that actually close the hole, even though it would stop the specific $0.01 example above?">
+<Checkpoint question="A teammate proposes fixing checkout by rejecting any price below 1.00. Why does that not close the hole, even though it stops the 0.01 example?">
 
-Because the bug was never about the number being too small — it was
-about the number coming from the wrong place. A minimum-price rule only
-rejects one narrow range of tampered values; an attacker can just send
-$18.00 instead of $0.01 and still undercharge by a dollar per unit, and
-that request sails right through the new rule looking perfectly
-reasonable. The real fix has to remove the client's ability to set the
-charged price at all, by re-deriving it from the server's own catalog —
-any check that still lets the client supply the number, no matter how
-the range is constrained, leaves the same trust-boundary crossing in
-place.
+Because the bug was never that the number was too small; it was that the number
+came from the wrong place. A minimum rule blocks one narrow range, so an
+attacker sends 18.00 and still undercharges, passing the new rule looking
+perfectly reasonable. The real fix removes the client's ability to set the
+charged price at all by re-deriving it from the server's own catalog. Any check
+that still lets the client supply the number leaves the same boundary crossing
+in place.
 
 </Checkpoint>
 
-## Running STRIDE on a real component: a file-upload endpoint
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="server-truth"
+/>
 
-Component: an endpoint that lets users upload a profile picture.
+## STRIDE on a real component: the profile-picture upload
 
-| STRIDE category        | Plausible here?                                                                                                           | Mitigation                                                                                                                 |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Spoofing               | Could someone upload as another user? — yes, if the session/auth check is missing on this specific route                  | Require and verify auth on every route independently, not just "most routes"                                               |
-| Tampering              | Could the uploaded file be something other than an image? — yes, if only the filename extension is checked                | Verify actual file content (magic bytes), not just the claimed extension                                                   |
-| Repudiation            | Low relevance here — profile pictures aren't typically an accountability-sensitive action                                 | Skip or deprioritize; not every category applies equally to every component                                                |
-| Information disclosure | Could the upload path leak internal storage structure or other users' files? — yes, if filenames aren't randomized/scoped | Store under a random, user-scoped key, never the client-supplied filename                                                  |
-| Denial of service      | Could someone upload huge files repeatedly to exhaust storage/bandwidth? — yes                                            | Enforce a max file size and per-user rate limit before accepting the upload                                                |
-| Elevation of privilege | Could the "image" actually be an executable script that gets served and run?                                              | Serve uploads from a separate domain/bucket with no execute permissions, correct `Content-Type`, and `Content-Disposition` |
+| STRIDE category        | Plausible here?                                                   | Mitigation                                                                               |
+| ---------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Spoofing               | Upload as another user if the auth check is missing on this route | Verify auth on every route independently                                                 |
+| Tampering              | A non-image file passes if only the extension is checked          | Verify real file content, not the claimed extension                                      |
+| Repudiation            | Low relevance: profile pictures are not accountability-sensitive  | Note it and move on; not every category fits every component                             |
+| Information disclosure | Predictable or client-chosen names can expose other users' files  | Store under a random, user-scoped key, never the client's filename                       |
+| Denial of service      | Huge files uploaded repeatedly exhaust storage and bandwidth      | Enforce a maximum size and a per-user rate limit                                         |
+| Elevation of privilege | An "image" that is really a script gets served and run            | Serve from a separate domain or bucket with no execute rights and a correct content type |
 
-Notice this is a genuinely boring feature — "let users upload a picture" — and STRIDE still surfaces six distinct, real risk categories a purely functional spec ("accepts an image, saves it, returns a URL") would never mention, because the functional spec only describes the intended path.
+A boring feature, "let users upload a picture", still raises five real
+categories and one honest "low relevance", none of which the functional spec
+("accepts an image, saves it, returns a URL") would mention. Later units cover
+authorization models, why scripts in a browser are dangerous, and the common
+attack categories in depth.
 
-If the file-upload table feels dense, split it across later units:
-`/security/authorization-models/` goes deeper on auth and ownership,
-`/web/xss/` explains why executable scripts in browsers are dangerous,
-and `/security/owasp-top-10/` expands common attack categories.
+## How much does adding entry points compound risk?
 
-## How much does adding entry points actually compound risk?
+Assume each of N entry points independently has a 3% chance of being
+exploitable. The chance that none are exploitable is 0.97 raised to the power
+N, and the chance that at least one is exploitable is one minus that.
+
+| Entry points | Chance none are exploitable | Chance at least one is |
+| ------------ | --------------------------- | ---------------------- |
+| 1            | 97.0%                       | 3.0%                   |
+| 5            | 85.9%                       | 14.1%                  |
+| 10           | 73.7%                       | 26.3%                  |
+| 20           | 54.4%                       | 45.6%                  |
+| 40           | 29.6%                       | 70.4%                  |
 
 ```mermaid
 xychart-beta
-    title "P(at least one exploitable entry point), 3% risk per endpoint"
+    title "P(at least one exploitable entry point), 3% each"
     x-axis ["1", "5", "10", "20", "30", "40"]
     y-axis "Probability" 0 --> 1
-    bar [0.03, 0.14, 0.26, 0.46, 0.60, 0.71]
+    bar [0.03, 0.14, 0.26, 0.46, 0.6, 0.7]
 ```
 
-This is the same file-upload endpoint's math scaled up: if each of N independent entry points has even a small, fixed chance of an exploitable flaw, the odds that _at least one_ of them is exploitable grow non-linearly with N. The simpler formula is: chance of at least one failure = `1 - chance that none fail`. A system with 40 loosely-reviewed entry points isn't "a bit riskier" than one with 5 — it's a fundamentally different risk profile, which is exactly why STRIDE is run per-component rather than once for the whole system: the unit of analysis has to match the unit that's actually multiplying. Play with the numbers yourself in the "Try it" demo below.
+Going from 5 to 40 entry points multiplies the entry point count by 8 and the
+risk by about 5. Two caveats keep this honest: the 3% is an assumed figure, not
+a measurement, and real flaws are rarely independent (one shared mistake can
+sit behind many entry points). The shape is what matters: risk climbs faster
+than the count. Try it below with your own numbers.
 
-<Checkpoint question="Going from 5 endpoints to 40 endpoints (each with an independent 3% chance of an exploitable flaw) more than quadruples the system-wide risk, even though the endpoint count only grew 8x. What does that imply about reviewing a system as it grows, versus reviewing it once at launch?">
+<Checkpoint question="Going from 5 to 40 entry points, each with an independent 3% chance, raises system-wide risk about five-fold while the count grew eight-fold. What does that imply about reviewing once at launch versus as the system grows?">
 
-It means a one-time security pass doesn't scale with the system —
-running STRIDE once when there were 5 endpoints and treating the result
-as still valid at 40 endpoints badly understates the actual risk,
-because the probability of at least one exploitable gap climbs faster
-than the endpoint count does. Each new entry point isn't just "one more
-thing to maybe check later"; it's another independent chance for the
-whole system to fail, multiplying against every chance that came before
-it. That's why the STRIDE review has to be a per-component habit applied
-as new entry points are added, not a single audit performed once and
-assumed to still cover a system that has since grown.
+A one-time pass does not scale with the system. Treating a STRIDE review done at
+5 entry points as still valid at 40 badly understates the risk, because the
+chance of at least one gap climbs quickly as entry points are added. Each new
+entry point is another independent chance for the whole system to fail,
+multiplying against all those before it. That is why STRIDE belongs to each
+component as it is added, rather than being an audit performed once.
 
 </Checkpoint>
 
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="risk-compounding"
+/>
+
 ## Failure modes
 
-- **Validating shape, not trust.** Checking that `price` is a number, or that a filename ends in `.jpg`, confirms the _shape_ of the input is well-formed — it says nothing about whether the input's _value_ should be trusted for anything security-sensitive. The checkout bug above passes every reasonable shape check.
-- **Security review as a separate late-stage gate.** Treating "think like an adversary" as a checklist run by a different team right before launch means the design itself was never adversarially examined — by then, fixing a trust-boundary mistake often means reworking the architecture, not patching a line.
-- **Stopping at "this specific bug is fixed" instead of "this category is covered."** Patching the price-tampering bug in `checkout()` doesn't mean every other client-controlled value elsewhere in the codebase (discount codes, shipping cost, user roles) is safe — STRIDE's value is in making you re-ask the same six questions per component, not treating one fix as proof the mindset was applied everywhere.
-- **Assuming "we'd never get attacked, we're small/unknown."** Most real-world exploitation of small or obscure systems is automated and untargeted (scanners probing for a known vulnerable pattern across millions of hosts) — obscurity reduces the odds of a _targeted_ attack, not an automated one, and the checkout bug above would be found by a script, not a person specifically hunting your company.
+- **Validating shape, not trust.** Checking that `price` is a number or a filename ends in `.jpg` confirms the input is well formed. It says nothing about whether the value should be trusted for anything security-sensitive.
+- **A late, separate security gate.** If the design was never examined adversarially, fixing a boundary mistake after launch often means reworking the architecture, not patching a line.
+- **Fixing one bug, not the category.** Patching the price in `checkout()` does not make the discount code, shipping cost or user role safe. The point of STRIDE is to ask the same six questions per component.
+- **"We are too small to be attacked."** Automated scanners probe for known patterns across millions of hosts. Obscurity lowers the odds of a targeted attack, not an automated one.
 
-The checkout bug and the file-upload table are one worked example each, not the whole territory. **Questions to think with:** what changes if the file-upload endpoint were internal-only, used by employees rather than the public? Usually the table shrinks in priority, not to zero: employees can make mistakes, accounts can be stolen, and internal tools still cross boundaries. And what happens to the checkout fix if `catalog` itself is populated from a third-party pricing feed? The trust boundary moves one hop back: now the feed needs verification before its prices become server truth.
+## Where does this example stop being the whole story?
+
+The checkout bug and the upload table are one worked case each, not the whole
+territory. **Questions to think with:** what changes if the upload endpoint were
+internal-only, used by employees instead of the public? The table usually shrinks
+in priority, not to zero: accounts can be stolen and mistakes happen. And what
+happens to the checkout fix if the catalog itself is filled from a third-party
+pricing feed? The trust boundary moves one hop back, so the feed needs
+verification before its prices become server truth. Try the same two questions on
+a feature you have built: which values did you accept from outside, and who
+chose them?
