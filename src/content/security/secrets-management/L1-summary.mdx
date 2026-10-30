@@ -1,119 +1,122 @@
 ---
-title: "L1 — How do we stop leaking secrets into code and logs?"
+title: "L1 — How do we keep secrets out of code and logs?"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario>
+export const unit = { track: "security", unitSlug: "secrets-management" };
+
+<Scenario label="A password was typed into a file, pushed, and deleted 45 minutes later. Is it safe again?">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🕐</span> <strong>0 min</strong> — `git push` lands on a public repo (visibility was flipped by accident)</div>
-      <div class="flex items-center gap-1.5"><span>🤖</span> <strong>3 min</strong> — an automated key-scanning bot flags the AWS-key pattern in the diff</div>
-      <div class="flex items-center gap-1.5"><span>🔎</span> <strong>9 min</strong> — the key is used for reconnaissance against the account</div>
-      <div class="flex items-center gap-1.5"><span>📧</span> <strong>47 min</strong> — an engineer finally notices and rotates the key</div>
+      <div class="flex items-center gap-1.5"><span>⌨️</span> <strong>Minute 0</strong> — the database password is pasted into a config file and pushed</div>
+      <div class="flex items-center gap-1.5"><span>👀</span> <strong>Minutes 0 to 45</strong> — the branch is readable by anyone who can see the repo</div>
+      <div class="flex items-center gap-1.5"><span>🧹</span> <strong>Minute 45</strong> — the line is deleted and a new commit is pushed</div>
+      <div class="flex items-center gap-1.5"><span>❓</span> <strong>Question</strong> — does the old password still work?</div>
     </div>
     <div class="not-prose mt-3 rounded border border-rose-300 bg-rose-50 p-1.5 text-xs dark:border-rose-800 dark:bg-rose-950">
-      <p class="font-semibold text-rose-600 dark:text-rose-400">Deleting the file at minute 50 changes nothing</p>
-      the key was live and usable for the 44 minutes before anyone acted — a later commit can't un-happen that
+      <p class="font-semibold text-rose-600 dark:text-rose-400">The database never heard about the deletion</p>
+      it accepts whatever password it was last told to accept
     </div>
-
   </Fragment>
 
-Mira, a backend engineer at Kelvin Metrics (a small monitoring SaaS), is
-under deadline pressure and hardcodes the production database password
-directly into `config/database.js` — "just for this branch, I'll fix it
-before merging." She pushes the branch. The repo's visibility had been
-flipped from private to public a week earlier during an unrelated GitHub
-migration, and nobody caught it. Three minutes later, an automated bot
-that continuously scans public GitHub commits for key-shaped strings
-flags the password. **Mira "fixes it" 47 minutes later by deleting the
-line and committing the change. Is the incident over?**
+Mira, a backend engineer at Kelvin Metrics (a small monitoring product),
+is in a hurry. She pastes the production database password into
+`config/database.js` — "just for this branch" — and pushes. Forty-five
+minutes later she notices, deletes the line, and pushes again. The file
+now looks clean. **Is the incident over?**
+
+No. Think of writing a house key's shape on a postcard and mailing it:
+tearing up your own copy of the postcard afterwards does nothing about
+the copy already in someone else's mailbox. The database still accepts
+the old password, and the old commit still contains it. Everything else
+in this unit grows from that one gap: "the file looks clean" and "the
+secret stopped working" are two different facts.
 
 </Scenario>
-
-No — and that gap between "the file no longer shows the secret" and "the
-secret is no longer usable" is the entire subject of this unit. The commit
-that deleted the password is still preceded, in git's history, by the
-commit that added it — anyone with a clone of the repo (a scanning bot
-included) already has both.
 
 <LevelIntro
   items={[
     "What counts as a secret",
-    "The five places secrets actually leak",
-    "The remediation stack: inject → manage → rotate → scan",
+    "The five places secrets leak",
+    "Why rotation, not deletion, ends a leak",
   ]}
 />
 
+```mermaid
+flowchart LR
+    A["Minute 0: password pushed"] --> B["Minutes 0 to 45: copies can be made"]
+    B --> C["Minute 45: line deleted"]
+    C --> D{"Did the database<br/>password change?"}
+    D -->|"No"| E["Every copy still works"]
+    D -->|"Yes: rotated"| F["Every copy is now useless"]
+```
+
 ## What counts as a secret
 
-Not just passwords — anything that, if read by someone outside its
-intended audience, lets them act as your system or read data they
-shouldn't:
+A secret is any value that lets whoever holds it act as your system or
+read data they should not see. Passwords are only one kind:
 
-| Secret type               | Example                                         | What it grants an attacker                                    |
-| ------------------------- | ----------------------------------------------- | ------------------------------------------------------------- |
-| API key / token           | Stripe secret key, a third-party SDK key        | Billing access, ability to charge cards or pull customer data |
-| Database credential       | `DB_PASSWORD`, a connection string              | Direct read/write on production data                          |
-| Private key               | TLS private key, an SSH deploy key              | Ability to impersonate your server or push code as you        |
-| Webhook signing secret    | Stripe/GitHub webhook secret                    | Ability to forge events your system trusts                    |
-| Cloud provider credential | AWS access key + secret, a service-account JSON | Whatever IAM permissions that credential carries              |
+| Secret type               | Fake example                  | What it grants                              |
+| ------------------------- | ----------------------------- | ------------------------------------------- |
+| API key                   | `sk_test_FAKE_0000`           | Calls the provider's API as you             |
+| Database credential       | `DB_PASSWORD=not-a-real-pw`   | Reads and writes production data            |
+| Private key               | a PEM block marked `FAKE`     | Impersonates your server or deploy identity |
+| Webhook signing secret    | `whsec_FAKE_0000`             | Forges events your system trusts            |
+| Cloud provider credential | `AKIAIOSFODNN7EXAMPLE` (docs) | Whatever permissions the account carries    |
 
-## The five places secrets actually leak
+The test is not "does it look like a password" but "what could someone
+do if they read it".
 
-Secrets rarely leak because someone typed them into a public form on
-purpose — they leak because a normal engineering workflow copies data
-somewhere the author never thought to check:
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="what-is-secret"
+/>
 
-<div class="not-prose my-3 grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-5">
-  <div class="rounded-lg border border-slate-200 p-2 dark:border-slate-700">
-    <div class="text-xl">📜</div>
-    <p class="mt-1 font-medium text-slate-700 dark:text-slate-200">
-      Git history
-    </p>
-  </div>
-  <div class="rounded-lg border border-slate-200 p-2 dark:border-slate-700">
-    <div class="text-xl">🖨️</div>
-    <p class="mt-1 font-medium text-slate-700 dark:text-slate-200">CI logs</p>
-  </div>
-  <div class="rounded-lg border border-slate-200 p-2 dark:border-slate-700">
-    <div class="text-xl">🩹</div>
-    <p class="mt-1 font-medium text-slate-700 dark:text-slate-200">
-      Error trackers
-    </p>
-  </div>
-  <div class="rounded-lg border border-slate-200 p-2 dark:border-slate-700">
-    <div class="text-xl">📦</div>
-    <p class="mt-1 font-medium text-slate-700 dark:text-slate-200">
-      Client bundles
-    </p>
-  </div>
-  <div class="rounded-lg border border-slate-200 p-2 dark:border-slate-700">
-    <div class="text-xl">🐳</div>
-    <p class="mt-1 font-medium text-slate-700 dark:text-slate-200">
-      Docker layers
-    </p>
-  </div>
-</div>
+## Where do secrets actually leak?
 
-- **Git history** — a secret added in commit A and removed in commit B still exists in commit A, in every clone, fork, and CI cache that ever pulled the repo before B.
-- **CI logs** — a build step that does `echo $DB_PASSWORD` for debugging (or that crashes and dumps its environment) writes the secret straight into a log that's often more widely readable than the source repo itself.
-- **Error trackers** — a crash handler that serializes "everything about this request" for a tool like Sentry can capture environment variables or local state that included a secret in scope.
-- **Client-side bundles** — any value baked into frontend JavaScript at build time ships to every visitor's browser; a "secret" placed there was never actually secret.
-- **Docker image layers** — a file copied in, used, and deleted in a later layer is still sitting in the earlier layer; anyone who can pull the image can inspect every layer.
+Rarely by someone posting them on purpose. They leak because an ordinary
+workflow copies data somewhere nobody checked:
 
-## The remediation stack
+| Place         | How the value gets there                                   | Why "removing it later" fails                   |
+| ------------- | ---------------------------------------------------------- | ----------------------------------------------- |
+| Git history   | Committed once, deleted in a later commit                  | The older commit still holds it, in every clone |
+| CI logs       | A debug `echo` or a crash that prints the environment      | Logs are stored and often widely readable       |
+| Error tracker | A crash report that captures local state                   | A third-party service already stored the event  |
+| Client bundle | A value baked into frontend JavaScript at build time       | Every browser that loaded it keeps a copy       |
+| Docker layer  | A file copied in, used, then deleted in a later `RUN` step | The earlier layer still contains the file       |
 
-Four ideas, in the order they actually get applied, from writing code to living with a secret in production:
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="leak-vectors"
+/>
 
-1. **Environment-variable injection** — the secret lives outside the source tree entirely and is supplied at runtime, not written into a file that gets committed.
-2. **A secret manager** (HashiCorp Vault, AWS Secrets Manager, and similar) — a dedicated system that stores, audits access to, and serves secrets on demand, instead of a plaintext `.env` file sitting on a server.
-3. **Rotation** — periodically (or immediately after a suspected leak) replacing a secret's value, so a copy that leaked in the past stops being useful.
-4. **Scanning** — automated tools (gitleaks, trufflehog, and similar) that check every commit or diff for secret-shaped strings before they ever reach a shared branch.
+## Rotate, do not just delete
 
-The single fact that ties all four together, and the one Mira's story is
-built around: **rotation is the only step that actually ends an
-exposure.** Deleting a file, tightening a `.gitignore`, or making a repo
-private again are all good hygiene — none of them make a secret that
-already leaked stop working.
+Four defenses exist, and they sit at different moments:
+
+1. **Inject** the secret at runtime (an environment variable) so it is never in the source tree.
+2. **Manage** it in a dedicated secret manager that stores, audits, and serves it.
+3. **Scan** every commit for secret-shaped strings before it is shared.
+4. **Rotate** it: change the value at the system that accepts it.
+
+Only the fourth one works after a leak has already happened. Deleting a
+file, adding a `.gitignore` line, or making a repo private are good
+hygiene, but none of them changes what the database accepts.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="rotate-vs-delete"
+/>
+
+## What the next levels add
+
+L2 explains why history keeps the secret, how the four defenses fit into
+one pipeline, and why one narrow credential per purpose limits the damage.
+L3 works through masking, a startup validator, and the order of an
+incident response.
