@@ -1,155 +1,197 @@
 ---
-title: "L2 — The properties every hash needs, and what a KDF deliberately breaks"
+title: "L2 — The properties a hash needs, why collisions still exist, and what a KDF and a salt add"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named the properties a cryptographic hash needs and drew the line
-between a fast everyday hash and a deliberately slow KDF without yet
-showing why each property matters or what a KDF actually changes
-internally. L2 works through both in order.
+export const unit = { track: "security", unitSlug: "hashing" };
+
+L1 gave hashes a job (a short fingerprint) and split it in two: fast for
+files, slow for passwords. L2 works out why each property exists and what
+exactly a KDF and a salt change.
 
 <LevelIntro
   items={[
-    "The five properties a cryptographic hash must satisfy",
-    "Why collisions are guaranteed to exist, and why that's still fine",
-    "The two levers a KDF adds that an everyday hash doesn't need",
+    "Properties a cryptographic hash must have",
+    "Why collisions exist but stay out of reach",
+    "What a KDF and a salt each add",
   ]}
 />
 
-## What actually makes a function a cryptographic hash
+## What separates a cryptographic hash from a simple checksum?
 
-**Isn't any function that shrinks data down to a fixed size a "hash"?**
-Not a _cryptographic_ one — a checksum like a simple sum-of-bytes also
-produces a fixed-length output, but it's trivial to find two inputs that
-produce the same checksum, and trivial to construct an input that
-produces a chosen checksum. A cryptographic hash function needs to hold
-up under adversarial pressure, which means satisfying several properties
-at once, not just "compresses the input":
+**Isn't any function that shrinks data to a fixed size a hash?** It is a
+hash in the loose sense, but a cheap checksum fails under pressure.
+Add up the byte values of a word, and `AB` (65 + 66) and `BA` (66 + 65)
+both give `131`: two different inputs, one output, and an attacker can
+build such pairs on purpose.
 
-A toy checksum shows the weakness. If `A = 65` and `B = 66`, then
-`AB` and `BA` both add to `131`. The output is the same even though the
-input order changed, so this is useful for catching accidents at best,
-not for resisting someone trying to fool it.
+| Property             | What it requires                                                       |
+| -------------------- | ---------------------------------------------------------------------- |
+| Deterministic        | Same input gives the same output, always                               |
+| Fixed-length output  | A one-byte input and a ten-gigabyte input give the same-size output    |
+| Avalanche effect     | Flipping one input bit flips about half the output bits, unpredictably |
+| Preimage resistance  | Given a hash, finding any input that produces it is infeasible         |
+| Collision resistance | Finding two different inputs with the same hash is infeasible          |
 
-| Property             | What it requires                                                                  |
-| -------------------- | --------------------------------------------------------------------------------- |
-| Deterministic        | Same input → same output, always, on any machine                                  |
-| Fixed-length output  | A one-byte input and a ten-gigabyte input both produce the same-size hash         |
-| Avalanche effect     | Flipping one input bit should flip roughly half the output bits, unpredictably    |
-| Preimage resistance  | Given a hash, it should be infeasible to find _any_ input that produces it        |
-| Collision resistance | It should be infeasible to find _two different_ inputs that produce the same hash |
+**Why does avalanche matter for tamper detection?** If a small edit moved
+the hash only a little, a tamperer could search for an edit that lands
+"close enough" to slip past a careless glance. With avalanche there is no
+"close": the only useful comparison is exact equality.
 
-Preimage means "the thing before the hash." Preimage resistance is the
-property that stops someone from seeing a fingerprint and reconstructing
-some matching original on purpose.
+<Checkpoint question="A friend says a function that is deterministic and fixed-length is already good enough to detect tampering. What is missing?">
 
-**Why does the avalanche effect matter for something like file
-integrity checking, specifically?** If a hash changed only a little for
-a small input change, an attacker tampering with a file could search for
-a modification that keeps the hash _close_ to the original and slip a
-change past a careless "looks about right" comparison. Avalanche makes
-"close" meaningless — any change at all produces a completely unrelated
-output, so the only useful comparison is exact equality.
-
-<Checkpoint question="A junior engineer says: 'if a hash only satisfies deterministic output and fixed length, that's basically good enough for tamper-detection, right?' What's missing from that claim?">
-
-No — deterministic and fixed-length alone describe a checksum, not a
-cryptographic hash, and a checksum is exactly what the toy `A=65, B=66`
-example above breaks: `AB` and `BA` are different inputs that produce
-the identical output, so an attacker who understands the algorithm can
-often construct a different input that lands on the same checksum on
-purpose. Tamper-detection specifically needs the avalanche effect (so a
-small change can't be disguised as "close enough") and collision
-resistance (so an attacker can't deliberately engineer a different file
-that hashes to the same value as the original). Determinism and
-fixed-length output are necessary for a hash to be usable at all, but
-they say nothing about whether it resists someone actively trying to
-fool it — which is the whole reason "cryptographic" is in the name.
+Those two properties describe a checksum, and the `AB`/`BA` example shows
+the gap: different inputs can land on the same output, and nothing stops
+someone from constructing such a pair. Tamper detection also needs
+avalanche, so a small change cannot hide as "nearly the same", and
+collision resistance, so a second file cannot be engineered to carry the
+same fingerprint as the first. Determinism and fixed size only make the
+function usable; they say nothing about whether it resists someone who is
+actively trying to fool it.
 
 </Checkpoint>
 
-## Why collisions are inevitable, and why that's still fine
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="fingerprint-and-avalanche"
+/>
+
+## If collisions must exist, why isn't every hash broken?
 
 ```mermaid
 flowchart TD
-    Inputs["Infinitely many possible inputs\n(any file, any string, any size)"] --> Hash["Hash function"]
-    Hash --> Outputs["Fixed, finite set of possible outputs\n(e.g. 2^256 for SHA-256)"]
-    Outputs -->|pigeonhole principle| Collision["Collisions MUST exist somewhere —\nmore inputs than outputs"]
+    I["Unlimited possible inputs\n(every file, every string)"] --> H["Hash function"]
+    H --> O["Limited possible outputs\n(2^256 for SHA-256)"]
+    O -->|pigeonhole principle| C["More inputs than outputs,\nso some inputs must share an output"]
 ```
 
-Start with a small version: if 100 objects must fit into 10 boxes, at
-least some objects share a box. Hashes have the same shape: many
-possible inputs, fewer possible outputs. Real cryptographic hashes make
-the number of boxes astronomically large, so finding a shared box on
-purpose is still practically out of reach.
+Put 100 objects in 10 boxes and some box holds several. Hashes are the
+same shape on a huge scale, so collisions are guaranteed to exist.
+Collision _resistance_ only claims that finding one on purpose is
+infeasible. A hash is "broken" when someone finds a way to locate
+collisions faster than the generic baseline, which is what eventually
+happened to MD5 and SHA-1.
 
-**If collisions are mathematically guaranteed to exist, doesn't that mean
-hash functions are broken?** No — collision _resistance_ doesn't claim
-collisions don't exist, only that finding one on purpose should take
-computationally infeasible effort (for SHA-256, roughly 2^128
-operations even accounting for the birthday paradox — a number large
-enough that "infeasible" holds in practice for the foreseeable future).
-A hash function is "broken" specifically when someone finds a way to
-locate collisions _faster_ than that brute-force baseline, the way
-MD5 and SHA-1 both eventually were.
+The generic baseline is not "try every output". By the birthday effect, a
+hash with `k` possible outputs yields a collision after roughly
+`sqrt(k)` tries, so an `n`-bit hash gives about `n/2` bits of collision
+resistance. Preimage resistance is the harder-to-beat property: finding an
+input for one given hash takes on the order of the full output space.
 
-## What a key derivation function deliberately breaks
+| Output size | Tries before a collision becomes likely | Tries to find a preimage (order) |
+| ----------- | --------------------------------------- | -------------------------------- |
+| 8 bits      | about 2^4 = 16                          | about 2^8 = 256                  |
+| 64 bits     | about 2^32 (about 4.3 billion)          | about 2^64                       |
+| 256 bits    | about 2^128                             | about 2^256                      |
 
-**If speed is normally a hash function's whole point, why does
-`security/authentication-fundamentals` use `scrypt` instead of plain
-SHA-256 for passwords?** Because a stored password hash isn't being
-checked against _legitimate_ traffic at meaningful volume — it's a
-target for an attacker running billions of guesses per second against a
-stolen database, entirely offline, unrestricted by any rate limit. A
-fast general-purpose hash is exactly the wrong shape for that threat
-model: the faster the hash, the cheaper each guess is. A key derivation
-function deliberately sacrifices speed and adds a second lever an
-everyday hash doesn't have:
+<Checkpoint question="Why does shrinking a hash's output from 256 bits to 64 bits hurt collision resistance far more than the size ratio suggests?">
 
-| Lever               | What it does                                                      | Why an everyday hash doesn't need it                                                                                                                                          |
-| ------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Iteration/time cost | Repeats internal work thousands of times                          | File-integrity checks need speed, not slowness                                                                                                                                |
-| Memory hardness     | Requires a large block of memory per attempt, not just CPU cycles | Forces attackers into expensive hardware (can't cheaply parallelize on cheap ASICs — specialized chips built to repeat one operation very fast — the way a pure-CPU hash can) |
-
-For the password side of this threat model, connect back to
-`/security/authentication-fundamentals/`: that unit explains why a
-stolen database turns fast guessing into the real danger.
-
-**Does turning up a KDF's cost parameter forever make it more secure
-with no downside?** No — every legitimate login pays that same cost too.
-The parameter is a genuine trade-off, tuned to be annoying for an
-attacker running billions of attempts but imperceptible for one real
-user running exactly one attempt — L3 measures this trade-off directly
-rather than just asserting it.
-
-<Checkpoint question="Two systems both call their password storage 'hashed.' System A uses plain SHA-256 with no salt. System B uses scrypt with a tuned cost parameter. If both databases are stolen, why does that shared word 'hashed' hide a huge difference in how much danger each system's users are actually in?">
-
-Because "hashed" only says that a fixed-length, deterministic
-fingerprint is stored instead of the plaintext password — it says
-nothing about how expensive each guess is for an attacker. System A's
-SHA-256 is a fast, general-purpose hash designed for the opposite job
-(checking file integrity quickly), so an attacker can attempt billions
-of guesses per second against the stolen database with commodity
-hardware. System B's scrypt deliberately spends extra time and memory on
-every single hash computation — the same billions of guesses now take
-orders of magnitude longer and require far more expensive hardware to
-parallelize. Both databases got "hashed," but only one of them was
-hashed with the actual threat model (offline, unlimited attacker
-guessing) in mind. The word describes a mechanism, not a security
-guarantee.
+Collision resistance follows the square root of the output space, so it
+is measured in half the bits. Cutting 256 bits to 64 does not leave a
+quarter of the security: it takes the collision cost from about 2^128 down
+to about 2^32, which is a few billion tries and entirely within reach. The
+square-root effect is why output size has to be generous, not merely
+"big enough that guessing one specific value is hopeless".
 
 </Checkpoint>
 
-## The generalizable lesson
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="collisions-and-preimages"
+/>
 
-**Is "hash it" ever a complete instruction on its own?** No — "hash it"
-only becomes a real design decision once paired with _which_ hash and
-_why_: a fast, general-purpose hash for integrity checks and content
-addressing, where speed at scale is the goal and there's no secret being
-protected; a slow, memory-hard KDF specifically for anything an attacker
-would want to brute-force offline, like a password. Picking the wrong
-one for the situation — a KDF for checksumming a large file, or a fast
-hash for a password — doesn't just underperform, it silently produces
-the wrong security properties for what's actually being protected.
+## Why would a password hash be deliberately slow?
+
+**If speed is usually a hash's selling point, why not store a password
+as plain SHA-256?** Because the threat is different. A stolen database
+lets an attacker guess offline, with no rate limit and no lockout, as
+fast as their hardware allows. The faster the hash, the cheaper each
+guess. A key derivation function adds two levers that an everyday hash
+has no reason to have:
+
+| Lever           | What it does                                        | Why it hurts the attacker more than the user                            |
+| --------------- | --------------------------------------------------- | ----------------------------------------------------------------------- |
+| Time cost       | Repeats internal work many times per hash           | One login pays it once; a billion guesses pay it a billion times        |
+| Memory hardness | Needs a large block of memory for every single hash | Cheap specialised chips cannot run huge numbers of guesses side by side |
+
+```mermaid
+flowchart LR
+    subgraph User["One real login"]
+      U["1 attempt x cost"] --> UR["A fraction of a second: invisible"]
+    end
+    subgraph Attacker["Offline guessing"]
+      A["Billions of attempts x the same cost"] --> AR["Days to years"]
+    end
+```
+
+<Checkpoint question="Two systems both say passwords are hashed: one with plain SHA-256, one with a tuned KDF. Both databases are stolen. Why does the shared word hide a large difference?">
+
+"Hashed" names a mechanism (a fingerprint is stored instead of the
+password), not a guarantee about how expensive a guess is. SHA-256 was
+designed to be fast, so an attacker can try guesses at enormous speed.
+The KDF spends deliberate time and memory on every single guess, so the
+same attacker pays far more per attempt and cannot cheaply parallelise.
+Same word, opposite fit to the actual threat of offline guessing.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="fast-vs-slow-hashing"
+/>
+
+## What does a salt fix that a slow hash does not?
+
+**Two users picked the same password. Without more, what does a stolen
+database reveal?** Their stored hashes are identical, so the attacker
+learns the two accounts share a password, and cracking one cracks both.
+A table of precomputed hashes for common passwords (a rainbow table or
+a simple lookup list) also works against every account at once.
+
+A salt is a random value generated for each user and stored next to the
+hash. The KDF mixes it into the input, so:
+
+| Without a salt                                 | With a per-user random salt                              |
+| ---------------------------------------------- | -------------------------------------------------------- |
+| Same password gives the same hash for everyone | Same password gives a different hash for each user       |
+| One precomputed table cracks every account     | A table would be needed per salt, so it stops paying off |
+| Guessing one password can match many accounts  | Each account must be attacked separately                 |
+
+```mermaid
+flowchart LR
+    P["Password"] --> M["KDF"]
+    S["Per-user random salt\n(stored in the open)"] --> M
+    M --> H["Stored hash"]
+    S --> R["Stored beside the hash"]
+```
+
+A salt is not a secret and it does not make a single targeted guess any
+slower. It removes shared work. Slowness comes from the KDF's cost; the
+salt makes sure that cost has to be paid per account.
+
+<Checkpoint question="An attacker has the salt and the hash for one user. Has the salt failed?">
+
+No. A salt was never meant to be secret, and it is stored in the open
+next to the hash. Its job is to make the attack account-specific:
+precomputed tables no longer apply, and matching hashes no longer reveal
+shared passwords. The attacker can still guess passwords for this one
+account, which is why the slow KDF is a separate and necessary defence.
+
+</Checkpoint>
+
+<PracticeCheck track={unit.track} unitSlug={unit.unitSlug} topicId="salting" />
+
+## The generalisable lesson
+
+"Hash it" is not a complete design decision. A fast hash fits integrity
+checks and content addressing, where nothing secret is guarded. A slow,
+memory-hard KDF with a per-user salt fits secrets an attacker can guess
+offline. Picking the wrong one does not fail loudly; it quietly gives
+the wrong security properties. How to pick the KDF's cost setting is the
+last question, and L3 answers it with measured numbers.

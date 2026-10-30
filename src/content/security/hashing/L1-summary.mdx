@@ -1,92 +1,83 @@
 ---
-title: "L1 — What makes a hash function actually one-way, and why passwords need a different kind of hash than everything else"
+title: "L1 — One short fingerprint for a whole file, and why passwords need a slow one"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 
-<Scenario label="One flipped character, a completely different fingerprint">
+export const unit = { track: "security", unitSlug: "hashing" };
+
+<Scenario label="Did the download arrive exactly as published?">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>📄</span> <strong>Original file</strong> — hash: <code>a3f5...9c1e</code></div>
-      <div class="flex items-center gap-1.5"><span>✏️</span> <strong>One byte changed</strong> — hash: <code>7b02...44af</code> — no resemblance at all</div>
-      <div class="flex items-center gap-1.5"><span>🔍</span> <strong>The use</strong> — comparing hashes tells you instantly whether the file changed, without comparing the files themselves</div>
+      <div class="flex items-center gap-1.5"><span>📄</span> <strong>Input A</strong> — <code>hello</code> → <code>2cf24dba…9824</code></div>
+      <div class="flex items-center gap-1.5"><span>✏️</span> <strong>Input B</strong> — <code>hellp</code> (one letter changed) → <code>fdd7585e…4ce7</code></div>
+      <div class="flex items-center gap-1.5"><span>🔍</span> <strong>The use</strong> — compare two short strings instead of two whole files</div>
     </div>
   </Fragment>
 
-A download page publishes a file's hash next to the download link. After
-downloading, hashing the file yourself and comparing it to the published
-value tells you, with near-certainty, whether the file arrived intact —
-without ever needing to compare the file byte-by-byte against a trusted
-copy. **How can a single short string stand in for an entire file's
-integrity, and why does changing one character of the file scramble that
-string completely instead of changing it just a little?**
+A download page prints a short string next to the link. You download the
+file, compute the same kind of string from your copy, and compare the two.
+If they match, your copy is the published one, and you never had to
+compare a single byte of the file against anything. **How can a short
+string stand in for an entire file, and why does changing one letter
+produce an unrelated-looking string instead of a slightly different one?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "What makes a hash 'cryptographic', not just fixed-size",
-    "The avalanche effect, in plain terms",
-    "Why passwords need a slow KDF instead of a fast hash",
+    "What a hash is and what makes it cryptographic",
+    "The avalanche effect",
+    "Why a password needs a slow hash and a salt",
   ]}
 />
 
-## Before the crypto words
+## The shape of the answer
 
-| Term          | Plain meaning                                                      |
-| ------------- | ------------------------------------------------------------------ |
-| **Bit**       | One tiny yes/no value: `0` or `1`                                  |
-| **Byte**      | 8 bits grouped together; files are made of many bytes              |
-| **Hash**      | A fixed-size fingerprint for some input                            |
-| **Integrity** | The file was not changed from the trusted version                  |
-| **One-way**   | Practical to compute forward, not practical to reverse             |
-| **KDF**       | A deliberately slow password hash, used to make guessing expensive |
+```mermaid
+flowchart LR
+    F["Any input\n(a word, a file, a movie)"] --> H["Hash function"]
+    H --> D["Fixed-size fingerprint\n(SHA-256: always 256 bits)"]
+    D -. "no practical way back" .-> F
+```
 
-Fast can be good or bad depending on the job. If you are checking a
-thousand downloaded files, you want the hash to be fast. If an attacker
-is trying a billion password guesses against a stolen database, you want
-each guess to be slow.
+| Term                 | Plain meaning                                                          |
+| -------------------- | ---------------------------------------------------------------------- |
+| **Hash**             | A fixed-size fingerprint of some input                                 |
+| **Deterministic**    | Same input, same fingerprint, on any machine, every time               |
+| **Avalanche effect** | A tiny input change scrambles the whole fingerprint                    |
+| **Preimage**         | An input that produces a given fingerprint; finding one should be hard |
+| **Collision**        | Two different inputs with the same fingerprint                         |
+| **Salt**             | A random value stored beside a password hash, different per user       |
+| **KDF**              | A key derivation function: a deliberately slow, tunable password hash  |
 
-## The shape of the problem
+## The twist: fast is a feature for files and a bug for passwords
 
-- A cryptographic hash function takes input of any size and produces a
-  fixed-length, deterministic fingerprint — the same input always
-  produces the same output, but there's no practical way to work
-  backwards from the fingerprint to the input.
-- A hash function being "one-way" and "fast" are two independent
-  properties — most hash functions are both, which is exactly right for
-  checking file integrity and exactly wrong for storing passwords, a
-  distinction this unit exists to make precise.
+| Job                          | Who is guessing?                                     | Fast hash is...                  |
+| ---------------------------- | ---------------------------------------------------- | -------------------------------- |
+| Check a download's integrity | Nobody; you hash one file once                       | Good: less waiting               |
+| Store a password for later   | An attacker with a stolen database, guessing offline | Bad: every guess becomes cheaper |
 
-## Key terms
+A real login hashes one password once. An attacker with a stolen
+database hashes billions of guesses. A function that is slow enough to be
+invisible to the first and painful for the second is exactly what a KDF
+is built to be, and a per-user salt makes sure the attacker cannot reuse
+one round of guessing against every account at once.
 
-- **Deterministic** — the same input always produces the exact same
-  hash, every time, on any machine.
-- **Avalanche effect** — changing even a single bit of the input should
-  scramble the output completely and unpredictably, not shift it
-  slightly — this is what makes a hash useful as a tamper-detector.
-- **Collision resistance** — it should be computationally infeasible to
-  find two different inputs that produce the same hash.
-- **Preimage resistance** — given only a hash, it should be infeasible
-  to find any input that produces that hash.
-- **Key derivation function (KDF)** — a hash function deliberately built
-  to be _slow_ and _tunable_, specifically for turning a password into a
-  stored credential; this is the missing half of the picture from
-  `security/authentication-fundamentals`, which used a KDF (`scrypt`)
-  without explaining what structurally separates it from an everyday
-  hash like SHA-256.
+```mermaid
+flowchart TD
+    P["Password + random salt"] --> K["KDF (slow, tunable)"]
+    K --> S["Store: salt + cost setting + hash"]
+    S --> L["Login: recompute with the stored salt,\ncompare to the stored hash"]
+```
 
-If you arrived here from passwords, `/security/authentication-fundamentals/`
-explains the login flow, salting, and rainbow-table problem this unit
-builds on.
+If you arrived from passwords, `/security/authentication-fundamentals/`
+covers the login flow this unit builds on.
 
 ## What this unit covers
 
-L2 works through the formal properties every cryptographic hash needs
-(deterministic, fixed-length, avalanche effect, collision resistance),
-and what specifically changes in a KDF's design to make it deliberately
-expensive. L3 demonstrates the avalanche effect and a real collision
-search with runnable code, and works through tuning a KDF's cost
-parameter to see the actual trade-off between login latency and
-attacker cost.
+L2 explains the properties a hash needs, why collisions must exist yet
+stay out of reach, why a KDF is slow on purpose, and what a salt does.
+L3 measures the avalanche effect and a collision search with real
+numbers, then works through tuning a KDF's cost setting.
