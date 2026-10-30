@@ -4,94 +4,114 @@ title: "L1 — How do we decide what an authenticated user is allowed to do? (au
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Logged in, but not supposed to see this">
+export const unit = { track: "security", unitSlug: "authorization-models" };
+
+<Scenario label="A hotel key card that opens the wrong door">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🔑</span> <strong>The endpoint</strong> — `GET /api/invoices/:id`, requires a valid login</div>
-      <div class="flex items-center gap-1.5"><span>🔢</span> <strong>The test</strong> — a logged-in user changes the `:id` in the URL from their own invoice to a neighboring number</div>
-      <div class="flex items-center gap-1.5"><span>😱</span> <strong>The result</strong> — a complete stranger's invoice, full billing details, returned successfully</div>
+      <div class="flex items-center gap-1.5"><span>🏨</span> <strong>The guest</strong> — holds a real card for room 214</div>
+      <div class="flex items-center gap-1.5"><span>🚪</span> <strong>The test</strong> — taps it on room 215 next door</div>
+      <div class="flex items-center gap-1.5"><span>😱</span> <strong>The result</strong> — the door opens</div>
     </div>
     <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
       <div class="rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950">
         <p class="font-semibold text-emerald-600 dark:text-emerald-400">Check performed</p>
-        Is there a valid login session? ✅
+        Is this a valid hotel card? ✅
       </div>
       <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
         <p class="font-semibold text-rose-600 dark:text-rose-400">Check NOT performed</p>
-        Does this invoice belong to this logged-in user? ❌
+        Is this card for THIS room? ❌
       </div>
     </div>
   </Fragment>
 
-An engineer, testing their own account, notices their invoice URL is
-`/api/invoices/48213`. Out of curiosity, they change it to `/api/invoices/48212`. It
-returns — successfully, with a `200 OK` — a complete stranger's invoice: their name,
-address, and billing history. **The endpoint required a valid login. The request came
-from a genuinely authenticated user. So why did it return someone else's private data?**
+A hotel guest holds a genuine key card for room 214. Out of curiosity they tap it
+on room 215, next door, and the door unlocks. The card is real, issued by the
+hotel, and not expired. **The lock accepted a valid card. So why did it open a room that
+card was never meant for?**
 
-The endpoint checked _authentication_ — is there a valid, logged-in session — and stopped
-there. It never checked _authorization_ — does the specific resource being requested
-(invoice `48212`) actually belong to the specific user making the request. Being logged in
-answered "who are you," not "what are you allowed to see," and the endpoint only ever
-asked the first question.
+The lock only asked "is this a card the hotel issued?" It never asked "is this
+card allowed to open this particular door?" The first question is about who
+you are. The second is about what you may do, and the lock skipped it.
 
 </Scenario>
 
-- **Authentication and authorization answer genuinely different questions, and a system
-  can get the first one completely right while failing the second** — "this request comes
-  from a real, logged-in user" (authentication) says nothing about "this specific user is
-  allowed to access this specific resource" (authorization). The invoice endpoint proves
-  both can be true and false at the same time.
-- **This specific failure pattern — checking login status but not resource ownership — is
-  common enough to have a name: Insecure Direct Object Reference (IDOR).** It's one of the
-  most frequently reported real-world web vulnerabilities precisely because it's easy to
-  write an endpoint that "obviously" requires login and never notice the missing second
-  check.
-- **An authorization model is the systematic answer to "what determines whether this
-  request should succeed."** Two common approaches: **RBAC** (role-based access control) —
-  permissions attached to a role, like "billing-viewer can view invoices" — and **ABAC**
-  (attribute-based access control) — permissions computed from attributes of the user, the
-  resource, and the context, like "user.id must equal invoice.ownerId."
-- **RBAC alone cannot express the invoice bug's fix.** "Is this user's role allowed to view
-  invoices at all" is a real, useful RBAC question — but it can only ever answer "can a
-  billing-viewer view invoices," never "can _this specific_ billing-viewer view _this
-  specific_ invoice." The missing check was inherently an attribute-level (ABAC-style)
-  comparison, not a role-level one.
-- The practical skill this unit builds: for any endpoint or action, ask not just "is this
-  role allowed to do this kind of thing" but **"is this specific actor allowed to act on
-  this specific resource"** — the second question is where IDOR-class bugs hide, and no
-  amount of correct role-checking catches it on its own.
-
 <LevelIntro
   items={[
-    "Authentication vs. authorization as separate questions",
-    "IDOR: the missing-ownership-check bug pattern",
-    "RBAC vs. ABAC as two different authorization approaches",
+    "Authentication vs. authorization",
+    "IDOR: the missing-ownership-check bug",
+    "RBAC vs. ABAC as two ways to decide",
   ]}
 />
 
-## Two questions, two different bugs
+## The same bug, in software
 
-| Question                                                       | Answers                              | Bug if skipped                                                                          |
-| -------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------- |
-| Is there a valid, authenticated session?                       | Authentication                       | Anyone, logged in or not, can access anything                                           |
-| Is this session's role allowed to perform this KIND of action? | Authorization (RBAC)                 | A role can perform actions it shouldn't be able to at all                               |
-| Does this specific resource belong to this specific actor?     | Authorization (ABAC-style ownership) | Any valid user of the right role can access ANY resource of that type — the invoice bug |
+Replace the hotel with a web service. An engineer tests their own account and
+sees their invoice at `GET /api/invoices/48213`. They change the number to
+`48212`, and the server returns `200 OK` with a stranger's name, address and
+billing history. The endpoint required a login, and the request came from a
+genuinely logged-in user. It checked identity and never checked access.
 
-The invoice endpoint got the first two rows right and skipped the third entirely.
+| Question                                                           | Name                            | Hotel version                      | Bug if skipped                                         |
+| ------------------------------------------------------------------ | ------------------------------- | ---------------------------------- | ------------------------------------------------------ |
+| Is there a valid, logged-in session?                               | Authentication                  | Is this a real hotel card?         | Anyone can use the system                              |
+| Is this kind of user allowed this kind of action?                  | Authorization (role check)      | Do guests get to open guest rooms? | A role does things it should never do                  |
+| Does this specific thing belong to / relate to this specific user? | Authorization (attribute check) | Is the card for room 215?          | Any valid user reaches every resource: the invoice bug |
 
-Small vocabulary bridge:
+The invoice endpoint passed the first row and skipped the third.
 
-| Term                    | Plain meaning                                                                                |
-| ----------------------- | -------------------------------------------------------------------------------------------- |
-| `endpoint`              | A server URL/action that answers a request, like "give me invoice 48212"                     |
-| `GET /api/invoices/:id` | A request for one invoice; `:id` is the number that changes                                  |
-| `200 OK`                | The server says the request worked; `/web/http-request-response-basics/` covers status codes |
-| `user.id`               | A fact about the logged-in person                                                            |
-| `invoice.ownerId`       | A fact about who owns the invoice                                                            |
-| `context`               | A fact about the situation, like time, location, or device                                   |
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="authn-vs-authz"
+/>
 
-If the auth/authz split still feels slippery, review
-`/security/authentication-fundamentals/` first: authentication proves
-identity; authorization decides access.
+## The bug has a name
+
+- **Authentication and authorization answer different questions, and a system can
+  get the first completely right while failing the second.** "This request comes from
+  a real, logged-in user" says nothing about "this user may open this resource."
+- **Checking login but not ownership is called Insecure Direct Object Reference
+  (IDOR).** It is one of the most commonly reported web vulnerabilities because an
+  endpoint that "obviously" requires login is easy to write without noticing the
+  missing second check.
+- **The user cannot be trusted to supply only their own IDs.** Anything in a URL or
+  request body can be edited by the person sending it, so the server has to
+  compare the requested resource against the requester every time.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="idor-pattern"
+/>
+
+## Two models for deciding
+
+An **authorization model** is the systematic answer to "what decides whether this
+request succeeds." Two common ones:
+
+| Model | Permissions are attached to...                       | Example rule                           | Answers                                     |
+| ----- | ---------------------------------------------------- | -------------------------------------- | ------------------------------------------- |
+| RBAC  | A role (a named bucket of permissions)               | `billing-viewer` can view invoices     | Can this KIND of user do this KIND of thing |
+| ABAC  | Attributes of the user, the resource and the context | `user.id` must equal `invoice.ownerId` | Can THIS user do this to THIS resource      |
+
+RBAC alone cannot express the invoice fix. "A billing-viewer may view invoices" is
+true for every billing-viewer and every invoice. Only a comparison between the
+requester's attributes and the resource's attributes can say "this one, yes; that one,
+no." The practical question for any endpoint is **"is this specific actor allowed to
+act on this specific resource?"**
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="rbac-vs-abac"
+/>
+
+## What this unit covers
+
+L2 works out the order of checks a request passes through (and which HTTP status
+each denial earns), then shows how RBAC and ABAC combine in one endpoint. L3 reproduces
+the invoice incident as a decision table, writes the ownership check itself, and
+stretches it to teams and sharing.

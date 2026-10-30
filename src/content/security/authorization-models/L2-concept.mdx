@@ -4,24 +4,26 @@ title: "L2 — RBAC and ABAC, and why one alone can't express ownership"
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named the invoice bug and the vocabulary around it — authentication vs.
-authorization, RBAC vs. ABAC. L2 works out the actual decision sequence a
-system runs, and exactly where in that sequence the invoice endpoint's
-check was missing.
+export const unit = { track: "security", unitSlug: "authorization-models" };
+
+L1 named the invoice bug (a valid login, no ownership check) and the two models,
+RBAC and ABAC. L2 works out the order a well-built system runs its checks in, and
+exactly where the invoice endpoint's check went missing.
 
 <LevelIntro
   items={[
-    "The three-check sequence: auth, RBAC, ABAC-style ownership",
-    "What RBAC alone can and can't express",
-    "How RBAC and ABAC combine in a real endpoint",
+    "The three checks and their status codes",
+    "What a role can and cannot express",
+    "RBAC and ABAC combined in one endpoint",
   ]}
 />
 
 ## Three questions, checked in order
 
-**Given a request, what's the actual sequence of checks a well-designed system runs
-before granting access?**
+**Given a request, what sequence of checks decides whether it succeeds, and what does
+the caller see when each one fails?**
 
 ```mermaid
 flowchart TD
@@ -33,97 +35,87 @@ flowchart TD
     C -- "Yes" --> Allow["Request succeeds"]
 ```
 
-The invoice endpoint's bug lived specifically in the gap between B and C: it correctly
-confirmed A (a valid session existed) and effectively treated every logged-in customer as
-allowed to view _some_ invoice, but never reached C — whether _this_ invoice belonged to
+The invoice endpoint passed A, effectively treated every logged-in customer as
+allowed to view invoices (B), and never reached C: whether _this_ invoice belongs to
 _this_ customer.
 
-Status-code shortcut: `401` means "we do not know who you are"; `403` means "we know who
-you are, but you cannot do this." For the HTTP foundation, use
-`/web/http-request-response-basics/`.
+| Status | Meaning                                        | Where in the flow        |
+| ------ | ---------------------------------------------- | ------------------------ |
+| `401`  | "We do not know who you are"                   | Fails check A            |
+| `403`  | "We know who you are, and you may not do this" | Fails check B or check C |
 
-<Checkpoint question="A request passes check A and check B, then gets denied. Which HTTP status code does it get, and what does that specific code tell the caller that a 401 wouldn't?">
+For the HTTP foundation, see `/web/http-request-response-basics/`.
 
-It gets a `403 Forbidden`, not a `401`. By the time a request has passed A
-and B, the server already knows exactly who is asking and has already
-confirmed their role is allowed to perform this kind of action at all — so
-a `401` (which means "I don't know who you are") would be actively wrong.
-`403` communicates something more precise: identity is established and the
-role is broadly permitted, but this specific resource is still off-limits
-to this specific actor. That distinction matters for debugging too — a
-`401` on a previously-working request usually points at an expired
-session, while a `403` in this position points at the ABAC-style ownership
-check itself, either correctly denying or (as in the invoice bug) never
-running at all.
+<Checkpoint question="A request passes check A and check B, then gets denied. Which HTTP status code does it get, and what does that code tell the caller that a 401 would not?">
+
+It gets a `403 Forbidden`, not a `401`. By the time a request has passed A and B,
+the server knows exactly who is asking and has confirmed their role may perform
+this kind of action, so a `401` ("I don't know who you are") would be wrong. The
+`403` says identity is established and the role is broadly permitted, but this
+specific resource is off-limits to this specific actor. That also helps debugging:
+a `401` on a previously working request usually points at an expired session, while
+a `403` in this position points at the ownership check itself, either correctly
+denying or, as in the invoice bug, never running at all.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="check-order"
+/>
+
+## What does a role say, and what can't it say?
+
+**If RBAC is clean and auditable, why can't it fix the invoice bug on its own?**
+A role is a named bucket of permissions, and a user's request is allowed when
+their role includes the needed permission:
+
+| Role             | view-invoice | view-billing-history | edit-invoice | refund-invoice |
+| ---------------- | :----------: | :------------------: | :----------: | :------------: |
+| `billing-viewer` |     yes      |         yes          |      no      |       no       |
+| `billing-admin`  |     yes      |         yes          |     yes      |      yes       |
+
+A `billing-viewer` asking to `refund-invoice` is denied: the role lacks the
+permission. That is RBAC doing its job. But look at what the table cannot contain: a
+column for _which_ invoice. Every `billing-viewer` has the same row regardless of
+whose invoice is on screen, so RBAC answers "can billing-viewers view invoices at
+all" and never "can this billing-viewer view this invoice."
+
+ABAC answers the second question by evaluating a rule over attributes:
+
+| Requester      | Invoice `ownerId` | Rule: `user.id == invoice.ownerId` OR role is `billing-admin` | Result  |
+| -------------- | ----------------- | ------------------------------------------------------------- | ------- |
+| user 42        | 42                | ids match                                                     | allowed |
+| user 42        | 99                | ids differ, not an admin                                      | denied  |
+| user 1 (admin) | 99                | role clause                                                   | allowed |
+
+Context is the optional third input: "only during work hours" or "only from the
+company network" are facts about the situation, not about the user or the resource.
+
+<Checkpoint question="A billing-admin role is granted view-invoice, edit-invoice and refund-invoice. Does giving a user that role, by itself, let them view every invoice in the system, or is something else still deciding that?">
+
+By itself, the role only grants the RBAC-level permission to perform those _kinds_ of
+actions. It says nothing about which specific invoices. In the rule above,
+`billing-admin` reaches every invoice only because the rule explicitly writes a
+second clause, "OR role is billing-admin", that bypasses the ownership comparison for
+that one role. Without that clause an admin would pass the role check and still fail
+the ownership check on invoices they do not own. "Admins see everything" is not
+automatic: it is a visible line of authorization logic that someone has to write on
+purpose.
 
 </Checkpoint>
 
-## RBAC: permissions attached to a role
-
-**How does role-based access control actually decide who can do what?** A role is a named
-bucket of permissions; a user is assigned one or more roles; a request is allowed if the
-user's role includes the required permission:
-
-```text
-Role: billing-viewer
-Permissions: [view-invoice, view-billing-history]
-
-Role: billing-admin
-Permissions: [view-invoice, view-billing-history, edit-invoice, refund-invoice]
-
-Request: user with role "billing-viewer" wants to view-invoice → ALLOWED (role has the permission)
-Request: same user wants to refund-invoice → DENIED (role lacks the permission)
-```
-
-RBAC answers **"is this kind of action allowed for this kind of user"** — a clean, simple,
-auditable model for permissions that don't depend on which specific resource is involved.
-It's exactly the right tool for "can billing-viewers view invoices at all" and exactly the
-wrong tool for "can this billing-viewer view this particular invoice."
-
-## ABAC: permissions computed from attributes
-
-**What does it take to express "this specific invoice, this specific user" as a rule?**
-ABAC evaluates a rule against attributes of the user, the resource, and sometimes the
-context — not just a role name:
-
-```text
-Rule: ALLOW view-invoice IF user.id == invoice.ownerId
-       OR user.role == "billing-admin"
-
-Request: user id=42 requests invoice with ownerId=42 → ALLOWED (attributes match)
-Request: user id=42 requests invoice with ownerId=99 → DENIED (attributes don't match)
-Request: user id=7, role="billing-admin" requests invoice with ownerId=99 → ALLOWED (role clause)
-```
-
-This is the exact check the vulnerable endpoint was missing — not a role check at all, but
-a comparison between an attribute of the requester (`user.id`) and an attribute of the
-resource (`invoice.ownerId`). No role-only system, however carefully designed, can express
-this comparison, because roles don't carry per-resource identity — a "billing-viewer" role
-is the same role regardless of which specific invoice is being requested.
-
-Context is optional in this invoice example, but it matters in other rules: "only during
-work hours," "only from the company network," or "only while the account is active" are
-context attributes.
-
-<Checkpoint question="A billing-admin role is granted view-invoice, edit-invoice, and refund-invoice. Does giving a user the billing-admin role, by itself, let them view every invoice in the system — or is something else still deciding that?">
-
-By itself, the `billing-admin` role only grants the RBAC-level permission
-to perform those _kinds_ of actions — it says nothing yet about which
-specific invoices. In the ABAC rule from this section, `billing-admin`
-reaches every invoice only because the rule explicitly writes `OR
-user.role == "billing-admin"` as a second clause, deliberately bypassing
-the ownership comparison for that one role. If that clause weren't written
-into the ABAC rule, a billing-admin would still pass the RBAC check but
-fail the ownership check on any invoice they don't personally own — the
-"admins see everything" behavior isn't automatic, it's a specific,
-visible line of authorization logic that has to be written on purpose.
-
-</Checkpoint>
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="rbac-limits-and-combo"
+/>
 
 ## Combining both, correctly
 
-**Does fixing the bug mean abandoning RBAC in favor of ABAC?** No — most real systems use
-both together, because they answer different, complementary questions:
+**Does fixing the bug mean abandoning RBAC for ABAC?** No. They answer complementary
+questions, and a real endpoint needs both:
 
 ```mermaid
 flowchart LR
@@ -132,21 +124,18 @@ flowchart LR
     Combined --> Decision["Grant or deny"]
 ```
 
-The fixed invoice endpoint still needs the RBAC check (only authenticated users with a
-billing-capable role can call this endpoint at all) **and** the ABAC-style ownership check
-(the specific invoice must belong to the specific requester, unless their role explicitly
-grants broader access, like `billing-admin`). Removing either check reopens a hole; RBAC
-alone reproduces the original bug, and ABAC alone (with no role gating) would require
-re-deriving role-like logic inside every ownership rule.
+| Design         | Gets right                            | Gets wrong                                                  |
+| -------------- | ------------------------------------- | ----------------------------------------------------------- |
+| RBAC only      | Which kinds of action a role may do   | Per-resource access: reproduces the invoice bug             |
+| ABAC only      | Per-resource rules                    | Role-like logic gets re-derived inside every ownership rule |
+| RBAC then ABAC | Both questions, each in its own place | Nothing, provided both run on every ID-accepting endpoint   |
 
-## The generalizable lesson
+## The pattern worth checking everywhere
 
-**Is the invoice endpoint a one-off mistake, or does it point at a pattern worth checking
-for elsewhere?** Any endpoint that takes an ID from the request (a URL parameter, a
-request body field) and uses it to fetch a specific resource is a candidate for this exact
-class of bug, unless an explicit ownership or relationship check runs before the data is
-returned. The practical audit question: **for every endpoint that accepts a resource
-identifier, is there a line of code that compares an attribute of the resource against an
-attribute of the requester — or is authentication alone silently standing in for that
-check?** The identifier might be in the URL, or it might be a field sent inside a form or
-request body.
+**Is the invoice endpoint a one-off, or a shape to look for elsewhere?** Any endpoint
+that takes an ID from the request (URL parameter or body field) and fetches a
+specific resource is a candidate, unless an explicit comparison between resource and
+requester runs before data is returned. The audit question: **for every endpoint
+that accepts a resource identifier, is there a line that compares an attribute of the
+resource against an attribute of the requester, or is authentication quietly standing
+in for it?**

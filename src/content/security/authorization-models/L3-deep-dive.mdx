@@ -1,233 +1,178 @@
 ---
-title: "L3 — Reproducing the IDOR bug and its fix in real, runnable code"
+title: "L3 — Reproducing the IDOR bug as a decision table, writing the fix, and stretching it to teams and sharing"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="One missing comparison, reproduced exactly">
+export const unit = { track: "security", unitSlug: "authorization-models" };
+
+<Scenario label="One missing comparison, traced exactly">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>👤</span> <strong>User 42</strong> — role `billing-viewer`, owns invoice `48213`</div>
-      <div class="flex items-center gap-1.5"><span>👤</span> <strong>User 7</strong> — role `billing-viewer`, owns invoice `48212`</div>
-      <div class="flex items-center gap-1.5"><span>🔓</span> <strong>The request</strong> — user 42 requests invoice `48212` (not theirs)</div>
+      <div class="flex items-center gap-1.5"><span>👤</span> <strong>User 42</strong> — role `billing-viewer`, owns invoice `48213` ($340)</div>
+      <div class="flex items-center gap-1.5"><span>👤</span> <strong>User 7</strong> — role `billing-viewer`, owns invoice `48212` ($120)</div>
+      <div class="flex items-center gap-1.5"><span>🛡️</span> <strong>User 1</strong> — role `billing-admin`, owns nothing</div>
     </div>
     <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
       <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
         <p class="font-semibold text-rose-600 dark:text-rose-400">Vulnerable handler</p>
-        Returns the invoice — 200 OK
+        6 of 6 requests succeed
       </div>
       <div class="rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950">
         <p class="font-semibold text-emerald-600 dark:text-emerald-400">Fixed handler</p>
-        Throws 403 Forbidden
+        4 of 6 succeed, 2 return 403
       </div>
     </div>
   </Fragment>
 
-**Before reading the code, predict: does adding the ownership check require changing the
-`users` or `invoices` data at all, or only the logic inside the handler function?**
+Three users and two invoices give six possible requests (every user asking for every
+invoice). Only some of those requests are legitimate. **Before reading on, predict:
+how many of the six should succeed, and does the fix need to change any stored data, or
+only the decision made when a request arrives?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "The vulnerable handler and its fix, as real code",
-    "RBAC and ABAC checks as separate, composable functions",
-    "Extending ownership from a single ID to team membership",
+    "The incident as a six-row decision table",
+    "The ownership-or-admin check itself",
+    "Teams, sharing and context as richer relationships",
   ]}
 />
 
-## The vulnerable handler, reproducing the exact incident
+## The incident, request by request
 
-Read the code with this small legend:
+The vulnerable handler looks up the user (else `401`), looks up the invoice (else
+`404`), and returns the invoice. It never compares anything between the two. Writing
+out all six requests shows what that means:
 
-| Code piece | Human idea                                       |
-| ---------- | ------------------------------------------------ | --- | -------------------------------- |
-| `users`    | The known users and their roles                  |
-| `invoices` | The known invoices and who owns each one         |
-| `throw`    | Stop and return an error instead of private data |
-| `return`   | Send the answer back                             |
-| `===`      | Compare whether two values are exactly equal     |
-| `          |                                                  | `   | "or": either condition is enough |
+| Requester        | Invoice (owner) | Should succeed? | Vulnerable handler | Fixed handler |
+| ---------------- | --------------- | :-------------: | :----------------: | :-----------: |
+| user 42 (viewer) | 48213 (user 42) |       yes       |        200         |      200      |
+| user 42 (viewer) | 48212 (user 7)  |       no        |      **200**       |    **403**    |
+| user 7 (viewer)  | 48212 (user 7)  |       yes       |        200         |      200      |
+| user 7 (viewer)  | 48213 (user 42) |       no        |      **200**       |    **403**    |
+| user 1 (admin)   | 48212 (user 7)  |       yes       |        200         |      200      |
+| user 1 (admin)   | 48213 (user 42) |       yes       |        200         |      200      |
 
-For the errors: no login gives `401`; invoice missing gives `404`; invoice exists but is
-not yours gives `403`.
+The two bold rows are the incident: a valid user reads an invoice that is not theirs.
+The vulnerable handler is right on 4 of 6 rows only by accident, because it allows
+everything. The `users` and `invoices` data are identical in both columns. Only the
+decision changed.
 
-```js
-// invoices.js — a simplified store and the ORIGINAL, vulnerable handler
-const invoices = {
-  48212: { id: 48212, ownerId: 7, amount: 120 },
-  48213: { id: 48213, ownerId: 42, amount: 340 },
-};
-const users = {
-  42: { id: 42, role: "billing-viewer" },
-  7: { id: 7, role: "billing-viewer" },
-  1: { id: 1, role: "billing-admin" },
-};
+This also matches the unit's interactive demo: with 2 users owning 1 invoice each,
+there are exactly 2 cross-user paths, which is the two bold rows. The demo shows how
+that count grows as users and invoices multiply.
 
-function getInvoiceVulnerable(currentUserId, invoiceId) {
-  const user = users[currentUserId];
-  if (!user) throw new Error("401 Unauthorized");
-
-  const invoice = invoices[invoiceId];
-  if (!invoice) throw new Error("404 Not Found");
-
-  return invoice; // BUG: authenticated, but never checked ownership
-}
+```mermaid
+flowchart LR
+    R["Request:\nuser, invoice id"] --> U{"Known user?"}
+    U -- "no" --> E1["401"]
+    U -- "yes" --> I{"Invoice exists?"}
+    I -- "no" --> E2["404"]
+    I -- "yes" --> O{"owner == user\nOR role == admin?"}
+    O -- "no" --> E3["403"]
+    O -- "yes" --> OK["200 + invoice"]
 ```
 
-```js
-// Reproducing L1's incident exactly: user 42 requests invoice 48212, owned by user 7
-getInvoiceVulnerable(42, 48212);
-// { id: 48212, ownerId: 7, amount: 120 } — returned successfully, no error at all
-```
+The vulnerable handler is this same flow with the last diamond deleted.
 
-The function correctly checks that `currentUserId` maps to a real, authenticated user —
-that check works exactly as intended. **It never once compares `invoice.ownerId` against
-`user.id`** — the ABAC-style attribute comparison from L2 simply doesn't exist in this
-code, which is precisely why any authenticated user can fetch any invoice by ID.
+## What is the smallest correct check?
 
-## The fixed handler — one added comparison
+**How much code is the fix, and what does it reuse?** One guard before the return:
 
 ```js
-function getInvoiceFixed(currentUserId, invoiceId) {
-  const user = users[currentUserId];
-  if (!user) throw new Error("401 Unauthorized");
-
-  const invoice = invoices[invoiceId];
-  if (!invoice) throw new Error("404 Not Found");
-
-  const isOwner = invoice.ownerId === user.id;
-  const isAdmin = user.role === "billing-admin";
-  if (!isOwner && !isAdmin) throw new Error("403 Forbidden");
-
-  return invoice;
-}
+const isOwner = invoice.ownerId === user.id;
+const isAdmin = user.role === "billing-admin";
+if (!isOwner && !isAdmin) throw new Error("403 Forbidden");
 ```
 
-```js
-try {
-  getInvoiceFixed(42, 48212); // user 42 requesting user 7's invoice
-} catch (e) {
-  console.log(e.message); // "403 Forbidden"
-}
+Two boolean facts and one guard that stops the function before private data can leave.
+The guard throws only when both facts are false, so either one alone is enough to
+allow. This is the OR-shaped rule from L2 written down.
 
-getInvoiceFixed(7, 48212); // the actual owner — succeeds
-getInvoiceFixed(1, 48212); // billing-admin — succeeds via the role clause
-```
+<Checkpoint question="User 1 (billing-admin) requests invoice 48212, owned by user 7, and succeeds. Which part of the guard lets that through, and why doesn't it need isOwner to be true?">
 
-**Neither the `users` object nor the `invoices` object changed at all.** The fix is
-entirely the added `isOwner`/`isAdmin` check — exactly the missing row from L1's table,
-implemented as two boolean comparisons and a guard clause, meaning an early check that
-stops the function before private data can be returned.
-
-<Checkpoint question="getInvoiceFixed(1, 48212) succeeds because user 1 is a billing-admin, not because they own invoice 48212. Trace through the function: which specific line lets that request through, and why doesn't it need isOwner to be true?">
-
-The line is `if (!isOwner && !isAdmin) throw new Error("403 Forbidden")`.
-For user 1, `isOwner` evaluates to `false` (`invoice.ownerId` is `7`, not
-`1`), but `isAdmin` evaluates to `true` (`user.role === "billing-admin"`).
-Because the guard only throws when _both_ are false, a true `isAdmin`
-alone is enough to satisfy the condition and let execution continue past
-the guard to `return invoice`. This is exactly the OR-shaped rule from
-L2's ABAC example (`user.id == invoice.ownerId OR user.role ==
-"billing-admin"`) expressed as code: ownership and admin-role are two
-independent, either-is-sufficient paths to the same allow decision, not
-two things that both have to be true.
+For user 1, `isOwner` is `false` (the invoice's `ownerId` is 7), but `isAdmin` is
+`true`. The guard only throws when _both_ are false, so a true `isAdmin` alone lets
+execution continue to the return. Ownership and admin role are two independent paths
+to the same allow decision, not two conditions that both must hold. A common slip is
+to write `!isOwner || !isAdmin`, which throws for almost everyone, including owners
+who are not admins.
 
 </Checkpoint>
 
-## The RBAC and ABAC checks, as separate, composable functions
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="ownership-check-code"
+/>
 
-```js
-// A real system typically separates these two kinds of checks
-function rbacAllows(role, permission) {
-  const ROLE_PERMISSIONS = {
-    "billing-viewer": ["view-invoice", "view-billing-history"],
-    "billing-admin": [
-      "view-invoice",
-      "view-billing-history",
-      "edit-invoice",
-      "refund-invoice",
-    ],
-  };
-  return (ROLE_PERMISSIONS[role] || []).includes(permission);
-}
+## Where do richer relationships fit?
 
-function abacAllowsViewInvoice(user, invoice) {
-  return invoice.ownerId === user.id || user.role === "billing-admin";
-}
-```
+**What changes if an invoice belongs to a whole team, or is shared with named
+coworkers, instead of having one owner?** Ownership was an equality between two IDs.
+Team access is a membership test against a list, and sharing is a membership test
+against a different list. Context adds a third input that is about neither side.
 
-```js
-rbacAllows("billing-viewer", "view-invoice"); // true — role has this permission
-rbacAllows("billing-viewer", "refund-invoice"); // false — role lacks this permission
+| Relationship          | Rule written as                        | Compared sides                                |
+| --------------------- | -------------------------------------- | --------------------------------------------- |
+| Owns                  | `invoice.ownerId == user.id`           | one user attribute, one resource attribute    |
+| Is on the owning team | `invoice.teamId in user.teamIds`       | a list on the user, one value on the resource |
+| Was shared with       | `user.id in invoice.sharedWithUserIds` | one value on the user, a list on the resource |
+| Business hours only   | `now` between 09:00 and 17:00          | the context only                              |
 
-abacAllowsViewInvoice({ id: 42, role: "billing-viewer" }, { ownerId: 7 }); // false
-abacAllowsViewInvoice({ id: 7, role: "billing-viewer" }, { ownerId: 7 }); // true
-```
+Each row is still "an attribute of one side compared against an attribute of the
+other (or of the situation)". Only the relationship changed. What none of them
+changes is the obligation: the check has to be written explicitly, because neither a
+login nor a role implies it.
 
-A real endpoint combines both: `rbacAllows` gates whether the _kind_ of action is even
-possible for this role, and `abacAllowsViewInvoice` gates whether _this specific_ resource
-is accessible to _this specific_ user. Neither function alone reproduces the fixed
-handler's behavior — `rbacAllows("billing-viewer", "view-invoice")` returns `true`
-regardless of which invoice ID is requested, and would incorrectly allow the original bug
-if used alone.
+<Checkpoint question="A new feature lets an invoice be shared with a list of individual coworkers. Does the attribute-vs-attribute shape still apply, or does sharing need a fundamentally different check?">
 
-## Extend the incident: what if the resource has a more complex ownership rule?
-
-L1 and L2's ownership check was a simple one-to-one comparison (`invoice.ownerId ===
-user.id`). First learn that one-to-one case. Team ownership is the same idea with a list
-instead of one ID: "is this user in the group that owns this resource?" **What changes if
-invoices can belong to a whole team, not just one user — does the same ABAC pattern still
-work?**
-
-```js
-function abacAllowsViewTeamInvoice(user, invoice, userTeamIds) {
-  const isTeamMember = userTeamIds.includes(invoice.teamId);
-  return isTeamMember || user.role === "billing-admin";
-}
-
-abacAllowsViewTeamInvoice(
-  { id: 42, role: "billing-viewer" },
-  { teamId: "team-9" },
-  ["team-9", "team-12"], // user 42's team memberships
-); // true — user is on team-9
-```
-
-The pattern generalizes directly: the comparison shifts from a single ID match to a
-membership check against a list, but it's still an attribute-of-the-user-vs-attribute-of-
-the-resource comparison — the same ABAC shape as before, just with a richer relationship
-than strict ownership. **This is the actual generalizable lesson**: whatever the specific
-relationship is (owns, is-on-the-same-team-as, is-assigned-to), an authorization check has
-to encode it explicitly — authentication alone, and even a correct role check alone, never
-implies it.
-
-<Checkpoint question="A new feature lets invoices be shared with a specific list of individual coworkers, not just a team. Does abacAllowsViewTeamInvoice's shape (an attribute-of-user vs. attribute-of-resource comparison) still apply, or does sharing need a fundamentally different kind of check?">
-
-The same shape still applies. Ownership was a single-ID equality check
-(`invoice.ownerId === user.id`), team access widened that to a
-membership check against a list (`userTeamIds.includes(invoice.teamId)`),
-and per-user sharing is the same membership check with a different list —
-something like `invoice.sharedWithUserIds.includes(user.id)`. In every
-case the function is still comparing an attribute pulled from the
-requesting user against an attribute pulled from the resource; only the
-specific relationship being tested changes (owns, is-on-a-team-with,
-is-shared-with). What would actually require a different kind of check is
-a rule that can't be reduced to comparing the two sides at all — for
-example, "only during business hours" pulls in a fact about the current
-context instead of either the user or the resource, which is why ABAC
-treats context as a third, separate input alongside user and resource
-attributes.
+The same shape applies. Ownership was a single-ID equality, team access widened it to
+a membership test on a list, and per-user sharing is the same membership test against
+a different list: whether `invoice.sharedWithUserIds` contains `user.id`. The function
+still compares something about the requester with something about the resource. A
+genuinely different kind of input only appears for rules like "only during business
+hours", which depend on neither side and so need context as a separate input.
 
 </Checkpoint>
 
-## Failure modes
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="relationship-shapes"
+/>
 
-| Failure mode                                                                    | What it gets wrong                                                                                                                                                       |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Assuming a valid login implies authorization to access any specific resource    | Authentication and authorization are separate checks — the invoice bug passed authentication perfectly and still leaked private data                                     |
-| Using only RBAC for resource-specific access control                            | `rbacAllows("billing-viewer", "view-invoice")` is true regardless of which invoice — role checks can't express per-resource ownership by design                          |
-| Adding the ownership check only to some endpoints that return user data         | Any endpoint accepting a resource ID from the request is a candidate for this exact bug class — the audit needs to cover all of them, not just the one that was reported |
-| Treating a "found the bug in one place, fixed it" as the whole task             | The generalizable fix is the AUDIT QUESTION (is there an attribute comparison for every ID-accepting endpoint), not just the one line changed in the reported endpoint   |
-| Assuming complex ownership (teams, shared resources) can't use the same pattern | The comparison shape stays the same (attribute of user vs. attribute of resource) even when the relationship is richer than a single ID match                            |
+## Failure modes, and how far the fix reaches
+
+| Failure mode                                           | What it gets wrong                                                                         |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| Assuming a valid login implies access to any resource  | Authentication passed perfectly in the incident and still leaked private data              |
+| Using only RBAC for per-resource access                | The role is the same for every invoice, so the check is true for all of them               |
+| Fixing only the endpoint that was reported             | Every endpoint that accepts an ID is a candidate for the same bug                          |
+| Checking the ID in the URL but not in the request body | The same resource can be named in two places, and an attacker edits whichever is unchecked |
+| Treating the fix as the one changed line               | The durable fix is the audit question, applied to every ID-accepting endpoint              |
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="audit-scope"
+/>
+
+## This is a case, not the whole territory
+
+The six-row table used two invoices, three users, one owner per invoice and one admin
+role. Real systems differ on every axis. Try extending the example yourself:
+
+- What changes if invoices can be soft-deleted, and a deleted invoice should return
+  `404` to everyone except an admin? Which of the three checks does that touch?
+- What if returning `403` for someone else's invoice, versus `404` for a missing one,
+  lets an attacker learn which invoice numbers exist? When would you return `404` for
+  both?
+- If one endpoint lists invoices rather than fetching one, where does the ownership
+  check go, and is "check each row after fetching" the same as "only fetch rows the user
+  owns"?
