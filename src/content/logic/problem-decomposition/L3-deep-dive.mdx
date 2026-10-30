@@ -1,212 +1,169 @@
 ---
-title: "L3 — Decomposing checkout's 4.2 seconds, and detecting a false decomposition in code"
+title: "L3 — Auditing a decomposition, and what changes when the pieces don't add up"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "logic",
+  unitSlug: "problem-decomposition",
+};
 
 <Scenario label="Four numbers instead of one vague complaint">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
       <div class="flex items-center gap-1.5"><span>⏱️</span> <strong>Total</strong> — 4,200ms measured checkout time</div>
-      <div class="flex items-center gap-1.5"><span>📊</span> <strong>Stages</strong> — network 300ms, server 800ms, DB query 2,500ms, rendering 600ms</div>
+      <div class="flex items-center gap-1.5"><span>📊</span> <strong>Stages</strong> — network 300ms, server 800ms, lookup 2,500ms, rendering 600ms</div>
+      <div class="flex items-center gap-1.5"><span>🔧</span> <strong>The fix</strong> — only the lookup is being optimized</div>
     </div>
   </Fragment>
 
-**Before reading the code, predict: if someone reports the database
-query dropped from 2,500ms to 1,000ms, but the OTHER three stages' times
-are unchanged, what should the new checkout total be?**
+Someone reports that the lookup dropped from 2,500ms to 1,000ms and the other
+three stages are unchanged. **Before reading on, predict: what is the new
+total, and is the lookup still the biggest piece?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Encoding the exhaustive/non-overlapping checks as code",
-    "Finding the bottleneck programmatically",
-    "Extending decomposition to non-additive problems",
+    "Auditing a split against the true total",
+    "How the bottleneck moves after a fix",
+    "Splits that are not simple sums",
   ]}
 />
 
-## Decomposing the total into measurable, independent stages
+## How do you audit a split against the real total?
 
-Before the JavaScript, the whole idea is arithmetic:
+**What can you check mechanically once the stages have names?** One
+comparison: the sum of the pieces against an independently measured total.
 
-| Check                 | No-code version                                       |
-| --------------------- | ----------------------------------------------------- |
-| Total                 | Add all stage times                                   |
-| Share of total        | Divide a stage's time by the total                    |
-| Priority              | Start with the largest useful stage                   |
-| Exhaustive            | The stage sum equals the independently measured total |
-| Possible double count | The stage sum is greater than the true total          |
+| Sum compared with the measured total | Verdict  | What to do next                      |
+| ------------------------------------ | -------- | ------------------------------------ |
+| Equal                                | Complete | Still check that no cause repeats    |
+| Smaller                              | Missing  | Hunt for the unmeasured contributor  |
+| Larger                               | Overlap  | Find the piece that contains another |
 
-The functions below do those checks repeatably. They are not the point
-of decomposition; they are a way to keep the decomposition honest once
-you have named the pieces.
+This is one of the rare spots where code is the clearest vehicle, because
+the audit is a single small rule that is easy to get subtly wrong (which way
+does the gap point?).
 
 ```js
-function decomposeTiming(stages) {
-  const total = stages.reduce((sum, s) => sum + s.ms, 0);
-  return stages.map((s) => ({
-    name: s.name,
-    ms: s.ms,
-    shareOfTotal: s.ms / total,
-  }));
+function auditDecomposition(stages, measuredTotal) {
+  const sum = stages.reduce((total, stage) => total + stage.ms, 0);
+  if (sum === measuredTotal) return "complete";
+  return sum < measuredTotal ? "missing" : "overlap";
 }
 ```
 
-```js
-const measurements = [
-  { name: "network", ms: 300 },
-  { name: "server-processing", ms: 800 },
-  { name: "db-query", ms: 2500 },
-  { name: "client-rendering", ms: 600 },
-];
+With the real four stages and a total of 4,200 it answers "complete". With
+a total of 5,000 it answers "missing", because 800ms is unaccounted for. With
+the overlapping list from L2 (3,300 + 2,500 + 300 + 600 = 6,700 against
+4,200) it answers "overlap".
 
-decomposeTiming(measurements);
-// [
-//   { name: "network", ms: 300, shareOfTotal: 0.071 },
-//   { name: "server-processing", ms: 800, shareOfTotal: 0.190 },
-//   { name: "db-query", ms: 2500, shareOfTotal: 0.595 },
-//   { name: "client-rendering", ms: 600, shareOfTotal: 0.143 },
-// ]
-```
+<Checkpoint question="The audit returns 'missing' for a total of 5,000ms. Does it tell you which stage is wrong?">
 
-| Function                    | Plain job                                 |
-| --------------------------- | ----------------------------------------- |
-| `decomposeTiming`           | Calculate how much each piece contributes |
-| `identifyBottleneck`        | Find the largest piece                    |
-| `isExhaustiveDecomposition` | Check whether something is missing        |
-| `hasOverlap`                | Check whether something was counted twice |
-
-## Identifying which piece is worth attention
-
-```js
-function identifyBottleneck(decomposedStages) {
-  return decomposedStages.reduce((max, s) => (s.ms > max.ms ? s : max));
-}
-
-identifyBottleneck(decomposeTiming(measurements));
-// { name: "db-query", ms: 2500, shareOfTotal: 0.595 }
-```
-
-This is the concrete output of decomposition: not just four numbers, but
-an unambiguous answer to "where should someone actually start" —
-`db-query`, at 59% of the total, dwarfing everything else.
-
-## Checking that a decomposition is exhaustive
-
-```js
-function isExhaustiveDecomposition(stages, measuredTotal) {
-  const sum = stages.reduce((s, x) => s + x.ms, 0);
-  return sum === measuredTotal;
-}
-
-isExhaustiveDecomposition(measurements, 4200); // true — the pieces account for the whole thing
-isExhaustiveDecomposition(measurements, 5000); // false — 800ms is unaccounted for somewhere
-```
-
-A `false` result here is a genuine signal: if the pieces don't sum to the
-independently-measured total, some real contributor to the 4.2 seconds
-isn't represented in the decomposition at all — a hidden cache miss, a
-retry loop, something not yet named as one of the four stages.
-
-<Checkpoint question="isExhaustiveDecomposition(measurements, 5000) returns false. Does that tell you WHICH stage is wrong, or just that something is wrong somewhere?">
-
-Just that something is wrong somewhere — the function only compares a sum
-against an independently-measured total, it has no way to attribute the
-800ms gap to any particular stage. Knowing the check failed is the start
-of an investigation, not the end of one: the next step is finding what's
-missing (a retry, a cache miss, a stage nobody thought to measure), the
-same way a mismatched receipt total tells you a purchase is missing from
-the list without telling you which one. The function's job is narrowly
-to catch that the decomposition is incomplete, not to diagnose why.
+No. It only says the pieces fall 800ms short of the whole. It compares a
+sum with a total and has no way to attribute the gap to any stage. The
+finding starts an investigation (a retry, a cache miss, a stage nobody
+thought to time) rather than ending one, much like a receipt that doesn't
+match your list tells you something is missing without saying what.
 
 </Checkpoint>
 
-## Detecting a false, overlapping decomposition
+A caution in the other direction: a matching sum does not prove the split is
+sound. One piece that is counted twice and one real piece that is missing can
+cancel out numerically. The audit catches most accidents, and the causal
+question "does any cause appear twice?" still has to be asked.
 
-```js
-function hasOverlap(stages, trueTotal) {
-  const sum = stages.reduce((s, x) => s + x.ms, 0);
-  return sum > trueTotal;
-}
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="decomposition-audit"
+/>
+
+## Where does the bottleneck go after the biggest piece is fixed?
+
+**If the lookup drops to 1,000ms, is the job done?** The total falls from
+4,200ms to 2,700ms, and the lookup's share falls from about 59% to about
+37%. It is still the biggest piece, but the margin over the server's 800ms
+has shrunk. Push it to 500ms and the total is 2,200ms; now the server, at
+about 36%, is bigger than the lookup at about 23%.
+
+```mermaid
+xychart-beta
+    title "Checkout total (ms) as the lookup is optimized"
+    x-axis "Lookup time (ms)" [500, 1000, 1500, 2000, 2500, 3000]
+    y-axis "Total checkout time (ms)" 0 --> 5000
+    line [2200, 2700, 3200, 3700, 4200, 4700]
 ```
 
-```js
-// A believable-looking BUT overlapping decomposition: "server-processing"
-// was measured in a way that already includes the DB query's time inside it
-const overlappingStages = [
-  { name: "server-processing-incl-db", ms: 3300 }, // double-counts db-query
-  { name: "db-query", ms: 2500 },
-  { name: "network", ms: 300 },
-  { name: "client-rendering", ms: 600 },
-];
+The chart is a straight line because the stages add. The share is what
+bends: each fix to the same piece buys fewer percentage points than the one
+before, and at some point the next piece has become the right target. The
+demo above lets you drag the lookup yourself and watch its share fall.
 
-hasOverlap(measurements, 4200); // false — the real decomposition, no overlap
-hasOverlap(overlappingStages, 4200); // true — sum (6700) exceeds the true total (4200)
-```
+<Checkpoint question="After the lookup is at 500ms, a teammate says 'keep going on the lookup, it was the problem.' What does the decomposition say?">
 
-The overlapping version isn't obviously wrong just by looking at it — all
-four numbers look like real measurements. It's only checkable by
-comparing the sum against the independently-measured true total, which is
-exactly why the exhaustive/non-overlapping checks matter as actual code,
-not just a one-time mental sanity check.
-
-<Checkpoint question="Someone argues 'overlappingStages can't be a real problem — every individual number in it is a real, honestly-measured time.' What's wrong with that defense?">
-
-Each individual number can be honest and the decomposition can still be
-false, because the property that matters isn't whether any one
-measurement is accurate — it's whether the pieces, as a set, double-count
-a cause. "server-processing-incl-db" at 3,300ms is a perfectly real
-measurement of how long server processing plus the database query
-together took; the problem is only visible when it's placed alongside
-"db-query" as if the two were separate, independent contributors. That's
-exactly why `hasOverlap` checks the sum against the true total instead of
-checking any single stage in isolation — overlap is a property of how the
-pieces relate to each other, not a property any one piece can fail on its
-own.
+It says the problem moved. At 500ms the lookup is about 23% of a 2,200ms
+total, while server processing is about 36%. The split that justified
+working on the lookup is the same split that now points at the server, so
+the decomposition should be re-read after each fix, not treated as a one-off
+verdict.
 
 </Checkpoint>
 
-## Extend the example: a decomposition that isn't purely additive
+## What if the pieces are not simple sums?
 
-**The checkout example is additive — the four stages happen one after
-another, so their times simply sum. What if a vaguer problem's pieces
-don't sum, but instead depend on each other in more complex ways?**
+**Checkout stages happen one after another, so they add up. What if a vaguer
+problem's pieces can't be summed, or depend on each other?** Take "our
+onboarding is confusing." There is no single total. A split into "confusing
+for new users" and "confusing for returning users" looks independent, but if
+one ambiguous button label confuses both groups, the two pieces share one
+cause. Splitting by audience hid a repeated cause; splitting by journey step
+would have exposed it.
 
-Consider "our onboarding is confusing" instead of "checkout is slow."
-There's no single total number, and a naive decomposition into
-"confusing for new users" and "confusing for returning users" might look
-independent but actually share a root cause (an ambiguous button label
-that confuses everyone, just noticed differently by each group). The
-additive structure of the checkout example is a special case that made
-exhaustive/non-overlapping checks easy to compute directly — most
-real-world decompositions require more judgment to verify the same two
-properties, but the properties themselves (does this cover the whole
-problem, do any two pieces share a cause) still apply.
-
-For a non-additive problem, the output may be a hypothesis matrix rather
-than a sum:
-
-| Step          | User affected       | Evidence              | Possible cause          | Check next            |
+| Step          | Who is affected     | Evidence              | Possible cause          | Check next            |
 | ------------- | ------------------- | --------------------- | ----------------------- | --------------------- |
-| Invite email  | New team members    | Low open rate         | Subject looks generic   | A/B test subject line |
+| Invite email  | New team members    | Low open rate         | Subject looks generic   | Test a new subject    |
 | Profile setup | Non-technical users | Many abandoned forms  | Required fields unclear | Watch a setup session |
-| First project | Managers            | Repeated help tickets | Button label ambiguous  | Rename in prototype   |
+| First project | Managers            | Repeated help tickets | Button label ambiguous  | Rename in a prototype |
 
-The same discipline applies: cover the whole journey, avoid naming the
-same cause twice, and choose the hypothesis with the strongest evidence.
-If you want to go deeper on the technical pieces, `systems/query-planning`
-and `systems/indexing` explain database query behavior, while
-`web/render-performance` expands the rendering side.
+The same two questions still apply: does the table cover the whole journey,
+and is each cause named once? What changes is that completeness is argued
+from evidence and causes rather than checked by addition.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="non-additive-decomposition"
+/>
+
+## Extend the example
+
+The checkout case is one case, not the whole territory. Its stages are
+sequential, measurable and additive, which made the checks easy. Try
+extending it yourself:
+
+- **What if the stages ran in parallel?** If the server and the lookup
+  overlapped in time, the total would no longer be their sum. How would you
+  audit completeness then?
+- **What if the news were worse?** Suppose the sum came out 1,500ms above the
+  measured total. Which stage would you suspect first, and what would you
+  measure to confirm?
+- **What if the audience were different?** Imagine "our team is always
+  behind." Which splits (by project, by person, by week) risk repeating a
+  cause, and which journey or cause-based split avoids it?
 
 ## Failure modes
 
-| Failure mode                                                                             | What it gets wrong                                                                                           |
-| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Treating "I don't know where to start" as a signal the problem is unsolvable             | It's usually a signal the problem hasn't been decomposed yet, not that it can't be                           |
-| Splitting a problem into pieces without checking they sum to the whole                   | A real contributing cause can hide entirely outside the named pieces                                         |
-| Measuring two pieces in a way that double-counts the same underlying cause               | Fixing one piece inflates the other's apparent improvement without anything real changing                    |
-| Assuming a proposed split's pieces can each be worked on independently, without checking | A piece that secretly depends on another isn't really separate — it's the same problem with two labels       |
-| Spreading effort evenly across all decomposed pieces instead of the dominant one         | Decomposition's real value is revealing where the effort should concentrate, not just producing more numbers |
+| Failure mode                                           | What it gets wrong                                        |
+| ------------------------------------------------------ | --------------------------------------------------------- |
+| Reading "I don't know where to start" as unsolvable    | It usually means the problem hasn't been split yet        |
+| Splitting without checking the pieces sum to the whole | A real cause can hide outside the named pieces            |
+| Two pieces that count the same cause                   | Fixing one inflates the other's apparent improvement      |
+| Trusting a matching sum as proof                       | An overlap and a gap can cancel out numerically           |
+| Splitting by audience instead of cause                 | Different groups can share one root cause, counted twice  |
+| Splitting once and never re-reading it                 | After a fix the biggest piece changes, as the chart shows |
