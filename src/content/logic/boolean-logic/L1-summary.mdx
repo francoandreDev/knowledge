@@ -1,102 +1,109 @@
 ---
-title: "L1 — Why does the same boolean condition mean two different things?"
+title: "L1 — Why does the same yes/no rule mean two different things?"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="The access-control bug nobody noticed for weeks">
+export const unit = {
+  track: "logic",
+  unitSlug: "boolean-logic",
+};
+
+<Scenario label="The pool sign nobody read the same way">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🗣️</span> <strong>The spec, spoken</strong> — "not an admin, and either logged in or the owner"</div>
-      <div class="flex items-center gap-1.5"><span>💻</span> <strong>The code</strong> — <code>!isAdmin && isLoggedIn || isOwner</code></div>
-      <div class="flex items-center gap-1.5"><span>🚨</span> <strong>The bug</strong> — an admin who also owns a document can still edit it</div>
+      <div class="flex items-center gap-1.5"><span>🪧</span> <strong>The sign</strong> — "No swimming if you're sick. Otherwise you need a pass or a guest wristband."</div>
+      <div class="flex items-center gap-1.5"><span>💻</span> <strong>The code</strong> — <code>!isSick &amp;&amp; hasPass || hasWristband</code></div>
+      <div class="flex items-center gap-1.5"><span>🤒</span> <strong>The bug</strong> — a sick guest with a wristband is let in</div>
     </div>
   </Fragment>
 
-Two engineers agree on the rule out loud: "a user can edit a document
-if they're not an admin, and they're either logged in or the owner."
-One of them writes `!isAdmin && isLoggedIn || isOwner`. It reads like
-a direct translation of the sentence — `not admin`, `and`, `logged in
-or owner`. Weeks later, a security review finds that an admin who
-happens to also own a document can edit it, which the spec explicitly
-said should never happen. **The code looks like it says exactly what
-was agreed. What actually went wrong?**
+A community pool posts one rule: **"You may swim if you are not sick, and you
+have either a season pass or a guest wristband."** The person writing the
+entry-gate software types `!isSick && hasPass || hasWristband`. It reads like
+a word-for-word copy of the sign. A week later, a lifeguard notices a sick
+child with a guest wristband swimming happily, which the sign clearly forbids.
+
+**The code looks like it says what the sign says. So what did the computer
+read that the humans did not?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "How && and || precedence actually groups an expression",
-    "Truth tables as proof, not just a few hand-picked examples",
-    "What De Morgan's laws are for",
+    "Which operator grabs its neighbours first",
+    "Truth tables that check every case",
+    "Flipping a whole rule with De Morgan",
   ]}
 />
 
-## Before reading the code
+## How does the computer decide what groups with what?
 
-Boolean logic is about rules that can answer only **true** or
-**false**: yes/no, allowed/blocked, included/excluded. The variable
-names are written like questions:
+**Why does the sick child get in?** The computer does not read left to right
+like a person reading a sentence. It uses a fixed pecking order, and `&&`
+outranks `||`, exactly as `*` outranks `+` in `2 + 3 * 4`.
 
-| Code             | Read it as                                 |
-| ---------------- | ------------------------------------------ |
-| `isAdmin`        | "Is this user an admin?"                   |
-| `isLoggedIn`     | "Is this user logged in?"                  |
-| `isOwner`        | "Is this user the owner?"                  |
-| `true`           | Yes, this part of the rule is satisfied    |
-| `false`          | No, this part of the rule is not satisfied |
-| `!isAdmin`       | Not an admin                               |
-| `&&`             | AND: both sides must be true               |
-| `\|\|`           | OR: at least one side must be true         |
-| Parentheses `()` | Group this part first, like arithmetic     |
+| You wrote                                | The computer reads                              | Sick guest with wristband |
+| ---------------------------------------- | ----------------------------------------------- | ------------------------- |
+| `!isSick && hasPass \|\| hasWristband`   | `(!isSick && hasPass) \|\| hasWristband`        | allowed (bug)             |
+| `!isSick && (hasPass \|\| hasWristband)` | `!isSick` AND the whole pass-or-wristband group | blocked (sign)            |
 
-So the intended sentence is:
+```mermaid
+flowchart TD
+    subgraph code["What the code does"]
+        A["!isSick && hasPass"] --> O["OR"]
+        W["hasWristband"] --> O
+    end
+    subgraph sign["What the sign says"]
+        N["!isSick"] --> AND["AND"]
+        G["hasPass || hasWristband"] --> AND
+    end
+```
 
-`not admin AND (logged in OR owner)`
+- `!` goes first, then every `&&`, then every `||`.
+- Parentheses force a group to resolve first. They are the fix.
 
-The buggy code is grouped as:
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="precedence"
+/>
 
-`(not admin AND logged in) OR owner`
+## How can you be certain two versions really differ?
 
-That small change moves `owner` outside the "not admin" veto.
+**Is picking a few test visitors enough?** No. A sick visitor with a pass
+behaves the same under both versions, so that test would pass. A **truth
+table** lists every combination of the yes/no inputs and the result of each
+rule, so no case hides.
 
-## The shape of the problem
+| isSick | hasPass | hasWristband | Code (buggy) | Sign (intended) |
+| ------ | ------- | ------------ | ------------ | --------------- |
+| true   | true    | true         | **true**     | **false**       |
+| true   | true    | false        | false        | false           |
+| true   | false   | true         | **true**     | **false**       |
+| true   | false   | false        | false        | false           |
+| false  | true    | true         | true         | true            |
+| false  | true    | false        | true         | true            |
+| false  | false   | true         | true         | true            |
+| false  | false   | false        | false        | false           |
 
-- Boolean operators have a fixed precedence — `&&` binds tighter than
-  `||`, the same way `*` binds tighter than `+` in arithmetic — so an
-  expression with both, written without parentheses, doesn't parse the
-  way a spoken English sentence with "and"/"or" naturally groups.
-- Negating a compound condition isn't just "flip every `&&` to `||`
-  and negate each piece" applied carelessly — De Morgan's laws say
-  _which_ operator swaps with which, and getting that backwards
-  produces a negation that looks plausible but is wrong for some
-  inputs.
+Three inputs give 2 x 2 x 2 = 8 rows. The two bold rows are the bug: both
+involve a sick person holding a wristband.
 
-## Key terms
-
-- **Operator precedence** — the fixed order in which `!`, `&&`, and
-  `||` are evaluated when an expression has no parentheses; `!` first,
-  then `&&`, then `||`.
-- **Truth table** — a table listing every possible combination of
-  inputs to a boolean expression alongside the result for each one —
-  the only way to be certain two expressions are equivalent for _all_
-  inputs, not just the cases that happened to be tested.
-- **De Morgan's laws** — the two rules for negating a compound boolean
-  expression correctly: `!(A && B)` equals `!A || !B`, and `!(A || B)`
-  equals `!A && !B` — the operator flips when the negation moves
-  inside.
-- **Short-circuit evaluation** — `&&` and `||` stop evaluating as soon
-  as the result is determined (a false `&&` operand, or a true `||`
-  operand), which matters for readability but doesn't change _what_
-  the final boolean result is.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="truth-table"
+/>
 
 ## What this unit covers
 
-L2 works through exactly why `!isAdmin && isLoggedIn || isOwner`
-doesn't mean what it sounds like, using precedence rules and a truth
-table to show precisely where it diverges from the intended rule. L3
-implements the buggy and fixed versions as real functions, brute-forces
-every input combination to prove they differ, and then builds the
-correct negation using De Morgan's laws — showing what happens when
-that negation is done carelessly instead.
+- **Operator precedence**: `!` then `&&` then `||`; parentheses override.
+- **Truth table**: every input combination with the result of each rule;
+  two rules are equivalent only if the result columns match on every row.
+- **De Morgan's laws** (L2): `!(A && B)` is `!A || !B`, and `!(A || B)` is
+  `!A && !B`. The operator flips when the negation moves inside.
+- **Short-circuiting** (L2): `&&` and `||` stop as soon as the answer is
+  known.

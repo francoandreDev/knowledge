@@ -1,153 +1,115 @@
 ---
-title: "L2 — Why precedence and negation don't follow spoken English"
+title: "L2 — Negating rules and stopping early"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named the key terms — operator precedence, truth tables, De Morgan's
-laws — without yet walking through why the buggy code actually diverges
-from the intended rule. L2 works through that divergence step by step,
-using the same `isAdmin`/`isLoggedIn`/`isOwner` example.
+export const unit = {
+  track: "logic",
+  unitSlug: "boolean-logic",
+};
+
+L1 showed that the pool gate's rule needed parentheses and that a truth table
+exposes the difference. L2 asks two follow-up questions the pool sign raises:
+how do you write the opposite of a rule, and does the computer always look at
+every part of it?
 
 <LevelIntro
   items={[
-    "How && and || precedence groups an unparenthesized expression",
-    "Proving two expressions differ with a full truth table",
-    "Deriving a correct negation with De Morgan's laws",
+    "Negating a rule with De Morgan's laws",
+    "The careless negation and where it breaks",
+    "Short-circuit evaluation",
   ]}
 />
 
-## Precedence: why `&&` grabs its operands first
+## How do you write the opposite of the sign's rule?
 
-**If `!isAdmin && isLoggedIn || isOwner` doesn't mean "not admin, and
-(logged in or owner)," what does it actually mean?** Without
-parentheses, `&&` binds tighter than `||` — exactly the way `*` binds
-tighter than `+` in `2 + 3 * 4`. That means the expression is really
-grouped as `(!isAdmin && isLoggedIn) || isOwner`, not
-`!isAdmin && (isLoggedIn || isOwner)`. The difference is where
-`isOwner` attaches: in the actual code, `isOwner` being true makes the
-_whole_ expression true, regardless of `isAdmin` — there's no way for
-`!isAdmin` to veto it.
+**The gate needs a "not allowed" message. Is it just the rule with every
+word flipped?** The allowed rule is `!isSick && (hasPass || hasWristband)`.
+Its opposite is "you are sick, or you have neither pass nor wristband".
+Notice that `and` became `or`, and `or` became `and`. That is De Morgan:
 
-"Binds tighter" means "gets grouped first." Parentheses are the manual
-version of that grouping: solve what is inside them before combining it
-with the rest, just like arithmetic.
-
-```mermaid
-flowchart TD
-    subgraph actual["Actual grouping (no parens)"]
-        A1["!isAdmin && isLoggedIn"] --> O1["OR"]
-        I1["isOwner"] --> O1
-    end
-    subgraph intended["Intended grouping"]
-        A2["!isAdmin"] --> AND2["AND"]
-        subgraph inner["isLoggedIn || isOwner"]
-            L2b["isLoggedIn"] --> O2["OR"]
-            I2["isOwner"] --> O2
-        end
-        O2 --> AND2
-    end
-```
-
-**Is this just a quirk of this one example, or a general rule?** General:
-`!` evaluates first, then every `&&` in the expression, then every
-`||` — left to right within the same precedence level. Any expression
-mixing `&&` and `||` without parentheses follows this same fixed order,
-which is exactly why relying on it to match a spoken sentence's natural
-grouping is risky — English "and"/"or" don't carry a fixed precedence
-the way the operators do.
-
-<Checkpoint question="Given the fixed rule '! first, then every &&, then every ||,' how would isReady || isAdmin && !isBlocked actually group, without adding any parentheses yourself?">
-
-It groups as `isReady || (isAdmin && !isBlocked)`. `!` evaluates first,
-turning `!isBlocked` into its own value before anything else happens.
-Then `&&` grabs its operands next, pulling `isAdmin` and the
-now-negated `isBlocked` together into one unit. Only after both of
-those are resolved does `||` combine that unit with `isReady`. The
-fact that `isReady` was written first, on the left, doesn't matter —
-precedence groups by operator strength, not by reading order, the same
-way `2 + 3 * 4` groups the multiplication first even though the `+`
-appears earlier in the line.
-
-</Checkpoint>
-
-## Proving the difference with a truth table
-
-**How do you know the two versions actually differ, instead of just
-looking different?** Testing a few example inputs by hand can miss the
-one combination where they diverge — a truth table checks _every_
-combination, which is the only way to be certain.
-
-There are three yes/no inputs, and each has two possible values, so
-there are `2 x 2 x 2 = 8` rows to check.
-
-| isAdmin | isLoggedIn | isOwner | `!isAdmin` | `isLoggedIn \|\| isOwner` | Actual: `(!isAdmin && isLoggedIn) \|\| isOwner` | Intended: `!isAdmin && (isLoggedIn \|\| isOwner)` |
-| ------- | ---------- | ------- | ---------- | ------------------------- | ----------------------------------------------- | ------------------------------------------------- |
-| true    | true       | true    | false      | true                      | **true**                                        | **false**                                         |
-| true    | true       | false   | false      | true                      | false                                           | false                                             |
-| true    | false      | true    | false      | true                      | **true**                                        | **false**                                         |
-| true    | false      | false   | false      | false                     | false                                           | false                                             |
-| false   | true       | true    | true       | true                      | true                                            | true                                              |
-| false   | true       | false   | true       | true                      | true                                            | true                                              |
-| false   | false      | true    | true       | true                      | true                                            | true                                              |
-| false   | false      | false   | true       | false                     | false                                           | false                                             |
-
-The highlighted rows are exactly the bug: an admin (`isAdmin: true`) who
-owns the document (`isOwner: true`) gets `true` from the actual code —
-edit access — when the intended rule says `false`, because `!isAdmin`
-alone should have vetoed it. Several other rows show the versions
-agreeing, which is exactly why some manual testing missed the bug: a
-non-admin owner behaves the same under both versions.
-
-Take the row `isAdmin=true`, `isLoggedIn=false`, `isOwner=true` slowly:
-`!isAdmin` becomes `false`, but the actual grouping still ends with
-`false || true`, which is `true`. The intended grouping ends with
-`false && true`, which is `false`. Same facts, different grouping,
-different access decision.
-
-## Negating a compound condition: De Morgan's laws
-
-**Suppose the intended rule (`!isAdmin && (isLoggedIn || isOwner)`)
-now needs a "why can't I edit this" message — the _negation_ of that
-whole condition. Can you just flip every `&&` to `||` and negate each
-piece?** Not quite — De Morgan's laws say the operator that flips
-depends on which operator you started with:
-
-| Original      | Negation     |
+| Original      | Opposite     |
 | ------------- | ------------ |
 | `!(A && B)`   | `!A \|\| !B` |
 | `!(A \|\| B)` | `!A && !B`   |
 
-Negating `!isAdmin && (isLoggedIn || isOwner)` means negating an `&&`
-of two things, so by the first row, it becomes
-`isAdmin || !(isLoggedIn || isOwner)`. That inner `!(isLoggedIn ||
-isOwner)` is itself a negated `||`, so by the second row it becomes
-`!isLoggedIn && !isOwner`. Put together: `isAdmin || (!isLoggedIn &&
-!isOwner)`.
+Everyday check: "not (raining and cold)" means "dry or warm", not "dry and
+warm".
 
-<Checkpoint question="Using the same two De Morgan rows, what does !(isAdmin || isSuspended) become — and which row applies first?">
+```mermaid
+flowchart TD
+    R["!( !isSick && (hasPass || hasWristband) )"]
+    R -->|"top is &&: flip to ||"| S["isSick || !(hasPass || hasWristband)"]
+    S -->|"inner is ||: flip to &&"| T["isSick || (!hasPass && !hasWristband)"]
+```
 
-It becomes `!isAdmin && !isSuspended`. The starting expression is a
-negated `||` (`isAdmin || isSuspended` wrapped in `!`), so the second
-row applies directly and in one step: `!(A || B)` becomes `!A && !B`.
-There's no nested structure here to peel apart in a second step, unlike
-the `!isAdmin && (isLoggedIn || isOwner)` example above, which needed
-two applications because it had an `&&` on the outside and an `||`
-nested inside it. The lesson generalizes: which row applies is decided
-by the operator actually sitting at the top of the expression being
-negated, not by which operators appear anywhere inside it.
+Work from the outside in: the operator at the top of the thing being negated
+decides which row applies, then repeat for what is inside.
+
+<Checkpoint question="What does !(isSick || isLate) become, and how many De Morgan steps does it take?">
+
+It becomes `!isSick && !isLate` in one step. The thing being negated is an
+`||` at the top, so the second row applies directly. There is no nested group
+to peel apart, unlike the pool rule, which needed two steps because an `&&`
+sat on the outside with an `||` inside it.
 
 </Checkpoint>
 
-## The generalizable lesson
+**What goes wrong if you negate carelessly?** Flipping only the pieces and
+leaving the operator, `!isOwner || !isEditor` for "not (owner or editor)",
+looks right but disagrees on every input where exactly one is true.
 
-**Is this really specific to `isAdmin`/`isLoggedIn`/`isOwner`, or does
-it generalize?** It generalizes to any boolean expression mixing `&&`
-and `||` without parentheses, and to negating any compound condition —
-the specific variable names don't matter. Two habits prevent both
-classes of bug: parenthesizing mixed `&&`/`||` expressions explicitly
-rather than relying on precedence to match intent, and deriving a
-negation mechanically via De Morgan's laws (or a truth table, for a
-small enough expression) rather than by rewriting the sentence in
-your head.
+| isOwner | isEditor | `!(isOwner \|\| isEditor)` | Careless `!isOwner \|\| !isEditor` |
+| ------- | -------- | -------------------------- | ---------------------------------- |
+| true    | true     | false                      | false                              |
+| true    | false    | false                      | **true**                           |
+| false   | true     | false                      | **true**                           |
+| false   | false    | true                       | true                               |
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="de-morgan"
+/>
+
+## Does the computer always look at both sides?
+
+**If the left side of an `&&` is already false, why look at the right?** It
+does not. `&&` and `||` stop the moment the answer is known:
+
+```mermaid
+flowchart LR
+    L["left side"] --> Q{"&& or ||?"}
+    Q -->|"&& and left is false"| F["result false, right side skipped"]
+    Q -->|"|| and left is true"| T["result true, right side skipped"]
+    Q -->|"otherwise"| R["evaluate right side, it decides"]
+```
+
+This never changes the final true or false of a rule whose parts are pure
+questions. It changes whether the right side runs at all, which matters when
+that side is expensive or fails on bad input: `list.length > 0 && list[0].ok`
+is safe only because the length check comes first.
+
+<Checkpoint question="Why can swapping the two sides of an && change whether a program crashes, even though the true/false result is the same when nothing crashes?">
+
+Because the right side only runs when the left side does not already settle
+the answer. Put the guard first and the risky part is skipped on bad input;
+put the risky part first and it runs anyway and fails. The truth table is
+identical either way, which is why this kind of bug never shows up in
+true/false reasoning, only when the program actually runs.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="short-circuit"
+/>
+
+## The habit to keep
+
+Parenthesize mixed `&&` and `||`, derive a negation step by step instead of
+rewriting the sentence in your head, and check small rules with a truth table.
