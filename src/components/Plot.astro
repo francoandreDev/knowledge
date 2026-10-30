@@ -1,0 +1,136 @@
+---
+// Declarative chart for the cases Mermaid's xychart-beta can't draw: scatter
+// points, log axes, several series. Rendered client-side by Observable Plot
+// from plain data, so an MDX author writes numbers, not chart code:
+//
+//   <Plot mark="dot" x="visitors" y="latency" xScale="log"
+//     data={[{ visitors: 10, latency: 40 }, { visitors: 1000, latency: 90 }]}
+//     xLabel="Visitors" yLabel="Latency (ms)" caption="..." />
+//
+// Colors come from currentColor / the --accent var so it follows light/dark.
+interface Props {
+  data: Record<string, number | string>[];
+  mark?: "line" | "dot" | "bar" | "area";
+  x: string;
+  y: string;
+  /** Optional field that splits the data into colored series. */
+  series?: string;
+  xScale?: "linear" | "log";
+  yScale?: "linear" | "log";
+  xLabel?: string;
+  yLabel?: string;
+  height?: number;
+  caption?: string;
+}
+
+const {
+  data,
+  mark = "line",
+  x,
+  y,
+  series,
+  xScale = "linear",
+  yScale = "linear",
+  xLabel,
+  yLabel,
+  height = 280,
+  caption,
+} = Astro.props;
+
+const spec = {
+  data,
+  mark,
+  x,
+  y,
+  series,
+  xScale,
+  yScale,
+  xLabel,
+  yLabel,
+  height,
+};
+---
+
+<figure class="not-prose my-6">
+  <div
+    data-plot
+    data-spec={JSON.stringify(spec)}
+    class="overflow-x-auto text-slate-700 dark:text-slate-300"
+  >
+  </div>
+  {
+    caption && (
+      <figcaption class="mt-2 text-center text-sm text-slate-500 dark:text-slate-400">
+        {caption}
+      </figcaption>
+    )
+  }
+</figure>
+
+<script>
+  import * as Plot from "@observablehq/plot";
+
+  type Spec = {
+    data: Record<string, number | string>[];
+    mark: "line" | "dot" | "bar" | "area";
+    x: string;
+    y: string;
+    series?: string;
+    xScale: "linear" | "log";
+    yScale: "linear" | "log";
+    xLabel?: string;
+    yLabel?: string;
+    height: number;
+  };
+
+  function render(el: HTMLElement) {
+    const spec = JSON.parse(el.dataset.spec ?? "{}") as Spec;
+    const common = {
+      x: spec.x,
+      y: spec.y,
+      stroke: spec.series ?? "var(--accent, #38bdf8)",
+      fill: spec.series ?? "var(--accent, #38bdf8)",
+    };
+    const marks = {
+      line: () =>
+        Plot.line(spec.data, { ...common, fill: undefined, strokeWidth: 2 }),
+      dot: () =>
+        Plot.dot(spec.data, {
+          ...common,
+          stroke: common.stroke,
+          fill: undefined,
+        }),
+      bar: () => Plot.barY(spec.data, { ...common, stroke: undefined }),
+      area: () =>
+        Plot.areaY(spec.data, {
+          ...common,
+          stroke: undefined,
+          fillOpacity: 0.35,
+        }),
+    } as const;
+    const chart = Plot.plot({
+      height: spec.height,
+      marginLeft: 52,
+      style: {
+        background: "transparent",
+        color: "currentColor",
+        fontSize: "12px",
+      },
+      x: { type: spec.xScale, label: spec.xLabel ?? spec.x, grid: true },
+      y: { type: spec.yScale, label: spec.yLabel ?? spec.y, grid: true },
+      color: spec.series ? { legend: true } : undefined,
+      marks: [marks[spec.mark](), Plot.frame({ strokeOpacity: 0.2 })],
+    });
+    el.replaceChildren(chart);
+  }
+
+  function init() {
+    document.querySelectorAll<HTMLElement>("[data-plot]").forEach((el) => {
+      if (el.dataset.wired === "true") return;
+      el.dataset.wired = "true";
+      render(el);
+    });
+  }
+  init();
+  document.addEventListener("astro:page-load", init);
+</script>
