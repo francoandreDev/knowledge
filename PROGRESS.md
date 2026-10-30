@@ -3420,3 +3420,16 @@ Migrated the last 4 `logic/` units via 4 parallel content-only subagents. Same p
 - **`multi-criteria-decisions-under-ambiguity`**: 5 topics, 60 items; code topic `scoring-in-code`. Laptop opening; removed "staff engineer" wording and invented progress bars; flip points recomputed (Budget overtakes Ultralight at 37.5% price weight). The demo's flip (~43%) differs from the 3-year-outlook row (50%) because the demo holds other weights proportional; L3 says so.
 
 `logic/` is complete: 12 of 12. Total migrated: 76 of 246. Open items: `fermi-estimation` demo default (1.48 vs ≈1.483); practice-tier answer-length bias in older batches (`state-machines`, `induction`, and earlier tracks). Next track in ROADMAP order: `security`.
+
+## 2026-10-30 — `security/` batch 1: `security-mindset`, `authentication-fundamentals`, `authorization-models`, `hashing`
+
+Started the `security/` track (13 units) with 4 parallel content-only subagents. Same pipeline; `typecheck` 0 errors, `build` 273 pages, Node sandbox check of 43 code items 0 failing assertions; live click-through passed every `DomainCheck` topic (4 code topics run with the reference solution), 0 Mermaid errors, "Mark as done" enabled on all four.
+
+- **`security-mindset`**: 6 topics, 68 items; code topic `risk-compounding`. House/latch opening; fixed 0.71 → 0.7043 for 40 entry points ("about five-fold", not "more than quadruples"); removed an invented "40,000 users" figure; threat scores labelled as assumptions.
+- **`authentication-fundamentals`**: 8 topics, 95 items; code topic `crack-time-code`. Replaced the unverified guesses-per-second chart with a table recomputed in Node (rates labelled as assumptions); the "Company A/B, 2M accounts" story is now an explicit two-shop PIN example.
+- **`authorization-models`**: 8 topics, 96 items; code topic `ownership-check-code`. Hotel key-card opening bridging to the invoice IDOR; long server code replaced by a 3-line guard; L3 poses extension questions (soft-deleted invoices, 403 vs 404, list endpoints). L1 has tables rather than a Mermaid diagram.
+- **`hashing`**: 5 topics, 60 items; code topic `cost-tuning`. Added salting (new); the "hours into days" claim is now the unit's own numbers (~43 days vs ~580 days); L1 hashes are the real SHA-256 values; scrypt timings labelled "one machine".
+
+Practice items have 3 choices (`authentication-fundamentals` uses 4); exam items have 4. Length bias, correct strictly longest / shortest: `security-mindset` practice 3% / 30%, exam 25% / 30%; `authentication-fundamentals` 17% / 10% overall; `authorization-models` 27% / 11% overall; `hashing` 2% / 0% overall (all within the ≤35% target, though `hashing` and `security-mindset` practice may read as a faint opposite tell).
+
+`security/` is at 4 of 13. Total migrated: 80 of 246. Remaining here: `symmetric-asymmetric-encryption-basics`, `tls-https`, `owasp-top-10`, `secrets-management`, `supply-chain-security`, `defense-depth`, `security-testing`, `incident-response`, `secure-by-design`.
