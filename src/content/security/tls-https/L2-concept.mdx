@@ -1,214 +1,219 @@
 ---
-title: "L2 — How a certificate chain is actually verified, and what that verification does and doesn't prove"
+title: "L2 — How a certificate chain is verified, and what the handshake does with it"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+import Compare from "../../../components/viz/Compare.astro";
 
-L1 established that a padlock only proves a certificate chains to a
-trusted CA for the exact domain in the address bar — not that the
-domain belongs to whoever the user thinks it does. L2 works through
-exactly how that chain of signatures gets verified, and pins down
-precisely what each check does and doesn't confirm.
+export const unit = { track: "security", unitSlug: "tls-https" };
+
+L1 established that a padlock proves an encrypted connection to the
+exact domain in the address bar, not that the domain is the brand you
+meant. L2 opens the box: what the browser actually checks, why those
+checks stay narrow on purpose, and how the handshake turns a
+certificate into a key.
 
 <LevelIntro
   items={[
-    "How chain-of-trust verification works, step by step",
-    "How the handshake turns a certificate into a shared key",
-    "Why ECDHE gives you forward secrecy and RSA key exchange doesn't",
+    "The checks behind a padlock",
+    "How the handshake produces a key",
+    "Forward secrecy: ECDHE versus RSA key exchange",
   ]}
 />
 
 ## Verifying a chain, link by link
 
-**When a browser shows a padlock, what exactly did it just check?**
-Not whether the site is trustworthy — it checked whether a chain of
-digital signatures, starting at the site's own certificate, leads
-back to a root certificate the browser already trusts:
+**When the padlock appears, what exactly did the browser just check?**
+Not whether the site is trustworthy. It checked whether a chain of
+signatures, starting at the site's own certificate, leads to a root
+the browser already trusts, and whether the certificate names the
+domain in the address bar:
 
 ```mermaid
 flowchart TD
-    A["Leaf certificate\n(e.g. paypa1-secure-login.com)"] -->|"signed by"| B["Intermediate CA certificate"]
-    B -->|"signed by"| C["Root CA certificate\n(pre-trusted by the browser)"]
-    A -->|"check 1"| D{"Does the domain in\nthe cert match the\naddress bar?"}
-    B -->|"check 2"| E{"Is each signature\nin the chain valid?"}
+    A["Leaf certificate<br/>(names one domain)"] -->|"signed by"| B["Intermediate CA certificate"]
+    B -->|"signed by"| C["Root CA certificate<br/>(pre-trusted by the browser)"]
+    A --> D{"Check 1: does the<br/>certificate's domain match<br/>the address bar?"}
+    B --> E{"Check 2: is every<br/>signature up to the root valid?"}
     D -->|"yes"| F["Padlock shown"]
     E -->|"yes"| F
-    D -->|"no"| G["Warning / no padlock"]
+    D -->|"no"| G["Warning page"]
     E -->|"no"| G
 ```
 
-For the point this unit is isolating, focus on two checks: does the
-certificate's domain match what's in the address bar, and does every
-signature in the chain verify correctly up to a trusted root. **Neither
-check asks "is this organization who it claims to be" in any deeper
-sense than "do they control this specific domain name."** Real browsers
-also check dates, revocation signals, policy rules, and more, but those
-extra checks still do not turn a lookalike domain into the real brand.
+Real browsers also check expiry dates, revocation signals, and policy
+rules. None of those extra checks turns a lookalike domain into the
+real brand: every one of them asks "is this certificate valid for this
+name?", never "is this name the one you meant?".
 
-<Checkpoint question="A certificate has a perfectly valid signature chain all the way up to a trusted root, but its domain field says paypa1-secure-login.com while the address bar also says paypa1-secure-login.com (the user typed the lookalike domain themselves, from a phishing email). Do both checks pass, and does that outcome mean the verification logic made a mistake?">
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="chain-verification"
+/>
 
-Both checks pass — the domain in the certificate genuinely matches the
-domain in the address bar, and the signature chain genuinely resolves to
-a trusted root. That's not a mistake in the verification logic; it's the
-verifier correctly answering the only question it was ever asked, which
-is "does this exact domain string have a certificate that chains to a
-trusted CA." It was never asked, and structurally cannot answer, whether
-`paypa1-secure-login.com` is a legitimate business or a trap — that
-question depends on facts about the real world (who registered the
-domain, what they intend to do with it) that no signature chain encodes.
+<Checkpoint question="A certificate has a valid signature chain up to a trusted root, and its domain is paypa1-secure-login.com, which is also what the address bar shows. Do both checks pass, and did the verifier make a mistake?">
 
-</Checkpoint>
-
-## What the padlock proves versus what people assume it proves
-
-**If both checks pass for a phishing site, what did the padlock
-actually guarantee, and what did it never claim to guarantee?**
-
-| The padlock proves                                                | The padlock does NOT prove                                                                                    |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| The connection between browser and server is encrypted in transit | The site's content is honest, safe, or non-malicious                                                          |
-| The certificate's domain matches the address bar exactly          | The domain is operated by the company or person the user assumes                                              |
-| A trusted certificate authority verified control of that domain   | The certificate authority verified the requester's real-world identity (for the most common certificate type) |
-| Data can't be silently read or modified by a network eavesdropper | The server itself won't misuse the data once it arrives                                                       |
-
-The gap between these two columns is exactly where phishing over
-HTTPS lives — a phishing site can satisfy every item in the left
-column while doing real harm through the right column, because the
-two columns are answering completely different questions.
-
-## Why domain validation is deliberately lightweight
-
-**If a CA could just refuse to certify any domain that looks
-suspicious, wouldn't that close the gap?** Domain validation (DV) —
-the most common certificate type — was deliberately designed to be
-fast, automated, and cheap: prove you control the domain (respond to
-a challenge sent to an email address at that domain, or publish a
-specific DNS record, a public configuration entry for that domain) and
-a certificate is issued within minutes, no human review involved. This
-scale is what made HTTPS practical for the entire web to adopt — but it
-also means DV certificates say nothing about who's actually behind the
-domain. Extended Validation (EV) certificates exist specifically to add
-real organizational identity checks, but they're far less common and
-browsers no longer visually distinguish them from DV certificates the
-way they used to, so most users never see the difference even when it
-exists.
-
-<Checkpoint question="A CA issues paypa1-secure-login.com a domain-validated certificate in minutes, with no human reviewing whether the domain sounds like PayPal. Was this the CA failing to do its job correctly?">
-
-No — this is domain validation working exactly as designed, not a
-lapse. DV's whole contract is "prove you control this domain," checked
-by an automated challenge, with no promise anywhere in that contract to
-evaluate whether the domain name resembles a well-known brand. Expecting
-the CA to catch lookalike domains would be holding it to a job it was
-never scoped to do; that scoping is precisely why DV can issue
-certificates in minutes at the scale the entire web relies on, and it's
-also precisely why the burden of noticing a lookalike domain falls
-somewhere else — on the user reading the address bar, or on a separate,
-dedicated anti-phishing system, not on the certificate chain itself.
+Both checks pass, and the verifier made no mistake. It answered the
+only question it was ever asked: does this exact domain string have a
+certificate that chains to a trusted CA. Whether the domain is a
+legitimate business depends on facts about the world, such as who
+registered it and what they intend, that no signature chain encodes.
 
 </Checkpoint>
 
-## How the handshake actually establishes trust and a key
+## Why domain validation is deliberately light
 
-Everything so far verified that a certificate is genuine and names the
-right domain. **But a certificate only ever contains a _public_ key —
-and a public key alone is too slow to encrypt an entire page load of
-traffic. So where does the actual key that encrypts your traffic come
-from, and how does the certificate stop an attacker from substituting
-their own key in that process?** That's the job of the **TLS
-handshake**, a short negotiation that runs before any page data moves:
+**If a CA refused any suspicious-looking domain, wouldn't that close the
+gap?** It would also break the thing that made HTTPS universal.
+**Domain validation (DV)** is automated: the requester proves control by
+answering a challenge, such as publishing a specific value at a
+specific web address on the domain or in its DNS records, and a
+certificate is issued in minutes with no human review. A job that
+needs judgment ("does this name resemble a brand?") cannot run at that
+speed and scale.
+
+| Certificate type         | What the CA checks                        | Human review | Typical speed |
+| ------------------------ | ----------------------------------------- | ------------ | ------------- |
+| Domain validated (DV)    | Requester controls the domain             | None         | Minutes       |
+| Extended validation (EV) | Domain control plus organization identity | Yes          | Longer        |
+
+Browsers no longer display EV certificates differently, so even when
+the extra checking happened, most users never see it. The burden of
+noticing a lookalike falls on the reader of the address bar, or on a
+separate anti-phishing system, not on the certificate chain.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="dv-lightweight"
+/>
+
+<Checkpoint question="A CA issued a certificate for paypa1-secure-login.com in minutes, with no human asking whether the name sounds like PayPal. Did the CA fail at its job?">
+
+No. DV's whole contract is "prove you control this domain", checked by
+an automated challenge. Expecting the CA to catch lookalikes holds it
+to a job it was never scoped to do, and that narrow scope is exactly
+why it can issue certificates at web scale.
+
+</Checkpoint>
+
+## From a certificate to a shared key: the handshake
+
+**A certificate holds only a public key, and public-key math is too
+slow to encrypt a whole page load. So where does the real key come
+from, and what stops an attacker from slipping in their own?** The
+handshake, a negotiation that runs before any page data moves:
 
 ```mermaid
 sequenceDiagram
-    participant C as Client (browser)
+    participant C as Browser
     participant S as Server
-    Note over C,S: 1. Negotiate: which TLS version, which cipher suite?
-    C->>S: ClientHello (supported versions, cipher suites, a random value)
-    S->>C: ServerHello (chosen version, chosen cipher suite, a random value)
-    Note over C,S: 2. Prove identity: the chain-of-trust check from above
-    S->>C: Certificate (leaf + intermediate chain)
-    Note over C: Verify chain to trusted root, hostname matches
-    Note over C,S: 3. Key exchange: derive a shared secret
-    S->>C: Server's ephemeral key-exchange value, signed with the certificate's private key
-    C->>S: Client's ephemeral key-exchange value
-    Note over C,S: Both sides now independently compute the same shared secret
-    Note over C,S: 4. Switch to symmetric encryption using that shared secret
+    C->>S: ClientHello (versions, cipher suites, random value)
+    S->>C: ServerHello (chosen version and suite, random value)
+    S->>C: Certificate chain (verify signatures, match hostname)
+    S->>C: Key-exchange value, signed with the certificate's private key
+    C->>S: Client's key-exchange value
+    Note over C,S: Both sides compute the same shared secret locally
     C->>S: Finished (encrypted)
     S->>C: Finished (encrypted)
+    Note over C,S: Page data now flows under symmetric encryption
 ```
 
-The certificate's job in this diagram is narrow but critical: the
-server signs its key-exchange value with the private key matching its
-certificate's public key. Because only the real certificate holder has
-that private key, a network attacker can swap bytes on the wire but
-can't forge a signature that verifies against the certificate — which
-is exactly the chain-of-trust check from earlier in this level, now
-put to use inside the handshake itself rather than just at page load.
+The certificate's job here is narrow but critical. The server signs
+its key-exchange value with the private key that matches its
+certificate. An attacker on the wire can swap bytes but cannot forge a
+signature that verifies against the certificate, so they cannot
+substitute their own key unnoticed. In TLS 1.3 the messages after
+ServerHello, including the certificate, are already encrypted; the
+diagram shows what is exchanged, not who can read it.
 
-**Why negotiate a "cipher suite" at all — why not just hard-code one
-algorithm forever?** A **cipher suite** names the specific bundle of
-algorithms this connection will use: which key-exchange method, which
-symmetric cipher for the actual traffic, and which integrity check
-detects tampering. Negotiating it lets TLS keep working as old
-algorithms are found weak and new ones replace them, without breaking
-every server and client that hasn't upgraded yet — both sides simply
-offer the suites they support, and agree on the strongest one both
-understand.
+**Why negotiate a cipher suite at all instead of hard-coding one?**
+Algorithms age. Negotiating lets both sides offer what they support and
+pick the strongest option they share, so TLS survives weak algorithms
+being retired without breaking every older client at once.
 
-<Checkpoint question="The handshake diagram shows the server's key-exchange value as 'ephemeral' — generated fresh for this connection, then discarded. Why does it matter whether that value is ephemeral (thrown away after the session) versus derived directly and permanently from the server's long-term certificate private key?">
+**What does the handshake cost?** Time. The handshake needs whole
+network round trips before the first encrypted byte of the page can
+move. In this unit's demo (counting only the TLS round trips and
+ignoring the TCP connection setup before it):
 
-It matters because of what happens if the server's long-term private
-key is ever stolen later — say, a year from now. If every past
-session's shared key had been derived straight from that same
-long-term private key, an attacker who later steals the key could
-retroactively decrypt every session ever recorded, including ones from
-before the theft. An ephemeral key-exchange value exists only for the
-lifetime of one handshake and is never written down or reused — so
-even total compromise of the long-term private key later on reveals
-nothing about a shared key that was only ever computed in memory,
-once, years earlier. This property is called **forward secrecy**, and
-it's the reason modern TLS treats "ephemeral" as a requirement, not an
-optimization.
+| Network round trip | TLS 1.3 (1 round trip) | TLS 1.2 (2 round trips) |
+| ------------------ | ---------------------- | ----------------------- |
+| 10 ms              | 10 ms                  | 20 ms                   |
+| 80 ms              | 80 ms                  | 160 ms                  |
+| 300 ms             | 300 ms                 | 600 ms                  |
+
+Drag the slider in the demo to see the same relationship across the
+whole range: handshake time is round trips multiplied by the network's
+round-trip time, so a distant server pays more for every extra round
+trip.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="handshake-cipher-suite"
+/>
+
+## Forward secrecy: why the key exchange method matters
+
+<Checkpoint question="The diagram calls the key-exchange values ephemeral: generated fresh for one connection, then discarded. Why does that matter if the server's long-term private key is stolen a year later?">
+
+If past sessions' keys had been derived from that long-term key, the
+thief could decrypt every recording they had saved. An ephemeral value
+exists only in memory for one handshake and is never reused, so
+stealing the long-term key later reveals nothing about a secret that no
+longer exists. That property is called **forward secrecy**.
 
 </Checkpoint>
 
-**Why does the key-exchange method matter for forward secrecy, and not
-just the cipher used afterward?** Older TLS configurations used plain
-**RSA key exchange**: the client picked a random secret, encrypted it
-directly with the server's long-term public key from its certificate,
-and sent it over. That secret can only be decrypted with the server's
-long-term private key — meaning anyone who later obtains that private
-key (theft, subpoena, a future cryptographic break) can decrypt a
-recording of that exact handshake, no matter how long ago it happened.
-**ECDHE** (Elliptic-Curve Diffie-Hellman, Ephemeral) instead has both
-sides generate a fresh, temporary key pair for that one handshake,
-exchange only the public halves, and each independently compute the
-same shared secret from their own ephemeral private value plus the
-other side's ephemeral public value — the shared secret itself is
-never transmitted, and the ephemeral private values are discarded the
-moment the handshake ends. That's forward secrecy: compromising the
-server's long-term certificate key later tells an attacker nothing
-about a shared secret that no longer exists anywhere to compromise.
-This is why essentially all modern TLS deployments require ECDHE (or
-its variants) and treat plain RSA key exchange as deprecated.
+**How do the two key exchange styles differ in practice?**
+
+<Compare
+  left={{
+    title: "RSA key exchange (old)",
+    items: [
+      "Client picks the secret",
+      "Wraps it in the server's cert key",
+      "Secret travels, only wrapped",
+      "Stolen key opens old recordings",
+    ],
+  }}
+  right={{
+    title: "ECDHE (modern)",
+    items: [
+      "Both sides make throwaway pairs",
+      "Swap only the public halves",
+      "Secret is never transmitted",
+      "Stolen key opens nothing old",
+    ],
+  }}
+  caption="Same certificate, very different exposure if its private key leaks later."
+/>
+
+With **ECDHE** (Elliptic-Curve Diffie-Hellman, Ephemeral), each side
+combines its own temporary private value with the other's public value
+and arrives at the same secret. The certificate key only signs, which
+proves who the server is; it never protects the secret. TLS 1.3 removed
+plain RSA key exchange entirely.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="forward-secrecy"
+/>
 
 ## Failure modes at this level
 
-- **Treating "HTTPS" as a synonym for "trustworthy."** HTTPS answers
-  "is this connection private," not "should I trust what's on the
-  other end" — conflating the two is exactly the gap phishing exploits.
-- **Assuming a CA vetted the organization's identity.** For the
-  overwhelming majority of certificates in use (domain-validated),
-  the CA checked domain control only — not a business registration,
-  not a physical address, not who's actually operating the site.
-- **Ignoring the actual domain string because a padlock is present.**
-  The padlock's domain-match check is strict about the _exact_ string
-  in the address bar — but it can't tell a human that
-  `paypa1-secure-login.com` isn't `paypal.com`; that comparison is
-  still the user's job.
-- **Thinking the certificate itself is the encryption key.** The
-  certificate only carries a public key used to authenticate the
-  handshake; the actual symmetric key that encrypts traffic is derived
-  fresh, during key exchange, and (with ECDHE) never exists anywhere
-  the certificate's long-term private key could later expose it.
+- **Treating "HTTPS" as a synonym for "trustworthy".** It answers "is
+  this connection private", not "should I trust the other end".
+- **Assuming the CA vetted the organization.** For domain-validated
+  certificates it checked domain control only.
+- **Skipping the domain string because a padlock is present.** The
+  match is strict about the exact string, but telling `paypa1` from
+  `paypal` is still the reader's job.
+- **Thinking the certificate is the encryption key.** It carries a
+  public key used to authenticate the handshake; the traffic key is
+  derived fresh during key exchange.

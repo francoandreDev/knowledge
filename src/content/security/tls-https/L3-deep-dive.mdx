@@ -1,353 +1,212 @@
 ---
-title: "L3 — Implementing a real chain-of-trust verifier, and proving what it can't catch"
+title: "L3 — One lookalike, two valid chains: what verification proves, what a watcher sees, and how hostnames match"
 ---
 
+import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L2 walked through the two checks a browser performs when it verifies a
-certificate chain: does the domain match, and does every signature
-resolve to a trusted root. L3 implements that verifier for real, with
-actual cryptographic signatures, to prove that both a legitimate site
-and a phishing lookalike can pass it cleanly — and to show exactly what
-it does catch.
+export const unit = { track: "security", unitSlug: "tls-https" };
+
+<Scenario label="The same city office stamped both shop cards">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🏛️</span> <strong>One office</strong> — the same intermediate CA signs both certificates</div>
+      <div class="flex items-center gap-1.5"><span>🏪</span> <strong>Shop A</strong> — paypal.com, the real brand</div>
+      <div class="flex items-center gap-1.5"><span>🎣</span> <strong>Shop B</strong> — paypa1-secure-login.com, a lookalike built to steal logins</div>
+      <div class="flex items-center gap-1.5"><span>🔒</span> <strong>Result</strong> — both pass every check the browser runs</div>
+    </div>
+  </Fragment>
+
+Picture the city office from L1 stamping two ID cards on the same
+afternoon. One goes to the real PayPal, for `paypal.com`. The other goes
+to someone who registered `paypa1-secure-login.com` an hour earlier.
+Both people proved they control the name on their card, and the office
+stamped both. **A visitor walks up to each door and checks the
+stamp. Does any step of that check separate the real shop from the
+fake one?**
+
+This is a single case, worked end to end. It is not the whole
+territory: the same shape appears with different brands, different CAs,
+and different mechanisms, and the questions at the end of each section
+ask you to push it beyond what is shown.
+
+</Scenario>
 
 <LevelIntro
   items={[
-    "Building a minimal CA hierarchy with real RSA signatures",
-    "Inspecting a real handshake's negotiated cipher suite with Node's tls module",
-    "What a network observer can and can't see without the private key",
+    "Two chains that both verify",
+    "What a passive watcher can see",
+    "Matching hostnames, wildcards included",
   ]}
 />
 
-## Building a minimal CA hierarchy with real signatures
+## The worked case: tracing both chains
 
-Using Node's built-in `crypto` module for genuine RSA key pairs and
-signatures — not a toy stand-in:
+**Where, step by step, could the browser tell the two sites apart?**
 
-You do not need to master RSA, SHA-256, or X.509 to read this example.
-Treat the code as a small paper-signing machine: one key signs a
-certificate, another public key checks whether the paper is still
-unchanged, and the chain says which witness signed which paper. The
-real web certificate format is called X.509; this example uses plain
-JSON so the responsibility of each field is visible.
+```mermaid
+flowchart TD
+    Root["Root CA<br/>(trusted by the browser)"] -->|"signs"| Int["Intermediate CA"]
+    Int -->|"signs"| A["Leaf: paypal.com"]
+    Int -->|"signs"| B["Leaf: paypa1-secure-login.com"]
+    A --> VA["Domain matches address bar: yes<br/>Signatures valid to root: yes"]
+    B --> VB["Domain matches address bar: yes<br/>Signatures valid to root: yes"]
+    VA --> PA["Padlock"]
+    VB --> PB["Padlock"]
+```
+
+| Check the browser runs                            | paypal.com | paypa1-secure-login.com |
+| ------------------------------------------------- | ---------- | ----------------------- |
+| Certificate domain equals address bar             | Pass       | Pass                    |
+| Leaf signature verifies against the intermediate  | Pass       | Pass                    |
+| Intermediate signature verifies to a trusted root | Pass       | Pass                    |
+| Certificate not expired                           | Pass       | Pass                    |
+| "Is this the brand the visitor meant?"            | Not asked  | Not asked               |
+
+The last row is the whole story. The first four rows are cryptographic
+facts that can be checked from the certificate data alone. The last is
+a fact about the world, and nothing in the chain encodes it. The result
+is correct for both sites: the verifier is telling the truth twice.
+
+<Checkpoint question="A security engineer proposes fixing this by making the chain verifier reject any domain that looks similar to a well-known brand. What would that change do to the verifier's contract?">
+
+It would quietly widen the verifier's job from "does this domain own a
+certificate signed by a trusted root" to "is this domain a legitimate,
+non-impersonating business". The first is a fact you can check offline
+from signatures. The second needs outside knowledge: a list of brands,
+fuzzy matching, and constant upkeep as new brands and lookalikes
+appear. Mixing them blurs "this domain owns this name" with "this
+domain is trustworthy", the exact conflation that lets the phishing
+site succeed. A lookalike check is worth building, but as a separate,
+explicit step.
+
+</Checkpoint>
+
+**What does verification catch, then?** Tampering after issuance. A
+signature covers the exact contents of the certificate:
+
+| Scenario                                                    | Hostname check | Signature check | Why                                               |
+| ----------------------------------------------------------- | -------------- | --------------- | ------------------------------------------------- |
+| Genuine certificate for `paypal.com`, visited at `evil.com` | Fail           | Pass            | The certificate names a different domain          |
+| Genuine certificate, subject edited after signing           | Depends        | Fail            | The stored contents no longer match the signature |
+| Lookalike with its own genuine certificate                  | Pass           | Pass            | Nothing was altered and the name matches          |
+
+The tampered certificate fails for a mechanical reason: its contents
+no longer match what was signed. The lookalike fails nothing, because
+what is wrong with it is entirely about what the name means to a human.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="lookalike-passes"
+/>
+
+**Try extending the case.** Suppose a company adds a rule that flags any
+domain within a small edit distance (the number of letter changes
+needed to turn one string into another) of a list of high-value
+domains. Would that rule belong inside the chain verifier, or
+somewhere else? What would break if the list went stale? And would it
+catch `paypal-support-center.com`, which is far from `paypal.com` by
+edit distance?
+
+## What a passive watcher can and can't see
+
+**If someone records every packet of a connection, with no
+interference, what do they learn?** The answer depends on which parts of
+the handshake travel before encryption starts:
+
+| Visible to a passive observer                                                 | Not visible to a passive observer                 |
+| ----------------------------------------------------------------------------- | ------------------------------------------------- |
+| Server address and approximate data volume and timing                         | Request and response contents after the handshake |
+| The offered versions and cipher suites in ClientHello                         | The shared traffic key (it is never transmitted)  |
+| The hostname the client asks for (SNI), unless Encrypted Client Hello is used | The URL path, query string, cookies, form fields  |
+| The certificate chain, in TLS 1.2 (TLS 1.3 encrypts it)                       | Anything inside the encrypted application data    |
+
+Two details matter. First, TLS 1.3 encrypts the server's certificate,
+so the certificate row changes with the protocol version. Second, the
+hostname is a separate leak: the client names the server it wants in
+the clear so that one address can host many sites. Encrypted Client
+Hello (ECH) is the effort to close that gap. TLS was never meant to hide
+who talks to whom, only what they say.
+
+<Checkpoint question="A network operator logs every connection for a year but never breaks any encryption. Name two things they can still report about a user's browsing, and one thing they cannot.">
+
+They can still report which servers the user connected to (the address,
+and usually the hostname through SNI) and when, plus roughly how much
+data moved. They cannot report which pages were requested or what any
+page contained, since paths, cookies, and bodies sit inside the
+encrypted data. This is metadata versus content: TLS protects the
+second and was never designed to hide the first.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="observer-visibility"
+/>
+
+**Try extending the case.** If both servers' long-term private keys were
+stolen a year later, and the observer had recorded today's handshake
+with each, for which server could they decrypt it if one used ECDHE and
+the other plain RSA key exchange? What would change if a third server
+reused its ephemeral value across many connections?
+
+## Matching the hostname: where reading the code is the point
+
+**What does "the certificate's domain matches the address bar" mean when
+a certificate says `*.example.com`?** A wildcard covers exactly one label
+(one dot-separated piece) in the position of the asterisk, which is
+easy to get wrong:
+
+| Certificate name  | `www.example.com` | `example.com` | `a.b.example.com` |
+| ----------------- | ----------------- | ------------- | ----------------- |
+| `www.example.com` | Match             | No            | No                |
+| `*.example.com`   | Match             | No            | No                |
+| `example.com`     | No                | Match         | No                |
+
+Here is the whole rule in a few lines; the point is the two guards, not
+the syntax:
 
 ```js
-const crypto = require("crypto");
-
-function generateKeyPair() {
-  return crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
-}
-
-function signCert(cert, signerPrivateKey) {
-  const payload = JSON.stringify({
-    subject: cert.subject,
-    issuer: cert.issuer,
-    publicKey: cert.publicKey.export({ type: "spki", format: "pem" }),
-  });
-  const signature = crypto.sign(
-    "sha256",
-    Buffer.from(payload),
-    signerPrivateKey,
+function matchesName(certName, host) {
+  const name = certName.toLowerCase();
+  const target = host.toLowerCase();
+  if (!name.startsWith("*.")) return name === target;
+  const rest = name.slice(2);
+  const labels = target.split(".");
+  return (
+    labels.length > 1 && labels[0] !== "" && labels.slice(1).join(".") === rest
   );
-  return { ...cert, signature };
-}
-
-function verifyCertSignature(cert, issuerPublicKey) {
-  const payload = JSON.stringify({
-    subject: cert.subject,
-    issuer: cert.issuer,
-    publicKey: cert.publicKey.export({ type: "spki", format: "pem" }),
-  });
-  return crypto.verify(
-    "sha256",
-    Buffer.from(payload),
-    issuerPublicKey,
-    cert.signature,
-  );
 }
 ```
 
-`signCert` produces a real SHA-256/RSA signature over the certificate's
-contents, and `verifyCertSignature` checks it against the claimed
-issuer's public key — this is the actual cryptographic operation a
-browser performs, simplified to plain JSON instead of the X.509
-binary format.
+The guard is that the wildcard stands for exactly one label: removing
+the first label of the host must leave exactly the rest of the pattern.
+That is why `*.example.com` does not cover the bare `example.com` and
+does not cover two extra labels. The exercise below asks you to write
+this logic yourself.
 
-## Verifying the full chain, exactly as L2 described
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="hostname-match"
+/>
 
-```js
-function verifyChain(leafCert, intermediateCert, rootPublicKey, hostname) {
-  if (leafCert.subject !== hostname) {
-    return { valid: false, reason: "hostname mismatch" };
-  }
-  if (!verifyCertSignature(intermediateCert, rootPublicKey)) {
-    return { valid: false, reason: "intermediate not signed by trusted root" };
-  }
-  if (!verifyCertSignature(leafCert, intermediateCert.publicKey)) {
-    return { valid: false, reason: "leaf not signed by intermediate" };
-  }
-  return {
-    valid: true,
-    reason: "chain verifies to a trusted root, hostname matches",
-  };
-}
-```
-
-This implements exactly the two checks from L2's flowchart: does the
-certificate's subject match the address bar, and does every signature
-in the chain verify up to a trusted root — nothing more.
-
-## Setting up the CA hierarchy and issuing both certificates
-
-```js
-const root = generateKeyPair();
-const intermediate = generateKeyPair();
-const leafLegit = generateKeyPair();
-const leafPhish = generateKeyPair();
-
-const intermediateCert = signCert(
-  {
-    subject: "IntermediateCA",
-    issuer: "RootCA",
-    publicKey: intermediate.publicKey,
-  },
-  root.privateKey,
-);
-
-const legitLeafCert = signCert(
-  {
-    subject: "paypal.com",
-    issuer: "IntermediateCA",
-    publicKey: leafLegit.publicKey,
-  },
-  intermediate.privateKey,
-);
-
-const phishLeafCert = signCert(
-  {
-    subject: "paypa1-secure-login.com",
-    issuer: "IntermediateCA",
-    publicKey: leafPhish.publicKey,
-  },
-  intermediate.privateKey,
-);
-```
-
-Both `paypal.com` and `paypa1-secure-login.com` requested a
-certificate from the same intermediate CA, and both requests were
-granted — the CA has no way to know, and no obligation to check, that
-one of these domains is impersonating a well-known brand. It only
-verified that each requester controlled the domain they asked for.
-
-## Verifying both chains — and confirming the padlock lies to no one
-
-```js
-console.log(
-  verifyChain(legitLeafCert, intermediateCert, root.publicKey, "paypal.com"),
-);
-// { valid: true, reason: 'chain verifies to a trusted root, hostname matches' }
-
-console.log(
-  verifyChain(
-    phishLeafCert,
-    intermediateCert,
-    root.publicKey,
-    "paypa1-secure-login.com",
-  ),
-);
-// { valid: true, reason: 'chain verifies to a trusted root, hostname matches' }
-```
-
-**Both verify as `valid: true`.** This is not a bug in the verifier —
-it's the correct, honest result. The chain-of-trust check answered
-exactly the question it's designed to answer (does this domain's
-certificate chain to a trusted root) for both domains truthfully.
-Neither the CA nor the browser's verification logic was ever asked
-"is this the real PayPal" — that was never part of the contract.
-
-<Checkpoint question="verifyChain returned valid: true for both paypal.com and the phishing domain paypa1-secure-login.com, using entirely real RSA signatures and a genuine chain of trust. If a security engineer proposed 'fixing' this by making verifyChain reject any domain that looks similar to a well-known brand, what would that change actually be doing to the function's contract?">
-
-It would be quietly expanding `verifyChain`'s job from "does this domain
-own a certificate signed by a trusted root" to "is this domain a
-legitimate, non-impersonating business" — two very different questions
-that happen to share the same function today. The first is a
-cryptographic fact you can verify offline from the certificate data
-alone; the second requires external knowledge (a list of brands to
-compare against, fuzzy-matching logic, and constant upkeep as new brands
-and new lookalikes appear) that has nothing to do with signatures or
-key pairs. Folding it into `verifyChain` wouldn't just add a feature —
-it would blur the line between "this domain cryptographically owns this
-name" and "this domain is trustworthy," which is the exact conflation
-that let the phishing site succeed in the first place. That's a real
-and worthwhile check to build, but it belongs as a separate, explicit
-step, not smuggled into the chain-of-trust verifier's contract.
-
-</Checkpoint>
-
-## What tampering actually breaks, to show the check isn't meaningless
-
-```js
-console.log(
-  verifyChain(legitLeafCert, intermediateCert, root.publicKey, "evil.com"),
-);
-// { valid: false, reason: 'hostname mismatch' }
-
-const tampered = { ...legitLeafCert, subject: "paypal.com-but-tampered" };
-console.log(verifyCertSignature(tampered, intermediate.publicKey));
-// false — the signature no longer matches the modified contents
-```
-
-The verifier isn't useless — it correctly rejects a hostname mismatch,
-and it correctly detects that a certificate was altered after signing
-(changing `subject` without re-signing invalidates the signature,
-since the signature covers the exact certificate contents). What it
-was never built to detect, and structurally cannot detect, is whether
-the _domain string itself_ is a legitimate brand's domain or a
-convincing lookalike — that comparison isn't cryptographic, it's
-lexical, meaning text compared character by character, and it has to
-happen in the human (or a separate anti-phishing system) reading the
-address bar.
-
-<Checkpoint question="verifyCertSignature correctly returned false for a certificate whose subject field was edited after signing, without re-signing it. Why doesn't that same signature check give the phishing domain's certificate away as fraudulent, the way it gave the tampered one away?">
-
-Because the phishing certificate was never tampered with — it was
-legitimately signed, for exactly the subject it claims (`paypa1-secure-login.com`), by an intermediate CA that really did sign it.
-Signature verification only detects a mismatch between a certificate's
-contents and its signature; it says nothing about whether the contents
-themselves describe something deceptive. The tampered certificate fails
-because its stored subject no longer matches what was signed — a
-purely mechanical mismatch. The phishing certificate's subject matches
-its signature perfectly; the "problem" with it is entirely about what
-the domain string means to a human reader, which is outside anything a
-signature can encode.
-
-</Checkpoint>
-
-## Inspecting a real negotiated handshake with Node's `tls` module
-
-L2 described the handshake in the abstract — ClientHello, key
-exchange, cipher suite negotiation. **Is any of that actually
-inspectable, or is it all invisible plumbing once the connection is
-open?** Node's built-in `tls` module exposes exactly what got
-negotiated, from a real outbound connection, with no simulation:
-
-```js
-const tls = require("tls");
-
-function inspectHandshake(host) {
-  return new Promise((resolve, reject) => {
-    const socket = tls.connect(
-      { host, port: 443, servername: host, minVersion: "TLSv1.2" },
-      () => {
-        const result = {
-          protocol: socket.getProtocol(), // e.g. "TLSv1.3"
-          cipherSuite: socket.getCipher(), // { name, standardName, version }
-          ephemeralKeyInfo: socket.getEphemeralKeyInfo(), // key-exchange details
-          authorized: socket.authorized, // did chain-of-trust verification pass?
-        };
-        socket.end();
-        resolve(result);
-      },
-    );
-    socket.on("error", reject);
-  });
-}
-
-// inspectHandshake("example.com").then(console.log);
-// {
-//   protocol: 'TLSv1.3',
-//   cipherSuite: { name: 'TLS_AES_128_GCM_SHA256', standardName: 'TLS_AES_128_GCM_SHA256', version: 'TLSv1.3' },
-//   ephemeralKeyInfo: { type: 'ECDH', name: 'X25519', size: 253 },
-//   authorized: true
-// }
-```
-
-`getCipher()` and `getEphemeralKeyInfo()` are reporting back exactly
-the two things L2's diagram described: which cipher suite the
-negotiation settled on, and what kind of ephemeral key exchange
-produced the shared secret for this specific connection.
-`ephemeralKeyInfo.type === 'ECDH'` is the observable signal that this
-connection got forward secrecy — a connection still willing to
-negotiate plain RSA key exchange would report no ephemeral key info at
-all for that part of the handshake, because nothing ephemeral was
-generated.
-
-<Checkpoint question="Running inspectHandshake against two different servers, one returns ephemeralKeyInfo: { type: 'ECDH', name: 'X25519', size: 253 } and the other returns ephemeralKeyInfo: undefined (because it negotiated plain RSA key exchange). A year later, both servers' long-term private keys are stolen in a breach. For which server (if either) could the attacker decrypt a recording of today's handshake made at the time of this call?">
-
-Only the server that negotiated plain RSA key exchange — the one where
-`ephemeralKeyInfo` came back `undefined`. That connection's shared
-secret was the client's random value, encrypted directly with the
-server's long-term public key; anyone later holding the matching
-long-term private key can decrypt that recorded exchange and recover
-the shared secret retroactively. The ECDHE connection generated a
-fresh key pair that existed only in memory for the duration of this
-one handshake and was discarded immediately after — stealing the
-long-term certificate private key a year later gives the attacker
-nothing to apply it to, because the actual secret-deriving values no
-longer exist anywhere to be compromised. This is forward secrecy made
-concrete: it isn't that ECDHE is unbreakable, it's that there's
-nothing long-lived left to break.
-
-</Checkpoint>
-
-## What a handshake observer can and can't see without the private key
-
-**If an attacker is passively recording every packet of this
-handshake and of the encrypted traffic that follows — no
-man-in-the-middle, just watching — what do they actually learn?**
-
-| Visible to a passive network observer                                                 | NOT visible to a passive network observer                                    |
-| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| The negotiated TLS version and cipher suite (ClientHello/ServerHello are unencrypted) | The plaintext contents of any request or response after the handshake        |
-| The server's certificate chain (sent in the clear, before encryption starts)          | The session's shared symmetric key itself (derived, never transmitted whole) |
-| The destination hostname, in older TLS versions or via SNI (unless ECH is in use)     | Which specific URL path or query string the client requested                 |
-| Roughly how much data was exchanged and the approximate timing of each exchange       | Any application-layer data: form fields, headers, cookies, response bodies   |
-
-The left column is exactly why a network eavesdropper or a
-well-resourced adversary logging traffic today can still later
-identify "this client talked to this server, using this cipher suite,
-at this time" without ever breaking the encryption — traffic metadata
-is not the same guarantee as confidentiality of contents, and TLS was
-never designed to hide that metadata (that's a separate problem, the
-kind Encrypted Client Hello / ECH is starting to address for the
-hostname row specifically).
-
-**Try extending this yourself:** `inspectHandshake` currently reports
-only `protocol`, `cipherSuite`, `ephemeralKeyInfo`, and `authorized`.
-What would you add to also report whether the certificate chain
-includes a self-signed root, or how many days remain before the
-leaf certificate expires — and could you get that from `socket` without
-opening a second connection? What changes about the function's
-contract if you call it against a server that deliberately only
-supports deprecated TLS 1.0, instead of a well-configured modern one?
-
-## What this proves and doesn't prove
-
-**Does this mean TLS/HTTPS is pointless?** No — the encryption and
-the hostname-match guarantee are both real and valuable; without them,
-anyone on the network path could read or silently rewrite the login
-form's contents even on the legitimate `paypal.com`. What this proves
-is narrower and more precise: **chain-of-trust verification is a
-necessary check, not a sufficient one**, for deciding whether a site
-is safe to trust with a password.
-
-**Try extending it yourself:** suppose a company later adds a check
-that flags any domain within a small edit-distance — the number of
-letter changes needed to turn one domain into another — of a list of
-known, high-value target domains (like `paypal.com`) as suspicious
-before showing a login form. Would that check belong inside
-`verifyChain` itself, or does it need to live somewhere else in the
-system? What would change if it lived inside `verifyChain`?
+**Try extending the case.** Real certificates list several names. How
+would you change the function to accept a list of names? What should
+happen if the list is empty, and why must an empty list never match?
 
 ## Failure modes
 
-| Failure mode                                                                                | What it gets wrong                                                                                                                                                                |
-| ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Treating a passing `verifyChain` result as proof the site is legitimate                     | The function's contract only covers domain-to-key binding, not brand identity — expanding what it's trusted to mean is the actual vulnerability                                   |
-| Assuming CAs manually review every domain before issuing a certificate                      | Domain-validated certificates (the vast majority in use) are issued automatically after an automated domain-control check, with no human review                                   |
-| Confusing "the certificate is valid" with "the certificate is for the domain I think it is" | Both checks passed for `paypa1-secure-login.com` — validity and identity-match are separate facts a user still has to check themselves                                            |
-| Building anti-phishing logic as an afterthought instead of a first-class check              | If lookalike-domain detection isn't a deliberate, separate check, nothing in the TLS handshake will ever catch it — it's simply out of scope for what TLS verifies                |
-| Assuming tampering after issuance is undetectable                                           | A modified certificate's signature breaks immediately, as shown above — the cryptography is doing real, verifiable work, just not the specific job of judging brand legitimacy    |
-| Assuming a stolen certificate private key retroactively decrypts past ECDHE sessions        | Forward secrecy means the long-term private key only authenticates handshakes — it was never the shared key, so stealing it later reveals nothing about traffic already exchanged |
-| Treating "the handshake is encrypted" as true from the first packet                         | ClientHello, ServerHello, and the certificate chain are sent in the clear, as the table above shows — encryption only begins once key exchange completes                          |
+| Failure mode                                                             | What it gets wrong                                                                                           |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Treating a valid chain as proof the site is the brand it resembles       | The chain proves domain control, nothing about resemblance                                                   |
+| Assuming a CA manually reviewed the domain before issuing                | Domain-validated certificates are issued after an automated challenge                                        |
+| Folding lookalike detection into the chain verifier                      | It mixes a cryptographic fact with a judgment about the world and hides the separate check that should exist |
+| Assuming tampering after issuance goes unnoticed                         | An edited certificate fails its signature check immediately                                                  |
+| Believing a stolen long-term key opens past ECDHE sessions               | The long-term key only signs the handshake; the traffic secret was ephemeral and no longer exists            |
+| Believing everything in the handshake is encrypted from the first packet | ClientHello and ServerHello travel in the clear, and in TLS 1.2 so does the certificate                      |
+| Letting a wildcard stand for more than one label                         | `*.example.com` covering `a.b.example.com` would hand out names the certificate owner never proved           |
