@@ -3383,3 +3383,16 @@ Picked from the design canvas (icons B, HUD B, UI B):
 - **Icons (Neon)**: weapon pictures glow in their own colour (`WEAPON_NEON`, `neonStyle()` in `icons.ts`) on the HUD, level-up tiles, build strip, weapon picker and lobby row.
 - **HUD (Corners)**: HP as a ring around a portrait with the level badge, timer and threat pips top centre, pause and kills/gems/coins top right, weapons as a left column (icon with a recharge sweep, name, level, kills), XP as a thin bar along the bottom. The in-canvas weapon slots were removed (the engine now reports `ready` per weapon). The special-move button is the single round button bottom right on every device.
 - **UI (Dark glass)**: Chakra Petch font (`@fontsource/chakra-petch`), translucent blurred panels with thin light borders, neon accents on the lobby, panels, weapon picker, pause menu and the level-up screen.
+
+## 2026-10-30 — `logic/` batch 1: `formal-informal-logic`, `fallacies`, `problem-decomposition`, `boolean-logic`
+
+Started the `logic/` track (12 units) with 4 parallel content-only subagents. Same pipeline; `build` 273 pages (other work added pages), `typecheck` 0 errors; Node sandbox check of 19 code items 0 failing assertions; live click-through passed all 22 `DomainCheck` topics (including the 2 code topics), 0 Mermaid errors.
+
+- **`formal-informal-logic`**: 6 topics, 68 items, all quiz. Replaced the code-heavy L3 brute-force checker with a truth table + flowchart (rule 9); reworded "most Mondays" claims to match the demo's "illustrative" framing; added the point that a valid argument can reach a true conclusion by luck. Correct is longest in only 4% of items (shortest 25%).
+- **`fallacies`**: 5 topics, 60 items, all quiz. Removed the JS `isFalseDichotomy` block (now a possibility-space table); numbers match the demo (33% miss, 40% reduction, 4.8 of 6).
+- **`problem-decomposition`**: 5 topics, 60 items; one code topic `decomposition-audit` (audit / auditReport / dominantStage / largestAfterFix), the rest quiz. Old L3 code blocks became tables/diagrams; added the point that matching sums don't prove soundness (an overlap and a gap can cancel). L1/L3 keep the checkout scenario because the demo is built on it.
+- **`boolean-logic`**: 6 topics, 66 items; one code topic `de-morgan-rewrite` (4 practice, 3 exam; tests include a "no `!(`" check via `String(fn)`, passed in the real Worker). Universal pool-gate scenario; all truth-table claims verified in Node (3 draft answers corrected).
+
+Practice items have 3 choices; exam items have 4. Length bias: 4–31% longest, 21–33% shortest.
+
+`logic/` is at 4 of 12. Total migrated: 68 of 246. Remaining here: `state-machines`, `edge-case-reasoning`, `induction`, `fermi-estimation`, `expected-value`, `correlation-causation`, `abstraction`, `multi-criteria-decisions-under-ambiguity`.
