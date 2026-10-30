@@ -1,100 +1,76 @@
 ---
-title: "L3 — Reproducing the boolean-flag bug, then making it structurally impossible"
+title: "L3 — Reproducing the flag bug, then making it impossible to write"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Same event sequence, two different implementations">
+export const unit = {
+  track: "logic",
+  unitSlug: "state-machines",
+};
+
+<Scenario label="Same two events, two implementations">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>Legacy version</strong> — 4 independent booleans, reproduces L1's exact bug</div>
-      <div class="flex items-center gap-1.5"><span>✅</span> <strong>State machine version</strong> — 1 state variable, explicit transition table</div>
-      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — run the identical `START, SUCCESS` sequence against both</div>
+      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>Flag version</strong> — 4 booleans, each handler edits some of them</div>
+      <div class="flex items-center gap-1.5"><span>📋</span> <strong>Machine version</strong> — 1 state value and a lookup table</div>
+      <div class="flex items-center gap-1.5"><span>▶️</span> <strong>The run</strong> — START, then SUCCESS, on both</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Question</strong> — can the machine version even express the bug?</div>
     </div>
   </Fragment>
 
-**Before running the code: the legacy `SUCCESS` handler has a real
-bug — it sets `isSuccess = true` but forgets to reset `isUploading`
-back to `false`. Will the state machine version have "the same bug,"
-just expressed differently — or is there literally no way to write
-that particular mistake in a state machine?**
+The upload widget from L2 is implemented twice. The flag version has a
+`SUCCESS` handler that forgets to clear `isUploading`. The machine version
+replaces the four flags with one value and a table of allowed moves.
+
+**Will the machine version have "the same bug, written differently", or is there
+no place in it to write that mistake at all?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Reproducing L1's exact bug in real boolean-flag code",
-    "A transition-table implementation that structurally rejects it",
-    "Extending the table for stateful rules like a retry limit",
+    "The flag bug reproduced in real code",
+    "A lookup table that rejects illegal events",
+    "Giving a rule memory, such as a retry limit",
   ]}
 />
 
-## Reproducing the bug: the legacy boolean-flag version
+## What does the flag version actually do?
 
-Before the code, the intended state-machine idea can be read as a table:
-
-| Current state | Event     | Next state  |
-| ------------- | --------- | ----------- |
-| `idle`        | `START`   | `uploading` |
-| `uploading`   | `PAUSE`   | `paused`    |
-| `paused`      | `RESUME`  | `uploading` |
-| `uploading`   | `SUCCESS` | `success`   |
-| `uploading`   | `FAIL`    | `error`     |
-
-The boolean version below does not have that table as its source of
-truth. Each branch edits separate checkboxes and must remember to clean
-up all the others.
+Code is worth reading here because the bug only exists as running behaviour.
+Each branch edits some flags and trusts the others to stay sensible:
 
 ```js
-function createLegacyUploadState() {
-  return {
-    isUploading: false,
-    isPaused: false,
-    isSuccess: false,
-    isError: false,
-  };
-}
-
 function legacyHandleEvent(state, event) {
   const next = { ...state };
-  if (event === "START") {
-    next.isUploading = true;
-  } else if (event === "PAUSE") {
-    next.isPaused = true;
-  } else if (event === "RESUME") {
-    next.isPaused = false;
-  } else if (event === "SUCCESS") {
-    // bug: forgets to reset isUploading back to false
-    next.isSuccess = true;
-  } else if (event === "FAIL") {
-    next.isUploading = false;
-    next.isError = true;
-  }
+  if (event === "START") next.isUploading = true;
+  else if (event === "SUCCESS") next.isSuccess = true; // forgets isUploading
   return next;
 }
 
-let legacyState = createLegacyUploadState();
-legacyState = legacyHandleEvent(legacyState, "START");
-legacyState = legacyHandleEvent(legacyState, "SUCCESS");
-
-console.log(legacyState);
+let s = {
+  isUploading: false,
+  isPaused: false,
+  isSuccess: false,
+  isError: false,
+};
+s = legacyHandleEvent(s, "START");
+s = legacyHandleEvent(s, "SUCCESS");
 // { isUploading: true, isPaused: false, isSuccess: true, isError: false }
 ```
 
-Verified: after `START` then `SUCCESS`, `isUploading` and `isSuccess`
-are **both `true`** — the exact impossible state from L1's bug report.
-There is a second suspicious detail too: `PAUSE` sets `isPaused = true`
-but leaves `isUploading` alone. If the intended paused row is "uploading
-false, paused true," then this branch has the same style of bug: a
-handler changed one flag and trusted the others to stay meaningful.
-Nothing in `legacyHandleEvent` prevented this; the `SUCCESS` branch
-simply didn't happen to reset a flag it should have. This is a single
-missing line, in a function that otherwise looks completely
-reasonable — which is exactly why it's easy to ship.
+After START then SUCCESS, both `isUploading` and `isSuccess` are `true`: the
+impossible setting from L1 and L2. One missing line in an otherwise reasonable
+function produced it, which is why it ships.
 
-## The fix: a state machine with an explicit transition table
+## How does the lookup table remove that mistake?
+
+**What would the same two events look like if the diagram itself were the code?**
+The table has one row per state and one entry per allowed event:
 
 ```js
 const transitions = {
@@ -106,144 +82,102 @@ const transitions = {
     CANCEL: "cancelled",
   },
   paused: { RESUME: "uploading", CANCEL: "cancelled" },
-  success: {},
   error: { START: "uploading" },
+  success: {},
   cancelled: {},
 };
 
 function transition(state, event) {
-  const nextState = transitions[state] && transitions[state][event];
-  if (!nextState) {
-    throw new Error(`Invalid transition: cannot ${event} from ${state}`);
-  }
-  return nextState;
+  const next = transitions[state] && transitions[state][event];
+  if (!next) throw new Error(`Invalid transition: ${event} from ${state}`);
+  return next;
 }
-
-let fsmState = "idle";
-fsmState = transition(fsmState, "START");
-console.log(fsmState); // "uploading"
-fsmState = transition(fsmState, "SUCCESS");
-console.log(fsmState); // "success"
 ```
 
-Verified: running the identical `START, SUCCESS` sequence produces a
-single state value, `"success"` — there is no `isUploading` variable
-left dangling `true`, because there's no `isUploading` variable at
-all. The bug isn't fixed by writing more careful code; it's fixed by
-removing the category of mistake the transition table can't represent.
+START then SUCCESS returns `"success"`. There is no `isUploading` left over,
+because there is no `isUploading`. And `transition("success", "PAUSE")` throws
+instead of producing a new impossible setting, which is exactly the 28 rejected
+pairs from L2 made executable.
 
-Read the table object aloud:
+<Checkpoint question="The flag handler forgot to reset isUploading. Could the same kind of mistake, editing one value and forgetting a related one, happen inside transition()?">
 
-- If I am in `idle` and `START` happens, go to `uploading`.
-- If I am in `uploading` and `SUCCESS` happens, go to `success`.
-- If I am in `success`, there are no allowed next events.
-
-The expression `transitions[state] && transitions[state][event]` is a
-JavaScript way to ask, "does this row exist, and does this event have a
-next state from that row?"
-
-<Checkpoint question="The legacy SUCCESS handler forgot to reset isUploading. Could the same category of mistake — editing one piece of state and forgetting to update a related one — happen inside transition() the way it happened inside legacyHandleEvent()?">
-
-No, not in the same shape. `legacyHandleEvent` mutates several independent
-fields, so leaving one stale is a matter of remembering to touch it every
-time — an easy line to skip. `transition` only ever does one thing:
-look up `transitions[state][event]` and return whatever single value is
-there. There's no second field to forget, because there's no second
-field at all — the entire state is the one string it returns. A bug
-could still exist in the _table itself_ (a wrong or missing entry), but
-that is a different, much easier bug to spot and review than a missing
-line buried inside a multi-branch handler.
+Not in that shape. `legacyHandleEvent` edits several independent fields, so
+leaving one stale is a matter of remembering. `transition` does one thing: it
+looks up a single value and returns it, and that value is the entire state.
+A mistake can still exist in the table itself, such as a wrong or missing entry,
+but that is a visible line in a short table, far easier to review than a missing
+line buried in a multi-branch handler.
 
 </Checkpoint>
 
-## The transition table also rejects genuinely invalid sequences
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="transition-lookup"
+/>
 
-```js
-try {
-  transition("success", "PAUSE");
-} catch (err) {
-  console.log(err.message);
-  // "Invalid transition: cannot PAUSE from success"
-}
+## What happens when a rule needs memory?
+
+**Suppose the rule is "allow at most 2 retries after a failure, then stop for
+good". Can the table still say it, using only current state and event?** Not as
+written: two visits to `error` must behave differently, yet `error` looks the
+same both times. There are two honest ways out.
+
+```mermaid
+stateDiagram-v2
+    [*] --> uploading0
+    uploading0 --> error0: FAIL
+    error0 --> uploading1: START
+    uploading1 --> error1: FAIL
+    error1 --> uploading2: START
+    uploading2 --> permanentlyFailed: FAIL
 ```
 
-Verified: attempting `PAUSE` from `success` throws immediately, rather
-than silently producing some new, undefined combination. Compare this
-to the legacy version, where calling `legacyHandleEvent(state,
-"PAUSE")` on an already-succeeded upload would happily set
-`isPaused: true` right next to `isSuccess: true` — another impossible
-combination the boolean version has no way to refuse.
+| Approach                        | How memory is kept                                     | Cost                                                               |
+| ------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------ |
+| Put the count in the state name | `uploading0`, `error0`, `uploading1`, ... are distinct | More states: for N retries, N+1 uploading, N error, 1 final = 2N+2 |
+| Keep a counter beside the state | A separate number, checked by a guard on FAIL          | The counter can drift from the state if updated carelessly         |
 
-## Full paths through the state machine
+With 2 retries the first approach needs 6 states (3 uploading, 2 error, 1
+permanently failed). Adding pause would multiply again, because `paused` must
+remember which attempt it paused, giving 3 paused states. Use the counter when
+it is only displayed; use separate states when different counts allow different
+next steps.
 
-```js
-// idle -> uploading -> paused -> uploading -> success
-let s = "idle";
-for (const event of ["START", "PAUSE", "RESUME", "SUCCESS"]) {
-  s = transition(s, event);
-}
-console.log(s); // "success"
+<Checkpoint question="Why does the count-in-the-state-name design need three uploading states for 2 retries, not two?">
 
-// retry after a failure: idle -> uploading -> error -> uploading
-let retry = "idle";
-retry = transition(retry, "START");
-retry = transition(retry, "FAIL");
-console.log(retry); // "error"
-retry = transition(retry, "START");
-console.log(retry); // "uploading"
-```
-
-Verified: the pause/resume path and the retry-after-failure path both
-work exactly as the diagram in L2 describes — `error` isn't a dead
-end, `START` from `error` is an explicit, defined transition back to
-`uploading`.
-
-<Checkpoint question="Both paths above call transition(state, event) repeatedly and only ever pass in the current state and the event that just happened — never any history of how that state was reached. Does the machine's next state depend on anything beyond those two values?">
-
-No — that's the whole design. `transitions[state][event]` is a pure
-lookup: give it the same state and the same event, and it always
-returns the same next state, regardless of how many times you've been
-through `uploading` before or which path got you there. This is why
-the retry-after-failure path works with the exact same `transition`
-function as the first path — the function has no memory of anything
-except the single current state string. It also sets up exactly the
-limitation the next section runs into: a rule like "at most 2 retries"
-needs the next state to depend on _more_ than just current state and
-event, since two visits to `error` need to behave differently the
-second time.
+Because the first attempt is not a retry. With 2 retries there are 3 attempts
+in total, so there must be a distinct state for the initial attempt, for retry 1
+and for retry 2. Only after the third attempt fails does the machine move to
+`permanentlyFailed`.
 
 </Checkpoint>
 
-## Extend it: what changes if a "retry limit" needs to be added?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="retry-limit-states"
+/>
 
-**Suppose the real requirement is "allow retrying from `error` at most
-2 times before moving to a new `permanently-failed` state." Can this
-be expressed by adding states and transitions to the table above,
-without going back to independent boolean flags (like adding a
-`retryCount` boolean-style flag) to track it?** Try sketching the
-additional states and transitions this would need — what has to change
-about `transition`'s signature if the _next_ state depends on more
-than just the current state and the event?
+## A case, not the whole territory
 
-A guided sketch could model retry count as explicit states:
+The upload widget is one worked case. Extend it yourself:
 
-| Current state | Event   | Next state           |
-| ------------- | ------- | -------------------- |
-| `error-0`     | `START` | `uploading-1`        |
-| `uploading-1` | `FAIL`  | `error-1`            |
-| `error-1`     | `START` | `uploading-2`        |
-| `uploading-2` | `FAIL`  | `permanently-failed` |
-
-In a real implementation you might keep extra context such as
-`retryCount` next to the state, but the warning is the same: do not let
-that context silently create states the table never modeled.
+- **What if the news were worse?** Suppose a SUCCESS event can arrive twice
+  because the network repeats messages. Should the table reject the second one,
+  or accept it as harmless? What does your answer cost the caller?
+- **What if the audience were different?** Redo the table for a vending
+  machine: which states, which events, and which pairs would you deliberately
+  reject?
+- **What if two machines must agree?** A page shows an upload and a "Submit"
+  button. How would you stop the button being enabled while the upload is not in
+  `success`, without adding a new independent flag?
 
 ## Failure modes
 
-| Failure mode                                                                         | What it gets wrong                                                                                                                       |
-| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Adding "just one more boolean flag" to an existing ad hoc flag set                   | Each new flag doubles the total combination count — the meaningful-to-meaningless ratio only gets worse                                  |
-| Assuming a missing `else` branch is a rare kind of bug                               | It's the _default_ failure mode of flag-based state — every handler has to remember every other flag, forever                            |
-| Treating a state machine's rejected transition as a crash to work around             | A thrown/rejected invalid transition is the system correctly refusing an impossible request — the fix is the calling code, not the table |
-| Believing a state diagram is just documentation, disconnected from the code          | In L3, the transition table _is_ the diagram — the code enforces exactly what the diagram claims, not a looser approximation of it       |
-| Using a state machine but still allowing extra, un-modeled boolean flags on the side | Any flag outside the state machine reopens the same "independent combinations" problem the state machine was meant to close              |
+| Failure mode                                   | What goes wrong                                                                 |
+| ---------------------------------------------- | ------------------------------------------------------------------------------- |
+| Adding one more boolean beside the machine     | The flag combines with every state and reopens the independent-settings problem |
+| Silently ignoring a rejected event             | A caller bug stays hidden; the machine looks healthy                            |
+| Treating the diagram as documentation only     | Code and diagram drift; the table should be the source of truth                 |
+| Letting a counter live outside the transitions | The counter and the state can disagree in ways the table never modelled         |

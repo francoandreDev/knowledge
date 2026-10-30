@@ -1,161 +1,154 @@
 ---
-title: "L2 — Counting the combinations a flag set allows, versus what a state machine allows"
+title: "L2 — Four flags versus one state, and reading the diagram"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named the bug — 4 independent booleans, 16 combinations, only 5
-meaningful — without yet showing the actual counting or the fixed-state
-alternative side by side. L2 works through both: the truth table that
-proves how bad the boolean version really is, and the transition diagram
-for the state-machine version of the same widget.
+export const unit = {
+  track: "logic",
+  unitSlug: "state-machines",
+};
+
+L1 used a traffic light to show that independent switches allow settings nobody
+meant. L2 moves to a case where the stakes are easier to measure: a file upload
+widget in an app. It is tracked with four flags (`isUploading`, `isPaused`,
+`isSuccess`, `isError`), and the question is what the same widget looks like as
+one named state.
 
 <LevelIntro
   items={[
-    "Counting how many combinations N booleans actually allow",
-    "Reading a state-transition diagram arrow by arrow",
-    "Where this same problem shows up outside UI widgets",
+    "Counting meaningful settings against all settings",
+    "Reading a state diagram arrow by arrow",
+    "Designing a machine from a list of states and events",
   ]}
 />
 
-## The truth table: how many combinations do 4 booleans actually allow?
+## How many of the four flags' settings are actually meaningful?
 
-**If an upload widget uses 4 independent booleans (`isUploading`,
-`isPaused`, `isSuccess`, `isError`), how many distinct combinations of
-`true`/`false` can those 4 booleans be in?** Every boolean doubles the
-count of possible combinations — 4 independent booleans give
-`2⁴ = 16` combinations total, whether or not each one makes sense:
+**If the widget uses four independent flags, how many settings can the code
+reach, and how many does the product mean to have?** Four flags give
+`2^4 = 16` settings. The product means 5 of them:
 
-| Number of independent booleans | Combinations |
-| ------------------------------ | ------------ |
-| 1                              | 2            |
-| 2                              | 4            |
-| 3                              | 8            |
-| 4                              | 16           |
+| isUploading | isPaused | isSuccess | isError | Meaning                          |
+| ----------- | -------- | --------- | ------- | -------------------------------- |
+| false       | false    | false     | false   | idle                             |
+| true        | false    | false     | false   | uploading                        |
+| false       | true     | false     | false   | paused                           |
+| false       | false    | true      | false   | success                          |
+| false       | false    | false     | true    | error                            |
+| true        | false    | true      | false   | the real bug: uploading and done |
 
-With only two booleans, you can see every combination:
-
-| isUploading | isSuccess | Meaning                                |
-| ----------- | --------- | -------------------------------------- |
-| false       | false     | idle-ish                               |
-| true        | false     | uploading                              |
-| false       | true      | success                                |
-| true        | true      | already suspicious: uploading and done |
-
-| isUploading | isPaused | isSuccess | isError | Meaningful state?                                   |
-| ----------- | -------- | --------- | ------- | --------------------------------------------------- |
-| false       | false    | false     | false   | ✅ idle                                             |
-| true        | false    | false     | false   | ✅ uploading                                        |
-| false       | true     | false     | false   | ✅ paused                                           |
-| false       | false    | true      | false   | ✅ success                                          |
-| false       | false    | false     | true    | ✅ error                                            |
-| true        | false    | true      | false   | 🚫 the actual bug — uploading AND succeeded at once |
-| true        | true     | false     | true    | 🚫 uploading, paused, AND failed, simultaneously    |
-| ...         | ...      | ...       | ...     | 🚫 9 more combinations, none of them meaningful     |
-
-Only **5 of the 16** combinations correspond to a state the widget was
-ever meant to be in. The other 11 aren't prevented by anything in the
-code — they're just combinations nobody happened to write an event
-handler that produces, until one did.
-
-Those 5 are the states expressible with the four original flags:
-`idle`, `uploading`, `paused`, `success`, and `error`. The diagram below
-adds `cancelled` as a sixth intentional state, which is a feature: it is
-named directly instead of being smuggled in through another independent
-flag.
-
-<Checkpoint question="If a fifth independent boolean were added to the upload widget (say, isRetrying), how many total combinations would the widget's state now technically allow, and would the number of meaningful ones necessarily grow to match?">
-
-The total would double again, to `2⁵ = 32` combinations — every extra
-independent boolean doubles the count regardless of what it means.
-The meaningful count doesn't have to grow at all: adding `isRetrying`
-might only make sense in one or two of the existing meaningful states,
-so the gap between "combinations the code allows" and "combinations
-that make sense" gets wider, not narrower, with every flag added. This
-is the trend the state-machine version below is built specifically to
-stop.
-
-</Checkpoint>
-
-## The state machine: the same widget, one variable instead of four
-
-**If a single named state replaced all 4 booleans, how many of those
-11 meaningless combinations would even be possible to represent?**
-None — because there'd only be one variable, and its value would have
-to be one of a fixed, named list:
+The other 11 settings are reachable by accident, such as a `SUCCESS` handler
+that sets `isSuccess` but forgets to clear `isUploading`. At four flags,
+5 of 16 is **31.25%** meaningful. The chart shows how fast the total grows while
+the meaningful count stays put:
 
 ```mermaid
-flowchart LR
-    idle -->|START| uploading
-    uploading -->|PAUSE| paused
-    paused -->|RESUME| uploading
-    uploading -->|SUCCESS| success
-    uploading -->|FAIL| error
-    error -->|START| uploading
-    uploading -->|CANCEL| cancelled
-    paused -->|CANCEL| cancelled
+xychart-beta
+    title "Settings reachable by n independent flags (meaningful: 5)"
+    x-axis "Number of flags" [1, 2, 3, 4, 5, 6]
+    y-axis "Settings" 0 --> 64
+    bar [2, 4, 8, 16, 32, 64]
 ```
 
-Every arrow is a **transition**: a specific state, a specific event,
-and the exact next state. There's no arrow for "PAUSE while in
-`success`" — which means, in this model, that transition simply
-doesn't exist. Not "is disallowed by a check somewhere" — doesn't
-exist, the same way "green" isn't a valid answer to "heads or tails."
+Drag the slider in the demo below to see the meaningful share fall as flags are
+added.
 
-Read the diagram like this: each word node is a state the upload can be
-in; each arrow is a permitted change; each label on an arrow is the
-event that causes that change. No arrow means "this event is not allowed
-from here."
+<Checkpoint question="A fifth flag, isRetrying, is added. How many settings can the widget now reach, and must the meaningful count grow to match?">
 
-## What a state machine actually buys you
-
-| Property                                  | 4 independent booleans                                     | State machine (1 named state)                             |
-| ----------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------- |
-| Total representable combinations          | 16 (2⁴)                                                    | Exactly however many states are named (here, 6)           |
-| Combinations that are actually meaningful | 5 out of 16 — the rest are accidents waiting to happen     | All of them, by construction — there's nothing else to be |
-| What stops an invalid combination         | Nothing, unless every handler is written perfectly forever | The transition table itself — no rule, no transition      |
-| What a new event handler has to get right | Every flag it doesn't touch, correctly, every time         | Just which state(s) it's valid to fire from               |
-
-This is the core trade a state machine makes: instead of hoping every
-future code change respects an unwritten rule about which flag
-combinations are meaningful, the _shape of the data itself_ makes the
-meaningless combinations impossible to construct.
-
-<Checkpoint question="The diagram has no arrow labeled PAUSE leaving the success state. Concretely, what happens if code calls the equivalent of 'pause' while the state machine is in success — does it silently do nothing, silently switch to some other state, or something else?">
-
-Something else: it's rejected, because there's no rule in the
-transition table that maps `(success, PAUSE)` to any next state at all.
-A well-built state machine implementation treats a missing entry as an
-error to surface immediately (L3 implements this as a thrown exception)
-rather than either ignoring the event or guessing a state. That's the
-concrete payoff of "no arrow means the event isn't allowed" — it isn't
-just a description of the diagram, it's a promise about what the running
-code actually does when something outside the diagram is attempted.
+The reachable total doubles to `2^5 = 32`, because every extra independent flag
+doubles it whatever it means. The meaningful count does not have to grow at all:
+`isRetrying` may only make sense in one existing state. So the share of
+meaningful settings falls (5 of 32 is about 15.6%), which is the trend a state
+machine is built to stop.
 
 </Checkpoint>
 
-## When this generalizes beyond UI widgets
+**What happens if one named state replaces all four flags?** There is a single
+variable, so only the named values can exist. Counting a new `cancelled` state,
+that is 6 values and no accidental ones:
 
-**Is this only a frontend concern?** No — anywhere a system has a
-handful of meaningfully distinct phases and specific rules about which
-phase can follow which, the same problem shows up: an order's
-lifecycle (placed, paid, shipped, delivered, cancelled), a TCP
-connection's handshake states, a CI pipeline's run status. Independent
-boolean flags scale the same way in all of these — badly, and quietly,
-until a genuinely impossible combination shows up in production.
+| Question                                   | Four flags                                  | One named state                    |
+| ------------------------------------------ | ------------------------------------------- | ---------------------------------- |
+| How many settings can be represented?      | 16, always `2^n`                            | Exactly as many as are named (6)   |
+| How many are meaningful?                   | 5, the rest are accidents waiting to happen | All of them, by construction       |
+| What rejects a nonsense setting?           | Nothing, unless every handler is perfect    | There is no value for it to take   |
+| What does a new handler have to get right? | Every flag it did not touch                 | Only which states it may fire from |
+| What does one more feature cost?           | Doubles the settings                        | Adds one named state               |
 
-Everyday examples work too: a traffic light is not red and green at the
-same time; a food order moves from placed to preparing to delivered or
-cancelled; a school application might be draft, submitted, reviewed,
-accepted, or rejected.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="machine-vs-flags"
+/>
 
-To design one from scratch:
+## How do you read the machine for the upload widget?
 
-1. List the real states the system can be in.
-2. List the events that can happen.
-3. Draw only the arrows that should be legal.
-4. Ask which events must be rejected from each state.
+**Given the diagram, which events are allowed right now?** Read it like a map:
+each word is a state, each arrow a permitted move, each label the event that
+causes it. No arrow means that event is not allowed from there.
 
-If `true`, `false`, and truth tables still feel slippery, revisit
-`logic/boolean-logic` before the code-heavy L3.
+```mermaid
+stateDiagram-v2
+    [*] --> idle
+    idle --> uploading: START
+    uploading --> paused: PAUSE
+    paused --> uploading: RESUME
+    uploading --> success: SUCCESS
+    uploading --> error: FAIL
+    error --> uploading: START
+    uploading --> cancelled: CANCEL
+    paused --> cancelled: CANCEL
+    success --> [*]
+    cancelled --> [*]
+```
+
+The same information as a table, one row per state:
+
+| State       | Events that are allowed      | Dead end? |
+| ----------- | ---------------------------- | --------- |
+| `idle`      | START                        | no        |
+| `uploading` | PAUSE, SUCCESS, FAIL, CANCEL | no        |
+| `paused`    | RESUME, CANCEL               | no        |
+| `error`     | START (a retry)              | no        |
+| `success`   | none                         | yes       |
+| `cancelled` | none                         | yes       |
+
+There are 6 states and 6 events, so 36 state-and-event pairs. Only 8 have an
+arrow, which leaves **28 pairs that are rejected**. Each of those 28 is a case
+the code no longer has to guess about.
+
+<Checkpoint question="There is no arrow for PAUSE leaving success. If code fires PAUSE while the machine is in success, should it ignore the event, switch to some other state, or do something else?">
+
+Neither of the first two. A missing entry means the request is outside the
+machine, so the safe response is to refuse it loudly and keep the state exactly
+as it was. Ignoring it silently hides a caller bug; guessing a next state
+invents a transition nobody designed. L3 implements the refusal as a thrown
+error.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="reading-diagram"
+/>
+
+## How do you design one from scratch?
+
+**Where do you start when there is no diagram yet?** Four questions, in order:
+
+1. Which distinct conditions can the thing really be in? These become states.
+2. Which things can happen to it? These become events.
+3. For each state, which events should move it, and to where? Draw only those
+   arrows.
+4. Which pairs are left over? Those are the rejections, and each deserves a
+   deliberate decision.
+
+The method is not tied to widgets. A food order is placed, preparing,
+delivered or cancelled. A school application is draft, submitted, reviewed,
+accepted or rejected. A TCP connection, an order lifecycle and a CI run all fit
+the same four questions. If true and false still feel slippery, revisit
+`logic/boolean-logic` first.
