@@ -4,127 +4,156 @@ title: "L2 — Why asymmetric encryption solves the key distribution problem, an
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named the key distribution problem: a shared secret key is only safe once
-it's already reached the other party, which is the exact thing encryption
-was supposed to make unnecessary. L2 works out the mechanism that actually
-solves it, what that mechanism costs, and why real systems don't pick one
-approach and stop there.
+export const unit = {
+  track: "security",
+  unitSlug: "symmetric-asymmetric-encryption-basics",
+};
+
+L1 showed that a padlock is useless if its key travels in the same mail as
+the box. L2 works out how a key pair avoids ever mailing a secret, what that
+costs, and why real systems use both kinds of encryption together.
 
 <LevelIntro
   items={[
-    "How a public/private key pair avoids sending a secret",
-    "What asymmetric encryption costs compared to symmetric",
-    "Why hybrid encryption combines both",
+    "How a key pair avoids sending a secret",
+    "What the second key costs in speed",
+    "How hybrid encryption combines both",
   ]}
 />
 
-## Two keys instead of one
+## If the key cannot travel safely, what could Bob send instead?
 
-**If a single shared key has to travel over an interceptable channel,
-what would actually fix that?** Not sending a secret at all. Asymmetric
-encryption gives each party a mathematically related pair of keys: a
-public key, safe to hand to literally anyone, and a private key that
-never leaves its owner. Anything encrypted with the public key can
-only be decrypted with the matching private key — so Alice can
-encrypt something for Bob using a key he already published openly,
-with no secret ever crossing the network.
+**What if Bob mailed Alice something that can only close a lock, never open
+one?** That is the padlock trick. Bob makes a pair of keys that belong
+together. The **public key** is like an open padlock he hands to anyone. The
+**private key** is the only key that opens a box closed with that padlock,
+and it stays with Bob.
 
 ```mermaid
 sequenceDiagram
     participant A as Alice
-    participant N as Network (interceptable)
+    participant N as Network (anyone can watch)
     participant B as Bob
-    Note over A,B: Symmetric — the key itself has to travel
-    A->>N: encrypted file
-    A->>N: the shared key
-    N->>B: encrypted file
-    N->>B: the shared key
-    Note over N: An eavesdropper on this channel<br/>now has both the file and the key.
+    Note over A,B: Symmetric: the opening secret has to travel
+    A->>N: box locked with the shared key
+    A->>N: the shared key itself
+    N->>B: box and key
+    Note over N: A watcher copies both and can open the box.
 ```
 
 ```mermaid
 sequenceDiagram
     participant A as Alice
-    participant N as Network (interceptable)
+    participant N as Network (anyone can watch)
     participant B as Bob
-    Note over A,B: Asymmetric — no secret ever travels
-    B->>N: Bob's public key (safe to expose)
+    Note over A,B: Asymmetric: only the locking half travels
+    B->>N: Bob's public key
     N->>A: Bob's public key
-    A->>N: file encrypted with Bob's public key
-    N->>B: file encrypted with Bob's public key
-    Note over N: An eavesdropper only ever sees<br/>the public key and ciphertext — useless without Bob's private key.
+    A->>N: message encrypted with Bob's public key
+    N->>B: message encrypted with Bob's public key
+    Note over N: A watcher holds the public key and the ciphertext.<br/>Neither one opens the box.
 ```
 
-In the second diagram, the only thing that travels besides ciphertext
-is Bob's _public_ key — which is safe to expose by design. Bob's
-private key, the only thing that can decrypt the message, never
-touches the network at all. A useful image: the public key is like a
-lock Bob gives everyone so they can close a box for him; the private
-key is the one key that opens boxes closed with that lock.
+Compare the two. In the second diagram the only key that crosses the network
+is the public one, and by design it can only lock. Bob's private key, the
+only thing that opens the box, never moves.
 
-<Checkpoint question="An eavesdropper captures every packet in the second diagram above — Bob's public key and the encrypted file. Can they recover the original file?">
+<Checkpoint question="An eavesdropper copies every message in the second diagram, including Bob's public key. Can they read Alice's message? Can they send Bob a message only he can read?">
 
-No. The eavesdropper now holds exactly the two things that were always
-meant to be public or unreadable: the public key, which by design does
-nothing to help decrypt (it can only encrypt), and the ciphertext, which
-is useless without Bob's private key. That private key never appeared on
-the network at any point in the exchange, so there is nothing the
-eavesdropper intercepted that lets them reverse the encryption — the
-scheme's whole point is that capturing everything sent over the wire
-still isn't enough.
+They cannot read Alice's message: the public key only encrypts, and the
+private key that decrypts never appeared on the network. They can, however,
+use the public key to lock a message for Bob, exactly as Alice did, because
+anyone is allowed to. That is the point of a public key: it hands the whole
+world the ability to lock, and only the owner the ability to unlock.
 
 </Checkpoint>
 
-## What asymmetric encryption costs to get that benefit
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="key-pair-roles"
+/>
 
-|                  | Symmetric encryption                       | Asymmetric encryption                                                |
-| ---------------- | ------------------------------------------ | -------------------------------------------------------------------- |
-| Keys involved    | One shared secret key                      | A public/private key pair                                            |
-| Key distribution | Requires a secure channel to share the key | No secret ever needs to be transmitted                               |
-| Speed            | Fast, even for large amounts of data       | Much slower — measured in L3, tens of times slower for the same data |
-| Typical use      | Encrypting the actual bulk data            | Encrypting a small secret (like a symmetric key), or signing         |
+## How badly does a shared key scale as a group grows?
 
-Asymmetric encryption solves the key distribution problem, but it does
-so at a real computational cost — it's not simply a strictly better
-version of symmetric encryption.
+**Suppose every pair of people in a group needs a private channel using symmetric
+encryption. How many keys have to be shared safely?** One for every pair, which
+is `n × (n − 1) / 2` for `n` people. Asymmetric encryption needs one key pair
+per person, so the count grows by one pair per newcomer instead.
 
-## Why real systems use both together
+| People in the group | Shared symmetric keys (one per pair) | Asymmetric key pairs (one per person) |
+| ------------------- | ------------------------------------ | ------------------------------------- |
+| 5                   | 10                                   | 5                                     |
+| 10                  | 45                                   | 10                                    |
+| 100                 | 4,950                                | 100                                   |
 
-**If asymmetric encryption solves the hard problem, why not just use
-it for everything?** Because its slowness makes it impractical for
-encrypting large amounts of data directly. The practical answer,
-called **hybrid encryption**, combines both: encrypt the actual data
-with a fast, randomly generated symmetric key, then encrypt that small
-key with the recipient's public key. The recipient uses their private
-key to unwrap the small symmetric key, then uses that key to decrypt
-the actual data quickly. This is exactly the pattern behind HTTPS,
-covered in `/security/tls-https/` — a brief asymmetric handshake,
-followed by fast symmetric encryption for the rest of the connection.
+Each symmetric key in that middle column also has to be delivered safely, the
+very problem from L1. Those numbers come straight from the pair-counting
+formula. They assume every pair has its own key, which is the strictest case.
 
-<Checkpoint question="A team wants to encrypt a 2GB database backup before uploading it, and considers encrypting the whole file directly with RSA. Based on the table above, what's wrong with that plan, and what should they do instead?">
+## If a key pair is so convenient, why not use it for everything?
 
-Encrypting 2GB directly with RSA runs straight into the cost row of the
-table: asymmetric encryption is tens of times slower than symmetric for
-the same data, so applying it to the entire backup would be dramatically
-slower than necessary — and RSA also has a hard per-operation size limit
-far smaller than 2GB, so it cannot even be applied directly to a file this
-large. The fix is the hybrid pattern from this section: generate a random
-symmetric key, encrypt the full 2GB backup with that fast symmetric key,
-then encrypt only that small key with RSA. The slow asymmetric operation
-touches a few dozen bytes instead of two billion.
+**What does the second key cost?** Speed. The mathematics that lets a public
+key lock and only a private key unlock is far heavier than the mathematics of
+one shared key. L3 measures the gap.
+
+|                  | Symmetric encryption                  | Asymmetric encryption                           |
+| ---------------- | ------------------------------------- | ----------------------------------------------- |
+| Keys involved    | One shared secret key                 | A public/private key pair                       |
+| Key distribution | Needs a safe channel to share the key | No secret ever needs to be sent                 |
+| Speed            | Fast, even for large amounts of data  | Much slower per operation (about 20x in L3)     |
+| Data size        | Handles messages of any length        | Each operation carries only a small amount      |
+| Typical use      | Encrypting the actual bulk data       | Locking a small secret, such as a symmetric key |
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="speed-cost-tradeoff"
+/>
+
+## So how do real systems get the benefit without the cost?
+
+**If the slow tool is only good for small things, and the fast tool needs a
+safe way to share its key, can they cover for each other?** Yes. That is
+**hybrid encryption**: the fast tool does the heavy lifting, and the slow tool
+protects only the tiny key the fast tool needs.
+
+```mermaid
+flowchart LR
+    M["Large message"] -->|"fast symmetric encryption"| C["Ciphertext"]
+    K["Fresh random symmetric key"] -->|"used for"| C
+    K -->|"locked with Bob's public key"| W["Wrapped key (small)"]
+    C --> S["Sent to Bob"]
+    W --> S
+    S --> U["Bob unlocks the wrapped key with his private key"]
+    U --> D["Bob decrypts the message with that key"]
+```
+
+The slow, asymmetric step touches only the small key, however long the message
+is. This is the pattern behind HTTPS, covered in `/security/tls-https/`.
+
+<Checkpoint question="A team wants to encrypt a 2 GB backup before uploading it. They plan to encrypt the whole file with a public key. What is wrong with that, and what should they do instead?">
+
+Each public-key operation carries only a small amount of data and is much
+slower than a symmetric one, so pushing 2 GB through it is both impractical
+and needlessly slow. Instead they should generate a random symmetric key,
+encrypt the backup with it, and lock only that small key with the public key.
+The slow step then handles a few dozen bytes instead of two billion.
 
 </Checkpoint>
 
-## The generalizable lesson
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="hybrid-pattern"
+/>
 
-**Is this only about encrypting emails?** No — the same shape shows up
-anywhere two parties who haven't already shared a secret need to
-communicate confidentially: signing software updates, securing a web
-connection, verifying a message really came from who it claims to.
-Those last two examples add a second question, identity, on top of the
-confidentiality question in this unit; `/security/authentication-fundamentals/`
-and `/security/tls-https/` pick up that boundary from different angles.
-The underlying question is always the same: does a secret need to
-travel to make this work, and if so, is there a way to avoid that
-using a key pair instead?
+## Does this only apply to mail and messages?
+
+No. Anywhere two parties who have never met need a private channel, the
+question is the same: does a secret have to travel, and can a key pair avoid
+that? This unit covers confidentiality. Proving who sent a message is a second
+question, taken up in `/security/authentication-fundamentals/` and
+`/security/tls-https/`.

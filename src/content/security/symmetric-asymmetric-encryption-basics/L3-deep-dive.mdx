@@ -5,213 +5,164 @@ title: "L3 — Symmetric, asymmetric, and hybrid encryption, measured"
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Same secret, three different approaches">
+export const unit = {
+  track: "security",
+  unitSlug: "symmetric-asymmetric-encryption-basics",
+};
+
+<Scenario label="Mailing a two-megabyte backup, one padlock at a time">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🔐</span> <strong>Symmetric</strong> — AES-256-GCM, one shared key</div>
-      <div class="flex items-center gap-1.5"><span>🔑</span> <strong>Asymmetric</strong> — RSA-2048, a public/private key pair</div>
-      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — measure the actual speed difference, then combine both</div>
+      <div class="flex items-center gap-1.5"><span>🗄️</span> <strong>The payload</strong> — a 2,000,000-byte backup that must reach Bob</div>
+      <div class="flex items-center gap-1.5"><span>🔑</span> <strong>The slow tool</strong> — public-key locking, which carries only a small piece per operation</div>
+      <div class="flex items-center gap-1.5"><span>⚡</span> <strong>The fast tool</strong> — a shared key, which handles any length</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>The question</strong> — how many slow operations does each plan need?</div>
     </div>
   </Fragment>
 
-**Before reading the code below, predict: RSA public keys use a small,
-fixed public exponent, making public-key operations (encrypting)
-relatively cheap. Which RSA operation — encrypting with the public key,
-or decrypting with the private key — do you expect to be the slow one,
-and why might that asymmetry itself be useful?**
+Picture a padlock that can only close around a very small parcel. Bob has
+published that padlock for everyone. Alice has a backup far too big for it. She
+could cut the backup into small parcels and padlock each one, or she could put
+the whole backup in an ordinary box with its own key and padlock only that
+tiny key. **Which plan needs fewer slow operations, and by how much?**
 
 </Scenario>
 
-Before the code gets dense, keep this tiny glossary nearby:
-`plaintext` is the original readable message, `ciphertext` or
-`encrypted` is the unreadable result, an `IV` is a fresh random starter
-value so repeated messages do not look the same, and an `authTag` is a
-tamper seal that makes wrong keys or modified ciphertext fail loudly.
-You do not need to memorize RSA's public exponent or modulus here; the
-idea to track is which part stays secret, which part travels, and which
-operation grows when the message grows.
-
 <LevelIntro
   items={[
-    "AES-256-GCM symmetric encryption, with real code",
-    "RSA-2048 asymmetric encryption, and its measured cost",
-    "Building hybrid encryption end-to-end",
+    "Measured cost of symmetric vs. asymmetric",
+    "A hybrid plan worked end to end",
+    "How each approach fails in practice",
   ]}
 />
 
-## Symmetric encryption with AES-256-GCM
+## How big is the speed gap, really?
 
-```js
-const crypto = require("node:crypto");
+**L2 said asymmetric is "much slower". What does that look like in numbers?**
+In one run on a single machine, each approach decrypted the same 32-byte
+payload 500 times. Each decryption is one attempt to open an encrypted message.
+The per-operation times below are what the interactive demo uses. Treat them as
+one measurement, not a benchmark: another machine will give different numbers.
 
-function symmetricEncrypt(plaintext, key) {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  const encrypted = Buffer.concat([
-    cipher.update(plaintext, "utf8"),
-    cipher.final(),
-  ]);
-  const authTag = cipher.getAuthTag();
-  return { encrypted, iv, authTag };
-}
+| Approach (500 decryptions of 32 bytes) | Per operation | Total for 500 |
+| -------------------------------------- | ------------- | ------------- |
+| Symmetric (AES-256-GCM)                | 0.0284 ms     | 14.2 ms       |
+| Asymmetric (RSA-2048 private key)      | 0.5546 ms     | 277.3 ms      |
 
-function symmetricDecrypt({ encrypted, iv, authTag }, key) {
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(authTag);
-  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString(
-    "utf8",
-  );
-}
+```mermaid
+xychart-beta
+    title "Total time for 500 decryptions (ms)"
+    x-axis ["Symmetric", "Asymmetric"]
+    y-axis "Milliseconds" 0 --> 300
+    bar [14.2, 277.3]
 ```
 
-```js
-const key = crypto.randomBytes(32);
-const { encrypted, iv, authTag } = symmetricEncrypt(
-  "Meet at the north dock at midnight",
-  key,
-);
-console.log(symmetricDecrypt({ encrypted, iv, authTag }, key)); // "Meet at the north dock at midnight"
+The ratio is `0.5546 / 0.0284`, about 19.5. If the fast path took one second
+the slow one would take about twenty. The cost sits in the **private-key**
+operation. The public key uses a small, cheap number, so locking is quick and
+unlocking is the slow half. That suits the hybrid design: the slow half runs
+once per message, not once per byte.
 
-const wrongKey = crypto.randomBytes(32);
-symmetricDecrypt({ encrypted, iv, authTag }, wrongKey); // throws: unable to authenticate data
-```
+<Checkpoint question="The slow operation is the private-key unlock, and it costs about the same whether the wrapped item is a tiny key or a bigger one. What does that suggest about what you should ever give it to unlock?">
 
-This runs and confirms both halves: the correct key recovers the exact
-original message, and a wrong key doesn't silently produce garbled
-text — GCM's authentication tag makes decryption with the wrong key
-fail loudly instead.
-
-<Checkpoint question="If symmetricDecrypt() were called with the correct key but a tampered authTag (say, one byte of the ciphertext was flipped in transit), what should happen — silently-wrong plaintext, or a thrown error?">
-
-A thrown error. GCM's authentication tag exists precisely to make this
-case fail loudly instead of quietly succeeding on corrupted data. The tag
-is computed from the ciphertext at encryption time, so any change to the
-ciphertext — even a single flipped byte — produces a mismatch when
-`setAuthTag` and `decipher.final()` verify it, and Node throws rather than
-returning altered plaintext as if nothing were wrong. This matters beyond
-correctness: without that check, an attacker who can modify ciphertext in
-transit could manipulate what the recipient decrypts to, even without
-knowing the key — the failure mode named later in this unit's table.
+Only something small and fixed in size, like a 32-byte symmetric key. The
+unlock cost does not shrink for smaller payloads, so you pay it once and want
+that payment to buy as much as possible. A key that then unlocks a message of any
+length is the best possible use of one slow operation.
 
 </Checkpoint>
 
-## Asymmetric encryption with RSA-2048
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="measured-cost"
+/>
 
-```js
-const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
-  modulusLength: 2048,
-  publicKeyEncoding: { type: "spki", format: "pem" },
-  privateKeyEncoding: { type: "pkcs8", format: "pem" },
-});
+## Worked example: how many slow operations does a 2 MB backup need?
 
-const secret = crypto.randomBytes(32); // e.g. a symmetric key being sent to someone
-const ciphertext = crypto.publicEncrypt(publicKey, secret);
-const recovered = crypto.privateDecrypt(privateKey, ciphertext);
-console.log(Buffer.compare(secret, recovered) === 0); // true
+**Back to the scenario. How many slow operations does each plan need?** Two
+assumptions, both stated so you can change them. First, each slow operation can
+carry at most 100 bytes. Real limits depend on the key size and padding, so
+this is a round number for the arithmetic. Second, each slow operation costs
+about the same as the measured 0.5546 ms, which was timed on a 32-byte payload.
+
+```mermaid
+flowchart TD
+    B["2,000,000-byte backup"] --> P1["Plan 1: padlock the backup directly"]
+    B --> P2["Plan 2: hybrid"]
+    P1 --> Q1["2,000,000 / 100 = 20,000 slow operations"]
+    Q1 --> T1["20,000 x 0.5546 ms = 11,092 ms, about 11.1 s"]
+    P2 --> Q2["Encrypt backup with a fast shared key"]
+    Q2 --> Q3["Padlock only the 32-byte key: 1 slow operation"]
+    Q3 --> T2["1 x 0.5546 ms, about 0.55 ms"]
 ```
 
-`publicKey` can be handed to anyone — posted publicly, emailed in the
-clear, printed on a business card — without weakening anything. Only
-`privateKey`, which never left this code, can reverse the encryption.
+| Plan                                  | Slow operations | Slow-operation time (assumed) |
+| ------------------------------------- | --------------- | ----------------------------- |
+| Padlock the backup in 100-byte pieces | 20,000          | about 11,092 ms               |
+| Hybrid: padlock one 32-byte key       | 1               | about 0.55 ms                 |
 
-## Measuring the actual speed difference
+The hybrid plan also pays for one fast symmetric pass over the 2 MB. That cost
+is small next to the slow operations it replaced, and the per-operation timing
+above cannot extrapolate it, since a 32-byte test mostly measures fixed overhead.
+Doubling the backup doubles the direct plan's slow operations and leaves
+the hybrid plan's at one.
 
-```js
-const payload = crypto.randomBytes(32);
-const aesKey = crypto.randomBytes(32);
-const symPackage = symmetricEncrypt(payload, aesKey);
-const asymCiphertext = crypto.publicEncrypt(publicKey, payload);
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="hybrid-cost-model"
+/>
 
-const iterations = 500;
+## Where does each approach go wrong in practice?
 
-const symStart = performance.now();
-for (let i = 0; i < iterations; i++) symmetricDecrypt(symPackage, aesKey);
-const symTime = performance.now() - symStart;
+**Both approaches can be used correctly and still fail. What does each failure
+look like?**
 
-const asymStart = performance.now();
-for (let i = 0; i < iterations; i++)
-  crypto.privateDecrypt(privateKey, asymCiphertext);
-const asymTime = performance.now() - asymStart;
+| Failure mode                                   | What goes wrong                                                                                                                                                              |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Padlocking large data directly with a key pair | Each operation carries little and is slow, so cost grows with the data. The hybrid plan avoids it.                                                                           |
+| Reusing one shared key for everything, forever | If that key ever leaks, every message ever locked with it opens, not just one.                                                                                               |
+| Trusting a public key that arrived unchecked   | An attacker who swaps in their own public key receives the secrets meant for Bob. Authenticity of the key matters, which `/security/tls-https/` addresses with certificates. |
+| Treating the public key as a secret            | Hiding it adds effort with no security gain. It is public by design.                                                                                                         |
+| Assuming a key pair proves who sent a message  | Anyone can lock a message with Bob's public key. Proving the sender needs a separate signature.                                                                              |
+| Skipping the integrity check on symmetric data | Modern shared-key modes attach a tamper-detection tag. If it is not verified, altered data can be accepted.                                                                  |
 
-console.log(symTime, asymTime, asymTime / symTime);
-```
+Notice the third row. A key pair removes the need to send a secret, but not the
+need to know that the public key really belongs to Bob. The padlock only helps if
+the open padlock Alice picked up really came from him.
 
-Running this 500 times each on the exact same 32-byte payload produces
-**symmetric decryption at roughly 0.028ms per operation, versus
-asymmetric (RSA private-key) decryption at roughly 0.55ms per
-operation — about 19.5x slower**, decrypting the identical amount of
-data. The predicted answer from the scenario above is confirmed: it's
-specifically the _private_-key operation that's slow, not the public
-one — RSA's public exponent is small and cheap by design, while the
-private-key operation involves the full, large modulus. This asymmetry
-is exactly what makes the hybrid pattern below worthwhile: pay the
-slow cost once, for a tiny secret, not for every byte of real data.
-If "19.5x slower" feels abstract, read it as a ratio: if the fast path
-took 1 second, the slow path would take almost 20 seconds for the same
-number of operations.
+<Checkpoint question="Alice receives an open padlock claiming to be Bob's, but it was actually forged by an attacker on the route. She locks her message with it. Who can open that message?">
 
-<Checkpoint question="Given that it's specifically the private-key operation that's slow, and that a symmetric key is small (32 bytes) no matter how large the actual message is, what design follows for how asymmetric encryption should be used against a large document?">
-
-Never encrypt the large document directly with asymmetric encryption —
-only ever use the slow asymmetric operation against something small and
-fixed-size, like a 32-byte symmetric key, then let fast symmetric
-encryption carry the actual bulk data of any size. Because the measured
-slowness lives in the private-key operation and that cost doesn't depend
-on how much data is being wrapped, the right move is to pay it exactly
-once per message, on the smallest possible payload — which is precisely
-the hybrid pattern built next.
+The attacker, who holds the matching private key, and Bob cannot. The math worked
+exactly as designed. What failed was Alice's belief about whose public key it
+was. This is why public keys are usually delivered with some proof of
+ownership, not just handed over.
 
 </Checkpoint>
 
-## Hybrid encryption: fast bulk data, safely-wrapped key
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="failure-modes"
+/>
 
-```js
-const message =
-  "Q3 contract terms: net-30, renewal auto-triggers unless canceled 60 days prior.";
-const aesKey = crypto.randomBytes(32);
+## Extend it: this worked example is a case, not the whole territory
 
-// Encrypt the real message with fast symmetric encryption
-const symPackage = symmetricEncrypt(message, aesKey);
+The 2 MB backup, the 100-byte limit, and the single recipient were all choices.
+Try changing one at a time and predict the effect before computing:
 
-// Wrap only the small AES key with the recipient's public key
-const wrappedKey = crypto.publicEncrypt(publicKey, aesKey);
+- **Three recipients.** Alice wants Bob, Carol, and Dave to read the same
+  backup. How many symmetric encryptions of the 2 MB does she do, and how many
+  slow operations? (One pass of the backup under a single shared key, plus one
+  key-lock per recipient, so three slow operations.)
+- **A smaller limit.** If each slow operation carried only 50 bytes, what would
+  happen to the direct plan, and to the hybrid plan? (The direct plan doubles to
+  40,000. The hybrid plan still needs just one for a 32-byte key.)
+- **A leaked shared key.** If the key from one hybrid message leaks, what is
+  exposed? (Only that message, because a fresh key was made for it.)
 
-// Recipient: unwrap the key with their private key, then decrypt the message
-const unwrappedKey = crypto.privateDecrypt(privateKey, wrappedKey);
-const recoveredMessage = symmetricDecrypt(symPackage, unwrappedKey);
-console.log(recoveredMessage === message); // true
-```
-
-Verified: **the recovered message matches the original exactly**. The
-slow asymmetric operation only ever touches the 32-byte key
-(`wrappedKey` comes out to 256 bytes — the RSA-2048 modulus size, not
-related to the message length) — the actual contract text, which could
-be arbitrarily long, is encrypted and decrypted entirely with fast
-symmetric operations.
-
-That 256-byte detail is not a number to memorize. It is a clue about
-the shape of RSA: the wrapped result has a fixed block size determined
-by the RSA key, so RSA is a good wrapper for a tiny AES key, not a good
-tool for directly carrying a long document.
-
-## Extend it: what if the message were 100x longer?
-
-**The message above is under 100 bytes. If it were instead a
-100,000-byte document, what would change about the hybrid approach's
-cost — the symmetric encryption step, the asymmetric key-wrapping
-step, or both?** Since `symmetricEncrypt`/`symmetricDecrypt` operate on
-the message itself while `publicEncrypt`/`privateDecrypt` only ever
-touch the fixed-size 32-byte AES key, only the symmetric step's cost
-would grow with the document size — the asymmetric wrapping cost stays
-exactly the same regardless of how large the actual message gets.
-
-## Failure modes
-
-| Failure mode                                                     | What it gets wrong                                                                                                         |
-| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Encrypting large data directly with asymmetric encryption        | RSA has a hard size limit per operation and is dramatically slower — this is exactly why hybrid encryption exists          |
-| Reusing the same symmetric key indefinitely across many messages | A compromised key exposes every message ever encrypted with it, not just one                                               |
-| Treating a public key as something that needs to stay secret     | The public key is safe to expose by design — protecting it adds complexity without adding real security                    |
-| Assuming asymmetric encryption alone provides authentication     | Encrypting with someone's public key proves nothing about who sent the message — that requires a separate signature step   |
-| Skipping the authentication tag check on symmetric decryption    | Without verifying the tag, tampered ciphertext can decrypt into corrupted-but-accepted plaintext instead of failing loudly |
+Which of those changes would you make first if the backup had to reach
+a thousand people?
