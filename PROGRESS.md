@@ -3396,3 +3396,16 @@ Started the `logic/` track (12 units) with 4 parallel content-only subagents. Sa
 Practice items have 3 choices; exam items have 4. Length bias: 4–31% longest, 21–33% shortest.
 
 `logic/` is at 4 of 12. Total migrated: 68 of 246. Remaining here: `state-machines`, `edge-case-reasoning`, `induction`, `fermi-estimation`, `expected-value`, `correlation-causation`, `abstraction`, `multi-criteria-decisions-under-ambiguity`.
+
+## 2026-10-30 — `logic/` batch 2: `state-machines`, `edge-case-reasoning`, `induction`, `fermi-estimation`
+
+Migrated 4 more `logic/` units via 4 parallel content-only subagents. Same pipeline; `build` 273 pages, `typecheck` 0 errors; Node sandbox check of 43 code items 0 failing assertions; live click-through passed all 20 `DomainCheck` topics (4 code topics run with the reference solution), 0 Mermaid errors, sliders present.
+
+- **`state-machines`**: 6 topics, 67 items; one code topic `transition-lookup` (guarded table lookup). Fixed the 5-vs-6 intended-state mix-up (4 flags express 5 states, `cancelled` makes 6), dropped a `PAUSE` inconsistency, and corrected the retry-limit table (limit N needs 2N+2 states). Traffic-light opening scenario (rule 4c).
+- **`edge-case-reasoning`**: 4 topics, 48 items; one code topic `boundary-test-code` (shippingCost, discountPercent, pageCount, firstOrDefault). Shipping numbers match the demo; a second bug (3.99 middle tier) shows what the monotonicity sweep catches.
+- **`induction`**: 5 topics, 60 items; one code topic `recursive-code`. Domino opening; the empty-folder crash is now explicitly a hidden base case; claims (35, NaN, -Infinity, 4^6) verified in Node.
+- **`fermi-estimation`**: 5 topics, 60 items; one code topic `range-estimator`. Pizza-slices opening; removed an invented "measured 1.9 TB" fact (now an explicit hypothetical) and a 3.9x→3.8x slip. **Open item:** `interactives.json` L3 text says ~10.7x at its default multiple 1.48, but 1.48^6 ≈ 10.51 (default would need ≈1.483); left untouched.
+
+Known weakness: practice-tier quizzes in `state-machines` (42%) and `induction` (21/32) still have the correct choice longest more often than the ≤35% target (the target was enforced on exam items only).
+
+`logic/` is at 8 of 12. Total migrated: 72 of 246. Remaining here: `expected-value`, `correlation-causation`, `abstraction`, `multi-criteria-decisions-under-ambiguity`.
