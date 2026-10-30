@@ -3409,3 +3409,14 @@ Migrated 4 more `logic/` units via 4 parallel content-only subagents. Same pipel
 Known weakness: practice-tier quizzes in `state-machines` (42%) and `induction` (21/32) still have the correct choice longest more often than the ≤35% target (the target was enforced on exam items only).
 
 `logic/` is at 8 of 12. Total migrated: 72 of 246. Remaining here: `expected-value`, `correlation-causation`, `abstraction`, `multi-criteria-decisions-under-ambiguity`.
+
+## 2026-10-30 — `logic/` batch 3 (final): `expected-value`, `correlation-causation`, `abstraction`, `multi-criteria-decisions-under-ambiguity`
+
+Migrated the last 4 `logic/` units via 4 parallel content-only subagents. Same pipeline; `build` 273 pages, `typecheck` 0 errors; Node sandbox check of 48 code items 0 failing assertions; live click-through passed all 20 `DomainCheck` topics (4 code topics), 0 Mermaid errors, sliders present. Process change: the answer-length limit (≤ ~35% strictly longest and strictly shortest) was enforced on BOTH practice and exam tiers this batch (practice 0–28% longest, 0–28% shortest).
+
+- **`expected-value`**: 5 topics, 60 items; code topic `ev-calculator`. Lemonade-stand opening. The old staged-rollout "goes badly" branch cost less than "goes fine" with no explanation; reframed as "caught early, rolled back, $4k spent" (demo's $17,300 EV kept), with an L3 extension that raises staged EV to $18,200 / breakeven 27.9%. Correct is never the longest (0%) — a faint tell in the other direction.
+- **`correlation-causation`**: 4 topics, 48 items; code topic `precision-calculator`. Ice-cream/sunburn and coin-machine scenarios; dropped the old seeded-random data and Pearson code; fixed a fire-trucks "reverse causation" slip and two garbled L3 sentences.
+- **`abstraction`**: 6 topics, 72 items; code topic `graph-code` (dependency maps, `hasCycle`, `deployOrder`). Subway-map opening; 14 services → 91 pairs kept to match the demo; large service-graph code replaced by a diagram plus one minimal `findCycle`.
+- **`multi-criteria-decisions-under-ambiguity`**: 5 topics, 60 items; code topic `scoring-in-code`. Laptop opening; removed "staff engineer" wording and invented progress bars; flip points recomputed (Budget overtakes Ultralight at 37.5% price weight). The demo's flip (~43%) differs from the 3-year-outlook row (50%) because the demo holds other weights proportional; L3 says so.
+
+`logic/` is complete: 12 of 12. Total migrated: 76 of 246. Open items: `fermi-estimation` demo default (1.48 vs ≈1.483); practice-tier answer-length bias in older batches (`state-machines`, `induction`, and earlier tracks). Next track in ROADMAP order: `security`.
