@@ -6,6 +6,8 @@ import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
 import PracticeCheck from "../../../components/PracticeCheck.astro";
+import Plot from "../../../components/Plot.astro";
+import LayerStack from "../../../components/viz/LayerStack.astro";
 
 export const unit = { track: "systems", unitSlug: "algorithmic-complexity" };
 
@@ -76,42 +78,34 @@ function removeDuplicatesSet(records) {
 }
 ```
 
-```js
-// benchmark.js — measure both versions across growing input sizes
-function makeRecords(n) {
-  const records = [];
-  for (let i = 0; i < n; i++) {
-    // ~10% duplicate rate, mirroring a realistic import
-    records.push({ id: i % Math.floor(n * 0.9) });
-  }
-  return records;
-}
+Run both versions on inputs of 2,000, 8,000 and 32,000 records (about 10 percent duplicates, after a JIT
+warm-up pass; exact numbers vary by machine):
 
-function timeIt(fn, records) {
-  const start = performance.now();
-  fn(records);
-  return performance.now() - start;
-}
-
-for (const n of [2000, 8000, 32000]) {
-  const records = makeRecords(n);
-  const arrayMs = timeIt(removeDuplicatesArray, records);
-  const setMs = timeIt(removeDuplicatesSet, records);
-  console.log(
-    `n=${n}: array=${arrayMs.toFixed(1)}ms, set=${setMs.toFixed(1)}ms`,
-  );
-}
-// Actual measured output (Node, after a JIT warm-up pass — exact numbers vary by machine):
-// n=2000:  array=2.2ms,    set=0.9ms
-// n=8000:  array=188.4ms,  set=0.7ms    <- array time jumped ~86x for 4x the input
-// n=32000: array=2560.1ms, set=4.7ms    <- array time jumped ~14x for another 4x input
-```
+<Plot
+  mark="line"
+  x="n"
+  y="ms"
+  series="version"
+  xScale="log"
+  yScale="log"
+  xLabel="Records (n)"
+  yLabel="Time (ms)"
+  caption="Measured in Node: the array version bends upward, the Set version stays nearly flat."
+  data={[
+    { n: 2000, ms: 2.2, version: "array" },
+    { n: 2000, ms: 0.9, version: "set" },
+    { n: 8000, ms: 188.4, version: "array" },
+    { n: 8000, ms: 0.7, version: "set" },
+    { n: 32000, ms: 2560.1, version: "array" },
+    { n: 32000, ms: 4.7, version: "set" },
+  ]}
+/>
 
 **Before reading further, predict: if `n` quadruples, roughly how much longer should the
 array version take, if the O(n²) claim is right?** Quadrupling `n` should roughly _16x_
-the array version's time (`4² = 16`), while the Set version's time should stay close to
-proportional — roughly 4x, not 16x. The measured 8,000→32,000 step lands close to that
-prediction (~14x); the earlier 2,000→8,000 step overshoots it (~86x) because 2,000 rows
+the array version's time ($$4^2 = 16$$), while the Set version's time should stay close to
+proportional — roughly 4x, not 16x. The measured 8,000→32,000 step (188.4ms → 2560.1ms) lands close to that
+prediction (~14x); the earlier 2,000→8,000 step (2.2ms → 188.4ms) overshoots it (~86x) because 2,000 rows
 still ran fast enough for measurement noise and JIT warm-up effects to distort the ratio —
 a real reminder that a single small-`n` timing isn't proof of anything by itself, and
 Big-O claims are about the trend across several growing sizes, not one measurement. The
@@ -195,6 +189,20 @@ small false-positive rate for bounded memory) or an external, disk-backed hash j
 kind a database's query planner reaches for. The Big-O lens still applies, but memory
 complexity joins time complexity as an equally real constraint once "does it fit in RAM at
 all" becomes the actual question.
+
+<LayerStack
+  arrows
+  layers={[
+    { label: "Plain list scan", note: "O(n) per lookup" },
+    { label: "In-memory Set", note: "O(1) average, holds every id" },
+    {
+      label: "Bloom filter",
+      note: "bounded memory, small false-positive rate",
+    },
+    { label: "Disk-backed hash join", note: "when even ids don't fit in RAM" },
+  ]}
+  caption="The ladder of fixes as data outgrows each structure."
+/>
 
 ## Failure modes
 
