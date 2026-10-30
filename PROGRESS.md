@@ -3433,3 +3433,16 @@ Started the `security/` track (13 units) with 4 parallel content-only subagents.
 Practice items have 3 choices (`authentication-fundamentals` uses 4); exam items have 4. Length bias, correct strictly longest / shortest: `security-mindset` practice 3% / 30%, exam 25% / 30%; `authentication-fundamentals` 17% / 10% overall; `authorization-models` 27% / 11% overall; `hashing` 2% / 0% overall (all within the ≤35% target, though `hashing` and `security-mindset` practice may read as a faint opposite tell).
 
 `security/` is at 4 of 13. Total migrated: 80 of 246. Remaining here: `symmetric-asymmetric-encryption-basics`, `tls-https`, `owasp-top-10`, `secrets-management`, `supply-chain-security`, `defense-depth`, `security-testing`, `incident-response`, `secure-by-design`.
+
+## 2026-10-30 — `security/` batch 2: `symmetric-asymmetric-encryption-basics`, `tls-https`, `owasp-top-10`, `secrets-management`
+
+Migrated 4 more `security/` units via 4 parallel content-only subagents. Same pipeline; `typecheck` 0 errors, `build` 273 pages, Node sandbox check of 41 code items 0 failing assertions; live click-through passed all 32 `DomainCheck` topics (4 code topics run with the reference solution), 0 Mermaid errors, "Mark as done" enabled on all four. `astro preview --background` timed out three times on this machine; running `bunx astro preview --port 9876` as a normal background process worked.
+
+- **`symmetric-asymmetric-encryption-basics`**: 7 topics, 83 items; code topic `hybrid-cost-model`. Padlock-and-courier opening; hybrid needs exactly one operation for a 32-byte key (old text said "one or two"); dropped an unsupported claim that RSA "cannot be applied" to 2 GB; added an unverified/forged public key failure mode; the 100-byte-per-operation limit is a labelled assumption and timings are labelled "one run on one machine".
+- **`tls-https`**: 9 topics, 103 items; code topic `hostname-match` (wildcards match one label; only 4 practice variants). Corrected two technical points: in TLS 1.3 the certificate is encrypted after ServerHello, and SNI is sent unencrypted by default unless Encrypted Client Hello is used. Latency figures match the demo (TLS round trips only, not TCP setup).
+- **`owasp-top-10`**: 7 topics, 84 items; code topic `access-control`. Shop opening (strong front lock, unlocked service entrance); the ten categories are grouped into 5 families as a labelled memory aid, not OWASP structure; removed the realistic `UNION SELECT` payload and the long SSRF checker; this unit has no `interactives.json`.
+- **`secrets-management`**: 9 topics, 107 items; code topic `fail-fast-config`. Replaced the invented 3/9/47-minute timeline with the demo's 45 minutes (0.75 h × 4 copies/hour = 3, labelled assumption); all secret-looking literals are obvious placeholders (only the AWS documentation example key).
+
+Practice items have 3 choices (`tls-https` and `authentication-fundamentals` use 4); exam items have 4. Length bias, correct strictly longest / shortest: `symmetric-asymmetric-encryption-basics` 15% / 24% overall, `tls-https` 23% / 19%, `owasp-top-10` 21% / 26%, `secrets-management` 18% / 30% (practice shortest 34%, at the ceiling).
+
+`security/` is at 8 of 13. Total migrated: 84 of 246. Remaining here: `supply-chain-security`, `defense-depth`, `security-testing`, `incident-response`, `secure-by-design`.
