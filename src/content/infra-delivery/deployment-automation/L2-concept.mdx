@@ -4,126 +4,156 @@ title: "L2 — What a scripted deploy pipeline enforces that a checklist can't"
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named the failure mode behind Deploy 9 — a manual checklist depends on
-a human remembering and correctly sequencing every step. L2 works through
-what a scripted deploy pipeline actually looks like, step by step, and why
-each part of it is specifically what a checklist can't reliably guarantee.
+export const unit = {
+  track: "infra-delivery",
+  unitSlug: "deployment-automation",
+};
+
+L1 named the failure behind release 9: a checklist depends on a person
+remembering and sequencing every step. L2 shows what a scripted pipeline
+looks like, step by step, and why each part is something a checklist
+cannot guarantee.
 
 <LevelIntro
   items={[
-    "The fixed step order of a scripted pipeline",
-    "Why the health check runs before the atomic switch",
-    "How an automatic rollback replaces a remembered one",
+    "The fixed step order of a pipeline",
+    "Why the health check precedes the switch",
+    "Rollback that runs without anyone remembering",
   ]}
 />
 
-## Turning the checklist into a fixed pipeline
+## If the steps were written down, why did skipping one still cause an outage?
 
-**If the steps were already written down on a wiki page, why did skipping
-one still cause an outage?** Because a wiki page is a _suggestion_ —
-nothing stops a step from being skipped, reordered, or run against the
-wrong release. A scripted pipeline turns the same steps into a fixed
-sequence a machine executes exactly the same way every time, with no
-step optional and no step reachable out of order.
+A wiki page is a suggestion. A script is a fixed sequence a machine runs
+the same way every time, with no step optional and none reachable out of
+order. First, the words translated into ordinary objects:
 
-Before the diagram, translate the infrastructure words into ordinary
-objects:
-
-| Term                  | Read it as                                                                              |
-| --------------------- | --------------------------------------------------------------------------------------- |
-| Release directory     | A separate folder containing one complete version of the app                            |
-| Traffic               | The real user requests arriving at the service                                          |
-| Health check          | An automatic question: "does this candidate version answer correctly?"                  |
-| Migration             | A database shape change the new code needs before it can run safely                     |
-| Atomic symlink switch | Changing one pointer so users go from the old folder to the new folder in a single step |
+| Term                  | Read it as                                                            |
+| --------------------- | --------------------------------------------------------------------- |
+| Release directory     | A separate folder holding one complete version of the app             |
+| Traffic               | The real user requests arriving at the service                        |
+| Health check          | An automatic question: "does this candidate version answer?"          |
+| Migration             | A database shape change the new code needs before it can run          |
+| Atomic symlink switch | Changing one pointer so users move from old folder to new in one step |
 
 ```mermaid
 flowchart TD
     A["extract new release"] --> B["install dependencies"]
     B --> C["run migrations"]
-    C --> D["health check"]
+    C --> D["health check on the candidate"]
     D -- "healthy" --> E["atomic symlink switch"]
     E --> F["restart service"]
-    D -- "unhealthy" --> G["rollback: keep old release live"]
+    D -- "unhealthy" --> G["keep old release live"]
 ```
 
-**Why does the health check sit _before_ the atomic switch, not after?**
-Because the whole point of checking health at all is to decide whether
-traffic should ever reach the new release — checking after the switch
-would mean users already hit the broken version before anyone found
-out. In a real pipeline, that pre-switch health check normally probes a
-candidate process, temporary port, or preview route for the new release
-while the old release is still serving users. The switch itself is
-deliberately the very last thing that can affect user traffic:
-extracting, installing, migrating, and proving the candidate healthy all
-happen while the _old_ release is still live and serving every request.
+**Why does the health check sit before the switch, not after?** The
+check exists to decide whether traffic should ever reach the new
+release. Checked after the switch, users would already be hitting the
+broken version. In a real pipeline the check probes a candidate process,
+a temporary port, or a preview route while the old release is still
+serving everyone. Extract, install, migrate, and check all happen while
+the old release stays live.
 
-<Checkpoint question="In the diagram above, extract, install, migrate, and the health check all run while the old release is still serving traffic. If a fresh production incident showed that users had briefly received a mix of old and new code during a deploy, which single step in the diagram would you suspect first, and why?">
+<Checkpoint question="In the diagram, extract, install, migrate, and the health check all run while the old release serves users. If an incident showed users briefly received a mix of old and new code, which step would you suspect first, and why?">
 
-The atomic symlink switch — specifically, whether it was actually atomic
-in the real implementation, or whether something upstream of it (like
-extracting the new release directly into the live directory instead of a
-separate one) let partially-written files become reachable before the
-switch happened. Every step before the switch is deliberately inert with
-respect to user traffic: extract, install, migrate, and health-check all
-operate on a release directory nobody is being routed to yet. If users
-saw a mix of old and new code, the boundary that's supposed to make that
-impossible — the single-pointer flip — is the first place to look,
-because every earlier step should be invisible to traffic by design.
+The atomic symlink switch, or whatever was supposed to make it atomic.
+Every earlier step works on a release directory nobody is routed to yet,
+so none of them should be visible to users. If a mix of old and new code
+reached users, the boundary meant to prevent that is the first place to
+look, for example new files being written straight into the live folder
+instead of a separate one.
 
 </Checkpoint>
 
-## What "atomic" actually buys you
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="pipeline-order"
+/>
 
-**Could the pipeline just overwrite the old release's files in place
-instead of switching a symlink?** It could, but then there's a window
-— however short — where some files on disk belong to the old version
-and some to the new one, and a request arriving in that window could
-read a mix of both. A symlink switch has no such window: the pointer
-either points at the old release directory or the new one, never
-something in between, so every request either gets a fully-old or
-fully-new version of the code.
+## What does "atomic" actually buy you?
 
-## The rollback is automatic, not remembered
+**Could the pipeline just overwrite the old files in place?** It could,
+but then for a short window some files belong to the old version and
+some to the new, and a request arriving in that window can read a mix. A
+symlink is a single pointer, and it names either the old folder or the
+new one, never something in between.
 
-**In the Deploy 9 incident, what would have actually prevented the
-outage?** Not a stricter checklist — a health check that runs _before_
-traffic ever reaches the new release, wired to automatically restore
-the old release if it fails. Nobody has to notice the crash, page
-anyone, or remember the rollback command; the pipeline's own next step
-_is_ the rollback, conditioned on the health check's result.
+```mermaid
+flowchart LR
+    subgraph InPlace["Overwrite in place"]
+        direction TB
+        P1["files: old, old, old"] --> P2["files: new, old, old"]
+        P2 --> P3["files: new, new, old"]
+        P3 --> P4["files: new, new, new"]
+    end
+    subgraph Pointer["Pointer switch"]
+        direction TB
+        Q1["pointer: release-8"] --> Q2["pointer: release-9"]
+    end
+```
 
-|                              | Manual checklist                             | Scripted pipeline                                        |
-| ---------------------------- | -------------------------------------------- | -------------------------------------------------------- |
-| Step order                   | Enforced by memory/documentation             | Enforced by the script itself                            |
-| Skipped step                 | Possible, and often invisible until it fails | Not reachable — each step runs unconditionally           |
-| Detecting a bad deploy       | Someone notices symptoms, then investigates  | Health check runs automatically, before traffic switches |
-| Recovering from a bad deploy | Someone manually re-runs the old steps       | Rollback step runs automatically on health-check failure |
+The left column has two in-between states a request could land in. The
+right column has none: there is no state between "points at release 8"
+and "points at release 9."
 
-<Checkpoint question="The table above says a scripted pipeline detects a bad deploy 'before traffic switches.' Given what you now know about step order, would a health check that only ran after 'restart service' still count as catching Deploy 9's mistake before users were affected?">
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="atomic-switch"
+/>
 
-No. By the time `restart service` has run, the atomic switch has
-already happened, which means real traffic is already being routed to
-the new release. A health check placed after that point can still
-detect the failure and trigger a rollback, but it can no longer prevent
-users from having been served the broken version in the meantime — it
-would be closer to the manual checklist's "someone notices symptoms,
-then investigates" row than to the scripted pipeline's actual guarantee.
-The ordering in the diagram — health check strictly before the switch —
-is what turns "detect and recover" into "prevent in the first place."
+## Rollback is automatic, not remembered
+
+**What would have prevented the release 9 outage?** Not a stricter
+checklist. A health check that runs before traffic reaches the new
+release, wired so that a failure keeps the old release live. Nobody has
+to notice the crash, page anyone, or recall a rollback command: the
+pipeline's next step is the rollback, conditioned on the check.
+
+| Question                   | Manual checklist                            | Scripted pipeline                               |
+| -------------------------- | ------------------------------------------- | ----------------------------------------------- |
+| Who enforces step order?   | Memory and documentation                    | The script itself                               |
+| What if a step is skipped? | Possible, often invisible until it fails    | Not reachable, every step runs unconditionally  |
+| How is a bad deploy found? | Someone notices symptoms, then investigates | The health check runs before traffic switches   |
+| How is recovery done?      | Someone re-runs the old steps by hand       | The rollback branch runs on the check's failure |
+
+A related word from L1: a pipeline that is **idempotent** can be
+re-run after a partial failure and still end in the right state, rather
+than needing a person to work out which steps already happened.
+
+<Checkpoint question="The table says a scripted pipeline detects a bad deploy 'before traffic switches.' Would a health check that only ran after 'restart service' still catch release 9's mistake before users were affected?">
+
+No. By the time the service restarts, the switch has already happened
+and real traffic is going to the new release. A check placed there can
+still detect the failure and trigger a rollback, but users have already
+been served the broken version in the meantime. That is the manual
+column's "someone notices symptoms" in automated clothing. Placing the
+check strictly before the switch is what turns "detect and recover" into
+"prevent."
 
 </Checkpoint>
 
-## The generalizable lesson
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="auto-rollback"
+/>
 
-**Is this really about `npm install` specifically, or about something
-more general?** More general: any process where a human is trusted to
-remember and correctly sequence multiple steps will eventually fail
-that trust, not because people are careless, but because human memory
-under time pressure isn't a reliable substitute for a machine that
-executes the same steps the same way regardless of how the day is
-going. The fix generalizes to any multi-step operational process, not
-just deploys — the fewer steps depend on a human doing the right thing
-in the right order, the fewer ways there are for a "normal" day to
-become an incident.
+## Is this really about one package install?
+
+No. Any process where a person is trusted to remember and sequence
+several steps will eventually fail that trust, not through carelessness
+but because memory under time pressure is not a substitute for a machine
+doing the same thing every time. The fix generalizes to any multi-step
+operational process: the fewer steps that depend on a person doing the
+right thing in the right order, the fewer ways an ordinary day becomes
+an incident.
+
+## What L3 adds
+
+L3 turns the pipeline into data and a small function so you can see why
+a scripted list cannot lose a step, then asks what happens when the
+health check itself is unreliable.

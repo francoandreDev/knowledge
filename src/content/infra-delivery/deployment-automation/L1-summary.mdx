@@ -4,78 +4,121 @@ title: "L1 — Why do manual deploys eventually cause an outage?"
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="The deploy that worked fine for eight months">
+export const unit = {
+  track: "infra-delivery",
+  unitSlug: "deployment-automation",
+};
+
+<Scenario label="A four-line checklist, and the one line that got skipped">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>📅</span> <strong>Deploys 1–8</strong> — SSH in, `git pull`, `npm install`, restart — no incidents</div>
-      <div class="flex items-center gap-1.5"><span>💥</span> <strong>Deploy 9</strong> — same steps, but `npm install` gets skipped, service crashes on restart</div>
-      <div class="flex items-center gap-1.5"><span>⏱️</span> <strong>Result</strong> — 20 minutes of downtime spent diagnosing before anyone notices the missed step</div>
+      <div class="flex items-center gap-1.5"><span>📋</span> <strong>The checklist</strong> — pull the code, install packages, restart</div>
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Releases 1 to 8</strong> — every line done, no incident</div>
+      <div class="flex items-center gap-1.5"><span>⚡</span> <strong>Release 9</strong> — a different person, in a hurry, skips "install packages"</div>
+      <div class="flex items-center gap-1.5"><span>💥</span> <strong>Result</strong> — the service crashes on restart</div>
+    </div>
+    <div class="not-prose mt-3 rounded border border-rose-300 bg-rose-50 p-1.5 text-xs dark:border-rose-800 dark:bg-rose-950">
+      <p class="font-semibold text-rose-600 dark:text-rose-400">The checklist did not change</p>
+      only the person following it did
     </div>
   </Fragment>
 
-Every release, an engineer SSHes into the production server, runs
-`git pull`, then `npm install`, then restarts the service. This has
-worked without incident for eight releases in a row. On the ninth, a
-new dependency was added to the codebase, but the engineer running
-this deploy — someone else, in a hurry — skips `npm install` because
-it "usually doesn't matter." The service crashes on restart. **The
-steps didn't change. What did?**
+Priya's team releases their app by following a checklist on a wiki page.
+Someone logs into the live server, runs `git pull` to fetch the newest
+code, runs `npm install` to fetch the outside packages that code needs,
+and restarts the service. It has worked eight times in a row. On release
+9 a teammate, Tomas, is rushed. The new code needs a new package, but he
+skips `npm install` because "it usually doesn't matter." The service
+crashes the moment it restarts. **The steps on the page are identical to
+the last eight releases. So what actually changed?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Why a manual deploy checklist eventually skips a step",
-    "The vocabulary: deployment, idempotency, atomic switch, rollback",
-    "What a scripted pipeline enforces that a checklist can't",
+    "Why a checklist eventually skips a step",
+    "Repeatability, idempotency, atomic switch, rollback",
+    "What a script enforces that a page cannot",
   ]}
 />
 
+```mermaid
+flowchart LR
+    subgraph Manual["Manual checklist"]
+        direction TB
+        M1["Person reads the page"] --> M2["Person remembers each step"]
+        M2 --> M3["Person runs each step"]
+        M3 --> M4["Hope nothing was skipped"]
+    end
+    subgraph Scripted["Scripted pipeline"]
+        direction TB
+        S1["Someone triggers the run"] --> S2["Script runs every step, in order"]
+        S2 --> S3["Script checks the result"]
+    end
+```
+
 ## The shape of the problem
 
-- Read the scenario in plain language: **SSH** means "log into a
-  remote machine," the **production server** is the machine real users
-  are depending on, `git pull` brings down the newest code, and
-  `npm install` installs any outside packages the code now needs. A
-  **dependency** is one of those outside packages; **downtime** is the
-  period where users cannot use the service.
-- A deploy is really a short sequence of steps that all have to happen,
-  in order, every single time — but when a human executes that
-  sequence from memory or a wiki page, nothing enforces that the steps
-  actually happen, or happen in the right order.
-- The failure isn't really about `npm install` specifically — it's
-  that a manual process's correctness depends on the person running it
-  remembering and following every step exactly, and that assumption
-  quietly breaks the moment someone is rushed, new, or simply tired.
+A deploy is a short sequence of steps that must all happen, in order,
+every time. Some plain-language terms first: **SSH** means "log into a
+remote machine," the **production server** is the machine real users
+depend on, a **dependency** is an outside package the code needs, and
+**downtime** is any period when users cannot use the service.
+
+- A written checklist is a **suggestion**: nothing stops a step from being skipped, reordered, or run twice.
+- The failure is not about `npm install` in particular. The process is only as correct as the memory of whoever is running it that day.
+- Eight clean releases are not evidence the process is safe, only that nobody had a bad day yet.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="manual-failure"
+/>
+
+## Why does the risk grow as the checklist gets longer?
+
+Suppose, as an assumption for illustration, that each manual step has a
+2% chance of being missed or done wrong. A step that is skipped 2% of
+the time sounds harmless. But the chance that **all** steps go right is
+0.98 multiplied by itself once per step, so the chance of at least one
+miss climbs fast:
+
+| Steps in the checklist | Chance at least one step is missed (assumed 2% per step) |
+| ---------------------- | -------------------------------------------------------- |
+| 1                      | 2.0%                                                     |
+| 5                      | 9.6%                                                     |
+| 10                     | 18.3%                                                    |
+| 20                     | 33.2%                                                    |
+
+The 2% is an assumption, not a measurement. The point is the shape:
+the chance of a miss grows with every step added, and a script's steps
+do not get forgotten. The interactive demo on L2 lets you move the rate
+and the step count.
 
 ## Key terms
 
-- **Deployment** — the process of taking a new version of code from a
-  built artifact to a running, live traffic-serving service. A built
-  artifact is the packaged output the server can run; if that idea is
-  still fuzzy, the Docker unit's image/container distinction is the
-  closest nearby mental model.
-- **Idempotency** — running the same deploy steps twice (or replaying
-  them after a partial failure) produces the same correct end state,
-  rather than compounding errors or requiring a human to figure out what
-  already happened. Everyday version: pressing "save" twice should not
-  create two copies of the same profile.
-- **Repeatability** — the exact same sequence of steps runs the same
-  way every time, regardless of who triggers the deploy or how tired
-  they are — this is what a manual checklist can't actually guarantee.
-- **Atomic switch** — flipping traffic from the old version to the new
-  one in a single, instantaneous step (like swapping a symlink) so
-  there's never a moment where some requests hit a half-updated state.
-- **Rollback** — automatically reverting to the last known-good version
-  when a new deploy fails a health check, instead of leaving the
-  broken version live while someone investigates.
+| Term              | Plain-language meaning                                                                   |
+| ----------------- | ---------------------------------------------------------------------------------------- |
+| **Deployment**    | Taking a built version of the code and making it the one users reach                     |
+| **Repeatability** | The same steps run the same way every time, whoever starts them                          |
+| **Idempotency**   | Running the steps twice, or replaying after a failure, still ends in the same good state |
+| **Atomic switch** | Moving users from the old version to the new in one indivisible step                     |
+| **Rollback**      | Going back to the last known-good version when the new one fails its check               |
 
-## What this unit covers
+Idempotency has an everyday version: pressing "save" twice should not
+create two copies of the same profile.
 
-L2 works through what a scripted deploy pipeline actually looks like —
-the fixed step order, the health check, and the automatic rollback —
-and why each of those is specifically what a manual process can't
-reliably guarantee. L3 implements a real deploy-pipeline function and a
-real rollback-triggering function, to show precisely why the ninth
-deploy's `npm install` mistake couldn't happen to a scripted pipeline.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="deploy-vocabulary"
+/>
+
+## What the next levels add
+
+L2 walks through what a scripted pipeline looks like: the fixed step
+order, why the health check sits before the switch, and how rollback
+becomes automatic. L3 models the pipeline as data and as a small
+function, and explores what happens when the health check is flaky.

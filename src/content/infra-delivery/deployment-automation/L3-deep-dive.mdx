@@ -1,38 +1,44 @@
 ---
-title: "L3 — A real deploy pipeline function, and why a scripted step can't be skipped"
+title: "L3 — The pipeline as data, the gated deploy, and a flaky health check"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Deploy 9, reproduced as data">
+export const unit = {
+  track: "infra-delivery",
+  unitSlug: "deployment-automation",
+};
+
+<Scenario label="Two lists of steps, one of them missing a line">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>📝</span> <strong>Manual list</strong> — assembled from memory, `install-deps` left out</div>
-      <div class="flex items-center gap-1.5"><span>🤖</span> <strong>Scripted list</strong> — built by a function, `install-deps` always present</div>
+      <div class="flex items-center gap-1.5"><span>📝</span> <strong>Typed list</strong> — written from memory, "install" left out</div>
+      <div class="flex items-center gap-1.5"><span>🤖</span> <strong>Built list</strong> — produced by one function, "install" always present</div>
+      <div class="flex items-center gap-1.5"><span>🔍</span> <strong>Both</strong> — end up as plain lists of names</div>
     </div>
   </Fragment>
 
-**Before reading further, predict: if a manually-typed step list and a
-function-built step list both end up as "just an array of strings" at
-the end, what actually stops the manual one from being incomplete in a
-way the scripted one can't be?**
+Both lists end up as plain lists of step names. **If a list typed by hand
+and a list built by a function look identical on the page, what actually
+stops the typed one from being incomplete in a way the built one cannot
+be?** Predict an answer before reading on.
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "A deploy pipeline modeled as a function, not typed steps",
-    "A real health-check-gated rollback implementation",
-    "Extending a pass/fail health check into a retry policy",
+    "A pipeline built by one function",
+    "The gated deploy, step by step",
+    "A flaky check and the retry trade-off",
   ]}
 />
 
-## Modeling the pipeline as a function, not a list someone types
+## What stops a built list from losing a step?
 
 ```js
-// deploy.mjs
 function buildDeploySteps(currentRelease, newRelease) {
   return [
     `extract:${newRelease}`,
@@ -44,171 +50,127 @@ function buildDeploySteps(currentRelease, newRelease) {
 }
 ```
 
-This first function is intentionally modeling the repeatability problem
-from Deploy 9: can a required step like `install-deps` disappear because
-someone typed the list from memory? It is not yet modeling the full
-"prove healthy before switching traffic" gate from L2. We'll add that
-gate below so the simplified code and the production pipeline idea do
-not get mixed together.
+Here code is the clearest vehicle, because the point is a fact about
+where the list comes from. Every call returns the same five steps in the
+same order, whoever is tired or hurried. A typed list can silently lose
+`install-deps`; this one cannot, because no path through the function
+skips that line. The only way to change the list is to edit the
+function, which is a visible, reviewable change.
 
-The steps aren't typed out by whoever happens to be running the
-deploy that day — they're the return value of a function, which means
-every call to `buildDeploySteps` produces the exact same five steps in
-the exact same order, regardless of who's tired, new, or in a hurry.
+| Question                     | Typed from memory               | Built by `buildDeploySteps`       |
+| ---------------------------- | ------------------------------- | --------------------------------- |
+| Can a step vanish unnoticed? | Yes, nothing records the intent | No, the function is the record    |
+| How does the list change?    | Whoever types it that day       | A reviewed edit with a name on it |
+| Same steps on every run?     | Only if the person is careful   | Always                            |
 
-## Reproducing Deploy 9's mistake, side by side
+<Checkpoint question="Someone edits buildDeploySteps and accidentally deletes the install-deps line, and review misses it. Is the pipeline now exactly as unsafe as the manual checklist?">
 
-```js
-// The manual list from Deploy 9: install-deps quietly left out
-const manualSteps = [
-  "extract:v9",
-  "run-migrations:v9",
-  "switch-symlink:v8->v9",
-  "restart-service",
-];
-
-// The scripted list for the same release
-console.log(buildDeploySteps("v8", "v9"));
-// [ "extract:v9", "install-deps:v9", "run-migrations:v9",
-//   "switch-symlink:v8->v9", "restart-service" ]
-```
-
-`manualSteps` is missing `install-deps:v9` — the exact mistake from
-the opening scenario. Nothing about typing that array out by hand
-would have caught the omission; there's no step that checks "did I
-forget one?" `buildDeploySteps` can't produce this array missing a
-step, because there's no path through the function that skips the
-`install-deps` line — the only way to change what it returns is to
-change the function itself, which is a deliberate, reviewable edit,
-not a slip made at 5pm on a Friday.
-
-<Checkpoint question="Suppose someone edits buildDeploySteps to accidentally remove the install-deps line, and the change passes code review because nobody notices. Is the resulting deploy pipeline now just as unsafe as Deploy 9's manual checklist?">
-
-Not in the same way, even though the immediate symptom — a missing
-`install-deps` step — looks identical. Deploy 9's failure mode was that
-the same steps could silently vary from one run to the next depending on
-who typed them and how careful they were that day; nothing recorded what
-"should" have run, so the omission was invisible until the crash.
-`buildDeploySteps` doesn't have that failure mode: whatever it returns is
-now returned on every single call, consistently, and the change that
-removed the line is a diffable, reviewable edit sitting in version
-control with a name attached. The bug is now a normal code-review miss —
-still worth catching, but a fundamentally different (and far more
-tractable) problem than "the correctness of this deploy depends on
-someone's memory being perfect under time pressure."
+Not in the same way, even though the symptom looks identical. The manual
+failure was that the steps could silently differ from one run to the
+next, and nothing recorded what should have run. After the bad edit the
+list is wrong, but it is wrong the same way on every run, and the change
+that caused it sits in version control with an author and a date. That
+is an ordinary code-review miss: still worth catching, but far more
+tractable than depending on perfect memory under time pressure.
 
 </Checkpoint>
 
-## A real health check and rollback
+## How does a gated deploy decide whether to switch?
 
-```js
-// runDeploy.mjs
-function runDeploy(steps, healthCheckFn) {
-  const executed = [...steps];
-  const healthy = healthCheckFn();
-  if (!healthy) {
-    executed.push("rollback");
-    return { success: false, executed };
-  }
-  return { success: true, executed };
-}
+L2 put the health check before the switch. Splitting the steps into
+"preparation" and "the one step that touches user traffic" makes the
+rule explicit: the check runs after preparation, and the switch happens
+only if it passes.
 
-console.log(runDeploy(["a", "b"], () => true));
-// { success: true, executed: ["a", "b"] }
-
-console.log(runDeploy(["a", "b"], () => false));
-// { success: false, executed: ["a", "b", "rollback"] }
+```mermaid
+flowchart TD
+    P["Preparation: extract, install, migrate"] --> H{"Health check passes?"}
+    H -- "yes" --> S["switch pointer to new release"]
+    S --> R["restart service"]
+    H -- "no" --> K["keep the old release live"]
+    K --> F["report failure, users never moved"]
 ```
 
-`runDeploy` never asks a human whether the deploy looked okay — the
-`healthCheckFn` result decides, and a failing result appends
-`"rollback"` to what actually ran, automatically, as part of the same
-function call that ran the deploy. There's no separate "someone
-notices and re-runs the old steps" phase.
+On a failed check the deploy never points users at the new release, so
+"rollback" here means "never switched." A real system may implement the
+check with a temporary port, a preview route, or a separate process, but
+the rule is the same: test before traffic depends on it.
 
-## Modeling the pre-switch gate explicitly
+<Checkpoint question="The gate calls the health check exactly once. If that one call fails on a release that is actually fine because the service had not finished starting, what happens, and is that right?">
 
-To match the L2 pipeline more closely, split the deploy into
-"preparation steps" and the one step that changes user traffic. The
-health check runs after preparation but before `switch-symlink`; if the
-candidate is unhealthy, users remain on the old release:
-
-```js
-function runGatedDeploy(currentRelease, newRelease, healthCheckFn) {
-  const executed = [
-    `extract:${newRelease}`,
-    `install-deps:${newRelease}`,
-    `run-migrations:${newRelease}`,
-    `health-check:${newRelease}`,
-  ];
-
-  if (!healthCheckFn()) {
-    executed.push(`keep-live:${currentRelease}`);
-    return { success: false, executed };
-  }
-
-  executed.push(`switch-symlink:${currentRelease}->${newRelease}`);
-  executed.push("restart-service");
-  return { success: true, executed };
-}
-```
-
-Now the rollback idea is not "users saw the broken version and then we
-recover." It is "the new version failed the candidate check, so the
-pipeline never points user traffic at it." A real system may implement
-that candidate check with a temporary port, preview route, or separate
-process, but the rule is the same: test before traffic depends on it.
-
-<Checkpoint question="runGatedDeploy calls healthCheckFn() exactly once. If that single call happens to return false for a deploy that is actually fine — say the service just hadn't finished starting up yet — what does the function do, and is that the right behavior?">
-
-It appends `keep-live:${currentRelease}` and returns `{ success: false, ... }`
-— in other words, it treats a single failed check as decisive and never
-switches traffic to the new release, even though the new release was
-never actually broken. That's the correct behavior for the specific
-failure `runGatedDeploy` is built to prevent — routing traffic to a
-release that's genuinely unhealthy — but it's the wrong behavior for a
-release that's healthy and just slow to warm up, since it rolls back a
-deploy that didn't need one. A single pass/fail call can't tell those two
-cases apart on its own; distinguishing them needs the health check itself
-to account for warm-up time, which is exactly the gap the retry policy
-below closes.
+The gate treats the single failure as decisive: it keeps the old release
+live and reports failure, even though the new release was never broken.
+That is the right behavior for the case the gate exists to catch, a
+genuinely unhealthy release. It is the wrong behavior for a healthy
+release that is slow to warm up, since it abandons a deploy that needed
+no abandoning. One pass-or-fail call cannot tell those two apart, which
+is the gap the next section addresses.
 
 </Checkpoint>
 
-## Extend it: what if the health check is flaky, not just pass/fail?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="gated-deploy"
+/>
 
-**Everything above treats the health check as a single yes/no call.
-What if a freshly-restarted service takes a moment to warm up, so the
-very first check sometimes fails even on a perfectly healthy deploy —
-should one failed check really trigger a full rollback?** Not
-necessarily — a more realistic health check retries a few times before
-giving up:
+## What if the health check is flaky, not just pass or fail?
 
-```js
-function retryHealthCheck(healthCheckFn, attempts) {
-  for (let i = 0; i < attempts; i++) {
-    if (healthCheckFn()) return true;
-  }
-  return false;
-}
-```
+**A freshly started service may need a few moments, so its first checks
+fail even on a good release. Should one failure trigger giving up?** A
+more realistic check retries a few times before deciding. Assume, for
+illustration, that a healthy release fails its first two checks and
+passes the third, and that checks are 10 seconds apart:
 
-Try modeling a health check that fails twice (still warming up) and
-then succeeds — `retryHealthCheck(flakyCheck, 5)` should return `true`
-after 3 calls, while `retryHealthCheck(flakyCheck, 2)` should give up
-and return `false` after only 2. **What would change if the warm-up
-took five checks instead of three — at what `attempts` value does the
-pipeline start rolling back a deploy that was actually fine?** This is
-the same trade-off every retry policy makes: too few attempts and you
-roll back healthy deploys; too many and a genuinely broken deploy stays
-live longer before rollback kicks in.
+| Attempts allowed | Result for a healthy-but-slow release | Result for a truly broken release | Wait before giving up |
+| ---------------- | ------------------------------------- | --------------------------------- | --------------------- |
+| 1                | Rolled back by mistake                | Caught                            | 10 s                  |
+| 2                | Rolled back by mistake                | Caught                            | 20 s                  |
+| 3                | Passes on the third check             | Caught                            | 30 s                  |
+| 5                | Passes on the third check             | Caught                            | 50 s                  |
+
+The first two rows reject a good deploy. Rows three and four pass it,
+and the cost of extra attempts shows in the last column: a release that
+is truly broken stays a candidate longer before the pipeline gives up.
+Too few attempts roll back healthy deploys. Too many delay the verdict
+on broken ones.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="retry-tradeoff"
+/>
+
+## Writing the pipeline's checks yourself
+
+Four small checks recur in a pipeline like this one: which required steps
+did not run, did the ones that ran keep their order, how long to keep
+retrying, and which branch the gate takes. They are short enough to write
+in a few lines each, and writing them is where the edge cases show up: an
+empty list of required steps, extra steps that are allowed, and stopping
+at the first passing check instead of calling it every time.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="pipeline-code"
+/>
+
+## This is a case, not the whole territory
+
+Everything above used one release, one check, and a fixed 10-second gap.
+**What would change if the warm-up took five checks instead of three? At
+what attempt count does the pipeline start rolling back a deploy that
+was actually fine? And what if the check were run against a database
+migration rather than a web server: could a retry hide a real problem?**
+The worked example gives you a shape; your own system decides the numbers.
 
 ## Failure modes
 
-| Failure mode                                                        | What it gets wrong                                                                          |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Treating a wiki-page checklist as equivalent to a script            | A checklist documents the steps; it doesn't enforce that they all ran, in order, every time |
-| Running the health check after the atomic switch                    | Traffic already reached the new release before anyone found out it was broken               |
-| Overwriting release files in place instead of switching a pointer   | Creates a window where some requests read old files and some read new ones                  |
-| Assuming "it worked the last eight times" means the process is safe | A manual process's safety depends on the person running it, not on the process itself       |
-| Giving a flaky health check zero retries                            | A slow-starting but healthy deploy gets rolled back for no real reason                      |
+| Failure mode                                      | What it gets wrong                                            |
+| ------------------------------------------------- | ------------------------------------------------------------- |
+| Treating a wiki checklist as equal to a script    | It documents the steps but does not enforce that they all ran |
+| Running the health check after the switch         | Traffic already reached the new release before anyone knew    |
+| Overwriting release files in place                | Some requests read old files and some read new ones           |
+| Assuming "it worked eight times" means it is safe | Safety depends on the person running it, not on the process   |
+| Giving a flaky check zero retries                 | A slow but healthy deploy is abandoned for no real reason     |
