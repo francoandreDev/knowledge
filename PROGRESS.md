@@ -3499,3 +3499,16 @@ Migrated the last 4 `infra-delivery/` units via 4 parallel content-only subagent
 Practice items have 3 choices; exam items have 4. Length bias, correct strictly longest / shortest: `config-management` 17% / 26%, `infra-observability` 30% / 18%, `cost-awareness` 25% / 15% (practice longest 34%, at the ceiling), `staff-level-release-engineering-strategy` 27% / 29%.
 
 `infra-delivery/` is complete: 12 of 12. Total migrated: 101 of 246. Next track in ROADMAP order: `career-craft`.
+
+## 2026-10-31 — `career-craft/` batch 1: `leveling-expectations`, `asking-feedback`, `mentoring-fundamentals`, `structured-interviewing`
+
+Started the `career-craft/` track (13 units, soft-skill: all-quiz, no code topics) with 4 parallel content-only subagents. `typecheck` 0 errors, `build` 273 pages; live click-through (iframe per unit) passed all 30 `DomainCheck` topics, 0 Mermaid errors, 0 KaTeX errors, "Mark as done" enabled on all four.
+
+- **`leveling-expectations`**: 7 topics, 84 items. Climbing-gym opening; fixed a "3 of 4 wide" bar that contradicted its own table; dropped an invented chart and invented story durations.
+- **`asking-feedback`**: 9 topics, 102 items. Corrected "19 words" to 21; chart computed from the demo's formula (1.1 / 2.0 / 3.0 at 20 / 60 / 100% safety).
+- **`mentoring-fundamentals`**: 6 topics, 72 items. Bike-teaching opening; "junior" → "newer" in the L1 title; break-even at 5 repeats checked in Node.
+- **`structured-interviewing`**: 8 topics, 88 items. Matches the demo (rubric 3 vs impression 5, tie at 50%); L2 has a negative-axis `xychart-beta` that rendered without error.
+
+Length bias, correct strictly longest / shortest: 12% / 17%, 21% / 26%, 18% / 22%, 26% / 32%.
+
+`career-craft/` is at 4 of 13. Total migrated: 105 of 246. Batch 2 (`goal-setting`, `impact-scope-over-correctness`, `documentation-career-tool`, `calibration-processes`) was launched but is not yet reviewed or committed. Remaining after that: `ic-em-tracks`, `peer-mentoring`, `staff-scope`, `market-research`, `negotiation-tactics`.
