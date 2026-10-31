@@ -4,87 +4,93 @@ title: 'L1 — Why did a "trusted" open-source dependency compromise production?
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario>
+export const unit = {
+  track: "security",
+  unitSlug: "supply-chain-security",
+};
+
+<Scenario label="You approved the sauce. Who approved the spice inside it?">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>📦</span> <strong>`case-fold`</strong> — a 6-year-old text-formatting utility, 9M weekly downloads, one solo maintainer</div>
-      <div class="flex items-center gap-1.5"><span>😮‍💨</span> <strong>Month 0</strong> — maintainer, burned out, hands off publish access to a "helpful" volunteer who'd been filing PRs for weeks</div>
-      <div class="flex items-center gap-1.5"><span>📤</span> <strong>Day 3</strong> — new maintainer publishes v2.4.1, a routine-looking patch bump, with one added `postinstall` script</div>
-      <div class="flex items-center gap-1.5"><span>🤖</span> <strong>Day 3, every CI run</strong> — `npm install` executes the script automatically, no approval needed — it scrapes `process.env` (CI secrets, npm tokens, cloud keys) and POSTs them out</div>
-      <div class="flex items-center gap-1.5"><span>🔎</span> <strong>Day 14</strong> — an unrelated security audit notices the outbound network call</div>
+      <div class="flex items-center gap-1.5"><span>☕</span> <strong>The café</strong> — checks one supplier, the sauce maker, and approves the sauce</div>
+      <div class="flex items-center gap-1.5"><span>🥫</span> <strong>The sauce maker</strong> — buys a spice from a farm the café has never heard of</div>
+      <div class="flex items-center gap-1.5"><span>🌶️</span> <strong>The spice farm</strong> — changes owner; the next batch is swapped, the label stays the same</div>
+      <div class="flex items-center gap-1.5"><span>📋</span> <strong>The café's checklist</strong> — still says "sauce: approved"</div>
     </div>
-    <div class="not-prose mt-3 rounded border border-rose-300 bg-rose-50 p-1.5 text-xs dark:border-rose-800 dark:bg-rose-950">
-      <p class="font-semibold text-rose-600 dark:text-rose-400">Nobody at Northfield Ledger ever chose `case-fold`</p>
-      it was pulled in three layers deep, as a dependency of a dependency of a formatting library — nobody reviewed it, because nobody knew it was there
+    <div class="not-prose mt-3 flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300">
+      <div>
+        <div class="flex justify-between"><span>Names in the chain the café actually reviewed</span><span>1 of 3</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-amber-500 animate-fill-bar" style="--target-width: 33%"></div></div>
+      </div>
     </div>
   </Fragment>
 
-Priya, a platform engineer at Northfield Ledger (a small invoicing SaaS),
-gets a Slack ping from security: CI has been quietly leaking AWS
-credentials for eleven days. Nobody touched `package.json`. Nobody
-approved a new dependency. `npm audit` was clean the whole time — no
-known CVE was ever published for the package involved, because the
-package itself wasn't broken. It was `case-fold`, a tiny date-formatting
-helper Northfield's team has never heard of, pulled in as a dependency of
-a dependency of a library they _did_ choose deliberately three years ago.
-**If nobody added it and nothing was "vulnerable," how did it end up
-running arbitrary code inside every CI job?**
+A café buys a ready-made sauce from a supplier it checked carefully: clean
+kitchen, good references. What the café never saw is that the sauce maker
+buys one spice from a small farm two steps away. One day the farm is sold,
+and the new owner swaps the spice in the next batch. The jar looks the same,
+the label is the same, the supplier is the same.
+**The café vetted exactly one name in that chain. So what did its approval
+actually cover, and who is responsible for the other two?**
 
 </Scenario>
 
-The honest answer is: `npm install` (or `pip install`, or `docker pull`)
-doesn't just fetch code you reviewed — it fetches code that code trusts,
-recursively, and runs a lot of it automatically. That transitive,
-automatic trust is the actual attack surface this unit is about.
+Software has the same shape. When you install a library, you also install
+everything that library depends on, and you run some of it automatically.
+Your approval covers the name you typed, not the names behind it.
 
 <LevelIntro
   items={[
-    "The trust boundary of code you didn't write, and never chose directly",
-    "How a package gets compromised without a bug in your own code",
-    "The defense stack: lockfiles, SBOM, scanning, and pinning",
+    "Trust you never chose, inherited through dependencies",
+    "Four ways a trusted package turns hostile",
+    "The defence stack and what each piece covers",
   ]}
 />
 
-## What "supply chain" means here
+## Where does the kitchen story land in a real build?
 
-Not the general "third-party risk" you'd find in a vendor-management
-policy — specifically the software you pull into a build without
-individually reviewing it:
+**If the café is your company, who are the sauce maker and the spice farm?**
+Meet **Northfield Ledger**, an invented invoicing app. Its team chose a PDF
+library, `ledger-pdf`, on purpose. That library depends on a small helper,
+`case-fold`, which the team has never heard of. (Both names are made up.)
 
-| Layer                     | Example                                                          | Who actually picked it             |
-| ------------------------- | ---------------------------------------------------------------- | ---------------------------------- |
-| Direct dependency         | `express`, `pandas`, a base Docker image                         | Your team, deliberately            |
-| Transitive dependency     | Whatever `express` itself depends on, and what _that_ depends on | Nobody at your company, ever       |
-| CI plugin / GitHub Action | A marketplace action pulled into a workflow file                 | Whoever wrote the YAML, often fast |
-| Build tooling             | A bundler plugin, a linter's transitive deps                     | Rarely reviewed at all             |
+| Kitchen                 | Software                                     | Who picked it                 |
+| ----------------------- | -------------------------------------------- | ----------------------------- |
+| The sauce maker         | `ledger-pdf`, a direct dependency            | Northfield's team, on purpose |
+| The spice farm          | `case-fold`, a transitive dependency         | Nobody at Northfield          |
+| The jar looks unchanged | A routine patch version number               | The new publisher             |
+| The checklist says fine | A scanner with no known-problem entry for it | Nobody; it is just silent     |
 
-A typical modern app has a handful of direct dependencies and hundreds to
-thousands of transitive ones. You reviewed the handful. Nobody reviewed
-the rest — and every one of them can run code during `install` or at
-runtime.
+The step that makes software worse than the kitchen: a package can run code
+**by itself at install time**, through a `postinstall` script. In the story
+below, that is the moment the swapped spice does its damage.
 
-## The four attack patterns worth naming
+```mermaid
+flowchart LR
+    A["Northfield's package.json<br/>(reviewed)"] --> B["ledger-pdf<br/>(chosen on purpose)"]
+    B --> C["case-fold<br/>(never seen by anyone)"]
+    C -->|"runs a postinstall script<br/>during every CI install"| D["CI secrets<br/>(cloud keys, tokens)"]
+    style C fill:#fecaca,stroke:#dc2626
+```
 
-These aren't hypothetical categories — each is a documented, repeated
-pattern in real ecosystems (npm, PyPI, Docker Hub, CI marketplaces):
+Assume the hostile `case-fold` version sat in Northfield's lockfile for 14
+days before an unrelated audit noticed an odd outbound network call. Assume
+(a made-up figure for this unit) that 40 CI jobs per day each ran an install.
+That is 40 × 14 = 560 runs of the hostile script, each one a fresh chance to
+send a secret out. L2 lets you drag both numbers.
 
-- **Maintainer takeover** — a maintainer, burned out or paid off, hands
-  over publish access (or credentials leak) to someone who ships a
-  malicious version under the package's existing trusted name and
-  install history. This is Priya's `case-fold` scenario.
-- **Typosquatting** — publishing `reqeusts` or `python-dateutil-2` hoping
-  for a fat-fingered `pip install`, banking on the real package's
-  reputation by proximity of name.
-- **Dependency confusion** — a company has an internal package named
-  `acme-auth-lib` on a private registry; an attacker publishes a
-  same-named package on the _public_ registry with a higher version
-  number, and a misconfigured resolver pulls the public (malicious) one
-  instead of the internal one.
-- **Compromised build/CI pipeline** — the attacker doesn't touch the
-  package's source at all; they compromise the _build system_ that
-  produces the published artifact, so the code you can read on GitHub is
-  clean but the binary/package that gets published isn't.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="trust-boundary"
+/>
+
+## How does a trusted package turn hostile?
+
+**If nobody wrote a bug, what changed?** The package, or the way you reach
+it. Four patterns recur across ecosystems:
 
 <div class="not-prose my-3 grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-4">
   <div class="rounded-lg border border-slate-200 p-2 dark:border-slate-700">
@@ -92,45 +98,75 @@ pattern in real ecosystems (npm, PyPI, Docker Hub, CI marketplaces):
     <p class="mt-1 font-medium text-slate-700 dark:text-slate-200">
       Maintainer takeover
     </p>
+    <p class="mt-0.5 text-slate-500 dark:text-slate-400">
+      the real name, a new hand
+    </p>
   </div>
   <div class="rounded-lg border border-slate-200 p-2 dark:border-slate-700">
     <div class="text-xl">🔤</div>
     <p class="mt-1 font-medium text-slate-700 dark:text-slate-200">
       Typosquatting
     </p>
+    <p class="mt-0.5 text-slate-500 dark:text-slate-400">a look-alike name</p>
   </div>
   <div class="rounded-lg border border-slate-200 p-2 dark:border-slate-700">
     <div class="text-xl">🌐</div>
     <p class="mt-1 font-medium text-slate-700 dark:text-slate-200">
       Dependency confusion
     </p>
+    <p class="mt-0.5 text-slate-500 dark:text-slate-400">
+      the wrong registry wins
+    </p>
   </div>
   <div class="rounded-lg border border-slate-200 p-2 dark:border-slate-700">
     <div class="text-xl">🏭</div>
     <p class="mt-1 font-medium text-slate-700 dark:text-slate-200">
-      Compromised CI/build
+      Compromised build
+    </p>
+    <p class="mt-0.5 text-slate-500 dark:text-slate-400">
+      clean source, dirty output
     </p>
   </div>
 </div>
 
-## The defense stack, at a glance
+| Pattern              | What the attacker controls                           | Example with invented names                                       |
+| -------------------- | ---------------------------------------------------- | ----------------------------------------------------------------- |
+| Maintainer takeover  | Publish rights to the real package                   | A volunteer is handed `case-fold` and ships a new patch           |
+| Typosquatting        | A new package whose name looks like a popular one    | `csae-fold` published, hoping for a typing slip                   |
+| Dependency confusion | A public package with the same name as a private one | Public `acme-auth-lib` at a higher version beats the internal one |
+| Compromised build    | The machine that builds the published artifact       | The repository is clean, the uploaded package is not              |
 
-Four ideas that show up together, each closing a different gap:
+Priya's Northfield incident is the first row. The fix for each row is
+different, which is why one tool is never the answer.
 
-| Defense                           | What it actually protects against                                             |
-| --------------------------------- | ----------------------------------------------------------------------------- |
-| Lockfile + integrity hashes       | A registry silently serving different bytes than what you installed last time |
-| SBOM (Software Bill of Materials) | Not knowing what's actually in your production artifact, at all               |
-| Dependency / CVE scanning         | A package version with a _known_, already-disclosed vulnerability             |
-| Pinning + version-bump review     | A trusted package's _next_ release doing something new and malicious          |
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="attack-patterns"
+/>
 
-Notice what none of these do alone: a lockfile pins what you already
-have, but doesn't stop you from _approving_ a malicious upgrade; scanning
-catches known CVEs, but `case-fold` v2.4.1 had no CVE — it was brand new.
-The stack works because each piece covers a gap the others leave open,
-not because any single tool is "the fix."
+## What does the defence stack look like at a glance?
 
-Compare this to `security/secrets-management`: that unit is about _your
-own_ credentials leaking from _your own_ code. This unit is about
-someone else's code — code you never wrote and often never even directly
-chose — being the thing that leaks them.
+Four ideas, each closing a gap the others leave:
+
+| Defence                   | Protects against                                        | Blind spot                                     |
+| ------------------------- | ------------------------------------------------------- | ---------------------------------------------- |
+| Lockfile + integrity hash | Different bytes served under a version you already have | Locks in a bad version just as firmly          |
+| SBOM                      | Not knowing what is inside what you shipped             | Lists contents; does not judge them            |
+| Dependency scanning       | Versions with a known, published problem                | Silent about a brand-new hostile release       |
+| Pinning + bump review     | A new release changing behaviour unnoticed              | Only works if a person actually reads the diff |
+
+L2 explains why each blind spot exists. L3 puts the four together in one
+worked incident.
+
+## Key terms
+
+- **Direct dependency** — a package you chose and listed yourself.
+- **Transitive dependency** — a package pulled in by something you chose.
+- **Lockfile** — a record of the exact versions (and content hashes) an install resolved to.
+- **SBOM** — a machine-readable list of every component inside a built artifact.
+- **`postinstall` script** — code a package asks the installer to run automatically.
+
+Compare with `security/secrets-management`: that unit is about your own
+credentials leaking from your own code. This one is about someone else's code
+becoming the thing that leaks them.
