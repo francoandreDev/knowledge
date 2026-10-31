@@ -1,137 +1,176 @@
 ---
-title: 'L2 — Where drift comes from, and what "same artifact everywhere" actually means'
+title: 'L2 — Where drift comes from, and what "one artifact everywhere" changes'
 ---
 
-import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Three environments, set up independently">
-  <Fragment slot="facts">
-    <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>💻</span> Laptop installed by hand, 8 months ago</div>
-      <div class="flex items-center gap-1.5"><span>🤖</span> CI image last rebuilt on its own schedule</div>
-      <div class="flex items-center gap-1.5"><span>☁️</span> Prod base image patched by a different team</div>
-    </div>
-    <div class="not-prose mt-3 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs dark:border-amber-800 dark:bg-amber-950">
-      Nobody configured a divergence on purpose — three independent setup
-      histories just produced three different environments running the same
-      source code.
-    </div>
+export const unit = {
+  track: "infra-delivery",
+  unitSlug: "environment-parity",
+};
 
-  </Fragment>
-
-A new hire spends a full afternoon debugging a deploy that fails only in
-CI. The code runs fine locally. Nobody touched the CI config recently.
-Eventually it turns out CI's Node version is two minors behind the
-laptop's — nobody decided that, it's just what each environment happened
-to end up running, installed at different times by different processes.
-
-**If nobody configured this divergence on purpose, where does it actually
-come from — and what would it take to make it structurally impossible
-instead of something you have to notice and fix each time?**
-
-</Scenario>
+L1 ended on a claim: the cake went wrong because of the kitchen, not the
+recipe, and a container ships the kitchen along with the recipe. L2 asks
+how the kitchens ended up different in the first place, and why shipping
+one sealed package changes the picture instead of just moving the problem.
 
 <LevelIntro
   items={[
-    "Why independent setups drift without anyone deciding to",
-    "What 'one built artifact, run everywhere' actually changes",
-    "The concrete categories of drift, and how containers close them",
+    "How independent setups drift apart",
+    "Resolve once, run everywhere",
+    "Drift categories and their symptoms",
   ]}
 />
 
-## Without parity: three environments, three quiet divergences
+## Why do three machines drift without anyone deciding to?
+
+**If nobody configured a difference on purpose, where did it come from?**
+From time. Each environment is installed once and then patched on its own
+schedule by its own process:
 
 ```mermaid
 flowchart TD
-    subgraph Laptop["Developer laptop"]
-        L1["Node 20.1, macOS, /usr/local libs"]
-    end
-    subgraph CI["CI runner"]
-        C1["Node 18.9, Ubuntu, different libs"]
-    end
-    subgraph Prod["Production"]
-        P1["Node 20.4, Amazon Linux, different libs again"]
-    end
-    Code["Same source code"] --> Laptop
-    Code --> CI
-    Code --> Prod
+    Code["Same source code"] --> Laptop["Laptop<br/>installed by hand, months ago"]
+    Code --> CI["CI runner<br/>image rebuilt on its own schedule"]
+    Code --> Prod["Production<br/>base image patched by another team"]
+    Laptop --> D1["Node 20.11"]
+    CI --> D2["Node 18.9"]
+    Prod --> D3["Node 20.4"]
 ```
 
-Nothing here is a mistake in the traditional sense — nobody configured this deliberately. Each environment was set up at a different time, by a different process (a developer's personal install history, a CI image's release schedule, a production base image's own patch cadence), and all three drifted independently. The code is identical; the environment executing it is not, and the bug that only reproduces on one of the three is a direct consequence of that gap — not a mystery, once you know to look there.
+The chance that something has drifted grows with the number of places.
+Assume, purely for illustration, that each independently managed
+environment has a 15 percent chance of having quietly drifted from the
+reference one, and that they drift independently. Then the chance that at
+least one of them has is $$1 - 0.85^n$$:
 
-## With parity: one artifact, three places it runs unchanged
+| Environments (n) | Chance at least one has drifted (assumed 15% each) |
+| ---------------- | -------------------------------------------------- |
+| 1                | 15.0%                                              |
+| 3                | 38.6%                                              |
+| 6                | 62.3%                                              |
+| 10               | 80.3%                                              |
+
+The 15 percent is an assumption chosen to show the shape, not a measured
+rate. The shape is the lesson: adding a staging tier or a second CI runner
+raises the risk much faster than it feels like it should. The demo on this
+page lets you move both numbers.
+
+**What does drift look like when it bites?** Each category has a typical
+symptom, and none of them show up in a code diff:
+
+| Category              | Typical symptom                                          |
+| --------------------- | -------------------------------------------------------- |
+| Runtime version       | Code using a newer API works locally, fails on CI        |
+| Settings (TZ, locale) | Dates or sorting differ on one machine only              |
+| Installed tools       | A build step behaves differently depending on who ran it |
+| Leftover state        | "Connection refused" because a port is already taken     |
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="drift-sources"
+/>
+
+## What changes when you build once and run everywhere?
+
+**Why does a container close the gap instead of moving it somewhere else?**
+Because it changes _when_ dependencies get resolved: from "every time, on
+every machine" to "once, at build time".
 
 ```mermaid
-flowchart TD
-    Code["Same source code"] --> Build["Build once: container image\n(app + exact runtime + exact deps)"]
-    Build --> RunL["Runs on laptop"]
-    Build --> RunC["Runs in CI"]
-    Build --> RunP["Runs in production"]
+flowchart LR
+    subgraph Before["Without a built artifact"]
+        direction TB
+        S["Setup instructions"] --> A1["Install on laptop"]
+        S --> A2["Install on CI"]
+        S --> A3["Install on prod"]
+    end
+    subgraph After["With a built artifact"]
+        direction TB
+        B["Build once:<br/>app plus exact dependencies"] --> I["One image"]
+        I --> R1["Run on laptop"]
+        I --> R2["Run on CI"]
+        I --> R3["Run on prod"]
+    end
 ```
 
-The shift is subtle but total: instead of three environments independently trying to match a specification, there's **one built artifact** that gets _run_ in three places — nothing about it is re-installed or re-resolved per environment, so there's nothing left to drift.
+On the left, installation happens three times, against whatever each
+machine and the package registry look like that day. On the right, it
+happens once, and the three places only _run_ the result. There is
+nothing left to re-resolve, so nothing left to drift.
 
-<Checkpoint question="A teammate suggests: 'let's just write a really thorough setup script and have everyone run it on their laptop, in CI, and on the prod host — same script, same result, right?' Does that achieve parity the way the built-artifact diagram above does?">
+<Checkpoint question="A teammate suggests one very thorough setup script that everyone runs on their laptop, in CI, and on the production host. Same script, so same result. Does that give the parity shown on the right of the diagram?">
 
-No. A setup script still gets _run_ independently on each machine, at different times, against whatever that machine's starting state and package registry happen to look like that day — it's the same "three environments independently trying to match a specification" pattern as before, just with the specification written down instead of tribal knowledge. It can reduce drift, but it can't eliminate it the way a single built artifact can, because installation/resolution still happens three separate times instead of once. The defining property of the parity diagram above isn't "everyone follows the same instructions" — it's that dependency resolution happens exactly once, before any environment runs anything.
+No. A script still runs three separate times, on three machines, each
+starting from its own leftover state and seeing its own version of the
+package registry on that day. It can reduce drift, but it keeps the exact
+shape that causes drift: installation repeated per environment. What
+defines the right-hand diagram is not that everyone follows the same
+instructions. It is that dependency resolution happens once, before any
+environment runs anything.
 
 </Checkpoint>
 
-## What actually counts as "drift," concretely?
+**Does that mean every environment must behave identically in every
+respect?** No. The image is identical everywhere. What differs on purpose,
+such as a database address or a feature flag, is passed in when the
+container starts.
 
-| Category                | Example                                                            | Why it's invisible until it breaks                              |
-| ----------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------- |
-| Runtime version         | Node 18 on CI, Node 20 on your laptop                              | Code using a Node-20-only API works locally, fails in CI        |
-| System libraries        | A locally-installed image library with different default behavior  | Only surfaces on inputs that hit the behavioral difference      |
-| Environment variables   | `TZ` set locally but not in prod, so date math differs             | Passes every test that doesn't cross a timezone boundary        |
-| Ambient state           | A port that happens to be free on your machine, occupied elsewhere | "Just works" locally, connection-refused errors elsewhere       |
-| Installed tool versions | A globally installed CLI tool at a different version per machine   | A build step behaves differently depending on who/where runs it |
+| Part             | Same everywhere? | Where it comes from                 |
+| ---------------- | ---------------- | ----------------------------------- |
+| OS libraries     | Yes              | Baked into the image at build time  |
+| Language runtime | Yes              | Baked into the image at build time  |
+| Dependencies     | Yes              | Baked into the image at build time  |
+| Database address | No, by design    | Passed in when the container starts |
+| Feature flags    | No, by design    | Passed in when the container starts |
 
-**Why does every row in that table share the same shape — "invisible until it breaks"?** Because none of these are declared anywhere the code review process looks. A diff shows what changed in the source; it says nothing about what the source is implicitly relying on already being true on the machine that runs it.
+The difference between the two groups is visibility. A start-up setting is
+written down where the container is launched and can be reviewed. Drift is
+the same kind of difference arriving silently.
 
-## The container's core mechanism
+<Checkpoint question="Each environment pins the same image but passes a different timezone setting when it starts the container. Is that the drift problem again?">
 
-Why does packaging the app into a container actually close this gap, rather than just moving it somewhere else? Because it changes _when_ dependency resolution happens — from "every time, on every machine" to "once, at build time":
-
-```
-function build_image(app_source, dependency_manifest, base_os_image):
-    # Every dependency is resolved and baked in ONCE, at build time,
-    # against a pinned base image — not re-resolved per environment.
-    image = base_os_image.copy()
-    image.install(dependency_manifest)   # exact versions, pinned
-    image.add(app_source)
-    return image  # a single, immutable, content-addressed artifact
-
-function run(image):
-    # No installation, no version resolution happens here — the
-    # environment is already fully baked into `image` from build time.
-    return start_process(image, isolated=True)
-```
-
-The crucial property: `build_image` runs exactly once per release, and `run` is executed identically on a laptop, in CI, and in production — none of them re-run `install`, so none of them can independently drift from what was actually tested.
-
-<Checkpoint question="Suppose a team pins their container's base image and dependency manifest exactly as shown, but each environment still passes a different set of environment variables into `docker run` (a different TZ, a different feature flag). Does that break the parity guarantee described above?">
-
-No — and the distinction matters. Parity, as described here, is about the _artifact_ being identical everywhere: the OS libraries, the runtime, the dependency tree baked in at build time by `build_image`. What's explicitly passed in at `run` time — environment variables, mounted config — is deliberate, visible per-environment configuration, not accidental drift, because it's declared at the point where the environment is started, not silently inherited from whatever state a machine happened to accumulate. The difference is between "the same thing behaves differently because someone told it to" (fine, expected, reviewable) and "the same thing behaves differently because nobody noticed the machines diverged" (the actual problem parity solves).
+Not by itself. The artifact is identical, and the timezone is a declared
+input at the point the container starts, so a reviewer can see it and ask
+whether the difference is intended. Drift is a difference nobody chose and
+nobody can see. A visible, deliberate difference is configuration. (L3
+shows a case where even a visible setting is a bad thing for code to lean
+on silently.)
 
 </Checkpoint>
 
-## Does this mean containers and VMs solve the same problem the same way?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="build-once"
+/>
 
-Not quite — they solve _isolation_ differently, even though both can deliver parity:
+## Do containers and VMs solve the same problem?
+
+They deliver the same parity guarantee by different means. A VM carries a
+whole guest operating system; a container shares the host's kernel.
 
 ```mermaid
 flowchart LR
     subgraph VM["Virtual machine"]
         direction TB
-        HW1["Host OS"] --> HV["Hypervisor"] --> GOS1["Guest OS"] --> App1["App"]
+        H1["Host machine"] --> HV["Hypervisor"] --> G["Guest OS"] --> A1["App"]
     end
     subgraph CT["Container"]
         direction TB
-        HW2["Host OS + kernel"] --> Eng["Container engine"] --> C1["Container"]
+        H2["Host machine and kernel"] --> E["Container engine"] --> A2["App and its libraries"]
     end
 ```
 
-A VM virtualizes an entire OS kernel per instance — heavy, minutes to boot, deep isolation. A container shares the host's kernel and only isolates the process/filesystem view — light, seconds to boot, narrower isolation. **For the specific problem this unit is about**, that isolation depth difference barely matters: what buys parity is that the dependency environment is baked into one artifact at build time, and that property holds for containers regardless of the weaker isolation boundary. The isolation trade-off is a separate concern from the parity guarantee — covered on its own terms in `infra-delivery/docker`.
+For parity, the weight difference barely matters: what counts is that the
+environment is packaged once. The isolation trade-off between the two is a
+separate topic, covered in `infra-delivery/docker`.
+
+## What L3 adds
+
+L3 takes one real drift bug down to a single function, shows the fix that
+removes the hidden dependency rather than hiding it, and looks at the few
+lines of image definition where pinning decisions are made.

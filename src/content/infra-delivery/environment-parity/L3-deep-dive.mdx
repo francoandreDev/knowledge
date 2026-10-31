@@ -1,164 +1,187 @@
 ---
-title: "L3 — A real drift bug, and the minimal Dockerfile that eliminates its class"
+title: "L3 — A real drift bug, and where a container's guarantee stops"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label='The "only happens in CI" bug, isolated down to one function'>
+export const unit = {
+  track: "infra-delivery",
+  unitSlug: "environment-parity",
+};
+
+<Scenario label="Two clocks, one midnight, two different answers">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>💻</span> Laptop: <code>TZ=America/New_York</code> — test passes</div>
-      <div class="flex items-center gap-1.5"><span>🤖</span> CI: <code>TZ=UTC</code> — same input, test fails</div>
-      <div class="flex items-center gap-1.5"><span>🔍</span> Function logic never changed between runs</div>
+      <div class="flex items-center gap-1.5"><span>💻</span> Laptop clock set to New York: both moments fall on March 14</div>
+      <div class="flex items-center gap-1.5"><span>🤖</span> CI clock set to UTC: the two moments fall on different days</div>
+      <div class="flex items-center gap-1.5"><span>🔍</span> The function logic did not change between runs</div>
     </div>
     <div class="not-prose mt-3 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs dark:border-amber-800 dark:bg-amber-950">
-      The bug isn't in <code>isToday</code>'s logic — it's in what the
-      function silently reads from the host machine's clock settings.
+      The bug is not in the comparison. It is in the clock setting the
+      function silently reads from the machine.
     </div>
-
   </Fragment>
 
-L2 named "environment variables" as one row in a table of drift sources.
-Here's what that looks like as an actual bug, isolated down to a single
-ten-line function — not a hypothetical, the exact kind of thing that
-produces a "works on my machine, fails in CI" ticket with no obvious
-repro steps.
+Picture asking two friends, one in New York and one in London, "was that
+phone call yesterday or today?" about the same call. If it happened late
+in the evening in New York, it was already tomorrow in London. Both friends
+are right, because "today" depends on where you are standing.
 
-**Given that the function's logic is genuinely correct, and the input is
-identical in both places — what's left that could possibly differ?**
+A function named `isToday` has the same problem. **If its logic is
+perfectly correct and the input is identical, what is left that could
+possibly differ between your laptop and the CI server?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "A worked timezone drift bug, and its actual fix",
-    "A minimal, real Dockerfile that eliminates its class",
-    "What container parity does and doesn't cover, with real failure modes",
+    "A drift bug reduced to one function",
+    "The image definition lines that pin the build",
+    "What a container does not cover",
   ]}
 />
 
-## A real drift bug: implicit timezone dependence
+## Where does the "only fails in CI" bug actually live?
 
-This function looks correct and passes locally, because "locally" happens to share a timezone assumption with the test author:
+A background job stored a timestamp at 22:00 UTC on March 14, 2024. Five
+hours later, at 03:00 UTC on March 15, a report asks `isToday` about it.
+`isToday` builds a calendar date from each moment using the machine's own
+timezone setting. The two moments are the same instants everywhere, but
+their calendar dates are not:
 
-```js
-// report.mjs — computes "is this timestamp today?" using local time
-function isToday(timestampMs) {
-  const now = new Date();
-  const then = new Date(timestampMs);
-  return (
-    now.getFullYear() === then.getFullYear() &&
-    now.getMonth() === then.getMonth() &&
-    now.getDate() === then.getDate()
-  );
-}
-
-// A background sync job recorded its last-run timestamp 5 hours before
-// a reporting job calls isToday() on it — this is real elapsed time,
-// not two clocks read at the same instant:
-const lastSyncMs = Date.parse("2024-03-14T22:00:00Z"); // stored, 5h ago
-const nowMs = Date.parse("2024-03-15T03:00:00Z"); // "now", when the report runs
-
-// On a laptop set to America/New_York: 22:00Z is 18:00 local on Mar 14,
-// and 03:00Z (5h later) is 23:00 local — STILL Mar 14. Same local day:
-console.log(isToday(lastSyncMs)); // true
-
-// The exact same two instants, read on a CI runner set to UTC: 22:00Z
-// is Mar 14, but 03:00Z has already rolled over to Mar 15 in UTC —
-// different calendar day, same underlying timestamps:
-console.log(isToday(lastSyncMs)); // false — the "bug" that "only happens in CI"
-```
-
-Nothing about the code or the timestamps changed between the two runs — `getFullYear`/`getMonth`/`getDate` all read the **system's local timezone**, which the laptop and the CI runner disagree on. Formatting those same two instants explicitly confirms it (no need to actually flip the host's `TZ` to see this — pinning the zone per call makes the host's ambient setting explicit instead of implicit):
-
-```js
-const fmt = (ms, tz) =>
-  new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(ms);
-fmt(lastSyncMs, "America/New_York") === fmt(nowMs, "America/New_York"); // "2024-03-14" === "2024-03-14" -> true
-fmt(lastSyncMs, "UTC") === fmt(nowMs, "UTC"); // "2024-03-14" === "2024-03-15" -> false
-```
-
-This is textbook environment drift: an ambient setting (`TZ`), not a code path, determines the outcome, and no amount of staring at `isToday`'s logic finds the bug — it's not in the logic.
-
-```js
-// report-fixed.mjs — pins the comparison to an explicit, injected timezone
-// instead of relying on whatever the host environment happens to be set to
-function isToday(timestampMs, timezone, referenceNowMs = Date.now()) {
-  const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }); // en-CA => YYYY-MM-DD
-  return fmt.format(referenceNowMs) === fmt.format(timestampMs);
-}
-```
-
-The fix isn't "set `TZ=UTC` everywhere and hope" (that's still an ambient, easy-to-forget setting) — it's removing the function's dependence on ambient environment state entirely by making the timezone an explicit parameter. This is the same principle containers apply at the infrastructure level, applied to a single function: don't let correctness depend on something outside the artifact itself.
-
-<Checkpoint question="A teammate proposes fixing the CI failure by adding `ENV TZ=UTC` to the CI runner's setup instead of changing `isToday`. Would that actually fix the bug, or just relocate it?">
-
-It would relocate it, not fix it. Pinning `TZ=UTC` on the CI runner makes CI's behavior match production's UTC setting by coincidence, but `isToday` still silently reads whatever the host's ambient timezone happens to be — it's still an implicit dependency, just one that now happens to agree across two of the three environments instead of disagreeing. The bug reappears the moment any environment's `TZ` differs again (a new hire's laptop, a future CI migration, a customer running the code in their own region). `report-fixed.mjs`'s explicit `timezone` parameter is the only version of the fix that removes the dependency itself rather than getting lucky about what value it currently resolves to.
-
-</Checkpoint>
-
-## A minimal real Dockerfile
-
-This is a genuinely runnable, minimal image definition for a small Node service — small enough to read end to end, but every line is doing real work, not filler:
-
-```dockerfile
-# Pin the exact base image by digest-eligible tag, not a moving "latest"
-FROM node:20.11-bookworm-slim
-
-WORKDIR /app
-
-# Copy dependency manifests first, install, THEN copy source — this
-# layer-ordering means `npm ci` only reruns when dependencies actually
-# change, not on every source edit, and it's not optional for parity:
-# npm ci (unlike npm install) refuses to proceed if package-lock.json
-# doesn't exactly match package.json, guaranteeing the exact dependency
-# tree that was locked, not "whatever resolves today."
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
-
-COPY . .
-
-ENV NODE_ENV=production
-EXPOSE 3000
-CMD ["node", "server.js"]
-```
-
-Building this (`docker build -t my-service .`) produces one immutable image. Running it (`docker run -p 3000:3000 my-service`) on a laptop, in CI, or on a production host executes the _exact same bytes_ — same Node binary, same OS libraries, same `node_modules` tree — every time. The only thing that can differ between environments now is what's explicitly passed in at `docker run` time (environment variables, mounted volumes), which is deliberate configuration, not accidental drift.
-
-Note what this Dockerfile does **not** do: it doesn't set `TZ`. That's deliberate — pinning the container's ambient timezone would paper over the exact bug above rather than fix it. `report-fixed.mjs`'s explicit `timezone` parameter is the actual fix; a container-level `TZ` pin is a second, weaker line of defense at best, not a substitute for removing the ambient dependency from the code itself.
-
-<Checkpoint question="If a teammate edits this Dockerfile to swap `npm ci --omit=dev` for `npm install --omit=dev` to 'save a step,' what specifically breaks about the parity guarantee this image is supposed to provide?">
-
-`npm ci` requires `package-lock.json` to exactly match `package.json` and installs precisely the locked dependency tree, refusing to proceed otherwise; `npm install` will happily resolve slightly different transitive dependency versions if the lockfile and the registry's available versions have drifted since the lockfile was last written. That reopens exactly the gap this whole Dockerfile exists to close: two builds of the "same" image, run at different times, could end up with different transitive dependencies baked in — drift moved from between environments to between builds of a single environment, but still drift, and still invisible until something built on one of the differing versions breaks.
-
-</Checkpoint>
-
-## How much does an undetected drift bug actually cost, as a function of where it's caught?
+| Timezone setting | Date of the stored moment | Date of "now" | Same day? |
+| ---------------- | ------------------------- | ------------- | --------- |
+| America/New_York | March 14                  | March 14      | Yes       |
+| UTC              | March 14                  | March 15      | No        |
+| Asia/Tokyo       | March 15                  | March 15      | Yes       |
 
 ```mermaid
-xychart-beta
-    title "Relative cost to fix, by environment where first detected"
-    x-axis ["Caught locally", "Caught in CI", "Caught in staging", "Caught in production"]
-    y-axis "Relative cost (dev caught = 1x)" 0 --> 30
-    bar [1, 2, 8, 25]
+flowchart LR
+    T["Same two moments"] --> NY["Laptop reads New York"]
+    T --> U["CI reads UTC"]
+    NY --> Y["Same day: true"]
+    U --> N["Different day: false"]
 ```
 
-This is the actual economic case for parity, not just a tidiness argument: a drift bug caught on a laptop costs a few minutes of confusion; the same underlying bug caught in production costs an incident, a rollback, and possibly a customer-facing outage — for a bug that was, mechanically, always the same gap between what the code assumed and what the environment actually provided. Parity doesn't make bugs impossible; it collapses this curve by making "the environment" identical everywhere, so a bug that would only have shown up in production now shows up on the laptop instead, at 1x cost instead of 25x.
+Nothing in the code differs between the first and second row. An ambient
+setting, not a code path, decides the answer. No amount of staring at the
+comparison finds the bug.
 
-## Failure modes
+The cure is not to set the timezone to UTC on every machine and hope. That
+is still an ambient setting, one that is easy to forget on the next laptop.
+The cure is to take the setting out of the machine and put it in the
+function's inputs:
 
-| #   | Mistake                                              | What it silently breaks                                                                                  |
-| --- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| 1   | Pinning the tag but not the digest                   | A tag can technically be repointed — "pinned" isn't the same guarantee as "immutable"                    |
-| 2   | Using `npm install` instead of `npm ci` in the build | Transitive dependency versions can silently drift between builds even with an unchanged lockfile         |
-| 3   | Baking secrets/env-specific config into the image    | Reintroduces "one image per environment," the exact drift risk containers exist to remove                |
-| 4   | Assuming container parity covers everything          | A database schema, a downstream API, host kernel/network config are all outside the container's boundary |
+```js
+function isToday(timestampMs, timezone, nowMs) {
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: timezone });
+  return day.format(timestampMs) === day.format(nowMs);
+}
+```
 
-- **Pinning the base image tag but not the digest, and treating "pinned" as "immutable."** `node:20.11-bookworm-slim` is far more specific than `node:latest`, but a tag can still technically be repointed (rare, but possible for a registry maintainer to push a new image under the same tag) — production-grade pipelines pin by content digest (`node:20.11-bookworm-slim@sha256:...`) when true byte-for-byte reproducibility matters, not just version-number stability.
-- **Letting `npm install` run instead of `npm ci` in the image build.** `npm install` will happily resolve slightly different transitive dependency versions if the lockfile and registry state have drifted since the lockfile was written; `npm ci` refuses to do this and fails loudly instead — silently drifting dependency versions between builds defeats the entire point of a pinned build step.
-- **Baking secrets or environment-specific config into the image.** The parity goal is "same artifact, different config injected per environment at run time" (via `docker run -e` or an orchestrator's config), not "one image per environment" — building a separate image per environment reintroduces exactly the drift risk containers exist to remove, just one layer up.
-- **Assuming container parity extends to things outside the container.** A container guarantees parity for what's _inside_ it — the OS, runtime, and app dependencies. It says nothing about a database schema being out of sync, a downstream API behaving differently in staging vs. prod, or the host kernel/network configuration differing — parity has to be reasoned about at each layer, not assumed to propagate automatically just because one layer achieved it.
+Reading this is the point: the zone and the current time both arrive as
+parameters, so the same call gives the same answer on any machine. This is
+the container idea applied to one function: correctness should not depend
+on anything outside the thing you built and tested.
 
-The timezone bug above is one worked example — a single function, one ambient dependency — not the whole territory. **What would change about diagnosing this if the drift weren't in application code at all, but in a downstream service's clock — say, a payments provider's API returning timestamps in its own server's local time instead of UTC?** The fix pattern is identical (stop trusting an ambient/implicit value, make the timezone explicit at the boundary), but the failure is now completely invisible to your own container's parity guarantee, because the drift lives in a system your image never controlled in the first place — exactly the "assuming container parity extends to things outside the container" failure mode above, encountered for real instead of as a bullet point.
+<Checkpoint question="A teammate proposes adding TZ=UTC to the CI runner's setup instead of changing isToday. Does that fix the bug or relocate it?">
+
+It relocates it. Setting UTC on CI makes CI agree with production by
+coincidence, but `isToday` still silently reads whatever the host happens
+to be set to. The bug returns the moment any machine differs: a new
+laptop, a future CI migration, a customer running the code in their own
+region. Only the explicit parameter removes the dependency itself, rather
+than getting lucky about its current value.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="ambient-input"
+/>
+
+## Which lines of an image definition decide whether the build is repeatable?
+
+**If the image is built once, what could still make two builds of the same
+source differ?** The build itself reads from outside: a base image name
+and a package registry. A minimal image definition makes the decisions
+visible:
+
+```dockerfile
+FROM node:20.11-bookworm-slim
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+COPY . .
+```
+
+Each line pins something different:
+
+| Line                  | What it pins                              | What it still leaves open                    |
+| --------------------- | ----------------------------------------- | -------------------------------------------- |
+| `FROM node:20.11-...` | A specific runtime and OS version by name | A tag can be re-pointed; a digest cannot     |
+| `COPY package*.json`  | Copied before the source, for caching     | Nothing, it just orders the layers           |
+| `RUN npm ci`          | The exact locked dependency tree          | `npm install` here would re-resolve versions |
+| `COPY . .`            | The app's own source                      | Nothing, but never copy secrets in with it   |
+
+Two details carry most of the weight. `npm ci` refuses to proceed if the
+lockfile and the manifest disagree, where `npm install` quietly resolves
+slightly different versions, which would bring back drift between builds
+of one environment. And pinning by a content digest (a hash of the image)
+is stronger than pinning by tag, because a tag is a label that can be moved.
+
+```mermaid
+flowchart TD
+    B1["Build on Monday"] --> Q{"Install command"}
+    B2["Build on Friday"] --> Q
+    Q -->|"npm ci with lockfile"| Same["Same dependency tree both days"]
+    Q -->|"npm install"| Maybe["Tree may differ if the registry moved"]
+```
+
+<Checkpoint question="A teammate swaps npm ci for npm install in the image definition to save a step. Which guarantee has just been loosened?">
+
+Repeatability between builds. `npm ci` installs exactly what the lockfile
+records and fails loudly otherwise, so two builds of the same commit
+contain the same dependencies. `npm install` can pick newer matching
+versions if the registry has changed since the lockfile was written, so
+Monday's image and Friday's image of the "same" commit can differ. That
+is drift again, moved from between machines to between builds, and still
+invisible until something built on the differing version breaks.
+
+</Checkpoint>
+
+## What does a container not cover?
+
+**A team containerizes everything and declares parity solved. What can
+still differ?** Anything outside the image:
+
+| Inside the image (same everywhere) | Outside the image (can still drift)          |
+| ---------------------------------- | -------------------------------------------- |
+| OS libraries and language runtime  | The database schema each environment has     |
+| Application dependencies           | A third-party service's behavior             |
+| The app's own code                 | The host's kernel and network configuration  |
+| Anything baked in at build time    | Configuration and secrets passed in at start |
+
+Two related mistakes follow. Baking environment-specific settings or
+secrets into the image forces one image per environment, which brings back
+the drift containers exist to remove. And assuming the guarantee extends
+to a database or a partner service means debugging the wrong layer.
+Parity has to be reasoned about layer by layer.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="pinning-and-limits"
+/>
+
+## This is a case, not the whole territory
+
+The timezone bug is one function with one ambient input. **What would
+change if the drift were not in your code at all, but in a payments
+provider whose API returns timestamps in its own server's local time?
+Would your container's parity guarantee help, and where would you put the
+explicit timezone instead?** Rework the table above for that situation and
+compare which rows moved and which stayed in place.
