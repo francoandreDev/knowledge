@@ -1,123 +1,143 @@
 ---
-title: "L2 — What canary, blue-green, and feature flags each actually solve"
+title: "L2 — What canary stages, health gates, and feature flags each do"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named canary, blue-green, and feature flags as three distinct
-techniques. This level works through what each one actually optimizes
-for, why they don't substitute for each other, and the staged-rollout
-model most canary systems use in practice.
+export const unit = {
+  track: "infra-delivery",
+  unitSlug: "progressive-delivery",
+};
+
+L1 ended with three techniques that answer three different questions.
+This level opens up two of them: how a canary moves from a small slice to
+everyone, and how a feature flag separates shipping code from turning it on.
 
 <LevelIntro
   items={[
-    "What each technique controls vs. doesn't",
-    "The staged canary rollout model",
-    "Failure modes: wrong tool, wrong pace, wrong signal",
+    "Stages and health gates",
+    "Choosing the right health signal",
+    "Deploy versus release with a flag",
   ]}
 />
 
-## Three techniques that solve different problems, not the same one
+## How does a canary go from a taste to the whole room?
 
-**If canary, blue-green, and feature flags are all "safer deployment"
-techniques, why does it matter which one is used for the Scenario's
-problem?** Because each one optimizes for a different failure mode,
-and picking the wrong one leaves the actual risk unaddressed:
-
-Plain version before the table: canary decides **how many people try
-the new version**, blue-green decides **how fast traffic can switch
-back to a known-good environment**, and a feature flag decides **whether
-one behavior inside the app is turned on**.
-
-| Technique             | What it actually controls                                                | What it doesn't solve                                                                                                                                |
-| --------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Canary deployment     | How many users are exposed to a new version before it's fully rolled out | Doesn't by itself define the rollback mechanism — reverting may mean lowering canary to 0%, switching environments, disabling a flag, or redeploying |
-| Blue-green deployment | How fast a full rollback can happen (an instant traffic switch)          | Doesn't limit how many users hit a bug before someone notices and switches back                                                                      |
-| Feature flag          | Whether a specific piece of code runs at all, independent of deploys     | Doesn't control infrastructure-level or non-code-gated risks (like the underlying deploy itself)                                                     |
-
-**Would blue-green deployment alone have prevented the Scenario's
-20-minute incident?** Not on its own — blue-green makes the _rollback_
-fast once the bug is noticed, but the Scenario's algorithm still would
-have gone to 100% of traffic immediately, meaning every user would
-still hit the bug in the time it takes to _notice_ it, before any
-rollback (fast or slow) even starts.
-
-<Checkpoint question="A team has blue-green deployment set up, but no canary and no feature flag. They ship a new version to 100% of traffic in the green environment. A bug affecting every user appears 10 minutes later. Did blue-green fail here, or is this what blue-green was always going to do without canary alongside it?">
-
-This is exactly what blue-green does on its own — it was never
-designed to limit how many users see a new version, only to make the
-switch back to the known-good version fast once someone decides to
-revert. Blue-green didn't fail; it did its one job (fast rollback)
-while a different job (limiting exposure before the bug is even
-noticed) went uncovered, because nothing here was routing only a small
-slice of traffic to the new version first. The 10 minutes it took to
-notice the bug is 10 minutes at 100% exposure regardless of how fast
-the rollback itself is — that gap is canary's job, not blue-green's.
-
-</Checkpoint>
-
-## The staged-rollout model canary deployments actually use
-
-**Does a canary deployment mean routing 5% of traffic forever, or
-something else?** In practice, canary rollouts move through defined
-stages, each gated by a health check before advancing:
+**If ten diners liked the soup, do you now serve all 190 the same bowl
+immediately?** Not quite: ten people tell you about ten people. A canary
+widens in steps, and each step has to earn the next one.
 
 ```mermaid
 flowchart LR
-    A["5% of traffic"] -->|"Healthy after\nmonitoring window"| B["25% of traffic"]
-    B -->|"Healthy"| C["50% of traffic"]
-    C -->|"Healthy"| D["100% of traffic"]
-    A -->|"Unhealthy —\nerror rate spike"| E["Halt / roll back\nto 0%"]
+    A["5% of traffic"] -->|"Healthy after<br/>the monitoring window"| B["25%"]
+    B -->|"Healthy"| C["50%"]
+    C -->|"Healthy"| D["100%"]
+    A -->|"Unhealthy"| E["Halt and go back to 0%"]
     B -->|"Unhealthy"| E
     C -->|"Unhealthy"| E
 ```
 
-Each stage is a real checkpoint, not just a delay — if the error rate
-or another health signal crosses a threshold at any stage, the
-rollout halts and rolls back to the previous known-good state,
-automatically or via a human decision, before advancing further.
-An **error rate** is "bad requests divided by total requests"; a
-**threshold** is the agreed limit; a **monitoring window** is the period
-you watch before deciding whether the stage is healthy. For the
-recommendation Scenario, "healthy" cannot only mean "the server did not
-crash" — it might also include recommendation-click rate, empty-result
-rate, support reports, or a product-quality metric tied to that feature.
+Each arrow is a real gate, not a wait. Three terms are worth fixing in
+your head:
 
-**Why not just start at 50% instead of 5%, to reach full rollout
-faster?** Because the whole point is limiting exposure while the
-signal is still uncertain — starting small means a bug caught at the
-first stage affects the smallest possible number of users, and each
-successful stage is itself evidence that increases confidence before
-increasing exposure.
+- **Monitoring window** — how long you watch a stage before judging it.
+- **Error rate** — bad requests divided by total requests.
+- **Threshold** — the agreed limit; crossing it halts the rollout.
 
-<Checkpoint question="A canary rollout is sitting at the 25% stage, healthy so far. The next scheduled stage is 50%. Why does advancing to 50% still need its own health check, instead of treating 'healthy at 25%' as proof the rollout is now safe all the way to 100%?">
+**Why start at 5% instead of 50% to finish sooner?** Because the point is
+to keep exposure small while the evidence is still thin. With an
+illustrative 100,000 users, a bug caught at the first stage touches
+5,000 people; caught at a 50% start it touches 50,000.
 
-Because each stage exposes a different, larger slice of real traffic,
-and a bug can be scale-dependent or segment-dependent in ways a
-smaller slice never revealed — a subtle issue that only shows up under
-higher concurrent load, or that disproportionately affects a user
-segment underrepresented in the first 25%, can pass cleanly at one
-stage and still surface at the next. "Healthy at 25%" is evidence
-about the 25% population and load level, not a guarantee about
-everyone else, which is exactly why the staged model gates every
-step with its own check rather than treating an early pass as
-clearance for the rest of the rollout.
+| Stage | Share of 100,000 users (illustrative) | Users who would hit a bug that gets caught here |
+| ----- | ------------------------------------- | ----------------------------------------------- |
+| 5%    | 5,000                                 | 5,000                                           |
+| 25%   | 25,000                                | 25,000                                          |
+| 50%   | 50,000                                | 50,000                                          |
+| 100%  | 100,000                               | 100,000                                         |
+
+<Checkpoint question="A canary has been healthy at 25%. The next stage is 50%. Why does 50% still need its own health check instead of trusting the 25% result?">
+
+Because "healthy at 25%" is evidence about the 25% slice and the load it
+generated, not about everyone else. A bug can depend on volume or on a
+user group that was thin in the first slice, so it can pass at one stage
+and appear at the next. That is why every step is gated separately.
 
 </Checkpoint>
 
-## Failure modes at this level
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="staged-gates"
+/>
 
-- **Treating any one of these three techniques as covering all the
-  others.** Blue-green without canary still exposes 100% of traffic
-  to a new bug immediately, just with a faster fix once it's found;
-  canary without a fast rollback mechanism still takes time to fully
-  revert even after a problem is caught early.
-- **Skipping stages or moving too fast through them.** Jumping
-  straight from 5% to 100% because the 5% stage "looked fine" after
-  only a minute defeats the purpose of gradual, evidence-based
-  expansion.
-- **Monitoring the wrong signal at each stage.** A canary stage that
-  only checks "did the server crash" misses the Scenario's exact
-  failure mode — a subtle correctness bug that doesn't crash anything,
-  just quietly returns wrong results.
+### What should "healthy" actually measure?
+
+**If the new version never crashes, is it healthy?** Not necessarily. The
+bitter soup did not stop the kitchen; it quietly made food worse. A
+canary that only watches for crashes misses that whole family of bugs.
+
+| Signal                                         | Catches                    | Misses                                     |
+| ---------------------------------------------- | -------------------------- | ------------------------------------------ |
+| Server crashes / HTTP 5xx rate                 | Outages, thrown exceptions | Wrong answers returned with a success code |
+| Product-quality metric (clicks, empty results) | Quietly worse behavior     | Anything the metric does not measure       |
+| Latency                                        | Slow code paths            | Correct but unhelpful results              |
+
+A good gate combines a technical signal with at least one signal tied to
+what the feature is for. For a recommendation change, that could be the
+share of pages that come back with an empty recommendation list.
+
+## What does a feature flag separate from a deploy?
+
+**If the new code is already on the servers, are users already using it?**
+Only if you let them. A flag splits two events that used to happen
+together:
+
+```mermaid
+flowchart LR
+    A["Deploy<br/>code reaches production"] --> B["Flag OFF<br/>no user sees the change"]
+    B --> C["Release<br/>flag ON for a small group"]
+    C --> D["Flag ON for everyone"]
+    C -->|"Problem found"| E["Flag OFF again<br/>no new deploy"]
+    D -->|"Problem found"| E
+```
+
+| Event   | What changes                         | How fast it can be undone                            |
+| ------- | ------------------------------------ | ---------------------------------------------------- |
+| Deploy  | Which code is running                | As slow as another deploy (or an environment switch) |
+| Release | Which users the behavior is shown to | As fast as flipping the flag                         |
+
+That is why a flag is the right tool for one risky behavior inside a
+larger change: you can turn that one dish off without taking the whole
+menu down. The limit is the other side of the coin: a flag only guards
+code that was written behind it. A broken database migration or a
+bad infrastructure change is not behind any flag.
+
+<Checkpoint question="A change is deployed with its new checkout path behind a flag that is OFF. Orders start failing. Are users affected by the new path, and what is the fastest fix?">
+
+No user is affected by the new path, because the flag is off and the old
+path is serving everyone; the failing orders have another cause. Had the
+flag been ON, switching it off would be the fastest fix, since it needs
+no deploy. The flag only helps for the behavior it actually guards.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="flags-and-decoupling"
+/>
+
+## Where this goes wrong
+
+- **Treating one technique as all three.** Blue-green alone still sends
+  100% of traffic to a bug; it only makes going back quick. A canary
+  alone still needs some way to actually go back.
+- **Moving through stages on a timer.** A stage that advances "after 10
+  minutes" with no health check is progressive delivery in name only.
+- **Watching the wrong signal.** Crash counts will not see a feature that
+  works but returns bad results.
+- **Forgetting old flags.** A flag left in the code long after rollout is
+  another branch someone has to understand and test.

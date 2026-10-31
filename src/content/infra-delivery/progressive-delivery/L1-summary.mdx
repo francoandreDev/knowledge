@@ -4,80 +4,116 @@ title: "L1 — How do we ship a risky change without risking everyone? (progress
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="A new recommendation algorithm shipped to 100% of traffic at once. A subtle bug hit every single user simultaneously.">
+export const unit = {
+  track: "infra-delivery",
+  unitSlug: "progressive-delivery",
+};
+
+<Scenario label="A cook has a new soup recipe and 200 diners waiting. Do you serve everyone the first bowl, or let a few taste it first?">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🚀</span> <strong>The deploy</strong> — new recommendation algorithm shipped to 100% of production traffic at once</div>
-      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>The bug</strong> — a subtle edge case in the new algorithm returned broken recommendations for a common user segment</div>
-      <div class="flex items-center gap-1.5"><span>💥</span> <strong>The blast radius</strong> — every single user hit the bug simultaneously, for the full 20 minutes it took to detect and roll back</div>
+      <div class="flex items-center gap-1.5"><span>🍲</span> <strong>The soup</strong> — a new recipe nobody has tasted outside the kitchen</div>
+      <div class="flex items-center gap-1.5"><span>🍽️</span> <strong>The room</strong> — 200 diners waiting for their bowl</div>
+      <div class="flex items-center gap-1.5"><span>🥄</span> <strong>The taste test</strong> — 10 diners get a small bowl first</div>
+    </div>
+    <div class="not-prose mt-3 flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300">
+      <div>
+        <div class="flex justify-between"><span>Served in the taste test</span><span>10 of 200 (5%)</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-emerald-500 animate-fill-bar" style="--target-width: 5%"></div></div>
+      </div>
     </div>
   </Fragment>
 
-A team ships a new recommendation algorithm. It passed all tests and
-staging checks, so it goes to 100% of production traffic in one
-deploy. A subtle bug — an edge case only common user behavior
-triggers — starts returning broken recommendations. It takes 20
-minutes to notice, diagnose, and roll back. **The bug wasn't the kind
-of thing tests or staging would reliably catch — it only showed up
-under real production traffic patterns. Given that, was shipping to
-100% of traffic at once ever actually necessary?**
+The kitchen tested the recipe on a quiet afternoon and it tasted fine.
+But the evening crowd orders differently, and one ingredient turns bitter
+in a way the kitchen test never showed. **If you serve all 200 at once and
+it is bitter, 200 people are unhappy. If 10 taste it first, how many
+people does the same mistake reach, and what do you do next?**
+
+Ten unhappy diners and 190 untouched bowls is the same mistake with a
+smaller price tag. Software shipping has exactly this choice, and the
+"diners" are real users on real traffic.
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "What canary deployment controls",
-    "Blue-green vs. feature flags",
-    "Key terms for progressive delivery",
+    "Why real traffic finds what tests miss",
+    "Canary, blue-green, feature flag",
+    "Which job each technique does",
   ]}
 />
 
-## The shape of the problem
+## The software version of the taste test
 
-- Some bugs genuinely can't be caught before production — they only
-  surface under real user traffic, real data patterns, or real scale
-  that staging can't fully replicate. Progressive delivery doesn't
-  try to prevent this category of bug; it changes **how many users
-  are exposed to it before it's caught**. Here, **traffic** means the
-  real visits or requests arriving at the production system.
-- A **canary deployment** routes a small percentage of real traffic
-  to a new version first, monitors it, and only expands to more
-  traffic if things look healthy — turning "100% of users hit the bug
-  simultaneously" into "5% of users hit the bug, it's caught, and the
-  other 95% never see it."
-- **Blue-green deployment** and **feature flags** solve a related but
-  distinct problem: not gradual traffic exposure, but instant,
-  reliable rollback — having a known-good version ready to switch
-  back to immediately, without waiting for a new deploy to finish.
-  Blue-green switches traffic between two complete environments;
-  a feature flag turns a specific behavior on or off inside the app.
+Some bugs only show up under real user traffic: real data, real habits,
+real scale. Staging cannot fully copy those. Progressive delivery does
+not try to prevent such a bug; it controls **how many users meet it
+before someone notices**. Here, **traffic** means the real requests
+arriving at the production system.
+
+To see the size of the difference, assume (for illustration only) 100,000
+users and a bug that takes the same 20 minutes to notice either way, and
+that it breaks the new version for every user who reaches it:
+
+| Rollout choice          | Users who reach the new version | Users who hit the bug |
+| ----------------------- | ------------------------------- | --------------------- |
+| All at once             | 100,000                         | 100,000               |
+| Canary at 5%, then halt | 5,000                           | 5,000                 |
+
+The bug, the code, and the detection time are identical. Only the share
+of traffic that reached the new version changed; in the canary row the
+other 95,000 users never leave the old version.
+
+```mermaid
+flowchart LR
+    A["New version ready"] --> B{"Who gets it first?"}
+    B -->|"Everyone"| C["100% exposed<br/>to any hidden bug"]
+    B -->|"A small slice"| D["5% exposed<br/>health check decides next step"]
+    D -->|"Healthy"| E["Widen the slice"]
+    D -->|"Unhealthy"| F["Stop and go back"]
+```
+
+## Three techniques, three different jobs
+
+These are not three names for the same safety net. Each one answers a
+different question:
+
+| Technique    | The question it answers                            | The plain picture                                                   |
+| ------------ | -------------------------------------------------- | ------------------------------------------------------------------- |
+| Canary       | How many users try the new version first?          | Ten diners taste the soup before the other 190 are served           |
+| Blue-green   | How fast can we switch back to the known-good one? | Two full kitchens; the dining room is moved from one to the other   |
+| Feature flag | Is this one behavior switched on right now?        | One dish on the menu can be crossed out without closing the kitchen |
+
+A canary limits who is hurt. Blue-green makes going back quick. A flag
+lets one behavior be turned off while the rest of the new version stays
+live. Picking the wrong one leaves the real risk uncovered.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="three-tools-three-jobs"
+/>
 
 ## Key terms
 
-- **Progressive delivery** — the general practice of rolling out a
-  change gradually and monitoring at each stage, rather than shipping
-  to all users at once.
-- **Canary deployment** — routing a small, defined percentage of
-  production traffic to a new version, then expanding the percentage
-  in stages if the canary shows no problems.
-- **Blue-green deployment** — running two complete, identical
-  production environments ("blue" and "green"), where traffic is
-  switched entirely from one to the other, allowing an instant switch
-  back if the new version has a problem.
-- **Feature flag** — a runtime toggle that controls whether a piece
-  of code is active, allowing a feature to be turned off instantly
-  without a new deploy, independent of which version of the code is
-  actually running. "Runtime" means while the app is already running,
-  not while code is being built or shipped.
+- **Progressive delivery** — rolling a change out in stages and checking
+  health at each stage, instead of giving it to everyone at once.
+- **Canary deployment** — sending a small, defined share of production
+  traffic to the new version first, and widening it only if it looks
+  healthy.
+- **Blue-green deployment** — keeping two complete, identical production
+  environments and moving all traffic from one to the other, so moving
+  back is a single switch.
+- **Feature flag** — a runtime toggle that turns a piece of code on or
+  off while the app is already running, with no new deploy.
+- **Blast radius** — how many users a mistake can reach.
 
-## What this unit covers
+## What the next levels cover
 
-L2 works through what each of the three techniques actually optimizes
-for and why they're not interchangeable, plus the staged-rollout model
-that most canary systems use in practice. L3 implements a
-percentage-based canary router with a consistent-hashing scheme (so
-the same user always gets the same version during a rollout — think
-"put each user in the same numbered bucket every time") and an
-error-rate monitor that would have automatically halted the Scenario's
-rollout before it ever reached 100%.
+L2 shows the staged-rollout model behind a canary and what a feature flag
+separates from a deploy. L3 shows how users are placed into a stable
+canary slice, why one bug can hide from a percentage canary, and how the
+halt rule works.

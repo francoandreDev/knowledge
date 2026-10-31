@@ -1,36 +1,61 @@
 ---
-title: "L3 — Building the canary router and error-rate monitor that would have caught the Scenario's bug"
+title: "L3 — Stable canary slices, the segment blind spot, and the halt rule"
 ---
 
+import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L2 established the staged-rollout model in the abstract — percentages,
-health checks, halt-and-rollback. This level implements the two pieces
-that make that model real: a router that consistently assigns each
-user to old or new, and a monitor that decides when a stage is
-unhealthy.
+export const unit = {
+  track: "infra-delivery",
+  unitSlug: "progressive-delivery",
+};
+
+<Scenario label="Ten diners taste the soup. If the same diner is handed the new soup at one table and the old soup at the next, what did you learn?">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🧑‍🍳</span> <strong>The goal</strong> — a small slice gets the new version, in steps, for a 100,000-user rollout</div>
+      <div class="flex items-center gap-1.5"><span>🔁</span> <strong>Problem 1</strong> — a user must not flip between versions on every request</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Problem 2</strong> — a bug affecting 1 user in 100 may hide inside an average</div>
+      <div class="flex items-center gap-1.5"><span>🛑</span> <strong>Problem 3</strong> — something automatic must decide when to stop</div>
+    </div>
+  </Fragment>
+
+L2 described the stages as percentages. But "5% of traffic" has to be
+made of specific people, and if the same person bounces between old and
+new, their complaints cannot be traced to either version. **How do you pick
+a slice that stays put, widens without reshuffling, and still reveals a
+problem that only touches a few users?**
+
+</Scenario>
 
 <LevelIntro
   items={[
-    "A consistent-hashing canary router",
-    "Measuring exposure at each stage",
-    "An automatic error-rate halt check",
+    "Stable slices by hashing a user id",
+    "A bug that hides in an average",
+    "The halt rule as a rate, not a count",
   ]}
 />
 
-## Routing a consistent percentage of users to the new version
+## How do you keep the same users in the canary slice?
 
-**A canary router needs two properties: a controllable percentage,
-and the same user consistently getting the same version throughout
-the rollout (not flipping back and forth on every request). Here's an
-implementation using a deterministic hash.**
+**Why not flip a coin on every request?** Because then one user sees both
+versions in one session, and your numbers mix the two. The fix is to
+turn the user id into a fixed bucket from 0 to 99 and compare the bucket
+with the current percentage:
 
-Without code, the idea is: put every user into one of 100 numbered
-buckets, always using the same rule. If the rollout is 5%, only buckets
-0 through 4 go to the new version. If it grows to 25%, buckets 0
-through 24 go to the new version. The same user keeps landing in the
-same bucket, so they do not bounce between old and new on every request.
+```mermaid
+flowchart LR
+    U["user id"] --> H["hash the id"]
+    H --> B["bucket 0 to 99<br/>(always the same)"]
+    B --> C{"bucket below<br/>canary percent?"}
+    C -->|"Yes"| N["new version"]
+    C -->|"No"| O["old version"]
+```
+
+This is one of the cases where the code is the point, so here it is,
+minimal:
 
 ```js
 function hashUserId(userId) {
@@ -42,138 +67,137 @@ function hashUserId(userId) {
 }
 
 function assignVersion(userId, canaryPercent) {
-  const bucket = hashUserId(userId) % 100;
-  return bucket < canaryPercent ? "new" : "old";
+  return hashUserId(userId) % 100 < canaryPercent ? "new" : "old";
 }
 ```
 
-```js
-assignVersion("user-42", 25); // "new" or "old" — but always the same answer for user-42 at 25%
-assignVersion("user-42", 25) === assignVersion("user-42", 25); // true, every time
-```
+No per-user record is stored anywhere; the id itself decides. Running
+this exact hash on three made-up ids gives these buckets and assignments
+(computed, not estimated):
 
-Hashing the user's id into a fixed bucket from 0–99, then comparing
-that bucket against the current canary percentage, gives both
-properties at once: the assignment is deterministic (the same user id
-always hashes to the same bucket), and the _percentage_ of users
-routed to "new" is controlled entirely by moving the threshold — no
-per-user state needs to be stored anywhere.
+| User id   | Bucket | At 5% | At 50% | At 100% |
+| --------- | ------ | ----- | ------ | ------- |
+| user-42   | 40     | old   | new    | new     |
+| user-7    | 77     | old   | old    | new     |
+| user-1001 | 94     | old   | old    | new     |
 
-<Checkpoint question="A rollout advances from a 5% canary stage to 25%. Using hashUserId and assignVersion above, does every user who was already routed to 'new' at 5% stay routed to 'new' at 25%, or could some of them flip back to 'old'?">
+Read across a row: once a user turns "new", they stay "new" as the
+percentage grows. Raising the percentage only adds buckets; it never
+removes any.
 
-They stay routed to "new." Each user's bucket (`hashUserId(userId) %
-100`) never changes — only the threshold being compared against it
-does. A user in bucket 3 was already below the 5% threshold, and
-bucket 3 is still below the 25% threshold, so nothing about their
-assignment flips. Raising the percentage only ever adds users whose
-bucket number falls in the newly-included range (5 through 24 here);
-it never removes anyone who already qualified at a lower percentage.
-That one-directional property is exactly why this scheme avoids the
-"same user bounces between versions" problem a random per-request
-assignment would have.
+<Checkpoint question="A rollout moves from 5% to 25%. Can a user who was on the new version at 5% be moved back to the old version at 25%, and why?">
+
+No. A user's bucket never changes; only the threshold it is compared
+against grows. A bucket below 5 is also below 25. The only users who
+change are those whose bucket is in the newly included range (5 to 24),
+and they move from old to new.
 
 </Checkpoint>
 
-## Measuring exactly how many users the Scenario's bug would have reached
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="sticky-bucketing"
+/>
 
-**At each canary stage, how many of the Scenario's users would
-actually have hit the bug, assuming it affects every user routed to
-the new version?**
+### How big is each slice, really?
 
-```js
-function usersAffectedByBug(users, canaryPercent) {
-  return users.filter((u) => assignVersion(u, canaryPercent) === "new").length;
-}
+Running the same hash on ids `user-1` through `user-100000` gives the
+real slice sizes. They are close to the nominal percentage, not exactly
+equal, because a hash spreads ids only approximately evenly:
+
+| Canary percent | Users on the new version (computed) |
+| -------------- | ----------------------------------- |
+| 1%             | 990                                 |
+| 5%             | 4,957                               |
+| 25%            | 24,988                              |
+| 50%            | 49,988                              |
+| 100%           | 100,000                             |
+
+```mermaid
+xychart-beta
+    title "Users who would hit the bug, by canary percent (100,000 users)"
+    x-axis ["1%", "5%", "25%", "50%", "100%"]
+    y-axis "Users on the new version" 0 --> 100000
+    bar [990, 4957, 24988, 49988, 100000]
 ```
 
-```js
-const users = makeUsers(100000);
+The slider demo for this unit uses the exact percentage instead of the
+hash, so its numbers (5,000 at 5%) sit a little off these; the shape is
+the same.
 
-usersAffectedByBug(users, 5); // ~4,957
-usersAffectedByBug(users, 25); // ~24,988
-usersAffectedByBug(users, 100); // 100,000
-```
+## Why can a bug hide from a percentage canary?
 
-`makeUsers(100000)` is standing in for "imagine we have 100,000 user
-ids to route." The exact ids are not the lesson; the lesson is how many
-of them cross the current canary threshold.
+**Suppose the bug only breaks users in one region that makes up 1% of all
+users. Does a bigger canary make the problem easier to see?** Work it out
+with the assumption that every affected user triggers one failed request
+and everyone else triggers none:
 
-At a 5% canary stage, roughly 5,000 of 100,000 users would have hit
-the bug — not zero, but about 20 times fewer than the Scenario's actual
-100,000. This is the concrete version of "progressive
-delivery doesn't prevent the bug, it limits exposure to it" — the
-same bug, the same code, radically different blast radius depending
-entirely on what percentage of traffic it reached before being caught.
+| Canary percent | Canary users | Affected users in canary (1%) | Overall canary error rate |
+| -------------- | ------------ | ----------------------------- | ------------------------- |
+| 5%             | 5,000        | about 50                      | 50 / 5,000 = 1%           |
+| 25%            | 25,000       | about 250                     | 250 / 25,000 = 1%         |
+| 100%           | 100,000      | about 1,000                   | 1,000 / 100,000 = 1%      |
 
-## Catching the bug automatically, not just limiting its reach
+The rate is stuck at 1% because the canary is a fair sample: it holds the
+same 1% share of affected users at every size. If the halt threshold is
+2%, nothing ever trips, even at 100%, where 1,000 users are broken. The
+same canary looked at by region would show something very different: in
+the affected region, 50 of the 50 canary users fail, a 100% error rate.
 
-**Limiting exposure only helps if something actually notices the
-problem at the small-percentage stage. What would an automatic halt
-check look like?**
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="segment-blind-spot"
+/>
 
-```js
-function shouldHaltRollout(errorCount, totalRequests, thresholdPercent) {
-  if (totalRequests === 0) return false;
-  const errorRate = (errorCount / totalRequests) * 100;
-  return errorRate > thresholdPercent;
-}
-```
+## How does the halt rule decide?
 
-```js
-shouldHaltRollout(50, 1000, 2); // true — 5% error rate exceeds a 2% threshold
-shouldHaltRollout(5, 1000, 2); // false — 0.5% error rate is within threshold
-```
+**A stage sees 20 errors. Should it halt?** The count alone cannot tell
+you. Twenty errors in 1,000 requests is a lot; twenty in 10,000 is not.
+The rule compares a rate to a threshold, and it needs one guard for the
+case with no traffic:
 
-The first call computes `50 / 1000 * 100 = 5%`, and 5% is above the 2%
-threshold, so the rollout halts. The second computes `5 / 1000 * 100 =
-0.5%`, which stays below the threshold.
+| Errors | Requests | Error rate | Threshold | Halt?                      |
+| ------ | -------- | ---------- | --------- | -------------------------- |
+| 50     | 1,000    | 5%         | 2%        | Yes                        |
+| 5      | 1,000    | 0.5%       | 2%        | No                         |
+| 20     | 1,000    | 2%         | 1%        | Yes                        |
+| 20     | 10,000   | 0.2%       | 1%        | No                         |
+| 0      | 0        | undefined  | any       | No (nothing to judge from) |
 
-At the 5% canary stage, even a relatively small absolute number of
-errors (50 out of 1,000 canary requests) produces an error rate high
-enough to trip a 2% threshold — which is exactly the point: catching
-a spike in a _rate_, computed only from the small canary population,
-rather than waiting for someone to notice a much larger absolute
-number of affected users at 100%.
+<Checkpoint question="Two canary stages both record exactly 20 errors, with a 1% threshold. Stage A had 1,000 requests, stage B had 10,000. Does the same count halt both?">
 
-<Checkpoint question="Two canary stages both see exactly 20 errors. Stage A is at 5% traffic (1,000 requests); stage B is at 50% traffic (10,000 requests). Using shouldHaltRollout with a 1% threshold, does the same raw error count of 20 trigger a halt at both stages?">
-
-No — the error rate, not the raw count, is what the check compares
-against the threshold, and the same 20 errors produce very different
-rates depending on the traffic volume they came from. At stage A,
-20/1,000 = 2%, which exceeds the 1% threshold and halts the rollout.
-At stage B, 20/10,000 = 0.2%, which stays well under 1% and does not
-halt. This is why `shouldHaltRollout` divides by `totalRequests`
-instead of comparing `errorCount` directly against some fixed number
-— an absolute error count means nothing without knowing how much
-traffic it's a fraction of, and a rate-based check is what lets the
-same threshold stay meaningful as the canary stage grows.
+No. Stage A's rate is 20 / 1,000 = 2%, above 1%, so it halts. Stage B's
+rate is 20 / 10,000 = 0.2%, below 1%, so it continues. The same raw count
+means something different depending on the traffic it came from, which is
+why the rule is written as a rate.
 
 </Checkpoint>
 
-## What generalizes and what doesn't
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="halt-rule"
+/>
 
-The core lesson — exposure to an undetected bug scales directly with
-what percentage of traffic reaches it, and an automatic rate-based
-check can catch a problem long before a human would notice it at full
-scale — generalizes to any staged rollout: mobile app releases,
-database migrations rolled out by shard, config changes rolled out by
-region. What's specific to this worked example: the exact hash
-function and bucket scheme is one particular way to implement
-consistent per-user routing — a different system might bucket by
-account, by region, or by request instead of by user id, depending on
-what "consistent experience" needs to mean for that specific product.
-**Try extending it yourself:** if the bug only affected users in a
-specific country, not uniformly across all users, would a
-percentage-based canary (routing an unbiased 5% of _all_ users)
-reliably catch it as fast as this unit's uniform-bug example — or does
-a non-uniform bug need a different kind of canary population to
-surface quickly?
+## What this case does and does not cover
+
+This unit followed one case: a uniform bug, one hash scheme, one halt
+rule. It is a case, not the whole territory. Other systems bucket by
+account, region, or request instead of by user, widen on a timer or by
+hand, and watch a mix of signals. **Try extending it yourself.** What
+changes if the bug only hits users on one mobile app version? What if
+the canary slice is chosen by account instead of user and one huge
+account holds 40% of traffic? What would you add to the halt rule so the
+1% region bug above would stop the rollout?
 
 ## Failure modes
 
-| Failure mode                                                                                    | What it gets wrong                                                                                                                                                      |
-| ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Using random assignment instead of a deterministic hash for canary routing                      | Random assignment means the same user can flip between old and new versions on different requests, producing an inconsistent experience and muddying monitoring signals |
-| Monitoring only crash/error-count in absolute terms, not as a rate                              | An absolute error count means nothing without knowing the traffic volume it came from — a rate-based threshold is what makes small-canary monitoring meaningful         |
-| Assuming a segment-specific bug will be caught by a percentage-based canary                     | A bug that only affects a specific user segment might be underrepresented or absent entirely in a small percentage-based sample, delaying detection                     |
-| Treating a canary stage as time-based only ("wait 10 minutes") without an explicit health check | A canary stage advancing purely on elapsed time, with no explicit rate check, provides no actual protection — it's progressive delivery in name only                    |
+| Failure mode                                 | What it gets wrong                                                        |
+| -------------------------------------------- | ------------------------------------------------------------------------- |
+| Random assignment per request                | The same user sees both versions; signals from the two versions are mixed |
+| Judging by raw error count                   | A count means nothing without the traffic it came from                    |
+| Only an overall rate                         | A bug in a small segment is averaged away and never crosses the threshold |
+| Advancing on elapsed time alone              | No evidence is gathered; the stage is a delay, not a check                |
+| Dividing by zero when a stage has no traffic | An empty stage looks like an error rate of "not a number" and can misfire |
