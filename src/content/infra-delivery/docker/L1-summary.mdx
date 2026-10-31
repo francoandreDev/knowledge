@@ -4,91 +4,108 @@ title: "L1 — How do we package an app so it runs the same everywhere?"
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario>
+export const unit = { track: "infra-delivery", unitSlug: "docker" };
+
+<Scenario label="Two ways to feed a friend who lives far away">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>💻</span> <strong>Local</strong> — Node 20.11, `npm install` ran months ago, an environment variable set once and forgotten</div>
-      <div class="flex items-center gap-1.5"><span>☁️</span> <strong>Prod</strong> — Node 18.4, a fresh install, none of that environment variable's history</div>
+      <div class="flex items-center gap-1.5"><span>📝</span> <strong>Send a recipe</strong> — the friend cooks it with whatever their kitchen has</div>
+      <div class="flex items-center gap-1.5"><span>🍱</span> <strong>Send a packed lunchbox</strong> — sandwich, fork and napkin all inside</div>
     </div>
     <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
-      <div class="rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950">
-        <p class="font-semibold text-emerald-600 dark:text-emerald-400">Local</p>
-        Passes every test, ships with confidence
-      </div>
       <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
-        <p class="font-semibold text-rose-600 dark:text-rose-400">Prod</p>
-        Crashes on the first request, 2 a.m. page
+        <p class="font-semibold text-rose-600 dark:text-rose-400">Recipe</p>
+        Result depends on the friend's kitchen
+      </div>
+      <div class="rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950">
+        <p class="font-semibold text-emerald-600 dark:text-emerald-400">Lunchbox</p>
+        Same meal wherever it is opened
       </div>
     </div>
-
   </Fragment>
 
-A payments service passes every test on an engineer's laptop and ships. Ten
-minutes later it's crash-looping in production. The code didn't change
-between the two — the Node version did, and so did a system library the
-code silently depended on. Nobody wrote that dependency down anywhere;
-it was just _true_ on the laptop and _not true_ on the server.
+Lena wants her friend Omar to taste her soup. She texts him the recipe, and
+his soup comes out thin: his stove is weaker, his pot is smaller, and he has
+no bay leaf. The recipe was identical. His kitchen was not. So next time
+she packs the soup in a sealed lunchbox, spoon included, and mails it.
+**What changed? She stopped depending on his kitchen.**
 
-| Where       | Node version | System libraries     | Result                 |
-| ----------- | ------------ | -------------------- | ---------------------- |
-| Laptop      | 20.11        | Whatever macOS ships | Every test passes      |
-| Prod server | 18.4         | A minimal Linux base | Crash on first request |
-
-**The code was identical in both places. What wasn't identical was
-everything around the code — and nothing forced that gap to be visible
-before it became an outage.**
+Software has exactly this problem. An app that works on one laptop can fail
+on a server because the language version or a system library differs. Docker
+is the lunchbox: it packs the app together with everything it assumes about
+its surroundings.
 
 </Scenario>
 
-Docker's whole reason for existing is to close that exact gap — by
-packaging not just the code, but everything the code assumes is true
-around it, into one artifact that's byte-identical everywhere it runs.
-
 <LevelIntro
   items={[
-    "Image, container, and layer — what each word actually means",
-    "Why the same image can run identically on any machine",
-    "Containers vs. VMs, at a glance",
+    "Dockerfile, image, container, registry",
+    "Why the same image runs the same way",
+    "Containers compared with virtual machines",
   ]}
 />
 
-Before the Docker words, name the everyday pieces:
+## What are the pieces?
 
-| Term        | Plain version                                                               |
-| ----------- | --------------------------------------------------------------------------- |
-| App         | The program you want to run                                                 |
-| Environment | Everything around the app: language version, OS libraries, variables, files |
-| Dockerfile  | The recipe that says how to build the package                               |
-| Image       | A sealed box with the app and its runtime assumptions                       |
-| Container   | That image started up as a running process                                  |
-| Registry    | A warehouse where built images are stored and pulled by name/tag            |
+| Lunchbox picture                     | Docker word | What it is                                           |
+| ------------------------------------ | ----------- | ---------------------------------------------------- |
+| The recipe for packing               | Dockerfile  | A short text file of build instructions              |
+| The sealed lunchbox                  | Image       | The packed app plus its runtime, fixed once built    |
+| A lunchbox opened and being eaten    | Container   | An image started as a running process                |
+| The warehouse that stores lunchboxes | Registry    | A store where images are kept and pulled by name/tag |
+| The compartments inside the box      | Layers      | The stacked pieces an image is built from            |
 
-- An **image** is a built, immutable artifact — a stack of filesystem layers plus metadata (entrypoint, exposed ports, environment defaults). A **container** is a _running instance_ of an image — the same relationship as a class and an object, or a program file and a running process.
-- Building an image (`docker build`) happens once per version; running it (`docker run`) can happen many times, on many machines, from the same unchanged image — this is the mechanical basis of the environment-parity guarantee covered in `infra-delivery/environment-parity`. It's also the direct fix for the scenario above: the Node version, the OS libraries, everything the laptop had that prod didn't — all of it ships inside the image now, instead of living only in one engineer's head.
-- **Images are built in layers**, one per Dockerfile instruction, and layers are cached and reused: if an early instruction's inputs haven't changed, Docker reuses the cached layer instead of re-executing it — this is why instruction _order_ in a Dockerfile has real, measurable performance consequences, not just stylistic ones.
-  As a beginner model, think "one important build instruction, one layer";
-  later Docker details get more precise because metadata-only
-  instructions such as `CMD` or `ENV` may update image configuration
-  rather than adding a new filesystem layer.
-- A **registry** (Docker Hub, a private registry) is where built images are stored and retrieved by name and tag (`node:20.11-bookworm-slim`) — pushing an image publishes it there; pulling retrieves it; this is what lets a CI pipeline build once and have production pull the exact same artifact, rather than rebuilding (and risking a rebuild landing on a different Node patch version than what was tested).
-- **Multi-stage builds** let a Dockerfile use one stage to compile/build (with all the heavy build tooling) and a second, separate stage to produce the final runtime image containing only what's needed to run — the build tools never end up in the shipped image, which matters for both image size and attack surface.
-- Containers share the host machine's kernel (unlike a VM, which virtualizes a whole OS) — this is why containers start in milliseconds-to-seconds instead of a VM's tens-of-seconds-to-minutes, at the cost of a narrower isolation boundary (covered as a trade-off, not a flaw, in `environment-parity`).
+```mermaid
+flowchart LR
+    D["Dockerfile<br/>(recipe)"] -->|"docker build, once"| I["Image<br/>(sealed box)"]
+    I -->|"docker run"| C1["Container 1"]
+    I -->|"docker run"| C2["Container 2"]
+    I -->|"docker run"| C3["Container 3"]
+```
+
+## Image versus container
+
+- An **image** is built once per version and never changes afterwards.
+- A **container** is a running instance of an image. Start it three times and there are three containers and still one image.
+- Anything a container writes while running stays in its own top layer and disappears when the container is removed.
+- Because the app and its assumptions travel inside the image, the laptop-versus-server gap closes: both run the same packed thing.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="image-vs-container"
+/>
+
+## Containers versus virtual machines
+
+- A virtual machine carries a whole guest operating system. A container carries only the app and its files and borrows the host's kernel.
+- Result: containers start much faster and use less space, in return for a thinner wall between neighbours. That is a trade-off, not a defect.
 
 ```mermaid
 flowchart LR
     subgraph VM["Virtual machine"]
         direction TB
-        HW1["Host OS"] --> HV["Hypervisor"] --> GOS1["Guest OS #1"] --> App1["App"]
-        HV --> GOS2["Guest OS #2"] --> App2["App"]
+        H1["Host"] --> HV["Hypervisor"] --> G1["Guest OS 1"] --> A1["App"]
+        HV --> G2["Guest OS 2"] --> A2["App"]
     end
     subgraph CT["Containers"]
         direction TB
-        HW2["Host OS + kernel"] --> Eng["Container engine"] --> C1["Container #1"]
-        Eng --> C2["Container #2"]
+        H2["Host OS + kernel"] --> E["Container engine"] --> K1["Container 1"]
+        E --> K2["Container 2"]
     end
 ```
 
-Each VM carries a full guest OS; each container shares the host's kernel and carries only the app plus its own filesystem layers — smaller, faster to start, but isolated one level less deeply.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="containers-vs-vms"
+/>
 
-This unit's practical goal: understand the image/container/layer/registry mechanics precisely enough to reason about _why_ a Dockerfile behaves the way it does — slow rebuilds, unexpectedly large images, cache misses — not just how to copy a working Dockerfile from somewhere else.
+## What the next levels add
+
+L2 looks inside an image: how layers are cached, why instruction order
+decides rebuild speed, how multi-stage builds trim what ships, and how a
+registry moves one exact image between machines. L3 turns the cache rule
+into a function and covers what the build is actually sent.

@@ -1,161 +1,175 @@
 ---
-title: "L3 — Watching cache hits happen for real, and modeling the invalidation rule in code"
+title: "L3 — Predicting rebuilds, and what the build is actually sent"
 ---
 
+import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L2 described the cache-invalidation cascade as a rule. L3 watches that same
-rule play out in real `docker build` terminal output across three actual
-builds, then turns the rule into a small, testable function instead of
-leaving it as something only observable by staring at build logs.
+export const unit = { track: "infra-delivery", unitSlug: "docker" };
+
+<Scenario label="Three edits, one Dockerfile: which one is slow?">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>✏️</span> <strong>Edit 1</strong> — change a line in <code>server.js</code></div>
+      <div class="flex items-center gap-1.5"><span>📦</span> <strong>Edit 2</strong> — add one dependency to <code>package.json</code></div>
+      <div class="flex items-center gap-1.5"><span>🧱</span> <strong>Edit 3</strong> — bump the base image's version tag</div>
+    </div>
+    <div class="not-prose mt-3 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs dark:border-amber-800 dark:bg-amber-950">
+      Same five-layer Dockerfile as L2. Predict the order of cost before reading on.
+    </div>
+  </Fragment>
+
+Think of three ways to change a school lunch order. Swapping the napkin takes
+a second. Swapping the sandwich filling means remaking the sandwich.
+Switching to a different lunchbox means repacking everything inside it.
+The cost depends on how deep the change sits in the stack. **For the same
+five-layer Dockerfile as L2, which of the three edits above is cheapest, which
+is most expensive, and can you say why before running anything?**
+
+</Scenario>
+
+L2 stated the cascade as a rule. L3 turns it into a prediction you can make
+without running the build, and then looks at the other thing every build
+quietly depends on: the folder it is sent.
 
 <LevelIntro
   items={[
-    "Real docker build output, cold cache vs. cache hits",
-    "The invalidation rule expressed as a pure function",
-    "Four Dockerfile mistakes that quietly defeat caching",
+    "Predicting cost from the depth of a change",
+    "The cache rule as a small testable function",
+    "What the build context drags in",
   ]}
 />
 
-## What does a cache hit actually look like, in real `docker build` output?
+## What does each of the three edits cost?
 
-Captured terminal output, real Docker behavior — first build (cold cache):
+These are assumed, illustrative costs, not a benchmark, and they match the
+defaults of the interactive demo on L2: the install takes 20 s, the source
+copy plus export takes 0.5 s, and a base image pull is assumed to take 2 s.
+Small steps such as `WORKDIR` and the manifest copy are treated as zero.
 
-```
-$ docker build -t myapp .
-[+] Building 24.3s
- => [1/5] FROM node:20.11-bookworm-slim                    2.1s
- => [2/5] WORKDIR /app                                      0.1s
- => [3/5] COPY package.json package-lock.json ./             0.1s
- => [4/5] RUN npm ci                                        19.8s
- => [5/5] COPY . .                                            0.2s
- => exporting to image                                       1.8s
-```
+| Edit                    | First layer to rerun | Layers that rerun | Assumed cost          |
+| ----------------------- | -------------------- | ----------------- | --------------------- |
+| `server.js` only        | 5 (source copy)      | 5                 | 0.5 s                 |
+| Add a dependency        | 3 (manifest copy)    | 3, 4, 5           | 20 + 0.5 = 20.5 s     |
+| Bump the base image tag | 1 (`FROM`)           | 1, 2, 3, 4, 5     | 2 + 20 + 0.5 = 22.5 s |
 
-Second build, after editing only `server.js` (source, not dependencies):
-
-```
-$ docker build -t myapp .
-[+] Building 0.6s
- => [1/5] FROM node:20.11-bookworm-slim                    CACHED
- => [2/5] WORKDIR /app                                      CACHED
- => [3/5] COPY package.json package-lock.json ./             CACHED
- => [4/5] RUN npm ci                                        CACHED
- => [5/5] COPY . .                                            0.3s
- => exporting to image                                       0.3s
+```mermaid
+xychart-beta
+    title "Assumed rebuild time by what changed (seconds)"
+    x-axis ["Edit server.js", "Add a dependency", "Bump base image"]
+    y-axis "Seconds" 0 --> 25
+    bar [0.5, 20.5, 22.5]
 ```
 
-The 19.8-second `npm ci` step — the expensive one — shows `CACHED` and takes effectively zero time, because nothing that layer's cache key depends on (the base image, the working directory, `package.json`/`package-lock.json`'s content) changed. Only layer 5 (`COPY . .`, which depends on the entire source tree's content) reruns, because `server.js` is part of that tree. This 24.3s → 0.6s difference, on every single rebuild during active development, is the entire practical payoff of layer ordering — not a theoretical concern, a directly measured one.
+The depth of the change decides the cost, not the size of the edit: a
+one-line bump of a version tag costs the most, and a hundred-line edit to
+source costs the least.
 
-Third build, after editing `package.json` (adding a dependency):
+<Checkpoint question="A fourth build bumps the base image from node:20.11 to node:20.12 and changes nothing else. Which of the five layers show as cached?">
 
-```
-$ docker build -t myapp .
-[+] Building 21.4s
- => [1/5] FROM node:20.11-bookworm-slim                    CACHED
- => [2/5] WORKDIR /app                                      CACHED
- => [3/5] COPY package.json package-lock.json ./             0.1s
- => [4/5] RUN npm ci                                        19.9s
- => [5/5] COPY . .                                            0.2s
-```
-
-Layer 3's cache key changed (the file content it copies changed), which cascades to layer 4 (`npm ci` reruns, since its own cache key includes layer 3's output) and layer 5 — exactly the cascade described in L2, now observed as real build output rather than asserted.
-
-<Checkpoint question="If a fourth build only bumped the base image tag from node:20.11-bookworm-slim to node:20.12-bookworm-slim, and nothing else changed, which of the five layers above would show CACHED and which would rebuild?">
-
-None of the five would show `CACHED` — all five would rebuild. Layer 1
-(`FROM`) is the foundation every later layer is built on top of, so
-changing its cache key invalidates it, and the cascade rule from L2 says
-once one layer rebuilds, every layer after it rebuilds too, regardless of
-whether their own individual inputs (the manifest files, the source tree)
-changed at all. This is why a base-image bump is the most expensive kind of
-change to make casually — it throws away the entire cache, not just the
-layer that technically changed.
+None. Layer 1 is the foundation every other layer is built on, so changing it
+invalidates it, and the cascade rule says every layer above a rebuilt layer
+rebuilds too, whether or not its own inputs changed. That is why a base-image
+bump is the most expensive change to make casually: it throws away the whole
+cache, not just the layer that technically changed.
 
 </Checkpoint>
 
-## Can the rule behind all three builds be expressed as code, not just described?
+## Can the rule be written as a function?
 
-Yes — it's a pure function of two inputs (the layer list, and which named inputs changed), which is exactly what makes it testable instead of just observable in terminal output: a layer rebuilds if and only if its own inputs changed, or an earlier layer it depends on rebuilt — invalidation cascades forward, never backward.
+Yes, and this is a case where code is the clearest vehicle, because the rule
+is a tiny algorithm with one subtle point: the flag that never turns off.
 
-In plain pseudocode:
-
-1. Start at the top of the Dockerfile.
-2. For each step, ask "did this step's own input change?"
-3. If yes, mark this step as rebuilt.
-4. Once one step rebuilds, mark every later step as rebuilt too, because
-   each later step sits on top of the changed step.
-5. Never rebuild an earlier step because of a later edit; the cascade
-   only moves downward.
+1. Walk the layers from the top of the Dockerfile down.
+2. A layer reruns if one of its own inputs changed.
+3. Once one layer reruns, every later layer reruns too.
+4. An edit to a later layer never forces an earlier one to rebuild.
 
 ```js
-// layer-cache.mjs — models Docker's layer cache invalidation rule
-function computeRebuildPlan(layers, changedInputs) {
-  // layers: [{ name, inputs: string[] }, ...] in Dockerfile order
-  // changedInputs: Set of input names that changed since the last build
-  const rebuilds = [];
+function computeRebuildPlan(layers, changed) {
+  const rebuilt = [];
   let cascading = false;
-
   for (const layer of layers) {
-    const inputsChanged = layer.inputs.some((i) => changedInputs.has(i));
-    if (inputsChanged || cascading) {
-      rebuilds.push(layer.name);
-      cascading = true; // once one layer rebuilds, every layer after it must too
+    if (cascading || layer.inputs.some((i) => changed.includes(i))) {
+      cascading = true;
+      rebuilt.push(layer.name);
     }
   }
-  return rebuilds;
+  return rebuilt;
 }
-
-const layers = [
-  { name: "FROM node:20.11", inputs: ["base-image-tag"] },
-  { name: "WORKDIR /app", inputs: [] },
-  {
-    name: "COPY package.json ./",
-    inputs: ["package.json", "package-lock.json"],
-  },
-  { name: "RUN npm ci", inputs: [] }, // depends only on the previous layer's output
-  { name: "COPY . .", inputs: ["source-tree"] },
-];
-
-console.log(computeRebuildPlan(layers, new Set(["source-tree"])));
-// ["COPY . ."] — matches the second real build above
-
-console.log(computeRebuildPlan(layers, new Set(["package.json"])));
-// ["COPY package.json ./", "RUN npm ci", "COPY . ."] — matches the third build's cascade
 ```
 
-## Four mistakes that are each individually easy to miss in a review — which would you flag first?
+With layers whose inputs are `image`, `pkg`, none, and `src`, changing
+`pkg` returns the manifest copy, the install and the source copy: exactly
+the middle row of the table above.
 
-| #   | Mistake                                   | What it silently breaks                                                                             |
-| --- | ----------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| 1   | `COPY . .` before installing dependencies | Every layer after it invalidates on _any_ source change — caching defeated almost entirely          |
-| 2   | Tagging (and pulling) `latest`            | "Same tag" stops meaning "same bytes" — undermines build-once-run-everywhere itself                 |
-| 3   | No `.dockerignore`                        | `node_modules/`, `.git/` and friends get sent, hashed, and folded into the cache key on every build |
-| 4   | Assuming stages share state               | A file written in stage 1 doesn't exist in stage 2 unless named in `COPY --from`                    |
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="rebuild-plan"
+/>
 
-- **Putting `COPY . .` before installing dependencies.** The single most common Dockerfile performance mistake — it makes every layer after it (including the expensive install step) invalidate on _any_ source change, defeating caching almost entirely, even though the dependency manifest didn't change. This is exactly the L2 scenario's bug: the teammate's one-line `server.js` edit re-ran `npm ci` because the Dockerfile they inherited had `COPY . .` ahead of the install step.
-- **Using `latest` as a tag and assuming it's stable.** `latest` is just a tag like any other — it can be repointed to a different image at any time, meaning "pull `myapp:latest`" doesn't guarantee the same bytes twice, undermining the exact build-once-run-everywhere guarantee this unit is about. A specific version tag (or better, a content digest) is what actually pins it.
-- **Copying more than necessary into the build context.** Without a `.dockerignore`, `COPY . .` includes `node_modules/`, `.git/`, and other large or irrelevant directories in the build context sent to the Docker daemon — this slows every build (the whole context has to be sent and hashed) and can bloat layer 5's cache key with files that have nothing to do with the actual application. A `.dockerignore` works exactly like a `.gitignore`: one glob pattern per line, matched against paths relative to the build context root.
+## What does the build get sent, and what does it fold into a layer?
 
-  The **build context** is the folder Docker receives before it can run
-  the Dockerfile. If that folder includes junk, Docker still has to send,
-  scan, and hash the junk. A `.dockerignore` is the filter at the door.
+Before any instruction runs, Docker receives the **build context**: the
+folder you point `docker build` at. `COPY . .` then folds whatever is in that
+folder into one layer and its cache key.
 
-  ```
-  # .dockerignore
-  node_modules/
-  .git/
-  *.log
-  dist/
-  .env
-  ```
+```mermaid
+flowchart LR
+    F["Project folder"] --> X{".dockerignore<br/>filter"}
+    X -->|"kept"| Ctx["Build context<br/>(sent to Docker)"]
+    X -->|"filtered out"| Gone["node_modules, .git, .env<br/>never sent"]
+    Ctx --> L["COPY . . folds it<br/>into one layer"]
+```
 
-- **Forgetting that multi-stage build stages don't share state except through explicit `COPY --from`.** A variable set, a file written, or a package installed in stage 1 does not exist in stage 2 unless it's named in a `COPY --from=<stage>` — treating stages as if they share an environment (the way a single-stage Dockerfile's instructions do) produces confusing "why isn't this here" failures in the final image.
+A `.dockerignore` works like a `.gitignore` (one pattern per line, relative to
+the context root):
 
-The code exercises below assume JavaScript comfort with arrays, objects,
-`Set`, loops, and simple string matching. If those are new, first solve
-the Docker reasoning without code: order the layers, mark which input
-changed, then draw the rebuild cascade by hand.
+```
+node_modules/
+.git/
+*.log
+.env
+```
 
-The three real builds above are one worked example — a Node app with exactly five layers — not the whole territory. **What changes if the Dockerfile also has a `RUN apt-get install` step for a native dependency, positioned between the base image and the `COPY package.json` step?** (Its cache key depends only on the base image, same as `WORKDIR` — so it stays cached across both source _and_ dependency-manifest changes, and only reruns if the base image itself is bumped. That's an argument for pushing genuinely stable steps as early as possible, not just dependency installs.)
+| Mistake                       | What it quietly costs                                        |
+| ----------------------------- | ------------------------------------------------------------ |
+| No `.dockerignore`            | Large, irrelevant folders are sent and hashed on every build |
+| `.git` left in the context    | The source layer's key changes with every commit             |
+| `.env` left in the context    | A file of secrets can be copied into an image layer          |
+| `COPY . .` before the install | Every source edit also invalidates the install (see L2)      |
+
+<Checkpoint question="A project has a .dockerignore listing .env, and the Dockerfile still ends with COPY . . Can the image end up containing .env?">
+
+No. The filter is applied before the build starts, so a path listed there is
+never part of the context and `COPY . .` has nothing to reach. This is also
+why `.dockerignore` is a security habit as well as a speed habit: it is the
+one place that stops a secrets file from being copied into a layer by
+accident. It does not protect a secret that was already baked into a layer in
+an earlier version of the image.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="build-context-ignore"
+/>
+
+## Where else do these ideas apply?
+
+The five-layer Node Dockerfile is one worked case, not the whole territory.
+The same two ideas, "a change invalidates everything above it" and "the
+context is the real input", apply to any build that stacks steps.
+
+**What changes if the Dockerfile also has a `RUN apt-get install` step for a
+native library between `FROM` and the manifest copy?** Its inputs are the
+base image only, so it stays cached through both source and manifest edits
+and reruns only when the base image changes. What if that step were moved
+below `COPY . .` instead? And what would you expect if the project had three
+services sharing one base image: how many of the three caches does one base
+bump invalidate? Work these out with the table and function above before
+checking them against a real build.
