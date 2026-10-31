@@ -526,7 +526,7 @@ export const UNIT_TEASERS: Record<string, UnitTeaser> = {
   "infra-delivery/staff-level-release-engineering-strategy": {
     myth: "A deployment architecture is just whatever pipeline the team happens to be using.",
     reality:
-      "At staff level it's a deliberate design that assumes a bad Friday deploy will happen — the question is whether the architecture survives it gracefully.",
+      "It's a deliberate design that assumes a bad Friday deploy will happen — the question is whether the architecture survives it gracefully.",
   },
 
   // career-craft/
