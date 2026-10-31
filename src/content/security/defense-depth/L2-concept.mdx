@@ -4,162 +4,177 @@ title: "L2 — How do we design a system assuming a component will be breached? 
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 showed the outcome — the same 0-day, wildly different blast radius.
-This level builds the actual model behind Castellan's architecture: how
-independent layers, minimal scope, and per-request verification combine
-into a system where one failure doesn't cascade into every other one.
+export const unit = { track: "security", unitSlug: "defense-depth" };
+
+L1 showed two castles robbed by the same stolen key, with very different
+results. This level builds the model behind Castle B, and moves it into
+software using two retailers, Meridian and Castellan, hit by the same
+0-day in the same image-resizing library on the same weekend.
 
 <LevelIntro
   items={[
-    "Layers as independent, not redundant, controls",
+    "Layers that are independent, not redundant",
     "Least privilege as blast-radius containment",
-    "Zero trust vs. perimeter-only ('castle and moat') trust",
+    "Zero trust versus castle-and-moat trust",
   ]}
 />
 
-## What makes a set of controls "layers" instead of just "more security"?
+## What makes a set of controls layers instead of just more security?
 
-Stacking controls only helps if each one is checking something the
-others don't already cover — three copies of the same check add
-friction without adding safety, since whatever defeats one defeats all
-three identically. A layer earns its place by assuming the layer before
-it already failed, and asking a genuinely different question at its own
-checkpoint.
+Imagine Castle B hires three more gate guards, all trained by the same
+person, all fooled by the same forged letter. Is the castle three times
+safer? No: whatever fools one guard fools all three. A layer only earns its
+place if it asks a **different question** from the layers around it, so that
+whatever defeats one does not automatically defeat the next.
 
 ```mermaid
 flowchart TD
-    Req[Incoming request] --> L1[Network segmentation\nwhich hosts can even reach the DB tier?]
-    L1 --> L2[WAF / input validation\nis the payload itself malicious?]
-    L2 --> L3[Authentication\nis this really who it claims to be?]
-    L3 --> L4[Authorization\nis this identity allowed to do this?]
-    L4 --> L5[Least-privilege service account\ncan the credential itself even do this?]
-    L5 --> L6[Encryption at rest\nis the stored data useless if copied?]
-    L6 --> L7[Monitoring / alerting\nis anyone watching what just happened?]
-    style L1 fill:#fee2e2,stroke:#dc2626
-    style L2 fill:#fed7aa,stroke:#ea580c
-    style L3 fill:#fef08a,stroke:#ca8a04
-    style L4 fill:#d9f99d,stroke:#65a30d
-    style L5 fill:#bbf7d0,stroke:#16a34a
-    style L6 fill:#a7f3d0,stroke:#059669
-    style L7 fill:#99f6e4,stroke:#0d9488
+    Req[Incoming request] --> N["Network segmentation: can this host even reach the database tier?"]
+    N --> W["Input validation / WAF: does the payload itself look malicious?"]
+    W --> Au["Authentication: is the caller who it claims to be?"]
+    Au --> Az["Authorization: may this identity do this thing?"]
+    Az --> LP["Scoped service account: can this credential even do this?"]
+    LP --> E["Encryption at rest: is copied data useless without the key?"]
+    E --> M["Monitoring: is anyone watching what just happened?"]
+    style N fill:#fee2e2,stroke:#dc2626
+    style W fill:#fed7aa,stroke:#ea580c
+    style Au fill:#fef08a,stroke:#ca8a04
+    style Az fill:#d9f99d,stroke:#65a30d
+    style LP fill:#bbf7d0,stroke:#16a34a
+    style E fill:#a7f3d0,stroke:#059669
+    style M fill:#99f6e4,stroke:#0d9488
 ```
 
-Each box above is answerable "no" independently of the others. A request
-can pass network segmentation and still fail the WAF; it can be
-correctly authenticated and still fail authorization; it can pass
-authorization and still be blocked by a service account that simply
-lacks the underlying permission. That last one — the layer holding even
-when every check _above_ it has already been bypassed by a compromised
-component acting with stolen or forged credentials — is exactly
-Castellan's DB-account layer in L1: the attacker had already defeated
-everything upstream of it (they had real code execution, not a forged
-request), and the layer that stopped them was the one asking "can this
-specific credential even do this," independent of who or what was
-holding it.
+Each box can say "no" even when every box above it said "yes". The scoped
+service account is the clearest case: the attacker at Castellan had already
+beaten everything upstream of it, because they had real code execution on
+the web server, not a forged request. The layer that still stopped them
+asked only "can this specific credential do this at all?", which does not
+depend on who is holding it.
 
-<Checkpoint question="A company adds a second WAF, from a different vendor, in front of the first one — both scanning for the same categories of malicious payloads. Is this a genuine second layer, in the sense this section means?">
+Why does stacking pay off so quickly? If each layer independently stops an
+attacker 60% of the time, the chance of getting through all of them is the
+product of the 40% pass rates. This is an **assumed** per-layer rate chosen
+to show the shape, not a measured figure.
 
-Not really — it's redundancy, not depth. Both WAFs are answering the
-same question ("does this payload look like a known attack pattern?")
-against the same class of input, so anything sophisticated enough to
-evade the first vendor's detection has a real chance of evading the
-second one too, since they're looking for overlapping signatures. A
-genuine second layer would ask a _different_ question — least-privilege
-scoping asks "can this credential even do this, regardless of what the
-payload looked like," which stays effective even against an attack the
-WAF never recognized as malicious at all. Two WAFs raise the cost of
-getting past the first checkpoint, which has some value, but they don't
-give the attacker a fundamentally different kind of problem to solve the
-way a genuinely independent layer does.
+| Independent layers | Chance of getting through all of them |
+| ------------------ | ------------------------------------- |
+| 1                  | 40%                                   |
+| 2                  | 16%                                   |
+| 3                  | 6.4%                                  |
+| 5                  | about 1.0%                            |
+| 7                  | about 0.16%                           |
+
+```mermaid
+xychart-beta
+    title "Chance of getting through every layer (assumed 60% stop rate each)"
+    x-axis "Independent layers" [1, 2, 3, 4, 5, 6, 7]
+    y-axis "Percent" 0 --> 45
+    bar [40, 16, 6.4, 2.6, 1.0, 0.4, 0.2]
+```
+
+The multiplication only holds when the layers really are independent. Two
+identical WAFs share a blind spot, so their pass rates are not independent
+and the product badly understates the real risk. The interactive demo for this level lets you drag both knobs: more layers, or
+stronger layers.
+
+<Checkpoint question="A company puts a second WAF from a different vendor in front of its first one, and both scan for the same attack signatures. Is this a genuine second layer?">
+
+Not really. It is redundancy, not depth. Both products ask the same
+question about the same kind of input, so an attack clever enough to evade
+the first has a good chance of evading the second, because their signatures
+overlap. A genuine second layer asks a different question: a scoped database
+account asks "can this credential do this at all?", and that stays effective
+even against an attack the WAF never recognised as malicious. Two WAFs make
+the first checkpoint harder to pass, which has some value, but they do not
+give the attacker a different kind of problem to solve.
 
 </Checkpoint>
 
-## Least privilege: why "give it admin, it's simpler" is the actual vulnerability
+## Least privilege: why is "just give it admin" the actual vulnerability?
 
-Meridian's web server held full admin database credentials not because
-anyone wanted to be breached, but because scoping access down is real,
-ongoing work — someone has to figure out exactly which tables and
-operations the app actually needs, and keep that list current as the app
-changes. "Just use admin" is the path of least _effort_, which is why it
-keeps happening, even though it's the opposite of least _privilege_.
+Back at Meridian, the web server held a shared admin database account. Nobody
+wanted a breach. Scoping an account down is ongoing work: someone has to
+list exactly which tables and operations the app needs, and keep that list
+current as the app changes. "Use admin, it's simpler" is the path of least
+_effort_, which is why it keeps happening, even though it is the opposite of
+least _privilege_.
 
-The question least privilege actually answers isn't "is this account
-convenient" — it's **"if this exact credential is stolen or misused
-right now, what's the smallest possible set of things that can go
-wrong?"** That smallest possible set is the blast radius.
+The question least privilege answers is not "is this account convenient?" It
+is: **if this exact credential is stolen right now, what is the smallest set
+of things that can go wrong?** That set is the blast radius.
 
-| Service account design                                | Tables reachable | Operations allowed               | Blast radius if stolen                  |
-| ----------------------------------------------------- | ---------------- | -------------------------------- | --------------------------------------- |
-| Meridian: shared admin account, "simpler to maintain" | All (47)         | SELECT/INSERT/UPDATE/DELETE/DROP | Entire database, read + write + destroy |
-| Castellan: scoped read proxy account for the web tier | 2                | SELECT only                      | 2 non-sensitive tables, read-only       |
+| Account design                                  | Tables reachable | Operations allowed                   | Blast radius if stolen                   |
+| ----------------------------------------------- | ---------------- | ------------------------------------ | ---------------------------------------- |
+| Meridian: shared admin account                  | all 47           | select, insert, update, delete, drop | Whole database: read, write, and destroy |
+| Castellan: scoped read account for the web tier | 2                | select only                          | 2 non-sensitive tables, read-only        |
 
-Scoping down isn't a one-time setting — it has to be re-derived as a
-service's actual needs change, and it has to survive the temptation to
-widen it "just for now" under deadline pressure (the same pressure that
-produced the hardcoded-secret incident in `secrets-management`). L3
-turns this table into a real IAM policy diff and a working calculation
-of exactly how many records each design exposes.
+Scoping is not a one-time setting. It has to be re-derived whenever a
+service's real needs change, and it has to survive the temptation to widen
+it "just for now" under deadline pressure. The L3 demo shows how
+directly the grant decision, rather than the theft technique, sets the
+number: at an average of 4,270 records per table, a 2-table grant exposes
+8,540 records and a 47-table grant exposes 200,690. The 4,270 average is a scenario value, not a statistic.
 
-## Zero trust: does being "inside the network" mean anything?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="least-privilege-blast"
+/>
 
-A perimeter-only ("castle and moat") architecture puts its serious
-checks at the network edge — firewall, VPN, login page — and then treats
-everything behind that edge as roughly trusted: service A can call
-service B without re-proving anything, because both are "inside." Zero
-trust removes that assumption entirely: **no request is trusted by
-virtue of where it came from — every request, including
-service-to-service calls entirely inside the same network, is
-authenticated and authorized on its own merits, every time.**
+## Zero trust: does being inside the network mean anything?
+
+A castle-and-moat design puts its serious checks at the edge (firewall, VPN,
+login page) and treats everything inside as roughly trusted. Service A can
+call service B without proving anything, because both are "inside". Zero
+trust removes that assumption: **no request is trusted because of where it
+came from.** Every request, including one between two services in the same
+cluster, is authenticated and authorised on its own merits, every time.
 
 ```mermaid
 flowchart LR
-    subgraph Perimeter-only["Perimeter-only (castle and moat)"]
+    subgraph P["Castle and moat"]
         direction TB
-        FW1[Firewall / login] --> S1[Service A]
-        S1 -.->|implicitly trusted,\nno re-check| S2[Service B]
-        S2 -.->|implicitly trusted| S3[(Database)]
+        FW1[Firewall and login] --> S1[Service A]
+        S1 -. "trusted, no re-check" .-> S2[Service B]
+        S2 -. "trusted" .-> D1[(Database)]
     end
-    subgraph ZeroTrust["Zero trust"]
+    subgraph Z["Zero trust"]
         direction TB
-        FW2[Firewall / login] --> T1[Service A]
-        T1 -->|mTLS + per-request\nauthz check| T2[Service B]
-        T2 -->|mTLS + per-request\nauthz check| T3[(Database)]
+        FW2[Firewall and login] --> T1[Service A]
+        T1 -- "identity proven, permission checked" --> T2[Service B]
+        T2 -- "identity proven, permission checked" --> D2[(Database)]
     end
 ```
 
-Why does this matter given the layers already covered above? Because
-Meridian's flat trust wasn't really "no security" — it likely had a
-firewall and a login page too. What it lacked was _any_ checkpoint
-_inside_ the perimeter: once the attacker's foothold on the web server
-was itself "inside," nothing asked it to re-prove anything before
-talking to the database. Zero trust is the design stance that treats
-"inside the network" as meaningless on its own, which is precisely what
-makes a single compromised component unable to freely impersonate a
-trusted internal caller.
+Meridian was not "no security": it very likely had a firewall and a login
+page. What it lacked was any checkpoint **inside** the perimeter. Once the
+attacker's foothold on the web server was itself inside, nothing asked it to
+prove anything before it talked to the database.
 
-<Checkpoint question="A service-to-service call inside the same Kubernetes cluster, on a private internal IP range, still gets mutual TLS and a per-request authorization check under a zero-trust design. Isn't that redundant, since an external attacker can't even reach that private IP?">
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="zero-trust-verify"
+/>
 
-The redundancy assumption is exactly the gap zero trust is closing. It's
-true that an _external_ attacker on the public internet can't directly
-address a private internal IP — but the threat this unit is built
-around isn't an external attacker knocking from outside, it's a
-component _already inside_ that perimeter, compromised through some
-other route (a 0-day, a malicious dependency, a leaked credential). Once
-that's the premise, "on the internal network" describes the attacker's
-position just as accurately as it describes a legitimate service's
-position — the IP range can no longer distinguish between them. mTLS
-and a per-request authz check verify the _caller's identity and
-permissions_ specifically, which is a property the network location
-never actually established in the first place.
+<Checkpoint question="Two services on the same private network still check each other's identity and permissions on every call. Isn't that pointless, since outsiders cannot reach that network?">
+
+The pointless-looking part is exactly the gap zero trust closes. It is true
+that an outsider cannot address the private network directly, but the threat
+this unit assumes is a component already inside, taken over through some
+other route such as a 0-day or a leaked token. Once that is the premise,
+"on the internal network" describes the attacker's position just as well as
+it describes a legitimate service. The network location can no longer tell
+them apart. An identity check and a permission check do, because they verify
+the caller itself rather than where the packet came from.
 
 </Checkpoint>
 
-Both ideas — least privilege and zero trust — describe the same
-underlying discipline from two different angles: least privilege bounds
-what a component _can_ do once trusted; zero trust bounds _how easily_
-anything gets treated as trusted at all. L3 makes both real: a scoped
-IAM/DB policy you could actually deploy, a Kubernetes `NetworkPolicy`
-enforcing the segmentation from L1's diagram, a service-to-service authz
-check in code, and a small blast-radius calculator that turns "how
-exposed is this design" into an actual number instead of a feeling.
+Least privilege and zero trust are two angles on one discipline. Least
+privilege bounds what a component **can** do once trusted. Zero trust bounds
+how **easily** anything becomes trusted at all. L3 puts both into a
+design review: which layer stops which failure, a small permission check,
+and a blast-radius number.
