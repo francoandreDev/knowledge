@@ -3446,3 +3446,17 @@ Migrated 4 more `security/` units via 4 parallel content-only subagents. Same pi
 Practice items have 3 choices (`tls-https` and `authentication-fundamentals` use 4); exam items have 4. Length bias, correct strictly longest / shortest: `symmetric-asymmetric-encryption-basics` 15% / 24% overall, `tls-https` 23% / 19%, `owasp-top-10` 21% / 26%, `secrets-management` 18% / 30% (practice shortest 34%, at the ceiling).
 
 `security/` is at 8 of 13. Total migrated: 84 of 246. Remaining here: `supply-chain-security`, `defense-depth`, `security-testing`, `incident-response`, `secure-by-design`.
+
+## 2026-10-31 — `security/` batch 3 (final): `supply-chain-security`, `defense-depth`, `security-testing`, `incident-response`, `secure-by-design`
+
+Migrated the last 5 `security/` units via 5 parallel content-only subagents. Same pipeline; `typecheck` 0 errors, `build` 273 pages, Node sandbox check of 30 code items 0 failing assertions; live click-through passed all 31 `DomainCheck` topics (3 code topics run with the reference solution), 0 Mermaid errors (including the `xychart-beta` in `incident-response` L1 and the `stateDiagram-v2` in `secure-by-design` L3), "Mark as done" enabled on all five. The `defense-depth` L1 fill-bar markup lives in the `Scenario` `facts` slot, which is not in the DOM until the whiteboard opens, so it was checked in source only.
+
+- **`supply-chain-security`**: 8 topics, 88 items; code topic `loose-ranges`. Borrowed-ingredient opening; unified the old "eleven days" / "14 days" mix to 14 (matches the demo: 40 runs/day × 14 = 560; 340 × 85% = 289, inputs labelled as assumptions); removed invented download/age figures and a real-sounding typosquat name.
+- **`defense-depth`**: 5 topics, 58 items; code topic `default-deny-check`. Two-castles opening; five layers at 60% stopped is 1.024% (old text said "fractions of a percent"); the 14 old code exercises became prose/tables; removed a SQL snippet with a password literal.
+- **`security-testing`**: 7 topics, 80 items, all quiz. Shop-lock opening; removed invented "19 days / 10 minutes" figures; the ×10-per-stage cost is labelled an illustrative assumption. `interactives.json` still calls it "well-documented" (file left untouched; worth revisiting).
+- **`incident-response`**: 6 topics, 72 items, all quiz (the 6 old code exercises became quiz concepts; rule 9, no fake pseudocode). Fixed a contradiction between the containment text and its decision tree (fast exfiltration means isolate immediately); replaced an invented pie chart with a labelled even-rate assumption (3650/11 ≈ 332 per night); recomputed the notification deadline (45h 40m used, 26h 20m left).
+- **`secure-by-design`**: 8 topics, 87 items; code topic `deny-by-default-check`. L1 cost figures now use the demo's $50 / $800 / $45,000 (16x and 900x, labelled assumptions). Removed the "staff engineer" label from the unit text, the roadmap row title and `src/data/unit-teasers.ts`.
+
+Practice items have 3 choices (`defense-depth` and others as noted per unit); exam items have 4. Length bias, correct strictly longest / shortest: `supply-chain-security` 10% / 14% overall (exam 0% / 0%), `defense-depth` 23% / 23%, `security-testing` 6% / 23% (practice 2% / 27%, a faint opposite tell), `incident-response` 26% / 8% (practice shortest 2%), `secure-by-design` 10% / 18%.
+
+`security/` is complete: 13 of 13. Total migrated: 89 of 246. Next track in ROADMAP order: `infra-delivery`.
