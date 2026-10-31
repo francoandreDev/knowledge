@@ -464,7 +464,7 @@ export const UNIT_TEASERS: Record<string, UnitTeaser> = {
   "security/secure-by-design": {
     myth: "Security gets added at the end, right before launch.",
     reality:
-      "A staff engineer bakes threat modeling into the architecture from day one — bolting security on afterward is far more expensive and far less effective.",
+      "Threat modeling is baked into the architecture from day one — bolting security on afterward is far more expensive and far less effective.",
   },
 
   // infra-delivery/
