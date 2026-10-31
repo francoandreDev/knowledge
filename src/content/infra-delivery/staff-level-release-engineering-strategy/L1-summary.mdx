@@ -1,123 +1,121 @@
 ---
-title: "L1 — How do we design a deployment architecture that survives a bad Friday deploy? (staff-level release engineering strategy)"
+title: "L1 — How do we design a deployment that survives a bad Friday deploy?"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "infra-delivery",
+  unitSlug: "staff-level-release-engineering-strategy",
+};
 
 <Scenario label="Same bug, same Friday, two very different afternoons">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>Same bug</strong> — a null-pointer regression in the checkout price calculator, shipped by both teams at 4:45pm Friday</div>
-      <div class="flex items-center gap-1.5"><span>🅰️</span> <strong>Team A</strong> — no integrated release strategy: full-traffic deploy, customer-complaint detection, blocked rollback</div>
-      <div class="flex items-center gap-1.5"><span>🅱️</span> <strong>Team B</strong> — canary + SLO alerting + compatible migration: the same bug, caught and reversed automatically</div>
+      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>Same bug</strong> — a null-pointer regression in a checkout price calculator, shipped at 4:45pm Friday</div>
+      <div class="flex items-center gap-1.5"><span>🅰️</span> <strong>Team A</strong> — everyone gets the new build at once, a customer ticket is the first alarm, rollback is blocked</div>
+      <div class="flex items-center gap-1.5"><span>🅱️</span> <strong>Team B</strong> — a small slice gets it first, an alert on checkout failures fires, rollback is safe</div>
     </div>
     <div class="not-prose mt-3 flex flex-col gap-1.5 text-xs">
       <div class="flex items-center gap-2">
         <span class="w-32 shrink-0">Team A: time to safe</span>
         <div class="h-3 flex-1 overflow-hidden rounded bg-slate-200 dark:bg-slate-800">
-          <div class="h-3 rounded bg-rose-400" style="width: 100%"></div>
+          <div class="animate-fill-bar h-3 rounded bg-rose-400" style="--target-width: 100%"></div>
         </div>
-        <span class="w-20 shrink-0 text-right">~72 min</span>
+        <span class="w-20 shrink-0 text-right">72 min</span>
       </div>
       <div class="flex items-center gap-2">
         <span class="w-32 shrink-0">Team B: time to safe</span>
         <div class="h-3 flex-1 overflow-hidden rounded bg-slate-200 dark:bg-slate-800">
-          <div class="h-3 rounded bg-emerald-400" style="width: 14%"></div>
+          <div class="animate-fill-bar h-3 rounded bg-emerald-400" style="--target-width: 14%"></div>
         </div>
-        <span class="w-20 shrink-0 text-right">~10 min</span>
+        <span class="w-20 shrink-0 text-right">10 min</span>
       </div>
     </div>
-
   </Fragment>
 
-Two teams ship the exact same bug at the exact same time: a null-pointer
-regression in a checkout price calculator, deployed at 4:45pm on a Friday.
-Neither team wanted this. Both code reviews missed it. What happens next
-is entirely a function of what each team built _in advance_, not how fast
-anyone reacts once the bug is live.
+Picture a restaurant adding a new dish. One careless kitchen serves it to the
+whole dining room at once and learns it is too salty from the angry
+reviews. A careful kitchen sends it to one table first, watches the plate
+come back, and pulls it before anyone else orders. The recipe is identical.
+The difference is what the kitchen set up _before_ the dish left the pass.
 
-**Team A** has no integrated release strategy. The new build goes straight
-to 100% of production traffic — there's no staged rollout, so there's
-nothing to catch the regression before it's everywhere. Nobody is paged;
-the only alerts wired up watch server CPU and memory, both of which stay
-perfectly calm because a null-pointer exception is cheap to throw. The
-first signal anyone gets is a customer support ticket, forty-one minutes
-later, from a shopper whose cart total silently showed $0.00. An engineer
-finally reaches for rollback — and discovers the deploy included a
-database migration that dropped a column the previous version still
-reads from. Rolling back the code without rolling back the migration
-would break the _previous_ version too. Untangling that safely takes
-another 31 minutes. Total time to safe: about 72 minutes, and the whole
-window happened in front of real customers.
+Two engineering teams are in exactly that position. Both ship the same bug
+at 4:45pm on a Friday: a null-pointer regression that makes checkout show a
+$0.00 total. Neither code review caught it. The numbers below are an
+illustrative scenario, not measurements from a real incident.
 
-**Team B** ships the identical bug into an architecture built for exactly
-this moment. The deploy first passes through a canary stage — 5% of
-traffic, not 100%. An SLO-based alert, watching the actual customer-facing
-success rate rather than server resource graphs, fires within 3 minutes
-of the canary's error rate crossing a threshold — long before any human
-would have noticed from a support ticket. The rollback that follows is
-fast and safe, because the team's migration was written to stay
-compatible with both the old and new code paths during the rollout (the
-old column wasn't dropped in the same deploy — see `rollback-strategy`
-for why that decoupling matters). Total time to safe: about 10 minutes,
-and 95% of customers never touched the broken version at all.
-
-| Timeline step | Team A (no integrated strategy)             | Team B (integrated pipeline)                    |
-| ------------- | ------------------------------------------- | ----------------------------------------------- |
-| Exposure      | 100% of traffic, immediately                | 5% of traffic (canary), for several minutes     |
-| Detection     | Customer complaint, ~41 min later           | SLO-based alert, ~3 min later                   |
-| Rollback      | Blocked 31 min by an incompatible migration | Immediate — migration was written compatibly    |
-| Time to safe  | ~72 minutes, customer-facing                | ~10 minutes, mostly contained to canary traffic |
-
-Nothing about Team B's outcome required faster typing or a calmer
-on-call. Every piece of it — the canary, the alert, the safe rollback —
-was designed and tested _before_ this Friday, not improvised during it.
-That's the actual subject of this unit: not any single technique, but how
-a staff engineer combines techniques already covered elsewhere in this
-track into one deliberate architecture.
+**Which of the two afternoons would you rather have, and what did the
+other team fail to build in advance?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "How progressive delivery, observability, rollback, and config validation compose into one pipeline",
-    "Why the whole chain has to be designed and tested in advance, not assembled during an incident",
-    "The real cost of safety margin, and how much of it is actually worth paying for",
+    "Four safety gates and the order they fire in",
+    "Blast radius versus detection latency",
+    "Why the whole chain is built before the bad day",
   ]}
 />
 
-## Key terms
+## What actually differed between the two teams?
 
-- **Integrated release architecture** — the combination of several
-  individually-useful techniques (limited-blast-radius rollout,
-  symptom-based alerting, safe rollback, pre-deploy config validation)
-  wired together into one ordered pipeline, rather than each existing in
-  isolation or being assembled ad hoc during an incident.
-- **Blast radius** — how much of production traffic (or how many users)
-  a bad deploy can actually reach before it's caught. `progressive-delivery`
-  (canary releases, feature flags) is the tool for keeping this small.
-- **Detection latency** — the time between a bad deploy going live and
-  someone or something noticing it's bad. `infra-observability`'s
-  SLO-based, symptom-focused alerting is what keeps this measured in
-  minutes instead of however long it takes a customer to complain.
-- **Safe reversibility** — being able to undo a bad deploy quickly
-  without causing a second, different incident. `rollback-strategy`'s
-  migration-compatibility discipline is what makes Team B's rollback take
-  90 seconds instead of 31 minutes.
-- **Fail-fast config validation** — catching an entire class of "the
-  config was wrong, not the code" bad deploys at startup, before they
-  ever reach production traffic at all — `config-management`'s territory,
-  and the earliest possible gate in the chain.
-- **Error budget** — the resource, from `infra-observability`, that
-  governs how aggressively a team can ship. A comfortable error budget
-  justifies a faster rollout; a nearly-exhausted one justifies slowing
-  down, independent of how good the pipeline itself is.
-- **Designed in advance, not improvised** — the core staff-level
-  discipline this unit is about: making sure this whole chain exists,
-  is tested, and actually works _before_ a real bad Friday, rather than
-  being wired together live while an incident is already in progress.
+Nothing about typing speed or calm on-call nerves. The difference is four
+things that existed on Team B's pipeline before Friday started:
 
-**Key terms:** integrated release architecture, blast radius, detection
-latency, safe reversibility, fail-fast config validation, error budget,
-canary rollout, SLO-based alerting.
+| Step         | Team A                                               | Team B                                         |
+| ------------ | ---------------------------------------------------- | ---------------------------------------------- |
+| Exposure     | 100% of traffic, immediately                         | 5% of traffic (canary stage)                   |
+| Detection    | Customer complaint, about 41 min later               | Alert on checkout failures, about 3 min later  |
+| Rollback     | Blocked 31 more min by an incompatible schema change | Safe, because the schema change was compatible |
+| Time to safe | 72 min (41 + 31), seen by real customers             | 10 min (3 to detect, the rest to reverse)      |
+
+The 72 comes straight from adding Team A's two delays. Team B's total is an
+assumption in this scenario: 3 minutes to detect and roughly 7 to reverse
+and confirm.
+
+```mermaid
+flowchart LR
+    A["Validate the config\n(before any traffic)"] --> B["Expose a small slice\n(canary)"]
+    B --> C["Detect with a customer-facing alert"]
+    C --> D["Reverse safely\n(compatible rollback)"]
+```
+
+Each box is a separate topic elsewhere in this track. This unit is about
+the thing none of them is on its own: the **order** and the **wiring**.
+
+## Which two ideas carry most of the weight?
+
+**If a bad deploy is inevitable, what do you control?** Two quantities:
+
+- **Blast radius** — how many users the bad build reaches before anyone
+  reacts. A canary keeps this small.
+- **Detection latency** — how long the bad build runs before something
+  notices. An alert on what users experience (checkout failures) keeps this
+  in minutes; alerts on server CPU and memory can stay perfectly calm while
+  checkout is broken.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="blast-radius-detection"
+/>
+
+## What do I need to remember?
+
+- **Integrated release architecture** — several safety techniques wired into
+  one ordered pipeline, not tools each team grabs during an incident.
+- **Fail-fast config validation** — rejects a wrong setting before any
+  request is served; the cheapest gate.
+- **Safe reversibility** — undoing a deploy without causing a second
+  incident; it needs the database change to stay compatible with the old
+  code.
+- **Error budget** — how much unreliability a service may spend; a nearly
+  empty budget is a reason to ship slower.
+- **Designed in advance** — the chain is tested before the bad day, because
+  an untested rollback is a guess.
+
+Safety also costs something: every canary stage adds minutes to every
+deploy. L2 shows how the gates compose and how to size them to the stakes.
