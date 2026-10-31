@@ -1,85 +1,111 @@
 ---
-title: "L1 — How do we run many containers reliably across many machines? (orchestration basics: Kubernetes concepts)"
+title: "L1 — How do we run many containers reliably across many machines?"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="3am: one server dies, and nothing brings the app back">
+export const unit = {
+  track: "infra-delivery",
+  unitSlug: "orchestration-basics",
+};
+
+<Scenario label="A kitchen has an order board, three cooks, and one cook goes home sick">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🖥️</span> <strong>Setup</strong> — 2 servers, containers started manually on each</div>
-      <div class="flex items-center gap-1.5"><span>💥</span> <strong>3am</strong> — one server crashes, taking its containers down with it</div>
-      <div class="flex items-center gap-1.5"><span>😴</span> <strong>Recovery</strong> — none, until an on-call engineer wakes up and logs in</div>
+      <div class="flex items-center gap-1.5"><span>📋</span> <strong>The board says</strong> — 5 bowls of soup must be cooking at all times</div>
+      <div class="flex items-center gap-1.5"><span>👩‍🍳</span> <strong>Three cooks</strong> — each has 4 burners, so 12 burners in total</div>
+      <div class="flex items-center gap-1.5"><span>🤒</span> <strong>8pm</strong> — one cook leaves; her 2 pots of soup go cold</div>
+      <div class="flex items-center gap-1.5"><span>🧭</span> <strong>The dispatcher</strong> — counts pots, sees 3 instead of 5, hands 2 new tickets to the other cooks</div>
+    </div>
+    <div class="not-prose mt-3 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs dark:border-amber-800 dark:bg-amber-950">
+      <p class="font-semibold text-amber-700 dark:text-amber-400">Nobody asked the dispatcher to react to the sick cook</p>
+      the board states the goal; the dispatcher keeps closing the gap
     </div>
   </Fragment>
 
-A small team runs their app as a handful of containers, started by hand
-on two servers — `ssh` in, `docker run`, done. It works, until 3am,
-when one server crashes. Its containers don't come back. Nothing was
-watching them. Half the app's capacity is gone, and it stays gone
-until a paged engineer logs in, notices what died, and manually starts
-replacement containers on the surviving server. **The team didn't do
-anything wrong when they set this up — so what's actually missing?**
+A small restaurant has an order board with one standing rule: "5 pots of
+soup cooking at all times". Three cooks share the kitchen, and each cook
+has 4 burners. At 8pm one cook goes home sick, and the two pots on her
+burners go cold. Nobody shouts "the soup is down". Instead, the
+dispatcher glances at the board, counts three pots where the board says
+five, and hands the two missing tickets to the cooks still on shift.
+**Now picture the same kitchen with no dispatcher and no board, only
+cooks who each remember their own pots. Who notices the gap, and when?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "What container orchestration actually solves",
-    "The reconciliation loop, in plain terms",
-    "Nodes, pods, and the scheduler's job",
+    "Desired state versus what is running",
+    "The loop that closes the gap",
+    "Who decides where each pot goes",
   ]}
 />
 
-## The shape of the problem
+The kitchen is the whole unit in miniature. Swap the words and it is a
+software cluster:
 
-- Read the scenario in plain language: a **container** is one running
-  copy of an app packaged with what it needs, a **server/node** is a
-  machine where that copy can run, and `docker run` is the manual
-  command that starts one. If the Docker unit is fresh in your mind,
-  this page is asking what happens after you have many containers, not
-  just one.
-- Running one container by hand is easy. Running enough containers to
-  matter, across enough machines to survive one of them dying, without
-  a human watching 24/7, is a different problem entirely.
-- What's missing isn't more servers or more containers — it's
-  something that constantly checks "is what's actually running what
-  I said should be running?" and takes action the moment those two
-  things disagree, without waiting for a human to notice.
-- Deciding _where_ each container should run is also a real problem
-  on its own: which machine has enough spare CPU and memory left, and
-  what happens to that decision when a machine disappears mid-flight.
+| In the kitchen                | In a cluster                                        |
+| ----------------------------- | --------------------------------------------------- |
+| A pot of soup                 | A running container (usually wrapped in a pod)      |
+| A cook with 4 burners         | A node: a machine with a fixed amount of CPU/memory |
+| The order board               | The desired state: "5 copies of this app"           |
+| The dispatcher's counting     | The reconciliation loop                             |
+| Picking which cook gets a pot | The scheduler                                       |
 
-## Key terms
+```mermaid
+flowchart LR
+    B["Board (desired): 5 pots"] --> C{"Count pots<br/>actually cooking"}
+    C -->|"5 of 5"| D["Do nothing,<br/>keep watching"]
+    C -->|"3 of 5"| E["Hand 2 new tickets<br/>to cooks with free burners"]
+    E --> C
+    D --> C
+```
 
-- **Container orchestration** — a system that keeps a fleet of
-  containers running as intended across multiple machines, handling
-  placement and failure recovery without manual intervention.
-- **Desired state / reconciliation loop** — the core mechanism: a
-  declared target ("5 replicas of this app should be running") is
-  continuously compared against the actual observed state, and any
-  gap triggers a corrective action.
-- **Scheduler** — the component that decides which machine a given
-  container should run on, based on each machine's available capacity
-  (CPU, memory) and the container's declared resource requirements.
-- **Node** — a single machine (physical or virtual) that's part of
-  the cluster and can have containers scheduled onto it.
-- **Pod** — the smallest schedulable unit in Kubernetes: one or more
-  containers that are always placed on the same node together. For this
-  unit, you can read "pod" as "the package the scheduler places"; real
-  Kubernetes usually schedules pods rather than loose containers.
-- **Self-healing** — the reconciliation loop's practical effect: when
-  a node dies and takes its containers with it, the loop notices the
-  gap between desired and actual state and reschedules the lost
-  containers elsewhere, without anyone paging on-call.
+## Why is one machine not enough, and many machines not automatic?
 
-## What this unit covers
+**A team starts containers by hand on two servers. At 3am one server
+crashes. What is missing?** Not more servers and not better containers.
+Nothing is comparing "what should be running" to "what is running", so
+the gap sits there until a paged engineer logs in. Running one container
+is easy; keeping the right number alive across machines that can vanish
+is a different job.
 
-L2 works through the reconciliation loop's actual mechanics and how a
-scheduler decides where each container lands. L3 implements both in
-real code — a scheduler that spreads containers across nodes based on
-available capacity, and a reconciliation function that detects a
-node's failure and reschedules its lost containers onto surviving
-nodes, including the case where there isn't enough spare capacity left
-to fully recover.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="orchestration-problem"
+/>
+
+## What is the loop, and what does it compare?
+
+- **Desired state** — the declared target, such as "5 replicas".
+- **Actual state** — what is observed running right now.
+- **Reconciliation loop** — compare the two forever; act only when they differ. Most passes find nothing to do.
+- **Self-healing** — the visible effect: lost containers are rescheduled without a human noticing first.
+
+Self-healing is not magic. It depends on spare room existing somewhere,
+which is the lesson L3 turns into numbers.
+
+## Who decides where each pot goes?
+
+The **scheduler** picks a **node** for each new **pod** (the smallest
+placeable unit: one or more containers that always travel together). It
+looks at each node's remaining CPU and memory and at what the pod asks
+to reserve. If no node has enough room left, the pod waits as
+`pending`. The orchestrator reports the gap but cannot create burners.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="cluster-vocabulary"
+/>
+
+## What this unit covers next
+
+L2 opens the loop and the scheduler: how a pass avoids double-ordering
+replacements, and why spreading pots across cooks beats filling one cook
+first. L3 runs real numbers on a small cluster and finds exactly how
+much spare capacity a single failure needs.

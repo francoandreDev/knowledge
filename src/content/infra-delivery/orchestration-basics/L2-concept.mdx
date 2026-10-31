@@ -4,122 +4,138 @@ title: "L2 — The reconciliation loop, and how a scheduler picks a node"
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named the missing piece in the 3am scenario as something that
-constantly checks desired state against actual state and acts on any
-gap. L2 works out exactly how that reconciliation loop operates, and
-how the scheduler it depends on decides which node each container
-lands on.
+export const unit = {
+  track: "infra-delivery",
+  unitSlug: "orchestration-basics",
+};
+
+L1's kitchen had a dispatcher who counted pots against the board and handed
+out tickets. L2 opens both halves of that job: how the counting avoids
+ordering twice, and how the ticket-handing decides which cook gets a pot.
 
 <LevelIntro
   items={[
-    "The reconciliation loop's compare-and-act cycle",
-    "How a scheduler picks a node from available capacity",
-    "Spreading vs. packing, and what each trades away",
+    "The compare-and-act cycle",
+    "Resource requests and the fit check",
+    "Spreading versus packing",
   ]}
 />
 
-## The reconciliation loop: comparing desired state to actual state
+## How does a loop find a gap nobody reported?
 
-**If nobody is watching the cluster, how does a dead node's containers
-ever get noticed, let alone replaced?** An orchestrator doesn't wait
-for a human — it runs a loop, continuously, that compares what was
-declared ("5 replicas should exist") against what's actually observed
-running, and acts on any gap:
-
-Think of desired state like a classroom attendance target: "there
-should be 5 students in this group." If you count only 3, you do not
-need to guess whether the group is complete — the difference tells you
-that 2 are missing. The reconciliation loop does that count again and
-again for containers.
+**If no human is watching, how does a dead node's workload ever get
+noticed?** The orchestrator never waits for a report. It repeats one cycle
+forever: read the declared target, observe what is running, and act only
+on the difference.
 
 ```mermaid
 flowchart TD
-    A["Desired state:\n'5 replicas should run'"] --> C{"Compare to\nactual state"}
-    B["Actual state:\nwhat's really running"] --> C
-    C -->|"Match"| D["Do nothing —\nkeep watching"]
-    C -->|"Gap found\n(fewer than 5 running)"| E["Schedule replacement\ncontainers"]
-    E --> B
+    A["Desired: 5 replicas"] --> C{"Compare"}
+    B["Observed: running<br/>plus starting"] --> C
+    C -->|"Equal"| D["No action"]
+    C -->|"Fewer than 5"| E["Create the missing<br/>replicas"]
+    C -->|"More than 5"| F["Remove the extras"]
     D --> B
+    E --> B
+    F --> B
 ```
 
-This loop runs constantly, not just when something breaks — most
-iterations find no gap and do nothing. The moment a node dies and
-takes containers with it, the very next comparison finds a gap, and
-the loop normally reacts far faster than waiting for a human to be
-paged and awake. The exact time depends on the platform's checks,
-timeouts, and type of failure, but the important change is that recovery
-starts from the system observing a gap, not from a person noticing one.
+Most passes end at "Equal" and do nothing. The cycle starts from the
+system noticing a gap, not from a person noticing one, which is why
+recovery can begin without anybody awake.
 
-<Checkpoint question="A reconciliation loop just found a gap — 2 fewer replicas running than desired — and scheduled 2 replacement containers. Ten seconds later, before those replacements have finished starting up, the loop runs its comparison again. Does it schedule 2 more replacements on top of the first 2?">
+<Checkpoint question="The loop finds 2 replicas missing and orders 2 replacements. Ten seconds later, before those have finished starting, it compares again. Does it order 2 more?">
 
-No — as long as the loop's actual-state observation counts containers
-that are scheduled-but-still-starting as already accounted for, not
-just fully-running ones. If it didn't, every comparison cycle would
-re-detect the same gap and pile on duplicate replacements faster than
-they could start, which is exactly the kind of bug a real
-reconciliation loop has to guard against. The loop's whole value comes
-from comparing against the true current state, including
-in-flight work, not just a stale snapshot from before the last
-corrective action — otherwise "continuously compare and act" turns
-into "continuously over-correct."
+No, provided the observed state counts replicas that are scheduled but still
+starting. If it only counted fully running ones, every pass would see the
+same gap and keep piling on duplicates faster than they could start. The
+loop's value depends on comparing against the true current picture,
+including work already in flight, and not against a snapshot taken before
+its own last action.
 
 </Checkpoint>
 
-## The scheduler: where does each container actually go?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="reconcile-loop"
+/>
 
-**Once the reconciliation loop decides a container needs to exist,
-which of the cluster's machines should it land on?** This is the
-scheduler's job — and it needs each node's available capacity and
-each container's declared resource requirements to make the call:
+## What does the scheduler need to know to place a pod?
 
-| Concept               | What it means                                                                  |
-| --------------------- | ------------------------------------------------------------------------------ |
-| Node capacity         | Total CPU/memory a machine has available for containers                        |
-| Pod resource request  | CPU/memory a pod asks the scheduler to reserve before it is placed             |
-| Placement decision    | Pick a node with enough _remaining_ capacity for that request                  |
-| Spreading vs. packing | Favor nodes with more free capacity (spread) vs. filling one node first (pack) |
+**A pod arrives asking for 2 CPU and 4 GB of memory. Which node can take
+it?** The scheduler compares the pod's _request_, a reservation, against
+each node's remaining unreserved capacity. A request is a promise not to
+overbook, like reserving seats before a trip, not a measurement of what
+the pod is using this second.
 
-The resource request is not "how much CPU this pod is using this exact
-millisecond." It is the amount the scheduler promises not to overbook,
-like reserving seats before a trip: if a pod asks for 2 CPU and 4 GB of
-memory, the scheduler only places it where that much room is still
-available.
+| Node (4 CPU, 8 GB)            | Reserved so far | Remaining    | Fits a 2 CPU / 4 GB pod? |
+| ----------------------------- | --------------- | ------------ | ------------------------ |
+| node-a, empty                 | 0 CPU / 0 GB    | 4 CPU / 8 GB | Yes                      |
+| node-b, one such pod          | 2 CPU / 4 GB    | 2 CPU / 4 GB | Yes, exactly             |
+| node-c, two such pods         | 4 CPU / 8 GB    | 0 CPU / 0 GB | No                       |
+| node-d, 3 CPU / 1 GB reserved | 3 CPU / 1 GB    | 1 CPU / 7 GB | No: CPU is short         |
 
-A scheduler that always _packs_ the fullest node first leaves other
-nodes empty — efficient on paper, but a single node failure then takes
-out everything packed onto it. A scheduler that _spreads_ containers
-across nodes with the most free capacity trades some packing
-efficiency for exactly the property that makes self-healing
-practical: no single node failure wipes out an outsized share of the
-fleet.
+The last row shows that both dimensions must fit. Plenty of memory does
+not rescue a pod that lacks CPU. And node-c stays full even if its two
+pods are idling at a fraction of their requests, because the reservation,
+not the usage, is what the scheduler counts.
 
-<Checkpoint question="Two nodes, A and B, both currently have identical free capacity: 4 CPU and 8 GB memory. A new pod requesting 1 CPU and 1 GB memory needs to be placed. Does a spreading scheduler's choice between A and B matter much here, and why would spreading start to matter more as more pods get placed?">
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="scheduler-requests"
+/>
 
-Not much for this single placement — with equal free capacity, either
-node works equally well right now. Spreading's benefit compounds over
-many placements, not one: each time the scheduler picks the node with
-the most remaining room, it keeps every node's free capacity roughly
-balanced as pods accumulate, rather than letting one node quietly fill
-up first. That balance is what matters later, because it determines
-how much spare room is left on any given node if it has to absorb a
-failed neighbor's containers — a single early placement barely moves
-that number, but hundreds of placements without spreading would leave
-some nodes packed tight and others nearly empty.
+## Among the nodes that fit, which one wins?
+
+**Four small pods (1 CPU each) arrive for two empty nodes with 4 CPU each.
+Fill one node first, or alternate?** The two policies leave the same total
+free room but a very different blast radius when a node dies.
+
+| Policy                              | Placement | Worst single-node failure loses |
+| ----------------------------------- | --------- | ------------------------------- |
+| Pack: fill the fullest node first   | 4 + 0     | 4 of 4 pods (100%)              |
+| Spread: pick the most free capacity | 2 + 2     | 2 of 4 pods (50%)               |
+
+```mermaid
+xychart-beta
+    title "Pods lost if the busier node fails (4 pods, 2 nodes)"
+    x-axis ["Pack", "Spread"]
+    y-axis "Pods lost" 0 --> 4
+    bar [4, 2]
+```
+
+Packing is not wrong: it leaves whole nodes empty, which can be switched off
+to save money. Spreading trades that efficiency for a smaller loss per
+failure and for free room on every node, which is exactly what
+rescheduling needs.
+
+<Checkpoint question="With both nodes empty and equal, does the spread choice for the very first pod matter?">
+
+Barely: either node is equally good for one pod. Spreading pays off over many
+placements, because choosing the node with the most remaining room keeps free
+capacity balanced as pods accumulate. That balance decides how much room each
+node has later, when it must absorb a failed neighbour's pods.
 
 </Checkpoint>
 
-## Manual ops vs. an orchestrator: what actually changes
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="spread-vs-pack"
+/>
 
-| Responsibility                                     | Manual ops (2-server scenario)                              | Orchestrator                                                                                  |
-| -------------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Noticing a node died                               | A human notices, or gets paged by an external monitor       | The reconciliation loop's next comparison finds the gap directly                              |
-| Deciding where replacements go                     | A human picks a server, hopefully checking capacity by hand | The scheduler evaluates every node's remaining capacity automatically                         |
-| Time to recovery                                   | However long it takes a human to wake up and act            | Seconds to the next reconciliation cycle                                                      |
-| What happens if there's no spare capacity anywhere | The human discovers this the hard way, mid-incident         | The reconciliation loop reports the gap as unresolved (pending), rather than silently failing |
+## What changes compared with doing it by hand?
 
-That last row matters: an orchestrator doesn't manufacture capacity
-that isn't there. If every surviving node is already full, the
-reconciliation loop still runs, still notices the gap, and still
-can't close it — which is exactly why headroom (deliberately unused
-capacity) has to be planned for, not assumed.
+| Responsibility                  | By hand (two servers)                 | With an orchestrator                          |
+| ------------------------------- | ------------------------------------- | --------------------------------------------- |
+| Noticing a node died            | A person, or an external alert        | The next comparison finds the gap             |
+| Choosing where replacements go  | A person checks capacity by guesswork | The scheduler checks every node's remaining   |
+| When there is no spare capacity | Discovered mid-incident               | Replicas stay `pending`, and the gap is shown |
+
+An orchestrator cannot manufacture burners. If every surviving node is
+full, the loop still sees the gap and still cannot close it. That is why
+unused headroom has to be planned, and L3 puts numbers on it.
