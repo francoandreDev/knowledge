@@ -1,133 +1,134 @@
 ---
-title: "L2 — Right-sizing, cost visibility, and the loop that keeps a bill from creeping"
+title: "L2 — Right-sizing as a loop, cost tracking, and a ceiling on auto-scaling"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1's bill tripled without a single dramatic incident. That's the pattern
-worth understanding precisely: cost waste doesn't announce itself the way
-a crashing service does. So start from the sharper question:
+export const unit = { track: "infra-delivery", unitSlug: "cost-awareness" };
 
-**If nothing pages anyone when spend creeps up, what has to exist instead
-to catch it — and what, specifically, was each of L1's three decisions
-actually wasting?**
+L1 ended with a bill that tripled without a single incident, because
+nothing was watching the running total. L2 explains the machinery that
+would have caught it: a loop for sizing, a signal for spend, and a ceiling
+for anything that grows by itself.
 
 <LevelIntro
   items={[
-    "Right-sizing: measured usage vs. guessed-high capacity, with real numbers",
-    "Why cost needs the same proactive visibility infra-observability builds for reliability",
-    "The three waste patterns from L1, each with a concrete fix",
+    "Right-sizing as a repeating loop",
+    "Cost tracking beside reliability tracking",
+    "A ceiling and an alert for auto-scaling",
   ]}
 />
 
-## Right-sizing: provision to measured usage, not a guess
+## Why is right-sizing a loop and not a one-time decision?
 
-**Staging was sized like production "just in case." How far off was that
-guess from what staging actually needed?**
-
-Right-sizing means provisioning a resource's capacity to match what it
-actually, measurably uses — plus a deliberate, justified safety margin —
-instead of a number chosen because it sounded safe. L1's staging
-environment was provisioned assuming it might need 4x normal capacity for
-occasional load tests. Once someone actually measured it:
-
-| Metric                    | Guessed need ("just in case") | Measured actual need            |
-| ------------------------- | ----------------------------- | ------------------------------- |
-| Peak CPU utilization      | Sized for 4x normal load      | Never exceeded 1.2x normal load |
-| Instance size             | Same as production (16 vCPU)  | Comfortably fits in 4 vCPU      |
-| Monthly cost at that size | ~$3,600                       | ~$900 right-sized               |
-
-The gap between "guessed 4x capacity" and "measured need was 1.2x" is the
-entire waste — nobody was being reckless, nobody made an obviously bad
-call. The instance was provisioned once, before there was any usage data
-to measure against, and then never revisited once real data existed. That
-second half — the missing revisit — is the actual failure. Right-sizing
-isn't a one-time sizing exercise; it's a loop: measure, size to what was
-measured plus headroom, and come back later and measure again.
+**Staging was sized once, before any usage data existed. What should have
+happened the day data did exist?** Someone should have measured, resized,
+and then come back later, because usage drifts.
 
 ```mermaid
 flowchart LR
-    A["Measure actual usage\n(CPU, memory, storage, over time)"] --> B["Right-size:\nprovision to usage + headroom"]
-    B --> C["Set a budget + alert\non the new baseline"]
-    C --> D["Re-audit periodically\n(usage patterns drift)"]
+    A["Measure real usage<br/>over weeks"] --> B["Size to peak plus<br/>a deliberate margin"]
+    B --> C["Set a budget and<br/>an alert on the new size"]
+    C --> D["Re-audit on a schedule<br/>(usage drifts)"]
     D --> A
 ```
 
-The loop only works if step D actually happens — a right-sizing decision
-made once and never revisited quietly drifts stale the same way any
-one-time snapshot does, as traffic patterns, team size, or the product
-itself changes.
+Skip the last arrow and the loop becomes a one-time snapshot. A snapshot
+goes stale the way the original guess did.
 
-<Checkpoint question="Staging was originally sized for '4x normal load, just in case.' Suppose measured peak usage really did spike to 3.5x normal load once a quarter during a real load test. Does that mean the original 4x sizing was justified after all?">
+A rare, predictable peak does not change this. Suppose, as an assumption,
+that staging does 4 vCPU of work on a normal day and 12 vCPU of work for two
+days each quarter during a load test, at $225 per vCPU-month:
 
-Not necessarily, and this is the trap right-sizing has to avoid: a rare,
-predictable, occasional spike doesn't require the resource to be
-permanently provisioned at that peak size all month. The right-sized
-answer is closer to "provision for the actual day-to-day usage (around
-1.2x), and either temporarily scale up for the known quarterly load test
-or accept a deliberate, budgeted spend spike for that one event" — not
-"pay for peak capacity 24/7 for a need that occurs a few days a year."
-Right-sizing to the 99th-percentile case, forever, is the same
-over-provisioning mistake wearing a more defensible-sounding number.
+| Plan                                          | Cost per quarter | How it is computed               |
+| --------------------------------------------- | ---------------- | -------------------------------- |
+| Keep 12 vCPU all quarter "to cover the test"  | $8,100           | 12 x 225 x 3 months              |
+| Keep 4 vCPU, add 8 vCPU for the two test days | $2,820           | 4 x 225 x 3, plus 8 x 225 x 2/30 |
 
-</Checkpoint>
+<Checkpoint question="The load test really does need 12 vCPU, for two days once a quarter. Does that justify keeping staging at 12 vCPU permanently?">
 
-## The visibility problem: you can't right-size what you never look at
-
-**None of L1's three decisions were hidden. Why did it still take a
-finance invoice to surface them?**
-
-This is the same "you don't know what you can't see" theme
-`infra-observability` covers for reliability, applied to cost instead. A
-runaway CPU metric gets seen because someone built a dashboard and an
-alert threshold specifically to watch it. A runaway cloud bill has no
-equivalent by default — most teams' only recurring look at total spend is
-whenever the invoice happens to arrive, which can be weeks after the
-spend already happened. Cost visibility means building the same kind of
-deliberate, proactive tracking:
-
-| Reliability version (infra-observability)              | Cost version (this unit)                                      |
-| ------------------------------------------------------ | ------------------------------------------------------------- |
-| SLI dashboard tracked continuously                     | Cost-by-resource dashboard, tracked continuously              |
-| SLO — a committed target on the SLI                    | Budget — a committed spend ceiling for a period               |
-| Burn-rate alert — pages before the error budget's gone | Budget-forecast alert — flags before the spend ceiling is hit |
-| Periodic SLO review as traffic patterns change         | Periodic right-sizing re-audit as usage patterns change       |
-
-Without this, cost visibility only exists retroactively — after the
-money's already spent, the same way L1's twelve green dashboards existed
-retroactively to a user-facing outage that had already happened by the
-time anyone noticed. The fix in both cases is the same shape: watch the
-signal that actually matters, proactively, before it becomes a surprise.
-
-## Three waste patterns, and the fix for each
-
-L1's three contributors aren't unique to that scenario — they're the
-common shapes cloud waste takes almost everywhere:
-
-| Pattern                              | What it looks like                                                                                      | Fix                                                                                        |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| **Idle / forgotten resources**       | Test databases, old staging stacks, unused volumes left running after a project ends                    | Tag resources with an owner and an expiry; automate teardown or a recurring review         |
-| **"Just in case" over-provisioning** | An instance or database sized well above measured need, "for safety," never revisited                   | Right-size against real utilization data; re-check on a schedule, not once                 |
-| **Unbounded auto-scaling**           | A scaling group with no ceiling — a traffic spike or retry storm can scale cost as high as a bug allows | Set an explicit maximum instance count; alert (don't just silently scale) past a threshold |
-
-<Checkpoint question="A team fixes the 'idle/forgotten resources' pattern by writing a one-time script that deletes every currently-unused test database. Six months later, a new batch of forgotten databases has accumulated again. What did the fix actually miss?">
-
-The one-time cleanup treated this as an incident to resolve rather than a
-recurring pattern to prevent. Deleting the current batch of idle
-resources fixes today's waste but does nothing about the process gap that
-created it — nobody owns tearing resources down when a project ends, and
-nothing tags a resource with an expiry or an owner at creation time. The
-durable fix is closer to the loop from the right-sizing diagram above:
-build recurring visibility (a tagging convention, a scheduled audit) so
-the next batch of forgotten resources gets caught in weeks, not
-discovered again by accident in another six months.
+No. A need that exists for two days is a reason to scale up for two days,
+not to pay for the peak on the other 88. Permanent peak sizing is the same
+over-provisioning mistake with a more respectable number attached. The
+table above shows the gap: $8,100 against $2,820 per quarter, for the same
+test.
 
 </Checkpoint>
 
-L3 builds both real halves of this: a right-sizing calculator that turns
-observed utilization data into a concrete recommended size and a dollar
-savings figure, and a budget-forecast function that flags spend on track
-to exceed a threshold before the billing period ends — plus the real
-trade-off that right-sizing and unbounded autoscaling both sit in a
-genuine tension with reliability, not just cost.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="sizing-loop"
+/>
+
+## How does cost tracking line up with reliability tracking?
+
+**The team already watches errors and latency. What is the money
+equivalent of each tool it uses?** Almost every reliability tool has a
+cost twin:
+
+| Reliability tool (infra-observability)           | Cost twin                                       |
+| ------------------------------------------------ | ----------------------------------------------- |
+| Dashboard of the key signals                     | Dashboard of spend by resource and by owner     |
+| SLO: a committed target for a period             | Budget: a committed spending ceiling            |
+| Burn-rate alert: fires before the budget is gone | Forecast alert: fires before the ceiling is hit |
+| Review of targets as traffic changes             | Right-sizing re-audit as usage changes          |
+
+The difference is only the default. Reliability tools get built because
+an outage hurts immediately. Spend tools are optional until a bill hurts,
+so someone has to decide to build them.
+
+## How can an auto-scaling group run up a bill by itself?
+
+**A retry bug doubles every request. The group adds servers to cope. With
+no upper limit, where does it stop?** Only at the limit of the account.
+
+```mermaid
+flowchart TD
+    A["Bug or traffic spike<br/>raises load"] --> B["Group adds servers"]
+    B --> C{"Ceiling set?"}
+    C -->|"No"| D["Keeps adding until the<br/>account limit is reached"]
+    C -->|"Yes"| E["Stops at the ceiling<br/>and an alert fires"]
+    D --> F["Bill grows with the bug"]
+    E --> G["A person decides what to do"]
+```
+
+Assume a group runs 4 servers normally, at $200 per server-month. If a
+retry storm pushes it to 18 servers and it stays there, the extra cost is
+(18 - 4) x 200 = $2,800 a month. A ceiling turns an open-ended risk into a
+known worst case:
+
+| Ceiling    | Worst-case monthly cost (all month at the ceiling) |
+| ---------- | -------------------------------------------------- |
+| 8 servers  | $1,600                                             |
+| 12 servers | $2,400                                             |
+| 18 servers | $3,600                                             |
+| No ceiling | Whatever the account limit allows                  |
+
+A ceiling alone is not enough: if the group quietly sits at its maximum,
+nobody learns that demand outgrew it. The ceiling and the alert belong
+together.
+
+<Checkpoint question="The group hits its ceiling of 12 servers and an alert fires at 2 a.m. Is the ceiling a failure of the setup, or the setup working?">
+
+The setup working. The ceiling capped the worst-case bill at $2,400 a
+month and the alert handed the decision to a person. The cost is that
+traffic above 12 servers' capacity is no longer absorbed, which is why the
+ceiling should come from an agreed worst case, not from the lowest number
+that sounds cheap. L3 returns to that tension.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="autoscale-ceiling"
+/>
+
+## What L3 adds
+
+L3 puts numbers on the safety margin, forecasts a month's spend from the
+first ten days, and asks what happens when each guardrail is pushed too
+far.
