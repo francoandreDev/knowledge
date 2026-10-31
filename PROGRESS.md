@@ -3460,3 +3460,16 @@ Migrated the last 5 `security/` units via 5 parallel content-only subagents. Sam
 Practice items have 3 choices (`defense-depth` and others as noted per unit); exam items have 4. Length bias, correct strictly longest / shortest: `supply-chain-security` 10% / 14% overall (exam 0% / 0%), `defense-depth` 23% / 23%, `security-testing` 6% / 23% (practice 2% / 27%, a faint opposite tell), `incident-response` 26% / 8% (practice shortest 2%), `secure-by-design` 10% / 18%.
 
 `security/` is complete: 13 of 13. Total migrated: 89 of 246. Next track in ROADMAP order: `infra-delivery`.
+
+## 2026-10-31 — `infra-delivery/` batch 1: `environment-parity`, `docker`, `ci-cd-pipeline-anatomy`, `deployment-automation`
+
+Started the `infra-delivery/` track (12 units) with 4 parallel content-only subagents. Same pipeline; `typecheck` 0 errors, `build` 273 pages, Node sandbox check of 43 code items 0 failing assertions; live click-through (iframe per unit) passed all 29 `DomainCheck` topics (4 code topics run with the reference solution), 0 Mermaid errors, 0 KaTeX errors, "Mark as done" enabled on all four.
+
+- **`environment-parity`**: 6 topics, 72 items; code topic `ambient-input` (host timezone/clock/path separator made explicit; run under three `TZ` values). Recipe/kitchen opening; removed an invented pie chart (35/25/15/25) and an invented relative-cost bar chart; replaced a misleading "same call in two environments" example with a per-timezone outcome table; the 15% per-environment drift rate (→ 15 / 38.6 / 62.3 / 80.3% at 1/3/6/10 environments) is a labelled assumption.
+- **`docker`**: 7 topics, 80 items; code topic `rebuild-plan` (5 practice variants). Lunchbox opening; removed "captured" `docker build` logs whose step times did not add up (24.1 s vs 24.3 s) in favour of an assumed-cost table checked against the demo's formula; dropped invented version/time figures.
+- **`ci-cd-pipeline-anatomy`**: 8 topics, 95 items; code topic `gate-model`. Toy-factory opening; all numbers match `interactives.json` (rollback exposure 250/750/1,500/3,000 users at 5/15/30/60 min at an adjustable 50 users/min).
+- **`deployment-automation`**: 8 topics, 94 items; code topic `pipeline-code`. Skipped-checklist-step opening; risk table (2% per step → 9.6% at 5 steps) is a labelled assumption matching the demo's default; the idempotency-vs-repeatability distractors in `deploy-vocabulary` are close in meaning (prompts worded to separate them).
+
+Practice items mostly have 3 choices (a few have 2 or 4); exam items have 4. Length bias, correct strictly longest / shortest: `environment-parity` 23% / 18%, `docker` 26% / 25%, `ci-cd-pipeline-anatomy` 2% / 24% (practice longest 0%), `deployment-automation` 13% / 23%.
+
+`infra-delivery/` is at 4 of 12. Total migrated: 93 of 246. Remaining here: `orchestration-basics`, `infrastructure-code`, `progressive-delivery`, `rollback-strategy`, `config-management`, `infra-observability`, `cost-awareness`, `staff-level-release-engineering-strategy` (the slug contains a level label; handle its title and teaser like `secure-by-design`).
