@@ -3473,3 +3473,16 @@ Started the `infra-delivery/` track (12 units) with 4 parallel content-only suba
 Practice items mostly have 3 choices (a few have 2 or 4); exam items have 4. Length bias, correct strictly longest / shortest: `environment-parity` 23% / 18%, `docker` 26% / 25%, `ci-cd-pipeline-anatomy` 2% / 24% (practice longest 0%), `deployment-automation` 13% / 23%.
 
 `infra-delivery/` is at 4 of 12. Total migrated: 93 of 246. Remaining here: `orchestration-basics`, `infrastructure-code`, `progressive-delivery`, `rollback-strategy`, `config-management`, `infra-observability`, `cost-awareness`, `staff-level-release-engineering-strategy` (the slug contains a level label; handle its title and teaser like `secure-by-design`).
+
+## 2026-10-31 — `infra-delivery/` batch 2: `orchestration-basics`, `infrastructure-code`, `progressive-delivery`, `rollback-strategy`
+
+Migrated 4 more `infra-delivery/` units via 4 parallel content-only subagents. Same pipeline; `typecheck` 0 errors, `build` 273 pages, Node sandbox check of 42 code items 0 failing assertions; live click-through (iframe per unit) passed all 27 `DomainCheck` topics (4 code topics run with the reference solution), 0 Mermaid errors, 0 KaTeX errors, "Mark as done" enabled on all four.
+
+- **`orchestration-basics`**: 7 topics, 72 items; code topic `pick-node` (4 practice variants). Restaurant-dispatcher opening; numbers checked against the demo's `compute` (pending after a failure: 6/4/2/0 for 2–5 nodes); "about half stay pending" corrected to "at least two of the four". "Pending means no node had room" is the unit's simplification (real clusters have other causes).
+- **`infrastructure-code`**: 9 topics, 107 items; code topic `plan-diff`. Recipe opening; the plan table (2/0/0, 0/0/0, 0/1/0, 0/0/1, 1/0/1) reproduced in Node. The unit teaches a model where plan compares config with state and only a drift check looks at the cloud (L2 notes real tools often refresh first); two exam items about a lost state file and an unmanaged resource are stated generically.
+- **`progressive-delivery`**: 6 topics, 72 items; code topic `halt-rule`. Taste-test opening; hash-bucket counts (4,957 / 24,988 and the 1% / 50% / 100% rows) kept and labelled as computed on `user-1`…`user-100000`; the demo slider uses exact percentages so differs slightly.
+- **`rollback-strategy`**: 5 topics, 60 items; code topic `window-code`. Undo-button opening; 1,200 req/min × 12.5% = 150 failed/min, 40 min = 6,000 vs 2 min = 300; removed the realistic JS state machine and long migration code.
+
+Practice items have 3 choices; exam items have 4. Length bias, correct strictly longest / shortest: `orchestration-basics` 29% / 31% practice, 8% / 21% exam; `infrastructure-code` 19% / 18% overall; `progressive-delivery` 20% / 28% overall; `rollback-strategy` 23% / 6% overall (shortest rarely correct, a faint opposite tell).
+
+`infra-delivery/` is at 8 of 12. Total migrated: 97 of 246. Remaining here: `config-management`, `infra-observability`, `cost-awareness`, `staff-level-release-engineering-strategy`.
