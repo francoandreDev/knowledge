@@ -3486,3 +3486,16 @@ Migrated 4 more `infra-delivery/` units via 4 parallel content-only subagents. S
 Practice items have 3 choices; exam items have 4. Length bias, correct strictly longest / shortest: `orchestration-basics` 29% / 31% practice, 8% / 21% exam; `infrastructure-code` 19% / 18% overall; `progressive-delivery` 20% / 28% overall; `rollback-strategy` 23% / 6% overall (shortest rarely correct, a faint opposite tell).
 
 `infra-delivery/` is at 8 of 12. Total migrated: 97 of 246. Remaining here: `config-management`, `infra-observability`, `cost-awareness`, `staff-level-release-engineering-strategy`.
+
+## 2026-10-31 — `infra-delivery/` batch 3 (final): `config-management`, `infra-observability`, `cost-awareness`, `staff-level-release-engineering-strategy`
+
+Migrated the last 4 `infra-delivery/` units via 4 parallel content-only subagents. Same pipeline; `typecheck` 0 errors, `build` 273 pages, Node sandbox check of 15 code items 0 failing assertions; live click-through (iframe per unit) passed all 24 `DomainCheck` topics (2 code topics run with the reference solution), 0 Mermaid errors, 0 KaTeX errors, "Mark as done" enabled on all four.
+
+- **`config-management`**: 7 topics, 79 items; code topic `validator-code` (4 practice variants). Two-heaters opening; the env var is now `PAYMENT_TIMEOUT_MS` in the content while the untouched `interactives.json` description still says `PAYMENT_GATEWAY_TIMEOUT_MS` (open item: unify one side); old latency and mistake-rate numbers are labelled as assumptions; coverage table (26.5 / 14.3 / 0 %) matches the demo.
+- **`infra-observability`**: 5 topics, 60 items, all quiz. Car-dashboard opening; fixed the old claim that a 17% failure rate was "past 120x using a conservative 12% reading" (it is burn rate 170); the 14.4x / 1h + 5min page rule is presented as one common recipe, not a standard; all figures verified in Node (43.2 / 432 / 216 / 4.32 min for 99 / 99.5 / 99.9 / 99.99 %).
+- **`cost-awareness`**: 7 topics, 84 items, all quiz. Left-the-tap-running opening; all dollar figures are labelled round-number assumptions matching the demo ($900 base, 1.3x margin = $1,170, $10,000 budget); whole-vCPU purchasing now explains 5.2 → 6 vCPU = $1,350 vs the slider's continuous $1,170; only the excess above what staging needed counts as waste.
+- **`staff-level-release-engineering-strategy`**: 5 topics, 56 items; code topic `stage-gate-check` (5 practice variants). Fixed the old "rollback in 90 seconds" vs 10 minutes to safe (now an assumed ~3 min detect + ~7 min reverse). The folder slug keeps its "staff-level" prefix (changing slugs would break stored progress), but the roadmap title and the teaser in `src/data/unit-teasers.ts` no longer carry the label.
+
+Practice items have 3 choices; exam items have 4. Length bias, correct strictly longest / shortest: `config-management` 17% / 26%, `infra-observability` 30% / 18%, `cost-awareness` 25% / 15% (practice longest 34%, at the ceiling), `staff-level-release-engineering-strategy` 27% / 29%.
+
+`infra-delivery/` is complete: 12 of 12. Total migrated: 101 of 246. Next track in ROADMAP order: `career-craft`.
