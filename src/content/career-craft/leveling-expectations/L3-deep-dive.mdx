@@ -5,26 +5,31 @@ title: "L3 — The same bug, handled at four different scopes"
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-Before the scenario, you do not need to master the technical words. Read
-them like this:
+export const unit = {
+  track: "career-craft",
+  unitSlug: "leveling-expectations",
+};
 
-| Term                       | Simple reading                                                        |
-| -------------------------- | --------------------------------------------------------------------- |
-| Event listener             | Code that waits for a signal, like "a request arrived"                |
-| Memory leak                | The program keeps holding memory it should have released              |
-| OOM                        | "Out of memory": the program runs out of memory and dies              |
-| Orchestrator               | A system that restarts services when they crash                       |
-| Profiler / load test       | Tools for checking what the program uses while it runs under pressure |
-| Lint rule                  | An automatic rule that warns when code matches a risky pattern        |
-| Platform default / rollout | A shared setting adopted by many teams, then introduced gradually     |
+Before the scenario, you do not need to master the technical words. Read them
+like this:
+
+| Term             | Simple reading                                                 |
+| ---------------- | -------------------------------------------------------------- |
+| Event listener   | Code that waits for a signal, like "a request arrived"         |
+| Memory leak      | The program keeps holding memory it should have released       |
+| Out of memory    | The program runs out of memory and dies                        |
+| Orchestrator     | A system that restarts services when they crash                |
+| Lint rule        | An automatic rule that warns when code matches a risky pattern |
+| Platform default | A shared setting adopted by many teams                         |
 
 <Scenario label="The scenario">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🐛</span> Root cause: event listener added per request, never removed</div>
-      <div class="flex items-center gap-1.5"><span>🔁</span> Orchestrator auto-restarts every few days before it OOMs</div>
-      <div class="flex items-center gap-1.5"><span>👀</span> Nobody investigated — the auto-restart made it a non-emergency</div>
+      <div class="flex items-center gap-1.5"><span>🐛</span> Root cause: an event listener added per request, never removed</div>
+      <div class="flex items-center gap-1.5"><span>🔁</span> The orchestrator restarts the service every few days, before it runs out of memory</div>
+      <div class="flex items-center gap-1.5"><span>👀</span> Nobody investigated, because the restart made it a non-emergency</div>
     </div>
 
     <p class="not-prose mt-3 mb-1 text-xs font-semibold tracking-wide text-slate-400 uppercase">Four responses to the same fact</p>
@@ -38,23 +43,27 @@ them like this:
   </Fragment>
 
 A production service has been slowly leaking memory for months, restarted
-automatically by the orchestrator every few days before it OOMs. Nobody's
-investigated because the auto-restart makes it a non-emergency. You're asked
-to look into it.
+automatically every few days before it runs out. Nobody has investigated
+because the auto-restart makes it a non-emergency. You are asked to look into
+it.
 
-**Before reading on: the technical fact is identical in every version below — a leaked event listener. If skill were the whole story, shouldn't every competent engineer's response look basically the same?**
+**The technical fact is identical in every version below: a leaked event
+listener. If skill were the whole story, shouldn't every competent engineer's
+response look basically the same?**
 
 </Scenario>
 
 <LevelIntro
   items={[
     "One bug, four scoped responses",
-    "What expands (and what doesn't) at each stage",
-    "Failure modes: scope creep vs. real expansion",
+    "What expands, and what stays constant",
+    "Failure modes: scope creep and unearned leaps",
   ]}
 />
 
-Watch how the _same underlying fact_ produces genuinely different bodies of work, depending on the scope someone brings to it.
+Watch how the same underlying fact produces different bodies of work,
+depending on the scope each person brings to it. Every detail below is part of
+one illustrative story, not data from a real team.
 
 ```mermaid
 flowchart TD
@@ -64,101 +73,115 @@ flowchart TD
     R3 --> R4["Response 4\n+ org-wide platform default"]
 ```
 
-## Response 1: well-defined task scope
+## Response 1: what does a well-defined task look like?
 
-Find the leak, patch it, verify memory is stable, ship the fix. Done in two days: a profiler run shows an event listener being added on every request without being removed; the fix removes it in the corresponding cleanup path. Verified with a load test showing flat memory over an hour where it previously climbed steadily.
+Find the leak, patch it, verify memory stays flat under load, ship. A profiler
+shows a listener being added on every request without being removed; the fix
+removes it in the cleanup path.
 
-**What's in scope:** exactly the reported symptom. **What's out of scope, by design:** why nobody noticed for months, whether the same pattern exists elsewhere, whether this class of bug is preventable going forward. This is complete, correct work for the ambiguity level of "fix this leak" — nothing here is wrong, it's scoped to a well-defined task.
-The dimension mostly exercised here is **task execution**: the problem was
-already defined, and the engineer solved exactly that problem well.
+**In scope:** exactly the reported symptom. **Out of scope, by design:** why
+nobody noticed for months, whether the same pattern exists elsewhere, whether
+this class of bug is preventable. This is complete, correct work for a
+defined task. The dimension mostly exercised is task execution.
 
-## Response 2: project scope
+## Response 2: what does a project with unclear edges add?
 
-Same fix, plus: while investigating, notices the leaked listener pattern (subscribing without a matching cleanup) appears in three other files in the same service, not yet leaking only because those code paths are triggered less often. Fixes all three, and adds a lint rule that flags an event-listener subscription with no corresponding removal in the same function scope, so this specific pattern can't silently reappear in this service.
+Same fix, plus: while investigating, the engineer sees the same subscribe-
+without-cleanup pattern in three other files in the same service. They are not
+leaking yet only because those paths run less often. All three are fixed, and
+a lint rule now flags a subscription with no matching removal, so the pattern
+cannot silently return in this service.
 
-**What's in scope now:** not just the reported instance, but the _pattern_ behind it, bounded to this project. The person filled in an edge the ticket didn't specify ("just fix the one leak") because the evidence in front of them implied a wider, still-bounded problem.
-The dimension that grew is **blast radius inside the project**: the fix now
-prevents the same pattern from hurting nearby files in the same service.
+The engineer filled an edge the ticket did not state, because evidence in
+front of them implied a wider but still bounded problem. The dimension that
+grew is **blast radius inside the project**.
 
-## Response 3: unowned-problem scope
+## Response 3: what does an unowned problem add?
 
-Same fix and lint rule, plus: notices this service has no memory-usage alerting at all — the only reason this leak was caught is a human happened to look, and the auto-restart was silently masking the underlying growth curve for months. Proposes and implements a memory-trend alert (not just a hard OOM crash-loop alert) for this service, then checks two adjacent services owned by the same team and finds neither has one either — adds it there too, and writes up why crash-loop auto-restart is a dangerous signal to treat as "handled."
+Same fix and lint rule, plus: the engineer notices the service has no
+memory-trend alerting at all. The only reason the leak was caught is that a
+human happened to look, and the auto-restart had hidden the growth curve for
+months. They add a trend alert (not just a crash alert), check two adjacent
+services on the same team, find neither has one, and add it there too.
 
-**What's in scope now:** a problem nobody had assigned to anyone — "we have no visibility into slow resource leaks until they crash-loop" — identified, scoped, and closed without waiting to be asked, because the evidence made the gap visible to someone looking for it.
-The dimensions that grew are **ambiguity tolerance** and **time horizon**:
-the engineer named an unowned monitoring problem and prevented a future
-repeat, not just today's leak.
+Nobody had been assigned "we cannot see slow leaks until they crash-loop".
+The engineer named it and closed it. The dimensions that grew are
+**ambiguity tolerance** and **time horizon**.
 
-<Checkpoint question="Each response so far has added a layer to the previous one — Response 2 kept Response 1's fix and extended it; Response 3 kept Response 2's and extended it further. Following that pattern, what would you expect Response 4 to add, and what dimension would it most likely grow?">
+<Checkpoint question="Each response keeps the previous one's work and extends it. Following that pattern, what would Response 4 add, and which dimension is it most likely to grow?">
 
-Following the pattern, Response 4 should keep everything Response 3 did
-(the fix, the lint rule, the alerting) and extend the underlying insight
-even further outward — past this team entirely, toward other teams or the
-organization as a whole. Since Responses 1 through 3 already grew ambiguity
-tolerance, blast radius, and time horizon in turn, the dimension most
-likely to grow next is influence radius — getting other people, who never
-asked for input, to change how they operate because of this work.
-
-</Checkpoint>
-
-## Response 4: cross-team direction scope
-
-Same investigation, plus: recognizes that "auto-restart on crash masks the underlying problem" isn't unique to this team — it's a property of how the whole organization's orchestration platform is configured by default. Writes a short document proposing a platform-level default (alert on the trend, not just the crash) that would apply to every team, works with the platform team to get it adopted as the new default rather than a fix each team has to remember to add, and mentors two engineers on other teams through applying the same pattern to their own services during the rollout.
-
-**What's in scope now:** an org-wide default nobody was individually responsible for, requiring influence across teams that never asked for input, with a time horizon (platform defaults, mentoring others through adoption) well beyond "this leak" or even "this team."
-The dimension that grew most is **influence radius**: other teams change how
-they operate because the engineer turned one team's lesson into a shared
-default.
-
-## What grows, response by response
-
-The technical difficulty of the fix itself barely changes — what expands is the count of distinct problems the person treated as theirs to close, unprompted.
-
-```mermaid
-xychart-beta
-    title "Distinct problems addressed, by response"
-    x-axis ["Response 1", "Response 2", "Response 3", "Response 4"]
-    y-axis "Count" 0 --> 4
-    bar [1, 2, 3, 4]
-```
-
-## What's the same across all four
-
-Every response starts from the identical technical fact (a leaked event listener) and the identical technical skill (reading a memory profile, understanding the JS event-listener lifecycle). None of the later responses are "better engineering" in a narrow technical sense than Response 1 — the leak-fixing code itself doesn't get more sophisticated. What expands is the **boundary of what the person treated as their problem to solve**, unprompted, at each stage.
-
-<Checkpoint question="A manager says Response 4's engineer is 'just a better programmer' than Response 1's. Based on what stays constant across all four responses, is that the right read of the difference between them?">
-
-No — the section just above spells out why: the technical fact, and the
-technical skill required to find and fix the leak itself, are identical
-across all four responses. None of the later responses involve harder code.
-What actually differs is how far each person let the boundary of "my
-problem to solve" extend beyond the literal ticket, unprompted — a scope
-difference, not a programming-skill difference. Calling it "better
-programming" misattributes the gap to the wrong axis entirely.
+Response 4 keeps the fix, the lint rule and the alerting, and pushes the
+insight past this team entirely, toward other teams or the whole organization.
+Since Responses 1 through 3 already grew ambiguity tolerance, blast radius and
+time horizon, the dimension most likely to grow next is influence radius:
+getting people who never asked for input to change how they operate.
 
 </Checkpoint>
 
-## Failure modes
+## Response 4: what does direction across teams add?
 
-| Failure                                            | What it looks like                                                                                          | Why it fails                                                                                                 |
-| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Mistaking scope creep for scope expansion          | Bolting on speculative extra work with no evidence the wider problem is real                                | Response 4 works because each addition is directly evidenced by what was actually found — not a guess        |
-| Staying at Response 1 forever, calling it humility | Deliberately declining to flag a pattern you've clearly seen repeat, to "stay in your lane"                 | It's withholding information that would help the team, not modesty — a common way skilled people plateau     |
-| Attempting Response 4 without earned trust         | Proposing an org-wide platform default with no track record of shipping smaller-scoped work reliably        | Cross-team influence depends on credibility built through consistent Response-2/3-level delivery first       |
-| Judging level from a single incident               | Treating one Response-3 bug fix as proof of consistent wide scope, or one Response-1 fix as a permanent cap | Leveling conversations look at a pattern across many situations, not a single data point in either direction |
+Same investigation, plus: the engineer recognizes that "auto-restart masks the
+underlying problem" is not unique to this team; it follows from how the
+organization's orchestration platform is configured by default. They write a
+short proposal for a platform-level default (alert on the trend, not just the
+crash), work with the platform team to get it adopted, and mentor two
+engineers on other teams through applying it to their own services.
+
+**In scope now:** a default nobody was individually responsible for, requiring
+influence across teams that never asked. The dimension that grew most is
+**influence radius**.
+
+| Response | What the engineer treated as theirs                   | Dimension that grew most          |
+| -------- | ----------------------------------------------------- | --------------------------------- |
+| 1        | The reported leak                                     | Task execution                    |
+| 2        | The pattern behind the leak, inside this service      | Blast radius                      |
+| 3        | The missing visibility, on this and adjacent services | Ambiguity tolerance, time horizon |
+| 4        | The platform default every team inherits              | Influence radius                  |
+
+<Checkpoint question="A manager says Response 4's engineer is 'just a better programmer' than Response 1's. Looking at what stays constant across all four, is that the right read?">
+
+No. The technical fact and the technical skill needed to find and fix the leak
+are identical across all four responses, and none of the later ones involves
+harder code. What differs is how far each person let the boundary of "my
+problem to solve" extend beyond the literal ticket, unprompted. That is a scope
+difference, and calling it better programming puts the gap on the wrong axis.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="expansion-vs-creep"
+/>
+
+## When does wider work stop being expansion?
+
+Each addition above was **evidenced by what the engineer actually found**: a
+pattern in three real files, an alerting gap they could point to, a platform
+default that explained the gap. That evidence is what separates real expansion
+from scope creep. The failure modes are about its absence:
+
+| Failure                                            | What it looks like                                                                           | Why it fails                                                                                     |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Mistaking scope creep for scope expansion          | Bolting on speculative extra work with no evidence the wider problem is real                 | Response 4 works because each addition is directly evidenced, not guessed                        |
+| Staying at Response 1 forever, calling it humility | Declining to flag a pattern you have clearly seen repeat, to "stay in your lane"             | It withholds information that would help the team, and it is a common way skilled people plateau |
+| Attempting Response 4 without earned trust         | Proposing an org-wide default with no record of delivering smaller-scoped work               | Cross-team influence rests on credibility from consistent Response 2 and 3 level delivery        |
+| Judging level from a single incident               | Treating one Response 3 fix as proof of wide scope, or one Response 1 fix as a permanent cap | Leveling looks at a pattern across many situations, not one data point in either direction       |
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="track-record"
+/>
 
 ## Beyond this example
 
-<div class="not-prose my-3 flex items-center justify-center gap-3 text-sm text-slate-500 dark:text-slate-400">
-  <span>🐛 This memory leak</span>
-  <span>&rarr;</span>
-  <span>
-    🧑‍💼 Whatever unowned problem is sitting in your own backlog right now
-  </span>
-</div>
+This leak is one case, not the whole territory. The same four stages apply to
+any problem where a defined task, a project, an unowned gap and a shared
+default are all possible answers. Test whether the model transferred, not just
+the specific bug:
 
-The leak is one case, not the whole territory — a few questions to test whether the model actually transferred, not just the specific bug above:
-
-- What would change if the underlying fact were worse — say, the leak had already caused a customer-facing outage before anyone looked? Which response would you expect from someone at each scope level, and does the "evidence, not speculation" rule from the failure modes above still hold, or does urgency change what counts as justified scope expansion?
-- Think of a real, currently-unowned rough edge in something you work on — not a leak, just something nobody's assigned. Which of the four responses would you realistically attempt this month, and what's the one piece of evidence you'd need in hand before attempting the next response up?
-- If Response 4's engineer had proposed the platform-wide default _before_ ever shipping a Response 2 or 3-level fix, per the third failure mode, what specifically would the platform team be reasonably skeptical of — the idea, or the proposer? Does that distinction change how you'd sequence building your own track record?
+- What would change if the fact were worse, say the leak had already caused a customer-facing outage before anyone looked? Which response would you expect at each stage, and does the evidence rule still hold, or does urgency change what counts as justified expansion?
+- Think of a real, unowned rough edge in something you work on. Which of the four responses would you realistically attempt this month, and what one piece of evidence would you need before attempting the next one up?
+- If Response 4's engineer had proposed the platform default before ever shipping a Response 2 or 3 level fix, what would the platform team reasonably doubt: the idea, or the proposer's follow-through? How does that change how you sequence building your own track record?
+- Replace the memory leak with something outside software, like the gym's beginner wall from L1. What would the four responses be there?
