@@ -1,164 +1,159 @@
 ---
-title: "L2 — What plan and apply actually compute, and why a state file is what makes drift visible"
+title: "L2 — What a plan compares, what a drift check compares, and why re-running is safe"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named the three pictures — declared config, state file, actual cloud —
-and the failure mode that happens when a change only ever touches the
-third one. L2 works out exactly what `plan` and `apply` compute from
-those three pictures, and why the state file specifically is what turns
-"someone changed something" into something a tool can actually detect.
+export const unit = {
+  track: "infra-delivery",
+  unitSlug: "infrastructure-code",
+};
+
+L1 left one question open: the teammate's deploy never warned anyone that
+`web-1` had been resized by hand. L2 works out why. It follows what a
+plan compares, how that differs from a drift check, and what has to be
+true for re-running an apply to be safe.
 
 <LevelIntro
   items={[
-    "Declarative vs. imperative, and why it decides re-run safety",
-    "What plan computes and why apply waits for review",
-    "Why idempotency means 'same end state,' not 'does nothing'",
+    "Create, update, delete from two lists",
+    "Plan versus drift check",
+    "Why a re-run is safe",
   ]}
 />
 
-## Declarative vs. imperative: two different questions to answer
+## What does a plan actually compute?
 
-**If someone hands you a script that runs `resize-server web-1 large`,
-and someone else hands you a file that says `web-1: size = large`,
-what's actually different between them?** The script answers "what
-steps do I run," while the file answers "what should exist" — and
-that difference is exactly what determines whether re-running it
-twice is safe:
-
-|                    | Imperative (a script of steps)                                         | Declarative (a description of state)                            |
-| ------------------ | ---------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Answers            | "What commands do I run?"                                              | "What should this look like?"                                   |
-| Running it twice   | May run the resize command twice — depends on the script being careful | Second run computes zero changes — nothing to do                |
-| Detecting drift    | Nothing — the script doesn't know or check current state               | The tool can compare its state file to what is actually running |
-| What IaC tools use | Rarely, for exactly this reason                                        | Almost universally (Terraform, CloudFormation, Pulumi)          |
-
-A script that says "resize `web-1` to `large`" doesn't know or care
-whether `web-1` is already `large` — it just runs the command. A
-declarative tool is asked "make reality match this description," and
-computing _whether anything needs to change at all_ is the first
-thing it does, before touching anything.
-
-## The plan → apply cycle
-
-**If a tool is about to make real, sometimes-expensive-to-reverse
-changes to running infrastructure, should it just make them?** No —
-a plan step exists specifically to show the _computed_ difference
-before anything is touched, so a human can review it first:
-
-Use the three pictures from L1: the declared config says what you want,
-the state file says what the tool remembers from last time, and the
-actual cloud is what really exists. A normal plan mostly compares
-declared config against the tool's recorded state; a drift check asks
-whether the recorded state still matches actual cloud reality.
+**If a tool is about to change running infrastructure, how does it decide
+what to do?** It compares two lists, matched up by resource id: what the
+config declares, and what the state file says was last applied.
 
 ```mermaid
 flowchart TD
-    A["Declared config\n(what should exist)"] --> C{"Plan: diff against\nstate file"}
-    B["State file\n(what was last applied)"] --> C
-    C --> D["Create: in declared,\nnot in state"]
-    C --> E["Update: in both,\nconfig differs"]
-    C --> F["Delete: in state,\nnot in declared"]
-    D --> G["Human reviews\nthe plan"]
+    A["Declared config<br/>what should exist"] --> C{"Plan: match by id,<br/>compare each config"}
+    B["State file<br/>what was last applied"] --> C
+    C --> D["Create: id in config, not in state"]
+    C --> E["Update: id in both, config differs"]
+    C --> F["Delete: id in state, not in config"]
+    C --> N["Nothing: id in both, config identical"]
+    D --> G["Human reviews the plan"]
     E --> G
     F --> G
-    G -->|"Approved"| H["Apply: execute the plan\nagainst real infrastructure"]
-    H --> I["Update state file\nto match what's now real"]
+    G -->|"approved"| H["Apply changes the real cloud<br/>then updates the state file"]
 ```
 
-**Why compute a plan at all instead of just applying every time?**
-Because "what changed" is exactly the information a reviewer needs
-before approving a change that might delete a database or resize a
-production server — showing "3 to create, 1 to update, 0 to delete"
-lets a human catch a mistake (like an accidental delete from removing
-a line in the wrong file) before it happens, not after.
+| Where the id appears | Config identical? | Plan action |
+| -------------------- | ----------------- | ----------- |
+| Config only          | not applicable    | Create      |
+| Config and state     | no                | Update      |
+| Config and state     | yes               | Nothing     |
+| State only           | not applicable    | Delete      |
 
-<Checkpoint question="A plan shows '2 to create, 1 to update, 0 to delete.' Which of those three lists comes from a resource that exists in the state file but no longer appears in the declared config?">
+The plan is shown before anything runs because "3 to create, 1 to update,
+0 to delete" is exactly what a reviewer needs. An accidental delete, such
+as a block removed from the wrong file, is visible here, before it
+touches a real database.
 
-The delete list. Plan is a three-way classification built from comparing
-declared config against the state file by resource id: an id present in
-declared config but missing from state is a create, an id present in
-both but with a config that differs is an update, and an id present in
-state but no longer present in declared config is a delete. So "0 to
-delete" here means every resource the tool remembers creating is still
-named somewhere in the declared config — nothing has been removed from
-that file since the last apply. This is also exactly why a reviewer
-reads the delete list most carefully: it's the one outcome that can lose
-real, running infrastructure, and it's produced automatically the moment
-a resource's block is deleted or renamed in the config, whether or not
-that was intentional.
+<Checkpoint question="A plan shows 2 to create, 1 to update, and 0 to delete. What does the 0 tell you about the config compared with the state file?">
+
+Every resource the tool remembers creating is still named in the config.
+Nothing has been removed from that file since the last apply. The delete
+list is the one a reviewer reads most carefully, because it is the only
+list that can destroy running infrastructure, and it fills automatically
+the moment a block disappears or is renamed.
 
 </Checkpoint>
 
-## Why the state file is what makes drift detectable at all
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="plan-classification"
+/>
 
-**If the console change from the opening scenario had happened, but
-the team used IaC, would the tool have noticed?** Only because of the
-state file, and only when someone runs a plan, refresh, or drift check
-that compares that memory against reality. The state file is the one
-place that remembers what the tool _believes_ is true, separate from
-what's _actually_ true:
+## Is a drift check just the plan again?
+
+**The console resize in L1 changed the real cloud. Would a plan have
+shown it?** In the model this unit uses, no. A plan compares config with
+state, and neither of those changed. A drift check compares a different
+pair.
 
 ```mermaid
 flowchart LR
-    A["State file says:\nweb-1 = small"] --- B["Actual cloud:\nweb-1 = xlarge\n(changed via console)"]
-    A -.->|"compare"| C{"Do they match?"}
-    B -.->|"compare"| C
-    C -->|"No"| D["Drift detected —\nsomeone changed this\noutside the tool"]
+    CFG["Declared config<br/>web-1 = small"] ---|"plan compares"| ST["State file<br/>web-1 = small"]
+    ST ---|"drift check compares"| CL["Actual cloud<br/>web-1 = xlarge"]
+    CL -.->|"mismatch"| ALERT["Changed outside the tool"]
 ```
 
-Without a state file, there's nothing to compare the actual
-infrastructure _against_ — a script has no memory of what it did
-last time. A declarative tool's state file is exactly that memory,
-and drift detection is just "does the state file's record still
-match reality" — the same comparison a plan does against declared
-config, but against what actually exists instead.
+| Comparison                 | Question it answers                                 | A mismatch usually means               |
+| -------------------------- | --------------------------------------------------- | -------------------------------------- |
+| Config against state       | Does what I asked for match what the tool last did? | Someone edited the config, as intended |
+| State against actual cloud | Does the tool's memory still match reality?         | Something changed outside the tool     |
 
-<Checkpoint question="A plan diffs declared config against the state file. A drift check diffs the state file against the actual cloud. Why are these two different comparisons, rather than the same one run twice?">
+Without a state file there is nothing to compare reality against. A
+script of commands has no memory of what it did last time. Real tools
+often refresh from the cloud as part of planning, which folds both
+comparisons into one command. The two questions stay separate, though:
+the first mismatch is expected, the second is a warning.
 
-Because they're checking two different relationships, and each one can
-be wrong independently of the other. Declared config vs. state file
-asks "does what I've asked for match what the tool last did" — a
-normal, expected mismatch whenever someone edits the config file, and
-exactly what a plan is supposed to surface before an apply. State file
-vs. actual cloud asks a completely different question: "does the
-tool's memory still match reality" — and a mismatch there means
-something changed the real infrastructure without going through the
-tool at all, which a plan alone would never catch, because a plan never
-looks at the actual cloud. The opening scenario's console resize is
-invisible to a plan (declared config and state file still agree with
-each other) but would show up immediately in a drift check, which is
-exactly why relying on plan review alone misses this failure mode.
+How long can such a mismatch sit unnoticed? Only as long as the gap
+between checks. A check that runs every 7 days can miss a change made
+right after it for up to 7 days. The demo on this page lets you
+move that interval.
+
+<Checkpoint question="In L1 the console change happened on day 1 and the deploy ran on day 8. If a drift check had run every night, what would have been different on day 2?">
+
+Someone would have been told that `web-1` no longer matches the tool's
+record. That is a prompt to either copy the new size into the config, or
+to undo the change on purpose. Either way the incident fix becomes a
+decision a person made, instead of something a routine deploy reverses
+by accident a week later.
 
 </Checkpoint>
 
-## Idempotency: why re-running the same apply twice has to be safe
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="drift-vs-plan"
+/>
 
-**If an `apply` fails halfway through (network blip, a transient
-cloud API error) and gets re-run, what has to be true for that to be
-safe rather than dangerous?** The second run has to compute the same
-plan a fresh run would — creating only what's still missing, updating
-only what still differs, and doing nothing to what already matches.
-This is what "idempotent" means in practice: not "running it twice
-does nothing," but "running it twice produces the same end state as
-running it once," which is exactly what a diff-based plan naturally
-gives you, and exactly what a raw imperative script doesn't guarantee
-without deliberate, careful checks at every single step.
+## Why must re-running an apply be safe?
+
+**An apply creates 2 of 5 resources, then the network drops. What does a
+re-run have to do?** Create only the 3 that are missing and leave the 2
+that exist alone. That is what idempotency means in practice: running
+twice reaches the same end state as running once. It does not mean the
+first run does nothing.
+
+| Approach                                | Re-run after partial failure                         |
+| --------------------------------------- | ---------------------------------------------------- |
+| Script that runs `create-server` always | May duplicate the 2 that already exist, or error out |
+| Declaration plus diff against state     | Plan lists only the 3 still missing                  |
+
+A diff-based plan gives this property for free, because it is computed
+from the current situation each time. An imperative script only gets it
+by adding a careful existence check to every step.
+
+<Checkpoint question="Someone says an idempotent apply must change nothing, even if the config was edited between two runs. What is wrong with that?">
+
+The guarantee is about identical input. If the config changed between the
+runs, the second run should change things, since that is its purpose.
+Idempotency says that running the same declaration again leaves the same
+end state, so the repeat is a no-op only when nothing else has moved.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="idempotency"
+/>
 
 ## Failure modes at this level
 
-- **Treating a script of cloud CLI commands as "Infrastructure as
-  Code."** Being version-controlled isn't the same as being
-  declarative — a script of imperative commands still can't detect
-  drift or guarantee idempotency on its own.
-- **Manually editing infrastructure "just this once" during an
-  incident, without a plan to reconcile it afterward.** This is
-  exactly the opening scenario — the fix is real short-term, but
-  becomes invisible drift the moment nobody updates the declared
-  config to match.
-- **Skipping the plan step, or approving it without actually reading
-  it.** The plan's entire value is catching an unexpected delete or
-  an unintended change before it's applied — approving on autopilot
-  defeats the purpose of having one.
+- Calling a Git-tracked script of cloud commands "Infrastructure as Code".
+  Version control is not the same as declaring an end state.
+- Making a "temporary" console edit in an incident and never copying it
+  into the config. That is the opening story.
+- Approving a plan without reading its delete list.

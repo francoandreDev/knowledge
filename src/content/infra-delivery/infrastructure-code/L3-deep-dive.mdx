@@ -1,263 +1,153 @@
 ---
-title: "L3 — Building a real plan/apply engine, and reproducing the opening scenario's drift"
+title: "L3 — A small plan engine worked through with numbers, the rename trap, and the opening drift"
 ---
 
+import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L2 worked out what `plan` and `apply` compute in principle, and why the
-state file is what makes drift detectable at all. L3 builds all three —
-`diffResources`, `applyPlan`, and `detectDrift` — as real, runnable code,
-then uses them to reproduce the opening scenario's drift step by step.
+export const unit = {
+  track: "infra-delivery",
+  unitSlug: "infrastructure-code",
+};
+
+<Scenario label="Someone tidied a name in the config. The plan says one thing is deleted and one is created.">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>✏️</span> <strong>Edit</strong> — id `web-1` becomes `web-1-primary`, nothing else changes</div>
+      <div class="flex items-center gap-1.5"><span>📋</span> <strong>Plan</strong> — 1 to create, 0 to update, 1 to delete</div>
+      <div class="flex items-center gap-1.5"><span>❓</span> <strong>Question</strong> — is that the same server, renamed?</div>
+    </div>
+  </Fragment>
+
+A teammate renames one id in the config for tidiness. The size is
+untouched, so to a human this is obviously the same server. **Why does
+the plan describe it as destroying one thing and building another?**
+
+</Scenario>
 
 <LevelIntro
   items={[
-    "A real create/update/delete diff, matched by resource id",
-    "Verifying idempotency by re-planning against unchanged config",
-    "Reproducing the opening scenario's drift with detectDrift",
+    "An id-based diff, worked with numbers",
+    "The rename trap and dependencies",
+    "Reproducing the opening drift",
   ]}
 />
 
-## Computing a plan: create, update, delete
+## How does the diff match things up?
 
-**Before writing `apply` — what does `plan` actually need to compare
-to produce a correct create/update/delete list?** Two lists of
-resources — the desired (declared) state and the current (state
-file) — matched up by id, then diffed by config:
-
-Code vocabulary before the function: a `Map` is a lookup table where
-you can ask "give me the resource with id `web-1`"; `id` is the stable
-name used to match the same resource across lists; `config` is the part
-that can change, like server size; and `JSON.stringify` is used here as
-a simple way to compare two small config objects. Real IaC tools use
-more careful comparisons, but the idea is the same.
+The plan engine from L2 fits in a dozen lines. Here the code is worth
+reading, because the whole rename trap lives in one detail: resources are
+matched by `id` and nothing else. Each resource is just `{ id, size }`.
 
 ```js
-function diffResources(desired, current) {
-  const desiredById = new Map(desired.map((r) => [r.id, r]));
-  const currentById = new Map(current.map((r) => [r.id, r]));
-  const toCreate = [];
-  const toUpdate = [];
-  const toDelete = [];
-
-  for (const [id, res] of desiredById) {
-    if (!currentById.has(id)) {
-      toCreate.push(res);
-    } else {
-      const existing = currentById.get(id);
-      if (JSON.stringify(existing.config) !== JSON.stringify(res.config)) {
-        toUpdate.push(res);
-      }
-    }
-  }
-  for (const [id, res] of currentById) {
-    if (!desiredById.has(id)) {
-      toDelete.push(res);
-    }
-  }
-  return { toCreate, toUpdate, toDelete };
+function planIds(desired, current) {
+  const have = new Map(current.map((r) => [r.id, r.size]));
+  const want = new Map(desired.map((r) => [r.id, r.size]));
+  return {
+    create: desired.filter((r) => !have.has(r.id)).map((r) => r.id),
+    update: desired
+      .filter((r) => have.has(r.id) && have.get(r.id) !== r.size)
+      .map((r) => r.id),
+    delete: current.filter((r) => !want.has(r.id)).map((r) => r.id),
+  };
 }
 ```
 
-**Before reading the apply function — what should happen to a
-resource that's in both the desired and current lists with identical
-config?** Nothing — it shouldn't appear in any of the three lists at
-all, which is exactly what makes the second `plan` call in the test
-below come back empty.
+Worked through with a two-resource setup, a first apply, and three
+later edits. The counts are what `planIds` returns for each input:
 
-```js
-function applyPlan(cloud, plan) {
-  const newCloud = new Map(cloud);
-  for (const res of plan.toCreate) newCloud.set(res.id, { ...res });
-  for (const res of plan.toUpdate) newCloud.set(res.id, { ...res });
-  for (const res of plan.toDelete) newCloud.delete(res.id);
-  return newCloud;
-}
-```
+| Step | Declared config                  | State file               | Plan (create / update / delete) |
+| ---- | -------------------------------- | ------------------------ | ------------------------------- |
+| 1    | web-1 small, db-1 medium         | empty                    | 2 / 0 / 0                       |
+| 2    | web-1 small, db-1 medium         | web-1 small, db-1 medium | 0 / 0 / 0                       |
+| 3    | web-1 large, db-1 medium         | web-1 small, db-1 medium | 0 / 1 / 0                       |
+| 4    | db-1 medium only                 | web-1 small, db-1 medium | 0 / 0 / 1                       |
+| 5    | web-1-primary small, db-1 medium | web-1 small, db-1 medium | 1 / 0 / 1                       |
 
-## Verifying idempotency: apply once, apply again, nothing changes
+Step 2 is idempotency shown rather than asserted: after the first apply
+records two resources, planning the same declaration finds nothing to do.
 
-```js
-const desired1 = [
-  { id: "web-1", type: "server", config: { size: "small" } },
-  { id: "db-1", type: "database", config: { size: "medium" } },
-];
-const cloud0 = new Map();
+<Checkpoint question="In step 3 only the size changed, so it is an update. In step 5 only the id changed. Why is that not an update too?">
 
-const plan1 = diffResources(desired1, []);
-// plan1.toCreate.length === 2 — both resources are new
-
-const cloud1 = applyPlan(cloud0, plan1);
-// cloud1.size === 2 — both now exist
-
-const stateFile1 = [...cloud1.values()];
-const plan2 = diffResources(desired1, stateFile1);
-// plan2.toCreate.length === 0
-// plan2.toUpdate.length === 0
-// plan2.toDelete.length === 0
-// — re-planning against the SAME desired config finds nothing to do
-```
-
-This is idempotency, demonstrated rather than asserted: `apply` was
-called with real changes the first time and would be called with an
-empty plan (a genuine no-op) the second time, for the exact same
-input `desired1` — this is what makes it safe to re-run after a
-failure without worrying about duplicating anything.
-
-## A real update, and a real delete
-
-**What should change in the plan if `web-1`'s desired size changes
-from `small` to `large`, versus if `web-1` is removed from the
-desired config entirely?** Two different outcomes, and the diff
-function needs to tell them apart correctly:
-
-```js
-const desired2 = [
-  { id: "web-1", type: "server", config: { size: "large" } }, // resized
-  { id: "db-1", type: "database", config: { size: "medium" } },
-];
-const plan3 = diffResources(desired2, stateFile1);
-// plan3.toUpdate.length === 1, plan3.toUpdate[0].id === "web-1"
-// plan3.toCreate.length === 0, plan3.toDelete.length === 0
-// — a config change on an existing id is an update, not create+delete
-
-const desired3 = [{ id: "db-1", type: "database", config: { size: "medium" } }];
-const plan4 = diffResources(desired3, stateFile1);
-// plan4.toDelete.length === 1, plan4.toDelete[0].id === "web-1"
-// — removing a resource from desired config marks it for deletion
-```
-
-<Checkpoint question="plan3 recomputed web-1 as an update because its size changed from small to large in the desired config. Suppose instead the id itself changed — the config still authored a 'small' server, but its id went from web-1 to web-1-primary. Would diffResources treat that as an update to the same resource, or as something else?">
-
-Something else — a delete of `web-1` plus a create of `web-1-primary`,
-even though to a human it's obviously "the same server, just renamed."
-`diffResources` matches resources purely by `id`: it builds its
-desired-by-id and current-by-id maps from that field alone, so an id
-change looks identical to deleting the old resource and creating an
-unrelated new one with the same config. This matters beyond the diff
-output itself — `applyPlan` would actually destroy and recreate the
-real infrastructure behind that id, which for a server might mean
-downtime, and for a database would mean data loss, none of which the
-person renaming a field in the config file necessarily intends. Real
-IaC tools solve this with an explicit "move" or "import" operation that
-tells the tool "this new id refers to the same real resource as that
-old id" — precisely because id-based matching alone can't distinguish
-a rename from a genuine replace.
+The engine decides "same resource" from the id alone. A different id has
+no entry in the state map, so the new name is a create, and the old name
+has no entry in the declared map, so it is a delete. For a stateless
+server this is a short outage at worst. For a database, applying that
+plan would destroy the data behind the old id.
 
 </Checkpoint>
 
-## Reproducing the opening scenario's drift, exactly
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="rename-is-replace"
+/>
 
-**Now the actual failure mode from L1 — someone resizes `web-1`
-directly in the console, bypassing the tool entirely. Does the state
-file know?** No — and that's the point. The state file still says
-whatever was last applied through the tool; only a direct comparison
-against the _real_ cloud state reveals the gap:
+## How does the opening story reproduce?
 
-```js
-function detectDrift(stateFile, actualCloud) {
-  const drifted = [];
-  for (const res of stateFile) {
-    const actual = actualCloud.get(res.id);
-    if (!actual) {
-      drifted.push({ id: res.id, reason: "deleted outside IaC" });
-    } else if (JSON.stringify(actual.config) !== JSON.stringify(res.config)) {
-      drifted.push({ id: res.id, reason: "config changed outside IaC" });
-    }
-  }
-  return drifted;
-}
-
-const actualCloudWithDrift = new Map(cloud1);
-actualCloudWithDrift.set("web-1", {
-  id: "web-1",
-  type: "server",
-  config: { size: "xlarge" }, // changed via console, not the tool
-});
-
-const drift = detectDrift(stateFile1, actualCloudWithDrift);
-// drift.length === 1
-// drift[0] === { id: "web-1", reason: "config changed outside IaC" }
-
-const noDrift = detectDrift(stateFile1, cloud1);
-// noDrift.length === 0 — when actual matches the state file, nothing to report
+```mermaid
+flowchart LR
+    S["State file<br/>web-1 = small"] ---|"drift check: mismatch"| A["Actual cloud<br/>web-1 = xlarge (console)"]
+    C["Declared config<br/>web-1 = small"] ---|"plan against refreshed cloud"| A
+    A --> U["Plan: update web-1 to small"]
+    U --> R["Apply: web-1 is small again"]
 ```
 
-This is exactly the opening scenario's mechanism, made concrete: the
-on-call engineer's console change updated the _actual_ cloud but not
-the _state file_ — `detectDrift` catches precisely that gap. And it
-also explains what went wrong for the teammate who ran the routine
-deploy: their `plan` was computed against `stateFile1` (which still
-said `small`), not against the drifted actual state — so their
-deploy's plan correctly matched what the _tool_ believed was true,
-which by then had silently diverged from reality.
+Two comparisons use the same live snapshot and give different verdicts.
+The drift check, state against cloud, says "something changed this
+outside the tool". The plan, config against the refreshed cloud, says
+"set it back to small", which is an ordinary update. The update is not
+malicious: the tool obeys the only written source of truth it has, and
+the incident fix never reached it. The state file is what turns the
+second kind of gap into a flagged anomaly rather than one more routine
+update.
 
-One more step shows the "it got resized back to `small`" part of the
-opening scenario. If the tool refreshes from actual cloud before
-applying the declared config, it sees that reality is `xlarge` while
-the declared file still says `small`, so the computed plan is an update
-back to `small`:
+<Checkpoint question="The drift check flags web-1 and the plan wants to set it back to small. Which one action keeps the incident fix alive?">
 
-```js
-const planAgainstActual = diffResources(desired1, [
-  ...actualCloudWithDrift.values(),
-]);
-
-// planAgainstActual.toUpdate.length === 1
-// planAgainstActual.toUpdate[0].id === "web-1"
-// planAgainstActual.toUpdate[0].config.size === "small"
-
-const cloudAfterRoutineDeploy = applyPlan(
-  actualCloudWithDrift,
-  planAgainstActual,
-);
-cloudAfterRoutineDeploy.get("web-1").config.size; // "small"
-```
-
-That update is not malicious and not random. It is the tool obeying the
-only declared source of truth it has. The incident fix lived only in
-the console, so the next routine deploy treated that console-only
-change as something to overwrite.
-
-<Checkpoint question="detectDrift compared stateFile1 against actualCloudWithDrift and found web-1 drifted. planAgainstActual compared desired1 against actualCloudWithDrift and found web-1 needs an update back to small. Both comparisons involve web-1 and actualCloudWithDrift — so why did one report 'drift' and the other report a normal 'update'?">
-
-Because the two functions are answering different questions with the
-same actual-cloud snapshot, not because one of them is wrong. `detectDrift`
-asks "does the tool's memory (the state file) still match reality" —
-and since the state file says `small` while reality says `xlarge`, that's
-a mismatch the tool never intended and has to surface as an anomaly. `diffResources`
-asks a completely different, ordinary question: "does reality match what's
-declared" — and a mismatch there is exactly what a plan is designed to
-find and fix every single time, whether or not anything unusual happened.
-The state file is what turns the second gap into something worth flagging
-specially: without it, `xlarge` vs. `small` would just look like a routine
-update, same as any other config change, and nobody would ever learn that
-this particular gap was caused by someone bypassing the tool rather than
-by someone editing the declared config on purpose.
+Change the declared size to `xlarge` in the config and review it like any
+other change, before any apply. Applying first would undo the fix. Deleting
+the state file would hide the warning and leave the config still saying
+`small`.
 
 </Checkpoint>
 
-## What generalizes and what doesn't
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="drift-reproduction"
+/>
 
-The plan → apply → detect-drift cycle generalizes to any declarative
-IaC tool (Terraform, CloudFormation, Pulumi) regardless of what kind
-of resource is being managed — servers, databases, network rules,
-DNS records. What's specific to this worked example: real IaC tools
-also handle dependency ordering (create the database before the
-server that connects to it), partial-failure recovery mid-apply, and
-provider-specific resource schemas that this simplified `Map`-based
-simulation skips entirely. **Try extending it yourself:** what would
-`diffResources` need to account for if two resources had a
-dependency — say, `web-1`'s config referenced `db-1`'s address — and
-`db-1` was both being deleted and recreated with a new address in the
-same plan? Does "delete `db-1`, then create `web-1`" or "create
-`db-1`, then update `web-1`" change which order is actually safe?
+## Writing the diff yourself
+
+Here writing the code is the understanding: the practice and domain-check
+exercises ask you to implement small pieces of this diff, such as listing
+the ids to create, or the ids that drifted. Notice how each is one filter
+over one of the two lists.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="plan-diff"
+/>
+
+## This is a case, not the whole territory
+
+The table above uses two resources and one setting. Real tools also
+handle ordering, partial failures, and many resource types. **Extend it:
+suppose `web-1` reads the address of `db-1`, and one plan both deletes
+and recreates `db-1`. Is it safer to delete `db-1` and then create
+`web-1`, or to create the new `db-1` first and then update `web-1`? What
+would change if `db-1` held data that could not be re-created?** Work out
+your own ordering, then compare it with what happens to the data and the
+downtime in each case.
 
 ## Failure modes
 
-| Failure mode                                                                              | What it gets wrong                                                                                                                                                       |
-| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Manually changing a resource "temporarily" without updating the declared config afterward | Creates exactly the drift from the opening scenario — the state file and reality silently diverge until something detects it or a plan is run                            |
-| Writing a script of cloud CLI commands and calling it "Infrastructure as Code"            | An imperative script has no state file to diff against — it can't detect drift or guarantee that re-running it after a failure is safe                                   |
-| Applying a plan without reviewing what it says it will create/update/delete               | The plan step exists specifically to catch an unexpected delete before it happens — skipping the review defeats its purpose                                              |
-| Assuming idempotency means "running apply twice does literally nothing"                   | It means running it twice produces the same _end state_ — the first run may make real changes; only the second run (against unchanged desired config) is a genuine no-op |
+| Failure mode                                     | What it gets wrong                                           |
+| ------------------------------------------------ | ------------------------------------------------------------ |
+| Renaming an id without a move operation          | Looks like delete plus create, which may destroy data        |
+| "Temporary" console edits never copied to config | The next routine apply reverts them, as in the opening story |
+| Approving a plan without reading deletes         | The one list that can lose real infrastructure goes unseen   |
+| Reading idempotency as "does nothing"            | Only a repeat of identical input is a no-op                  |

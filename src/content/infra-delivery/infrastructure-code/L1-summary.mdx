@@ -4,89 +4,125 @@ title: "L1 — How do we change infrastructure without clicking through a consol
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Someone resized a server during an incident. Nobody wrote it down.">
+export const unit = {
+  track: "infra-delivery",
+  unitSlug: "infrastructure-code",
+};
+
+<Scenario label="A server was resized by hand during an incident. A routine deploy undid it.">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🔥</span> <strong>Incident</strong> — on-call resizes `web-1` from small to xlarge in the console</div>
-      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Resolved</strong> — nobody documents the change</div>
-      <div class="flex items-center gap-1.5"><span>💥</span> <strong>Next deploy</strong> — a teammate's routine deploy resizes `web-1` back to small</div>
+      <div class="flex items-center gap-1.5"><span>🔥</span> <strong>Day 1</strong> — traffic spikes; on-call clicks `web-1` from small to xlarge in the console</div>
+      <div class="flex items-center gap-1.5"><span>🤫</span> <strong>Day 1</strong> — the incident ends; the change is written down nowhere</div>
+      <div class="flex items-center gap-1.5"><span>🚀</span> <strong>Day 8</strong> — a teammate runs the documented deploy process</div>
+      <div class="flex items-center gap-1.5"><span>📉</span> <strong>Day 8</strong> — `web-1` is small again, and the next spike takes it down</div>
     </div>
   </Fragment>
 
-An on-call engineer resizes a struggling server from `small` to
-`xlarge` directly in the cloud console to survive a traffic spike.
-The incident resolves. Nobody writes down what they did. A week
-later, a teammate runs a routine deployment and — with no ill
-intent, following the documented process exactly — the server gets
-resized back down to `small`, and the site falls over again the next
-time traffic spikes. **Nobody did anything wrong by their own
-process. What's actually missing that let a correct, well-intentioned
-action from one week undo a correct, well-intentioned action from
-another?**
+Think of a kitchen with a written recipe. One cook tastes the sauce
+during a rush, adds extra salt, and tells nobody. The next day another
+cook follows the recipe word for word, and the sauce is bland again.
+Neither cook did anything wrong by their own process.
+
+The same thing happens with servers. An on-call engineer resizes `web-1`
+from `small` to `xlarge` by clicking in the cloud console, which survives
+the spike. Nobody records it. A week later a teammate runs the routine
+deploy, exactly as documented, and `web-1` goes back to `small`.
+**What is missing, so that a correct action one week can silently undo
+a correct action from another week?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "What Infrastructure as Code actually declares",
-    "Declared config, state file, and actual cloud as three separate pictures",
-    "Key terms: plan, apply, drift, idempotency",
+    "Clicked by hand versus a written recipe",
+    "Declared config, state file, and actual cloud",
+    "Plan, apply, drift, and idempotency",
   ]}
 />
 
-## The shape of the problem
+```mermaid
+sequenceDiagram
+    participant O as On-call engineer
+    participant C as Actual cloud
+    participant R as Written recipe (config)
+    participant D as Teammate's deploy
+    O->>C: Day 1: resize web-1 to xlarge (console)
+    Note over R: Still says web-1 is small
+    D->>R: Day 8: read the recipe
+    D->>C: Day 8: make web-1 match the recipe (small)
+    Note over C: The incident fix is gone
+```
 
-- Clicking through a console makes a change **real but invisible** —
-  it takes effect immediately, but nothing records that it happened,
-  why, or that it should stay that way.
-- The teammate's deploy wasn't wrong: whatever process they followed
-  didn't know about the console change, because the console change
-  never became part of any process — it lived only in the actual
-  running infrastructure, not in anything anyone else could read.
-- **Infrastructure as Code (IaC)** means describing the desired
-  infrastructure state in a file, checked into version control like
-  any other code (a shared history like Git), and letting a tool compute
-  and apply the difference between what's declared and what's currently
-  running — so "what should this look like" has exactly one source of
-  truth: the place everyone looks to know what should exist, not one
-  source of truth per person who happened to touch the console.
+## Why does clicking by hand cause this?
 
-Keep three pictures separate as you read the rest of the unit:
+A console click is **real but invisible**: it takes effect at once, yet
+nothing records that it happened, why, or that it should last. The
+teammate's deploy was not wrong. It followed the only written source of
+truth, and the console change never became part of it.
 
-| Picture         | What it means in this unit                                 |
-| --------------- | ---------------------------------------------------------- |
-| Declared config | The file that says what should exist                       |
-| State file      | The tool's memory of what it last created or updated       |
-| Actual cloud    | The real servers/databases/network rules running right now |
+| Aspect                   | Clicked by hand           | Written recipe (Infrastructure as Code) |
+| ------------------------ | ------------------------- | --------------------------------------- |
+| Where the change lives   | Only in the running cloud | In a file under version control         |
+| Who can see it           | Whoever happens to look   | Anyone who can read the repository      |
+| Can it be reviewed       | After the fact, if at all | Before it happens, as a normal change   |
+| Does a later run keep it | Only by luck              | Yes, once the file says so              |
 
-## Key terms
+**Infrastructure as Code (IaC)** means describing the infrastructure you
+want in a file kept in version control (a shared history such as Git),
+and letting a tool work out and apply the difference between that file
+and what is running. "What should exist" then has one home that
+everyone reads.
 
-- **Declarative configuration** — describing the desired end state
-  ("this server should be size `large`"), not the steps to get there —
-  the tool figures out what needs to change.
-- **State file** — the IaC tool's own record of what it last applied,
-  used to compute what's different the next time a change is planned.
-- **Plan** — a computed list of the specific create/update/delete
-  actions needed to make the actual infrastructure match the declared
-  configuration, shown before anything is changed.
-- **Apply** — actually executing a plan, making the real infrastructure
-  match the declared state.
-- **Drift** — infrastructure that no longer matches its state file,
-  usually because someone changed it directly (through a console, a
-  CLI command, or another tool) instead of through the declared
-  configuration.
-- **Idempotency** — applying the same declared configuration twice
-  produces the same result both times; the second apply is a no-op
-  because nothing has changed since the last one.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="declarative-vs-script"
+/>
 
-## What this unit covers
+## Three pictures to keep apart
 
-L2 works through the plan → apply cycle and what a state file
-actually tracks, plus what makes an operation idempotent and why
-that property matters for a tool that might get re-run after a
-partial failure. L3 builds a real, working plan/apply engine in
-code — computing create/update/delete diffs, applying them to a
-simulated cloud, verifying idempotency on a repeated apply, and
-detecting the exact kind of drift from the opening scenario when a
-resource is changed outside the tool.
+Almost every confusion in this unit comes from mixing up these three:
+
+| Picture         | What it means in this unit                           | Who normally changes it            |
+| --------------- | ---------------------------------------------------- | ---------------------------------- |
+| Declared config | The file that says what should exist                 | People, through reviewed changes   |
+| State file      | The tool's memory of what it last created or updated | The tool, after an apply           |
+| Actual cloud    | The real servers and databases running right now     | The tool, or anyone with a console |
+
+In the opening story the console click changed only the third picture.
+The first two still said `small`.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="three-pictures"
+/>
+
+## Five terms
+
+- **Declarative configuration**: you describe the end state ("`web-1`
+  has size `large`"), not the steps to reach it.
+- **Plan**: a computed list of create, update, and delete actions needed
+  to make reality match the declaration, shown before anything changes.
+- **Apply**: executing a plan against the real infrastructure.
+- **Drift**: the real infrastructure no longer matches what the tool
+  recorded, usually because someone changed it directly.
+- **Idempotency**: applying the same declaration twice leaves the same
+  end state as applying it once.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="iac-vocabulary"
+/>
+
+## What the next levels add
+
+L2 shows exactly what a plan compares, why a drift check is a different
+comparison, and what idempotency buys after a half-finished apply. L3
+works one small example through with numbers, including the rename trap
+and a reproduction of the opening story, and asks you to write the diff
+yourself.
