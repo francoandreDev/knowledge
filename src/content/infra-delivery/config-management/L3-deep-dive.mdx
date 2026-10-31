@@ -1,260 +1,173 @@
 ---
-title: "L3 — Building a config loader and validator that catches L1's bug before it ships traffic"
+title: "L3 — A start-up validator, its honest limits, and the line between a difference and a mistake"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Same bug, different consequence">
+export const unit = { track: "infra-delivery", unitSlug: "config-management" };
+
+<Scenario label="Same missing dial, found at two different moments">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>❌</span> Without validation: bug found by customers, in production, mid-incident</div>
-      <div class="flex items-center gap-1.5"><span>✅</span> With validation: bug found by the deploy process, before any traffic is served</div>
+      <div class="flex items-center gap-1.5"><span>❌</span> <strong>No check</strong> — a customer finds the cold room</div>
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Start-up check</strong> — the installer finds it before the room is let</div>
     </div>
     <div class="not-prose mt-3 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs dark:border-amber-800 dark:bg-amber-950">
-      Same missing environment variable. The only thing that changed is
-      <em>when</em> the service checks for it.
+      Same missing value. The only thing that changed is <em>when</em> someone
+      looks for it.
     </div>
-
   </Fragment>
 
-L1's outage and this section's fix are the same bug, caught at two
-different points in time. Without a validation layer, `PAYMENT_GATEWAY_TIMEOUT_MS`
-being unset in production is discovered by a customer's failed checkout.
-With one, it's discovered by the deploy itself, seconds after the new
-container starts — before it's added to the load balancer, before it
-serves a single request.
+Back to the two heaters. A landlord who checks every dial before handing
+over the keys never gets a call from a freezing tenant. The mistake still
+happens, but the installer sees it, in a corridor, with no tenant
+involved. L1's missing `PAYMENT_TIMEOUT_MS` is the same mistake. Without a
+check, a customer's failed checkout reveals it. With one, the new
+container refuses to start and the deploy reports exactly which value is
+missing, before it receives a single request.
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "A typed config loader with explicit (not silent) defaults",
-    "A startup validator that fails fast on missing or malformed values",
-    "Telling a legitimate per-environment difference from an actual bug",
+    "A start-up validator and what it catches",
+    "Legitimate difference versus mistake",
+    "What validation can never prove",
   ]}
 />
 
-## The loader: read config once, with types, not scattered `process.env` reads
+## How does a start-up validator catch the original bug?
 
-The first structural problem in L1's code wasn't the missing environment
-variable — it was that the fallback lived inline, next to the one call
-site that happened to use it, with no record anywhere that this value was
-supposed to be set explicitly in production. A config loader centralizes
-every value the service depends on into one typed object, built once at
-startup:
+```mermaid
+flowchart TD
+    Env["Raw settings: strings from file and environment"] --> Parse["Parse into typed values<br/>no silent default for required ones"]
+    Parse --> Rules["Run every rule and collect every error"]
+    Rules -->|"zero errors"| Ok["Hand typed config to the service"]
+    Rules -->|"one or more"| Fail["Throw one error listing all problems<br/>exit before accepting traffic"]
+```
 
-```typescript
-// config.ts — one place that knows every config value this service needs
-interface AppConfig {
-  paymentGatewayTimeoutMs: number;
-  paymentApiKey: string;
-  rateLimitPerSecond: number;
-  featureFlagNewCheckout: boolean;
-}
+The logic is small enough that reading it is the point. The key choice is
+that a required value has no fallback, so missing and chosen can never
+look the same:
 
-// Source of truth for env vars. In production this reads process.env;
-// tests and the sandboxed exercises below pass a plain object instead,
-// so the same logic is testable without a real process environment.
-function readConfig(env: Record<string, string | undefined>): AppConfig {
-  return {
-    paymentGatewayTimeoutMs: env.PAYMENT_GATEWAY_TIMEOUT_MS
-      ? Number(env.PAYMENT_GATEWAY_TIMEOUT_MS)
-      : NaN, // no silent numeric default — see why below
-    paymentApiKey: env.PAYMENT_API_KEY ?? "",
-    rateLimitPerSecond: env.RATE_LIMIT_PER_SECOND
-      ? Number(env.RATE_LIMIT_PER_SECOND)
-      : NaN,
-    featureFlagNewCheckout: env.FEATURE_NEW_CHECKOUT === "true",
-  };
+```javascript
+function validateConfig(env) {
+  const errors = [];
+  if (!env.PAYMENT_API_KEY) errors.push("PAYMENT_API_KEY is required");
+  const timeout = Number(env.PAYMENT_TIMEOUT_MS);
+  if (!Number.isFinite(timeout) || timeout < 1000 || timeout > 60000) {
+    errors.push("PAYMENT_TIMEOUT_MS must be a number from 1000 to 60000");
+  }
+  return errors; // the caller refuses to start if this is not empty
 }
 ```
 
-Notice what's deliberately absent: no `?? 3000` fallback for the timeout.
-L1's bug wasn't that a default existed — sensible defaults are fine for
-genuinely optional values. It's that a _required_ value (a payment
-gateway timeout materially affects correctness) had a default that made
-a missing environment variable indistinguishable from a deliberately
-chosen one. `NaN` here is a deliberate "not yet validated" placeholder —
-the validator below is what turns a missing value into a startup failure
-instead of a silently-accepted 3000.
+Run against L1's production settings (the timeout absent), it returns one
+clear sentence instead of a quiet 3-second fallback. Two details matter.
+It collects all errors instead of stopping at the first, so a person fixes
+everything in one pass. And the range check catches a typo such as `1`
+or `5000000`, which are valid numbers but not values anyone would choose.
 
-## The validator: fail fast, with a clear message
+<Checkpoint question="Why does the validator report every error at once instead of throwing on the first problem?">
 
-```typescript
-// config.ts (continued)
-class ConfigError extends Error {}
-
-function validateConfig(config: AppConfig): AppConfig {
-  const errors: string[] = [];
-
-  if (!config.paymentApiKey) {
-    errors.push("PAYMENT_API_KEY is required and was not set");
-  }
-
-  if (!Number.isFinite(config.paymentGatewayTimeoutMs)) {
-    errors.push(
-      "PAYMENT_GATEWAY_TIMEOUT_MS is required and must be a number " +
-        `(got: ${config.paymentGatewayTimeoutMs})`,
-    );
-  } else if (
-    config.paymentGatewayTimeoutMs < 1000 ||
-    config.paymentGatewayTimeoutMs > 60000
-  ) {
-    // A "reasonable range" check, not an exact-value check — see below
-    // for why the line has to be drawn this way, not tighter.
-    errors.push(
-      `PAYMENT_GATEWAY_TIMEOUT_MS is outside a sane range (1000-60000ms), ` +
-        `got: ${config.paymentGatewayTimeoutMs}`,
-    );
-  }
-
-  if (
-    !Number.isFinite(config.rateLimitPerSecond) ||
-    config.rateLimitPerSecond <= 0
-  ) {
-    errors.push(
-      `RATE_LIMIT_PER_SECOND must be a positive number, got: ${config.rateLimitPerSecond}`,
-    );
-  }
-
-  if (errors.length > 0) {
-    throw new ConfigError(
-      `Refusing to start — invalid configuration:\n  - ${errors.join("\n  - ")}`,
-    );
-  }
-
-  return config;
-}
-
-function loadValidatedConfig(
-  env: Record<string, string | undefined>,
-): AppConfig {
-  return validateConfig(readConfig(env));
-}
-```
-
-Run against L1's actual production environment (no `PAYMENT_GATEWAY_TIMEOUT_MS`
-set), this throws immediately:
-
-```text
-ConfigError: Refusing to start — invalid configuration:
-  - PAYMENT_GATEWAY_TIMEOUT_MS is required and must be a number (got: NaN)
-```
-
-That's the whole fix, structurally: the exact same missing value, but
-discovered by a deploy failing loudly in a terminal instead of by
-customers failing quietly at checkout.
-
-<Checkpoint question="Why does the validator check that the timeout falls within a range (1000-60000ms) instead of just checking that it's present and numeric?">
-
-Presence-and-type checks alone would have let a technically-valid but
-operationally absurd value through — a timeout of `1` millisecond, or
-`5000000` (over an hour), is a real number and would pass a bare
-`Number.isFinite` check, but either one is almost certainly a typo, not a
-deliberate choice. A range check catches the class of mistake that's
-"valid-shaped but not a value anyone would sanely configure," which
-presence checks alone can't. It still isn't a guarantee of correctness —
-that limitation is the subject of the next section.
+If it stopped at the first, a deploy with three problems takes three
+deploy-fail-fix cycles to get through, each costing minutes and one more
+chance to give up and bypass the check. Listing everything turns the
+failure into a single, complete to-do list. The cost is a slightly longer
+function, which is tiny next to repeated failed deploys.
 
 </Checkpoint>
 
-## The harder line: legitimate variation vs. an actual bug
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="validator-code"
+/>
 
-L1 and the validator above cover one failure mode: a required value
-that's simply missing. But config management has a second, subtler
-failure mode, and it's the one strict validation can make _worse_ if
-you're not careful about where the line goes.
+## Where does legitimate variation end and a mistake begin?
 
-Consider `RATE_LIMIT_PER_SECOND`. Staging realistically needs something
-like 10-50 requests/second — that's roughly what a handful of engineers
-poking at a test environment generates. Production needs 500-5000,
-because it's serving real traffic at real scale. **Both of these are
-correct.** They're supposed to differ by two orders of magnitude — that's
-not drift, it's the entire point of having separate environments sized
-for separate loads.
+Take `RATE_LIMIT_PER_SECOND`. Suppose, for illustration, staging runs at
+20 and production at 2000. Both are right, because the environments are
+sized for different loads. A typo that makes production 2 has the same
+shape of difference and is wrong.
 
 ```mermaid
 flowchart LR
-    subgraph Legit["Legitimate per-environment variation"]
+    subgraph Legit["Legitimate difference"]
         direction TB
-        A1["Staging: 20 req/s"]
-        A2["Production: 2000 req/s"]
-        A1 -.->|"both intentional, both correct"| A2
+        A1["Staging: 20 per second"] -.->|"both chosen on purpose"| A2["Production: 2000 per second"]
     end
-    subgraph Bug["Accidental misconfiguration"]
+    subgraph Bug["Mistake"]
         direction TB
-        B1["Staging: 20 req/s"]
-        B2["Production: 2 req/s (typo, missing a zero)"]
-        B1 -.->|"same shape of difference, but wrong"| B2
+        B1["Staging: 20 per second"] -.->|"a zero was dropped"| B2["Production: 2 per second"]
     end
 ```
 
-A validator that says "rate limit must be within 20% of staging's value"
-would correctly catch the second case — but it would also **reject the
-first one**, which is exactly the config a healthy production deployment
-needs. That's the trap of over-strict validation: a check tight enough to
-catch every accidental typo is usually also tight enough to block every
-legitimate scaling difference, and a validator that blocks legitimate
-deploys gets disabled or worked around within a week, at which point it
-catches nothing at all.
+A validator that demands production match one exact number would catch
+the typo, and would also block the correct deploy next month when traffic
+doubles and the limit is deliberately raised. A check that blocks correct
+work gets bypassed within weeks, after which it protects nothing. So the
+rules mark the outer bounds of what a person would ever sanely choose and
+leave the exact figure to the humans who plan capacity.
 
-The range check used above (`1000 <= paymentGatewayTimeoutMs <= 60000`,
-`rateLimitPerSecond > 0`) draws the line differently: it defines the
-outer bounds of _anything a human would ever sanely configure_, not the
-expected value for any one environment. It will happily accept both
-staging's 20 req/s and production's 2000 req/s — and it will still catch
-a negative number, a zero, or a value with a missing digit that lands
-outside all plausible bounds. What it explicitly does **not** try to do
-is guess whether 2000 is the _right_ number for production specifically
-— that's a capacity-planning judgment a human makes deliberately, not
-something a startup check can infer from the number alone.
+| Question                                     | Can a start-up validator answer it?            |
+| -------------------------------------------- | ---------------------------------------------- |
+| Is the required value present?               | Yes                                            |
+| Is it the right type and inside sane bounds? | Yes                                            |
+| Is `pool size` below the database's limit?   | Yes, with a rule that compares two values      |
+| Is 2000 per second enough for next month?    | No, that is a capacity decision                |
+| Is 2 a typo for 2000?                        | Only if a lower bound or a review rules it out |
 
-<Checkpoint question="A new engineer proposes tightening the rate-limit check so staging and production must each match a hardcoded expected value exactly, to 'really' catch misconfiguration. What's the problem with that?">
+<Checkpoint question="Production's limit is set to 2 by a typo and the rule only demands a positive number. Does the validator catch it?">
 
-It would work right up until the next time either environment's traffic
-pattern legitimately changes — a traffic spike that calls for temporarily
-raising production's limit, or a load test that needs staging's limit
-raised for a day, would now fail validation and block a deploy that is
-otherwise completely correct. Hardcoding an expected value conflates
-"this differs from what I expect right now" with "this is wrong," and
-those aren't the same claim. The range check's job is to catch
-values nobody would ever sanely choose, not to freeze each environment's
-config at today's specific number — the latter isn't validation, it's
-just moving the maintenance burden from "the app might misbehave" to
-"the validator constantly needs updating by hand."
+No. Two is positive and inside the bounds, so every rule passes. The
+validator proves a value is well-formed, not that it is right for this
+environment. Catching this one needs a tighter lower bound that is still
+loose enough to allow legitimate change, a review of the diff, or an
+alert on traffic after the deploy. Validation is one layer, not the whole
+defense.
 
 </Checkpoint>
 
-This is also validation's real ceiling, worth stating plainly: a range
-check can confirm a rate limit is a positive number under a sane cap. It
-cannot tell you that 2000 req/s is actually too low for this Black
-Friday, or that 20 req/s in staging is now too tight for a new load test
-someone's about to run. **Config validation catches shape and presence
-bugs — a value that's missing, malformed, or absurd. It cannot catch "the
-number is technically valid but still wrong for this environment right
-now."** That second class of problem is a human capacity-planning
-decision, revisited deliberately, not something more validation code can
-resolve on its own.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="validation-line"
+/>
 
-**Two extensions worth thinking through beyond this worked example:**
+## How much risk does validation actually remove?
 
-What changes if a value like the feature flag needs to be toggled at
-runtime — turned off during an incident — without waiting for a
-redeploy? Startup validation alone doesn't help here: it only runs once,
-at boot. A runtime-toggleable flag needs its own mechanism (a config
-service the app polls or subscribes to, not just an environment
-variable read once at startup), and that mechanism now needs its _own_
-validation on every change, not just at deploy time — the fail-fast
-principle still applies, but it has to run continuously instead of once.
+The interactive demo on this page models the original scenario. Assume,
+for illustration, that 6 values differ between staging and production and
+that each independently has a 5 percent chance of an accidental mistake.
+The chance that at least one reaches production is one minus 0.95 to the
+power of the number of unvalidated values:
 
-And what changes if two config values need to be consistent _with each
-other_, not just individually valid — say, a connection-pool size that
-must stay below the database's own max-connections limit, or a timeout
-that must stay shorter than a caller's own timeout upstream? Each value
-in isolation can pass every check above and the combination can still be
-wrong. That needs a validation rule that looks across multiple config
-values at once, not a per-field check — a real extension of the same
-`errors.push(...)` pattern above, just comparing two fields against each
-other instead of one field against a range.
+| Share of values covered by validation | Unvalidated values | Chance a mistake reaches production |
+| ------------------------------------- | ------------------ | ----------------------------------- |
+| 0 percent                             | 6                  | 26.5 percent                        |
+| 50 percent                            | 3                  | 14.3 percent                        |
+| 100 percent                           | 0                  | 0 percent                           |
+
+The 5 percent rate is an assumption, not a measurement, and real mistakes
+are not independent. The shape is what carries: every value you bring
+under validation removes its share of risk. Coverage of the values that
+matter beats cleverness on one value.
+
+## This is a case, not the whole territory
+
+The worked example was a payment timeout and a rate limit. Try the same
+reasoning on others before you trust it:
+
+- A feature flag must be switched off during an incident without a
+  redeploy. Start-up validation only runs at boot. What would have to
+  check a value that changes while the service is running?
+- A connection-pool size must stay below the database's own maximum, and a
+  timeout must stay shorter than the caller's own timeout. Each value
+  passes alone and the pair is still wrong. What kind of rule catches
+  that?
+- What would change in your validator if a wrong value could cost money
+  within seconds instead of causing slow failures?

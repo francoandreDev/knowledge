@@ -1,81 +1,119 @@
 ---
-title: "L1 — Why does the same code behave differently in staging vs. prod? (config management, environment-specific behavior)"
+title: "L1 — Why does the same code behave differently in staging and production?"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="The timeout nobody set">
+export const unit = { track: "infra-delivery", unitSlug: "config-management" };
+
+<Scenario label="Two identical heaters, one cold room">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🧪</span> <strong>Staging</strong> — `PAYMENT_GATEWAY_TIMEOUT_MS=30000` set explicitly</div>
-      <div class="flex items-center gap-1.5"><span>☁️</span> <strong>Production</strong> — variable never set, code silently falls back to 3000</div>
+      <div class="flex items-center gap-1.5"><span>🔥</span> <strong>Heater A</strong> — dial set to 22°C by the installer</div>
+      <div class="flex items-center gap-1.5"><span>❄️</span> <strong>Heater B</strong> — dial never set, uses the factory default of 5°C</div>
+      <div class="flex items-center gap-1.5"><span>🏭</span> <strong>Same factory, same wiring</strong> — only the setting differs</div>
     </div>
     <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
       <div class="rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950">
-        <p class="font-semibold text-emerald-600 dark:text-emerald-400">Staging</p>
-        30s timeout, payment provider responds in ~1s. Always passes.
+        <p class="font-semibold text-emerald-600 dark:text-emerald-400">Room A</p>
+        Warm. Nobody thinks about the heater.
       </div>
       <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
-        <p class="font-semibold text-rose-600 dark:text-rose-400">Production</p>
-        3s timeout, real provider takes 4-8s at peak. Legitimate checkouts fail.
+        <p class="font-semibold text-rose-600 dark:text-rose-400">Room B</p>
+        Cold. The heater is not broken, nobody chose its setting.
       </div>
     </div>
-
   </Fragment>
 
-A checkout feature ships. It's reviewed, it passes every test in staging,
-and the deploy goes out clean — the exact same built container image that
-staging ran, now running in production. Within an hour, support tickets
-start piling up: real customers, with valid cards, getting "payment failed"
-at checkout. Nobody touched the payment code. Nobody rolled back anything.
-So what changed?
-
-| Where      | `PAYMENT_GATEWAY_TIMEOUT_MS` | Effective timeout   | Provider's real response time | Result           |
-| ---------- | ---------------------------- | ------------------- | ----------------------------- | ---------------- |
-| Staging    | set to `30000`               | 30 seconds          | ~1 second (low traffic)       | Always succeeds  |
-| Production | never set                    | 3 seconds (default) | 4-8 seconds (real load)       | Times out, fails |
-
-**The code is identical. The container image is identical — it's the same
-build artifact, promoted from staging to production without a rebuild.**
-The only thing that differs is a single environment variable someone
-meant to set in production and never did — so the code quietly fell back
-to a default value that was never tested against production's real
-latency. Nothing in the code review could have caught this: the bug isn't
-in the code, it's in a value that lives outside the code entirely.
+A building has two rooms with the same model of heater, bought in one
+order. Room A is warm. Room B is freezing. The repair person opens the
+second heater and finds nothing wrong: the same parts, the same wiring,
+passing every factory test. The only difference is the dial. Someone set
+it in Room A and forgot to set it in Room B, so the heater quietly used
+the factory default of 5°C. **If the machine is identical, where did the
+difference come from?**
 
 </Scenario>
 
+Software has the same trap. A checkout service passes every test in a
+test environment, ships as the identical built package to the live
+environment, and starts failing real customers within the hour. Nobody
+changed the code. All numbers below are assumptions made up for
+illustration:
+
+| Where                   | `PAYMENT_TIMEOUT_MS` | Effective timeout   | Provider's response time (assumed) | Result           |
+| ----------------------- | -------------------- | ------------------- | ---------------------------------- | ---------------- |
+| Staging (test copy)     | set to `30000`       | 30 seconds          | about 1 second (light traffic)     | Always succeeds  |
+| Production (live users) | never set            | 3 seconds (default) | 4 to 8 seconds (real load)         | Times out, fails |
+
+The code and the built package are the same. The one difference is a
+setting that lives outside the code, and the code filled the gap with a
+default nobody had tested against live load.
+
 <LevelIntro
   items={[
-    "The config-vs-code distinction",
-    "Where config values live (env vars, files, secrets manager)",
-    "Why validating config at startup beats finding out in production",
+    "Config versus code",
+    "Where settings can live",
+    "Checking settings at start-up",
   ]}
 />
 
-- **Config** is anything that legitimately varies by environment without the
-  code changing — a database URL, a timeout, a feature flag, a rate limit,
-  an API key. **Code** is the logic that should behave identically
-  everywhere it runs. Keeping the two separate is what lets one built
-  artifact run correctly in every environment.
-- This is a different problem from **environment parity** (making
-  environments _structurally identical_ so nothing drifts by accident) —
-  here, the differences are intentional and necessary. Staging genuinely
-  should point at a different database than production. The problem isn't
-  that they differ; it's making sure the differences are the _right_ ones,
-  on purpose, and nothing silently falls back to a value nobody chose.
-- Config can live in **environment variables** (simple, but easy to typo
-  or forget to set), **per-environment config files** (versioned,
-  reviewable, but can't hold secrets safely), or a **secrets manager**
-  (secure, auditable, but adds real operational complexity) — each has
-  real trade-offs, covered in L2.
-- **Fail-fast validation**: checking that required config is present and
-  well-formed the moment a service starts, instead of discovering a
-  missing or wrong value deep inside a real request — the difference
-  between a service refusing to start with a clear error, and a service
-  starting successfully and then silently misbehaving under real traffic.
+## What is the line between config and code?
 
-**Key terms:** config vs. code, environment variable, per-environment
-config file, secrets manager, silent default, fail-fast validation, build
-once / configure per environment.
+```mermaid
+flowchart LR
+    Code["Code<br/>the logic, identical everywhere"] --> Run["Running service"]
+    Config["Config<br/>the dial settings for this place"] --> Run
+    Run --> Stg["In staging"]
+    Run --> Prod["In production"]
+```
+
+- **Code** is the logic that should behave the same wherever it runs, like
+  the heater's wiring.
+- **Config** is anything that may legitimately differ by environment:
+  a database address, a timeout, a rate limit, a feature switch, a key.
+  It is the dial.
+- **Build once, configure per environment**: one built package is promoted
+  from staging to production unchanged, and each place hands it its own
+  settings when it starts.
+
+This is a different problem from _environment parity_ (making the
+machinery of two environments match so nothing drifts by accident). Here
+the differences are intentional. Staging should use a different database.
+The danger is a difference nobody chose.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="config-vs-code"
+/>
+
+## What is a silent default?
+
+A **silent default** is a fallback value the code uses when a setting is
+missing, with no warning to anyone. It is the factory 5°C. Defaults are
+fine for truly optional settings. They are dangerous when the setting
+matters and a missing value looks the same as a deliberate choice.
+
+```mermaid
+flowchart TD
+    Q["Is PAYMENT_TIMEOUT_MS set?"] -->|"yes"| Use["Use the chosen value"]
+    Q -->|"no, silent default"| Fall["Fall back to 3000 ms and say nothing"]
+    Q -->|"no, required"| Stop["Refuse to start with a clear error"]
+```
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="silent-default"
+/>
+
+**Key terms:** config versus code, build once and configure per
+environment, silent default, environment variable, secrets manager,
+fail-fast validation.
+
+L2 compares the places settings can live, shows how layers of settings
+override one another, and explains why checking at start-up beats
+discovering a gap under live traffic.
