@@ -4,29 +4,34 @@ title: "L2 — Gated stages, artifact promotion, and why rollback needs to be pl
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named the stages and warned that a bypassed gate can turn "all green"
-into a lie. This level builds the actual mental model of what a gate is,
-how an artifact is supposed to move between environments, and why
-rollback can't be improvised.
+export const unit = {
+  track: "infra-delivery",
+  unitSlug: "ci-cd-pipeline-anatomy",
+};
+
+L1 named the stations and showed how one ignored verdict turns "all
+green" into a lie. This level builds the model underneath: what a gate
+is, how a finished toy (the artifact) should travel between stations,
+and why the recall plan cannot be invented after something ships broken.
 
 <LevelIntro
   items={[
-    "Gates as the thing that makes a pipeline protective",
-    "Build-once, promote-everywhere artifact handling",
-    "Rollback as a decision made before an incident, not during one",
+    "Gates as what makes a pipeline protective",
+    "Build once, promote everywhere",
+    "Rollback decided before the incident",
   ]}
 />
 
-## A pipeline as a chain of gates
+## What actually decides whether a commit reaches production?
 
-**What actually determines whether a commit ends up running in
-production — is it just "the pipeline finished"?**
+**Is it enough that "the pipeline finished"?**
 
 ```mermaid
 flowchart LR
     Commit["Commit pushed"] --> Build["Build stage"]
-    Build -- "fails" --> Stop1["Pipeline halts —\nnothing later runs"]
+    Build -- "fails" --> Stop1["Pipeline halts:<br/>nothing later runs"]
     Build -- "passes" --> Test["Test stage"]
     Test -- "fails" --> Stop2["Pipeline halts"]
     Test -- "passes" --> Staging["Deploy to staging"]
@@ -36,101 +41,139 @@ flowchart LR
 
 "The pipeline finished" and "the pipeline finished because every gate
 passed" are different claims. A pipeline that always reaches the final
-stage regardless of intermediate results isn't a safety mechanism — it's
-a sequence of steps that happen to run one after another. The gates
-between stages, not the stages themselves, are what make a pipeline
-protective. A **gate** is a door with a condition: if the condition
-fails, the next room should not open.
+stage regardless of intermediate results is not a safety mechanism, it
+is a list of steps that happen to run one after another. A **gate** is a
+door with a condition: if the condition fails, the next room does not
+open. The gates between stages, not the stages themselves, are what
+protect you.
 
-## Continue-on-error: a scalpel, not a permanent setting
+The unit's own demo flips the same gates. Here is what its model says for
+the same four switches:
 
-**Is there ever a legitimate reason to let a pipeline continue after a
-step reports failure?** Yes — a genuinely flaky, non-blocking check (like
-a slow integration test known to occasionally time out for infrastructure
-reasons unrelated to code correctness) is a real, if imperfect, case for
-tolerating failure temporarily. The problem in the incident wasn't that
-the flag exists — it's that it was applied to the actual test suite
-itself, the one gate specifically responsible for catching real bugs, and
-then left there long after its original justification (the specific flaky
-test) was gone:
+| Build | Tests | `continue-on-error` on tests | Staging | Result                     |
+| ----- | ----- | ---------------------------- | ------- | -------------------------- |
+| pass  | pass  | off                          | pass    | Reaches production         |
+| pass  | fail  | off                          | pass    | Stops at the test stage    |
+| pass  | fail  | on                           | pass    | Reaches production         |
+| fail  | pass  | on                           | pass    | Stops at the build stage   |
+| pass  | pass  | off                          | fail    | Stops at the staging stage |
+| pass  | fail  | on                           | fail    | Stops at the staging stage |
 
-```text
-Legitimate temporary use:
-  A known-flaky, LOW-STAKES check, with a ticket to fix it,
-  and a plan for when the override gets removed
+Row 3 is the incident: the same failing tests as row 2, and the only
+difference is one flag. Row 6 shows that a bypass does not disable the
+other gates, so a later blocking gate can still catch the commit.
 
-What happened instead:
-  Applied to the actual correctness gate (the test suite)
-  No ticket, no removal plan
-  Stayed in place indefinitely after its original reason vanished
-```
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="gate-halting"
+/>
+
+## Is there ever a legitimate reason to continue past a failure?
+
+Yes: a genuinely flaky, non-blocking check, such as a slow integration
+test that sometimes times out for infrastructure reasons, is a real if
+imperfect case for tolerating failure temporarily. The incident was not
+that the flag exists. It was applied to the test suite itself, the one
+gate responsible for catching real bugs, and left there after its
+justification disappeared.
+
+| Legitimate temporary use               | What happened instead                     |
+| -------------------------------------- | ----------------------------------------- |
+| A known-flaky, low-stakes check        | Applied to the actual correctness gate    |
+| A ticket to fix it                     | No ticket                                 |
+| A plan for when the override comes out | Stayed in place after the reason vanished |
 
 <Checkpoint question="A team adds continue-on-error: true to a linting step that only checks code style, with a ticket filed to remove it once a legacy module is reformatted. Is this the same mistake as the incident described above?">
 
-No. The distinguishing factor isn't whether `continue-on-error` is used
-at all — it's _what gate it's applied to_ and _whether there's a removal
-plan_. A linting step checking style conventions is advisory: a style
-violation doesn't mean the code is broken, only that it doesn't match a
-convention. Tolerating failure there temporarily, with a ticket tracking
-its removal, is exactly the "legitimate temporary use" case. The incident
-happened because the same flag was applied to the test suite — the one
-stage whose entire job is catching actual bugs — and then nobody tracked
-its removal. The flag itself isn't the problem; applying it to a
-correctness gate with no expiration plan is.
+No. The distinguishing factor is not whether `continue-on-error` is used
+at all, it is which gate it is applied to and whether there is a removal
+plan. A style check is advisory: a violation does not mean the code is
+broken. Tolerating failure there temporarily, with a ticket tracking its
+removal, is the legitimate case. The incident happened because the flag
+was applied to the test suite, whose entire job is catching bugs, and
+nobody tracked its removal.
 
 </Checkpoint>
 
-## Artifact promotion: build once, deploy the same thing everywhere
+## If staging and production are separate, is the app rebuilt for each?
 
-**If staging and production are separate environments, does the pipeline
-rebuild the application separately for each one?** A well-structured
-pipeline builds the deployable artifact exactly once, then promotes that
-identical artifact through staging and production in sequence — it never
-rebuilds from source for each environment. This matters because rebuilding
-per-environment reopens the exact risk environment-parity practices exist
-to close: a dependency resolving to a slightly different version between
-builds, a compiler flag differing by environment, anything that could make
-"tested in staging" and "running in production" refer to two subtly
-different artifacts instead of the same one. The everyday version is:
-inspect the same sealed box in each room, not a freshly-packed box that
-only looks similar.
+A well-structured pipeline builds the deployable artifact exactly once,
+then promotes that identical artifact through staging and into
+production. Rebuilding per environment reopens the risk that
+environment-parity practices exist to close.
 
-<Checkpoint question="A team's pipeline runs 'npm run build' separately inside the staging deploy job and again inside the production deploy job, using the same source commit both times. Does using the same commit guarantee staging and production are running the same artifact?">
+```mermaid
+flowchart TB
+    subgraph Rebuild["Rebuild per environment (risky)"]
+        S1["Same commit"] --> B1["Build 1 -> staging"]
+        S1 --> B2["Build 2 -> production"]
+    end
+    subgraph Promote["Build once, promote (safe)"]
+        S2["Same commit"] --> B3["Build once: artifact 8231"]
+        B3 --> T1["Staging runs 8231"]
+        B3 --> T2["Production runs 8231"]
+    end
+```
 
-No. "Same commit" guarantees the same _source_, not the same _build
-output_. Rebuilding separately means each build resolves its own
-dependency versions at that moment, runs on whatever build-tool version
-happens to be installed on that runner, and applies whatever environment
-variables or flags are set for that specific job — any of which can
-differ between the two runs even with identical source. That's precisely
-the drift artifact promotion is designed to prevent: build the artifact
-once, then move that exact file (or container image, or package) through
-staging and into production unchanged, so "it passed in staging" is a
-claim about the literal thing running in production, not about a
-similar-looking rebuild of it.
+"Same commit" guarantees the same source, not the same build output. Two
+builds can resolve a dependency to a slightly different version, run on
+runners with different tool versions, or pick up different environment
+variables. The everyday version: inspect the same sealed box in each
+room, not a freshly packed box that only looks similar.
+
+<Checkpoint question="A team's pipeline runs the build command separately inside the staging deploy job and again inside the production deploy job, on the same commit. Does that guarantee staging and production run the same artifact?">
+
+No. Each run resolves its dependencies at that moment, on whatever
+runner it landed on, with whatever settings that job has. Any of those
+can differ even when the source is identical. Building once and moving
+that exact file (or container image) through both environments makes
+"it passed in staging" a claim about the literal thing in production.
 
 </Checkpoint>
 
-## Rollback has to be a decision made in advance, not during an incident
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="build-once"
+/>
 
-**Once a bad deploy reaches production, is "roll back" always
-straightforward?** Only if the pipeline was built with rollback in mind
-before the incident — keeping the previous artifact readily deployable,
-and having a fast, well-rehearsed path back to it. Deciding how rollback
-will work _during_ an active incident, under pressure, with a team that's
-never actually exercised the rollback path before, is far slower and
-riskier than a path that was designed and tested in advance. The next
-unit, `/infra-delivery/deployment-automation/`, continues the same idea:
-deployment steps should be repeatable enough that recovery is not a
+## Once a bad deploy is live, is "roll back" always straightforward?
+
+Only if the pipeline was built with rollback in mind: the previous
+artifact stays readily deployable, and the path back to it has been
+rehearsed. Working out how to roll back during an incident, with a team
+that has never run the path, is slower and riskier. While the broken
+version stays live, every request keeps hitting it. This demo's own
+model: affected users = minutes to roll back x users per minute. At the
+demo's default of 50 users per minute:
+
+```mermaid
+xychart-beta
+    title "Users who hit the broken deploy (50 per minute assumed)"
+    x-axis ["5 min", "15 min", "30 min", "60 min"]
+    y-axis "Users affected" 0 --> 3000
+    bar [250, 750, 1500, 3000]
+```
+
+The 50 per minute is the demo's adjustable assumption, not a measurement.
+What the chart shows is the shape: cost grows in direct proportion to
+rollback time, so shortening that time before an incident is the cheapest
+lever. The next unit, `/infra-delivery/deployment-automation/`, continues
+the same idea: deployment steps repeatable enough that recovery is not a
 guessing exercise.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="rollback-plan"
+/>
 
 ## The generalizable lesson
 
-**Is the fix "never allow any pipeline step to continue past a
-failure"?** Not quite — some checks genuinely are advisory rather than
-blocking, and forcing every failure to halt the pipeline would make
-legitimately non-critical flakiness as disruptive as a real bug. The
-actual skill is being deliberate about _which_ gates are allowed to be
-bypassed and under what conditions, keeping that list short and reviewed,
-and treating "we bypassed a gate" as something that needs a visible,
-time-bound reason — not a setting that quietly becomes permanent.
+**Is the fix "never allow any step to continue past a failure"?** Not
+quite. Some checks are advisory, and forcing every failure to halt the
+line would make harmless flakiness as disruptive as a real bug. The
+skill is being deliberate about which gates may be bypassed and under what
+conditions, keeping that list short and reviewed, and treating "we
+bypassed a gate" as something that needs a visible, time-bound reason.

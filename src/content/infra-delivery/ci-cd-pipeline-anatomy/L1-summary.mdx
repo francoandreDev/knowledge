@@ -4,40 +4,64 @@ title: "L1 — How does code get from a commit to running in production?"
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Green checkmark, broken code in production">
+export const unit = {
+  track: "infra-delivery",
+  unitSlug: "ci-cd-pipeline-anatomy",
+};
+
+<Scenario label="An inspector stamps every toy 'passed', even the broken ones">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>Two weeks earlier</strong> — a flaky test kept failing intermittently; someone adds "continue on error" to the test step to unblock a release</div>
-      <div class="flex items-center gap-1.5"><span>😬</span> <strong>Nobody removes it</strong> — the workaround stays in the pipeline config after the flaky test is forgotten</div>
-      <div class="flex items-center gap-1.5"><span>🔥</span> <strong>This week</strong> — a genuinely broken commit fails the test suite, but the pipeline shows all green and deploys to production anyway</div>
+      <div class="flex items-center gap-1.5"><span>🔧</span> <strong>Station 1</strong> — workers assemble the toy</div>
+      <div class="flex items-center gap-1.5"><span>🔍</span> <strong>Station 2</strong> — an inspector tests each toy and stamps it</div>
+      <div class="flex items-center gap-1.5"><span>🏪</span> <strong>Station 3</strong> — a trial shelf that copies the real shop</div>
+      <div class="flex items-center gap-1.5"><span>🚚</span> <strong>Station 4</strong> — the truck to real customers</div>
+      <div class="flex items-center gap-1.5"><span>🏷️</span> <strong>Two weeks ago</strong> — a sticker went on the inspector's desk: "stamp passed even if the toy fails"</div>
+    </div>
+    <div class="not-prose mt-3 rounded border border-rose-300 bg-rose-50 p-1.5 text-xs dark:border-rose-800 dark:bg-rose-950">
+      <p class="font-semibold text-rose-600 dark:text-rose-400">The stamp no longer means anything</p>
+      every toy gets "passed", so nothing is ever stopped
     </div>
   </Fragment>
 
-A commit with a real bug fails the test suite. The pipeline dashboard
-shows every stage green, and the broken code is already running in
-production by the time anyone notices. **The team has a CI/CD pipeline
-specifically to prevent this. What went wrong?**
+A toy factory has four stations in a row. At station 2 an inspector tests
+each toy and stamps it "passed" or "failed", and only passed toys move on.
+One day the inspector's test gauge kept giving random readings, so a
+manager stuck a note on the desk: "stamp passed even if the toy fails,
+just for today, we have orders to fill." Nobody ever took the note down.
+Weeks later a toy with a snapped wheel reaches the inspector. The gauge
+says fail, the inspector stamps it passed, and it ships. **The line was
+built to stop exactly this. What went wrong?**
 
-Two weeks earlier, a flaky test kept failing for unrelated reasons, and
-someone added `continue-on-error: true` to the test step to unblock a
-release under time pressure — intending to come back and fix the flaky
-test properly. Nobody did. The flag stayed. When a real test failure
-happened weeks later, the pipeline treated it exactly like the flaky
-failure it was built to tolerate: it logged the failure, marked the step
-"green" anyway, and moved on to deploy.
+Software teams build the same line, and it is called a CI/CD pipeline. A
+real incident of this shape: the test step was told to continue after
+failure, the dashboard showed every stage green, and the broken commit
+was already live before anyone looked.
 
 </Scenario>
 
 <LevelIntro
   items={[
     "What each pipeline stage catches",
-    "Why continue-on-error is a temporary escape hatch, not a setting",
-    "CI vs. CD as two chained but distinct concerns",
+    "CI and CD as two chained concerns",
+    "Why a bypass flag needs an expiry plan",
   ]}
 />
 
-- **Commit** means a saved snapshot of a change in Git. If that word is
+```mermaid
+flowchart LR
+    A["Station 1<br/>assemble"] --> B["Station 2<br/>inspect"]
+    B --> C["Station 3<br/>trial shelf"]
+    C --> D["Station 4<br/>ship"]
+    A -.- E["Pipeline: build"]
+    B -.- F["Pipeline: test"]
+    C -.- G["Pipeline: deploy to staging"]
+    D -.- H["Pipeline: deploy to production"]
+```
+
+- A **commit** is a saved snapshot of a change in Git. If that word is
   still fuzzy, `/git-teamwork/working-tree/` builds the mental model
   underneath it.
 - **Production** is the real app users touch; **staging** is a rehearsal
@@ -45,36 +69,61 @@ failure it was built to tolerate: it logged the failure, marked the step
   package that moves between those places. Later units like
   `/infra-delivery/docker/` go deeper on packaging the artifact.
 
-- **A CI/CD pipeline is a sequence of stages, each one built to catch a
-  specific class of problem** — a build stage catches "does this even
-  compile," a test stage catches "does this behave correctly," a staging
-  deploy catches "does this work outside a developer's machine." Each
-  stage is only useful if a failure in it actually stops the pipeline.
-- **"Continue on error" is a deliberate escape hatch for a specific,
-  temporary situation — not a permanent setting.** It exists for cases
-  like a known-flaky, non-blocking check; left in place indefinitely, it
-  silently converts a real safety gate into a no-op that always reports
-  success regardless of what actually happened.
-- **CI (continuous integration) and CD (continuous delivery/deployment)
-  are two different concerns chained together**: CI answers "is this
-  change good," CD answers "how does a change that's already been judged
-  good actually reach production." A pipeline can have excellent CI and
-  still ship broken code if the connection between the two — the gate —
-  isn't enforced.
-- **The same build artifact should move through every environment
-  unchanged** — built once, then promoted through staging and production
-  — rather than rebuilt separately for each one, so that what gets tested
-  in staging is provably the exact same thing that reaches production.
-- The practical skill this unit builds: **treating every "temporary"
-  override to a pipeline gate as something that needs an expiration plan**
-  — a ticket, a follow-up, a reason it will actually get removed — not
-  just a fix for right now.
+## What is each stage actually for?
 
-## What a pipeline stage is actually for
+A pipeline is a sequence of stages, and each one exists to catch one
+class of problem. A stage is only useful if a failure in it really stops
+the line.
 
-| Stage                | Question it answers                           | What a silent bypass costs                                |
-| -------------------- | --------------------------------------------- | --------------------------------------------------------- |
-| Build                | Does this compile / package correctly?        | Broken artifacts reach later stages                       |
-| Test                 | Does this behave correctly?                   | Bugs reach production undetected                          |
-| Deploy to staging    | Does this work outside a developer's machine? | Environment-specific bugs reach production                |
-| Deploy to production | Is this actually live for users?              | N/A — this is the stage everything else exists to protect |
+| Stage                | Question it answers                           | What a silent bypass costs                               |
+| -------------------- | --------------------------------------------- | -------------------------------------------------------- |
+| Build                | Does this compile / package correctly?        | Broken artifacts reach later stages                      |
+| Test                 | Does this behave correctly?                   | Bugs reach production undetected                         |
+| Deploy to staging    | Does this work outside a developer's machine? | Environment-specific bugs reach production               |
+| Deploy to production | Is this actually live for users?              | N/A, this is the stage everything else exists to protect |
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="pipeline-stages"
+/>
+
+## CI and CD: who judges, who delivers?
+
+**CI (continuous integration)** answers "is this change good?". **CD
+(continuous delivery or deployment)** answers "how does a change that was
+already judged good actually reach production?". In the factory, CI is the
+inspector and CD is the truck.
+
+| Concern  | Factory picture                  | Pipeline stages            | Fails when                                           |
+| -------- | -------------------------------- | -------------------------- | ---------------------------------------------------- |
+| CI       | The inspector's verdict          | Build, test                | A bad change is judged good                          |
+| CD       | The truck and the trial shelf    | Staging, production deploy | A judged-good change never arrives, or arrives wrong |
+| The gate | The rule "only passed toys move" | Between every stage        | The verdict is ignored, so CI no longer matters      |
+
+A pipeline can have excellent CI and still ship broken code if the
+connection between the two, the gate, is not enforced. The same build
+artifact should also move through every environment unchanged: built
+once, then promoted, so what was tested is provably what ships.
+
+<PracticeCheck track={unit.track} unitSlug={unit.unitSlug} topicId="ci-vs-cd" />
+
+## A bypass flag is a loan, not a setting
+
+`continue-on-error` is a deliberate escape hatch for a specific,
+temporary situation, such as a known-flaky, low-stakes check. Left in
+place, it silently converts a real safety gate into a step that always
+reports success. The practical skill this unit builds: **every
+"temporary" override to a gate needs an expiration plan**, meaning a
+ticket, an owner, and a date it comes out.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="bypass-expiry"
+/>
+
+## What the next levels add
+
+L2 shows what a gate is mechanically, why the artifact is built once,
+and why rollback must be planned before the incident.
