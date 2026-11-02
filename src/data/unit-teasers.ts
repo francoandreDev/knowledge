@@ -732,7 +732,7 @@ export const UNIT_TEASERS: Record<string, UnitTeaser> = {
   "corporate-politics/influence-tool-org-s-good": {
     myth: "Wielding influence at scale inevitably means accumulating personal power.",
     reality:
-      "A staff engineer can use influence ethically, in service of the org's actual goals — the scale is the same, the intent is what differs.",
+      "An engineer can use influence ethically, in service of the org's actual goals — the scale is the same, the intent is what differs.",
   },
 
   // learning-craft/
