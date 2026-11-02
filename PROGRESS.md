@@ -3551,3 +3551,16 @@ Migrated the last `career-craft/` unit plus the first three `product-domain/` un
 Length bias, correct strictly longest / shortest: `negotiation-tactics` 28% / 24%, `understanding-user-s-problem-solution` 20% / 29%, `requirements-gathering` 20% / 19%, `domain-driven-design-basics` 21% / 7% (shortest rarely correct, a faint opposite tell).
 
 `career-craft/` is complete: 13 of 13. `product-domain/` is at 3 of 13. Total migrated: 117 of 246. Next in `product-domain/`: `bounded-contexts`, `validation`, `value-framing-over-feature-framing`, `buyer-psychology` (batch in progress).
+
+## 2026-11-02 — `product-domain/` batch 2: `bounded-contexts`, `validation`, `value-framing-over-feature-framing`, `buyer-psychology`
+
+Migrated 4 more `product-domain/` units via 4 parallel content-only subagents. `typecheck` 0 errors, `build` 273 pages; live click-through (iframe per unit) passed all 26 `DomainCheck` topics, 0 Mermaid errors, 0 KaTeX errors, "Mark as done" enabled on all four. All quiz, no code topics.
+
+- **`bounded-contexts`**: 6 topics, 72 items. Owner-and-bookkeeper "table" opening; the toy-model table (1 / 2 / 5 / 10 consumers → 2 / 4 / 10 / 20 places to fix vs 2 updates with a layer) matches the demo; removed a vague "small percentage" claim. The held-order recheck loop in L3 is the agent's own elaboration of the original fix.
+- **`validation`**: 6 topics, 72 items. Test-one-portion-before-100 opening; fixed "3 days" vs "two days" (now 2 everywhere) and stated the base of each rate (32 is 89% of answers, 80% of clickers, 16% of all 200); the 0.5-week cost of the 2-day test comes from the demo's description and is labelled assumed.
+- **`value-framing-over-feature-framing`**: 8 topics, 89 items (practice items have 4 choices). Drill-vs-hole opening; removed invented figures (helmet "roughly in half", "92% vs 61%", standing-desk "5 seconds"); water-filter arithmetic checked in Node ($1,095.00 bottles vs $66.50 pitcher + filters in year one, $1,028.50 saved, matching the demo default); fixed a draft exam item (one bottle a day saves $481.00 in year one).
+- **`buyer-psychology`**: 6 topics, 69 items; no `interactives.json` in this unit. Jacket-with-a-20%-cut opening (assumed prices); all 28 old items replaced and the prose rewritten; the "some objections are the real ones" edge cases are the agent's own additions.
+
+Length bias, correct strictly longest / shortest: `bounded-contexts` 15% / 18%, `validation` 28% / 26%, `value-framing-over-feature-framing` 26% / 26%, `buyer-psychology` 22% / 28%.
+
+`product-domain/` is at 7 of 13. Total migrated: 121 of 246. Remaining here: `translating-capability-into-their-vocabulary-cfo`, `value-based-selling`, `discovery`, `objection-handling` (batch in progress), then `case-studies` and `presales-engineering`.
