@@ -5,163 +5,148 @@ title: "L3 — The Sales/Warehouse Order, worked through in full"
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "product-domain",
+  unitSlug: "bounded-contexts",
+};
 
 <Scenario label="What actually happened, and what fixed it">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>The bug</strong> — Warehouse shipped orders whose payment later failed</div>
-      <div class="flex items-center gap-1.5"><span>🔍</span> <strong>Root cause</strong> — Warehouse trusted Sales' Order object directly, with no translation</div>
-      <div class="flex items-center gap-1.5"><span>🛠️</span> <strong>The fix</strong> — an anticorruption layer that only forwards paid, in-stock orders</div>
+      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>The bug:</strong> parcels shipped for orders whose payment later failed</div>
+      <div class="flex items-center gap-1.5"><span>🔍</span> <strong>Root cause:</strong> Warehouse trusted Sales' status text as a promise</div>
+      <div class="flex items-center gap-1.5"><span>🛠️</span> <strong>The fix:</strong> a layer that forwards only paid, reserved orders</div>
     </div>
   </Fragment>
 
-**Before reading the fix, predict: what's the smallest change that would
-have prevented the bug, without asking Sales to redefine what an
-`Order` means for their own purposes?**
+Back in the restaurant, imagine the kitchen printer shows "Table 7 ready". The
+host reads it as "a physical table is free" and seats a new party there, while
+the kitchen meant "Table 7's food is ready to carry out". Nobody was careless.
+A message written for one place was read as a promise in another.
+
+**Before reading the fix, predict: what is the smallest change that would have
+prevented the Warehouse bug without asking Sales to redefine `Order` for its own
+purposes?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "The Sales/Warehouse bug, traced to its root cause",
-    "Building an anticorruption layer that actually holds",
-    "When conformist beats anticorruption, and the failure modes",
+    "The bug traced to its root cause",
+    "An anticorruption layer that holds up",
+    "Leverage, cost and the failure modes",
   ]}
 />
 
-## What actually happened
+## What actually happened, and why is reading the status field not a fix?
 
-Sales' system creates an `Order` record the instant a shopping cart is
-submitted — before the payment processor confirms the charge, and before
-inventory is checked. This is deliberate: Sales needs that record to
-exist early, for the cart page, for "you left something in your cart"
-emails, and for reporting on submitted-but-not-yet-paid carts.
+Sales creates an `Order` record when a cart is submitted, before the payment
+provider confirms the charge and before stock is checked. That is deliberate:
+the cart page and the reminder emails need the record early. The Sales status
+text moves through values such as `submitted`, `processing`, `paid` and
+`shipped`. To make the screen feel responsive, Sales sometimes marked an order
+`processing` before payment confirmation came back.
 
-A **payment processor** is the outside or internal system that confirms
-whether the card or payment actually succeeded. **Inventory** means the
-stock available to sell. A record is just stored data about one thing,
-like one submitted cart.
+Warehouse listened for new orders and queued anything past `submitted` for
+picking, reasonably assuming `processing` meant "safe to act on". When a
+payment later failed, the parcel had already left.
 
-Warehouse's integration was built to listen for new `Order` records and
-immediately queue them for picking and packing. It read Sales' `status`
-field, saw values like `"submitted"`, `"processing"`, `"paid"`, and
-`"shipped"` — and, reasonably, assumed anything past `"submitted"` was
-safe to act on. What nobody had verified was that Sales sometimes moved
-an order to `"processing"` _before_ the payment provider's confirmation
-came back, as a UI optimization to show the customer "we're on it"
-sooner. A small percentage of `"processing"` orders had their payment
-fail afterward — and by then, Warehouse had already shipped them.
+**Wouldn't a careful mapping of every current status value fix it?** Only for
+today. Sales can add a status, reorder transitions or change what `processing`
+means internally, and owes Warehouse no notice, because `processing` was never a
+promise made to Warehouse. A hand-mapped status list is a snapshot of someone
+else's model, not a contract.
 
-"Listen" here means Warehouse's system automatically reacts whenever
-Sales creates or publishes a new order record. **UI** means user
-interface: what the customer sees on the screen.
+<Checkpoint question="Warehouse's team documents every current Sales status value and builds shipping logic around that exact mapping. Is the bug permanently fixed?">
 
-## Why "read Sales' status field carefully" wouldn't have been enough
-
-**Wouldn't fixing this just mean Warehouse should have understood Sales'
-status field better?** That's the conformist-pattern instinct, and it's
-fragile here: even if Warehouse's team carefully mapped every current
-status value to a shipping decision, that mapping breaks the moment
-Sales adds a new status, reorders when a status transition happens, or
-changes what `"processing"` means internally — none of which Sales owes
-Warehouse advance notice about, because `"processing"` was never a
-promise made _to_ Warehouse. Warehouse was depending on the specific
-shape of a model that belongs to, and evolves for, a different context.
-
-<Checkpoint question="Suppose Warehouse's team had carefully documented every current value of Sales' status field and built shipping logic around that exact mapping. Would that have permanently fixed the bug?">
-
-No — it would have fixed today's version of the bug while leaving the
-underlying cause untouched. The mapping only holds for as long as
-Sales' status values, their order, and their meaning stay exactly as
-they are right now. Sales owes Warehouse no notice before adding a new
-status, reordering a transition, or quietly changing what
-`"processing"` means internally, because none of that was ever a
-promise made _to_ Warehouse — it's Sales' own internal model, evolving
-for Sales' own reasons. A hand-mapped status list is a snapshot of
-someone else's model, not a contract, so it breaks again the next time
-that model moves.
+No. The mapping only holds while Sales keeps its status values, their order and
+their meaning exactly as they are today. Sales changes them for Sales' reasons,
+so the same bug returns the first time one of them moves. The cause was never a
+misread field. It was depending on a model that belongs to another context.
 
 </Checkpoint>
 
-## The fix: an anticorruption layer
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="status-mapping-fragility"
+/>
 
-Warehouse introduced a translation step between Sales' `Order` stream and
-its own internal model:
+### The fix, concretely
+
+Warehouse added a layer between Sales' order stream and its own model. The layer
+asks two yes or no questions: is the payment really confirmed, and is the stock
+really reserved? Only when both answers are yes does it create Warehouse's own
+`ShipmentRequest`. An order that fails either question is held, and it is
+checked again when the missing confirmation arrives.
 
 ```mermaid
 flowchart LR
-    SO["Sales Order\nstatus: submitted / processing / paid / shipped"] --> ACL{{"Anticorruption layer:\nonly pass through if\npayment_confirmed = true\nAND stock_reserved = true"}}
-    ACL -->|meets both conditions| WO["ShipmentRequest\n(Warehouse's own model —\nalready safe to ship)"]
-    ACL -->|doesn't meet conditions| Hold["Held, not forwarded\n(no ShipmentRequest created)"]
+    SO["Sales Order\nstatus text: submitted, processing,\npaid, shipped"] --> ACL{{"Anticorruption layer\npayment confirmed?\nstock reserved?"}}
+    ACL -->|both yes| WO["ShipmentRequest\nWarehouse's own model\nalready safe to ship"]
+    ACL -->|either no| Hold["Held\nno ShipmentRequest yet"]
+    Hold -.->|confirmation arrives| ACL
 ```
 
-In plain words, the layer asks two yes/no questions before Warehouse acts:
-"Has the payment really succeeded?" and "Is the item really reserved?"
-Those true/false checks are what the boolean conditions represent.
+| Question                            | Before the fix                               | After the fix                                      |
+| ----------------------------------- | -------------------------------------------- | -------------------------------------------------- |
+| What Warehouse trusted              | Sales' status text, interpreted by guesswork | Two explicit facts checked at the boundary         |
+| If Sales changes its statuses       | Shipping decisions break silently            | Nothing changes, the layer ignores status text     |
+| If Sales renames the facts          | Not applicable                               | The layer fails loudly, in one place               |
+| Who owns the meaning "safe to ship" | Nobody explicitly, assumed from Sales' field | Warehouse, through its own `ShipmentRequest` model |
 
-Instead of trying to keep Warehouse's understanding of Sales' status
-values perfectly in sync, the anticorruption layer checks two specific,
-narrow conditions — an explicit payment confirmation and a stock
-reservation — and only then constructs Warehouse's own `ShipmentRequest`
-object. Warehouse's internal model never has to know that
-`"processing"` exists, what it means, or when Sales might change it.
+Here "contract" does not mean a legal document. It means an explicit promise
+between systems about what a piece of data can be trusted to mean.
 
-## What changed, concretely
+## When is building the layer the wrong call?
 
-|                                                | Before the fix                                                   | After the fix                                                                        |
-| ---------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| What Warehouse trusted                         | Sales' `status` string, interpreted by Warehouse's own guesswork | Two explicit boolean conditions checked at the boundary                              |
-| What breaks if Sales changes internal statuses | Warehouse's shipping decision, silently                          | Nothing — the anticorruption layer's contract is unrelated to Sales' internal states |
-| Who owns the meaning of "safe to ship"         | Nobody, explicitly — assumed from Sales' field                   | Warehouse, via its own `ShipmentRequest` model                                       |
+**Everything above assumed Warehouse could build and maintain its own layer.
+What if Sales were a marketplace platform that dictates its order format, take
+it or leave it?** Then the conformist pattern becomes attractive: adopt the
+upstream model largely as-is and accept that upstream changes will occasionally
+break something. The judgment is about leverage and cost, not about which
+pattern is more correct. A layer that costs more to build and maintain than the
+breakage it prevents is not the better choice.
 
-Here, **contract** does not mean a legal document. It means an explicit
-promise between systems about what a piece of data can be trusted to
-mean.
+<Checkpoint question="A downstream team is choosing between an anticorruption layer and adopting a marketplace platform's order format as-is. What should decide it?">
 
-## Extend it: what if Warehouse had no leverage with Sales at all?
-
-**Everything above assumed Warehouse's team could design and maintain its
-own anticorruption layer. What changes if Sales were a third-party
-system Warehouse's company doesn't control at all — say, a marketplace
-platform that dictates the order format, take it or leave it?** This is
-the **conformist** pattern instead of an anticorruption layer: when a
-downstream context has no realistic influence over the upstream model
-and no practical way to insulate itself from it (because building and
-maintaining a full translation layer costs more than the integration is
-worth), the pragmatic choice is to adopt the upstream model largely
-as-is and accept that upstream changes will occasionally break things
-downstream. The judgment call is about leverage and cost, not about
-which pattern is "more correct" — an anticorruption layer that costs more
-to build and maintain than the bugs it prevents isn't obviously the
-better choice.
-
-**Leverage** means practical influence. If Warehouse can ask Sales to
-expose clearer data, it has leverage. If Sales is an outside platform
-that says "use our format or leave," Warehouse has little leverage.
-
-<Checkpoint question="A downstream team is deciding whether to build an anticorruption layer against a marketplace platform's order format, or just adopt that format as-is. What should actually decide it — which pattern is 'more correct,' or something else?">
-
-Something else: leverage and cost, not correctness. An anticorruption
-layer is only worth building when the downstream team has enough
-influence to make the upstream model's evolution predictable, or enough
-at stake to justify absorbing translation cost on its own — neither
-pattern is inherently the "right" one in the abstract. Against a
-marketplace platform that dictates its format and won't negotiate,
-building and maintaining a full translation layer can easily cost more
-than the occasional breakage it would prevent, which makes the
-conformist choice the pragmatic one here, not a lesser one. The same
-reasoning runs the other way when the downstream team does have real
-influence, or when the upstream model's guarantees genuinely can't be
-trusted as-is — that's when the anticorruption layer earns its cost.
+Leverage and cost, not correctness. A layer is worth building when the upstream
+guarantees cannot be trusted and the downstream team has enough at stake to pay
+for the translation. Against a platform that will not negotiate, the layer may
+cost more than the occasional breakage, which makes conformist the pragmatic
+choice. The reasoning flips when the team has real influence or the upstream
+guarantees truly cannot be relied on.
 
 </Checkpoint>
 
-## Failure modes
+| Failure mode                                                   | What it gets wrong                                           |
+| -------------------------------------------------------------- | ------------------------------------------------------------ |
+| Wiring one model directly into another with no translation     | Every upstream change becomes a silent risk downstream       |
+| Assuming "we agree on the word" means "we agree on guarantees" | The definitions match while the hidden assumptions diverge   |
+| Building a layer with no leverage or stake to justify it       | Effort goes into insulating against changes that cost little |
+| Treating a context map as a service diagram                    | Misses that the boundary is where meaning changes            |
+| Skipping the layer because "it is more code"                   | Swaps a one-time visible cost for a recurring silent one     |
 
-| Failure mode                                                                                    | What it gets wrong                                                                                            |
-| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Wiring one context's model directly into another with no translation                            | Every future change to the upstream model becomes a silent risk to the downstream system                      |
-| Assuming "we agree on the word" means "we agree on the guarantees"                              | The dictionary definition can match while the assumptions baked into each context's use of it diverge         |
-| Building an anticorruption layer where there's no real leverage to negotiate the upstream model | Sinks effort into a translation layer that can't actually prevent upstream changes from breaking things       |
-| Treating a context map as just a service diagram                                                | Misses that the real boundary is wherever a word's meaning changes, not wherever a network call happens to be |
-| Skipping a translation layer because "it's more code"                                           | Trades a one-time, explicit cost for a recurring, silent one every time the upstream model shifts             |
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="leverage-and-cost"
+/>
+
+## Extend it: this is a case, not the whole territory
+
+The Sales and Warehouse story is one case. Try the next ones yourself before
+reading any answer.
+
+- A third context, Returns, also consumes Sales' `Order`. Can it reuse
+  Warehouse's layer, or does it need its own?
+- What changes if the news were worse, and a payment fails after the parcel has
+  shipped? Which context owns the next step?
+- What changes if the audience were different: a two-person startup with one
+  consumer of Sales' data, instead of a company with ten?
+
+Use the L2 numbers as a starting point. With one consumer, the layer saves
+nothing in the count, so the answer to the third question may well be "do not
+build it yet".
