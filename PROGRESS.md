@@ -3603,3 +3603,16 @@ Migrated 4 more `corporate-politics/` units via 4 parallel content-only subagent
 Length bias, correct strictly longest / shortest: `who-holds-influence` practice 0% / 11%, exam 18% / 0% (faint opposite tell), `favor-economy` 31% / 21% (exam shortest 0%), `strategic-ambiguity` 26% / 28%, `framing` 23% / 24%.
 
 `corporate-politics/` is at 6 of 14. Total migrated: 133 of 246. Remaining here: `subtext`, `credit-stealing`, `warning-signs`, `documentation-discipline` (batch in progress), then `calibrated-confrontation`, `coalition-building-defense`, `staying-principled`, `influence-tool-org-s-good` (its roadmap title and teaser carry "staff engineer", to fix).
+
+## 2026-11-03 — `corporate-politics/` batch 3: `subtext`, `credit-stealing`, `warning-signs`, `documentation-discipline`
+
+Migrated 4 more `corporate-politics/` units via 4 parallel content-only subagents. `typecheck` 0 errors, `build` 273 pages; live click-through (iframe per unit) passed all 23 `DomainCheck` topics, 0 Mermaid errors (including the `xychart-beta` in `credit-stealing` L3 and the line chart in `documentation-discipline` L3), 0 KaTeX errors, "Mark as done" enabled on all four. All quiz, no code topics.
+
+- **`subtext`**: 8 topics, 92 items; no `interactives.json`. Dinner-where-everyone-says-"fine" opening; "to a senior person" reworded to "someone with more authority"; the only assumed number is a 5-day working week (1 / 5 / 10 working days, 9-day difference checked in Node).
+- **`credit-stealing`**: 5 topics, 60 items. Defensive framing only (patterns and responses, no playbook for performing the tactics). Corrected "around 60" to 59 at wording 85 with no repeats (`85 * 0.7` is 59.4999… in floating point; the untouched `interactives.json` description still says "around 60"); dropped a meaningless 100% bar; the tactics table (what you can observe, first defensive move) and the sabotage / rumours / urgency items are the agent's own framing.
+- **`warning-signs`**: 4 topics, 48 items. Fixed an L3 accounting that called the pattern "four signals" while the table was ambiguous (two cleared the alternative-explanation check, two failed); the fixed confidence values in the demo are not quoted in the prose. Keeps the characters Priya and Marcus.
+- **`documentation-discipline`**: 6 topics, 66 items. Line chart uses the demo's formula (100 − 5 per day, floor 10: 100 / 85 / 65 / 30 / 10 at 0 / 3 / 7 / 14 / 21 days); no legal advice, stated in L1 and L3. Exam correct answers almost never the longest or shortest, so they sit in the middle (a reader could learn to pick the middle length).
+
+Length bias, correct strictly longest / shortest: `subtext` 27% / 26%, `credit-stealing` 23% / 18%, `warning-signs` 4% / 23%, `documentation-discipline` 3% / 15% (the last two have a faint opposite tell).
+
+`corporate-politics/` is at 10 of 14. Total migrated: 137 of 246. Remaining here: `calibrated-confrontation`, `coalition-building-defense`, `staying-principled`, `influence-tool-org-s-good` (batch in progress; the "staff engineer" label was removed from its roadmap title and teaser).
