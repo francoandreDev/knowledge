@@ -3538,3 +3538,16 @@ Migrated 4 more `career-craft/` units via 4 parallel content-only subagents. `ty
 Length bias, correct strictly longest / shortest: `ic-em-tracks` 27% / 23% (exam longest 33%), `peer-mentoring` 19% / 30%, `staff-scope` 25% / 30% (practice shortest 34%), `market-research` 20% / 21%.
 
 `career-craft/` is at 12 of 13. Total migrated: 113 of 246. Remaining here: `negotiation-tactics` (in progress together with the first three `product-domain` units).
+
+## 2026-11-02 — `career-craft/` final unit and `product-domain/` batch 1: `negotiation-tactics`, `understanding-user-s-problem-solution`, `requirements-gathering`, `domain-driven-design-basics`
+
+Migrated the last `career-craft/` unit plus the first three `product-domain/` units via 4 parallel content-only subagents. `typecheck` 0 errors, `build` 273 pages; live click-through (iframe per unit) passed all 26 `DomainCheck` topics, 0 Mermaid errors (including the `erDiagram`, `stateDiagram` and `xychart-beta` in `domain-driven-design-basics`), 0 KaTeX errors, "Mark as done" enabled on all four. All quiz, no code topics.
+
+- **`negotiation-tactics`** (career-craft): 6 topics, 68 items. Market-stall opening; rebuilt the old "$175k + 12% bonus + equity = $196k" line as $170,000 + $20,400 + $5,600 = $196,000 (opening offer $155,000 + $15,500 + $4,500 = $175,000); removed an invented 45/20/25/10 pie, the "Staff" labels and a named recruiter; demo values checked in Node (each extra $5,000 of anchor adds $3,250; default anchor $210k settles at $198,800 while the story closes at $196,000, which L3 explains as a simplified model).
+- **`understanding-user-s-problem-solution`**: 7 topics, 84 items. Gift opening (water bottle); removed an invented "under 2%" usage statistic and an invented "complaints dropped to near zero" outcome; fixed "depth 3 compares four options" to the demo's 3; chart values (40, 55, 70, 85, 100, 75, 50, 25) computed from the demo and labelled illustrative. Folder name keeps the odd `s` in the slug.
+- **`requirements-gathering`**: 8 topics, 85 items; `story-and-criteria` is practice-only (no exam section, no reflection, judged too thin). Custom-cake opening; the old "1, 3, 12, 40" cost bars did not match the demo and are replaced by values from 1 + (days/5)^1.5 (1.0, 1.5, 2.0, 7.3 at days 0, 3, 5, 17).
+- **`domain-driven-design-basics`**: 6 topics, 72 items. Two-people-one-word opening; all figures are labelled teaching numbers (1,200 vs 4,800, a $200 plan with a 40% cap); the pairs table matches n(n−1)/2 (1, 3, 6, 10, 15, 21, 28, 36, 45 for 2–10 teams).
+
+Length bias, correct strictly longest / shortest: `negotiation-tactics` 28% / 24%, `understanding-user-s-problem-solution` 20% / 29%, `requirements-gathering` 20% / 19%, `domain-driven-design-basics` 21% / 7% (shortest rarely correct, a faint opposite tell).
+
+`career-craft/` is complete: 13 of 13. `product-domain/` is at 3 of 13. Total migrated: 117 of 246. Next in `product-domain/`: `bounded-contexts`, `validation`, `value-framing-over-feature-framing`, `buyer-psychology` (batch in progress).
