@@ -3525,3 +3525,16 @@ Migrated 4 more `career-craft/` units via 4 parallel content-only subagents (the
 Length bias, correct strictly longest / shortest: `goal-setting` 23% / 20%, `impact-scope-over-correctness` 20% / 15%, `documentation-career-tool` 33% / 28%, `calibration-processes` 32% / 25% (practice longest 36%, just over the target).
 
 `career-craft/` is at 8 of 13. Total migrated: 109 of 246. Remaining here: `ic-em-tracks`, `peer-mentoring`, `staff-scope`, `market-research`, `negotiation-tactics` (batch 3 for the first four is in progress).
+
+## 2026-11-02 — `career-craft/` batch 3: `ic-em-tracks`, `peer-mentoring`, `staff-scope`, `market-research`
+
+Migrated 4 more `career-craft/` units via 4 parallel content-only subagents. `typecheck` 0 errors, `build` 273 pages; live click-through (iframe per unit) passed all 29 `DomainCheck` topics, 0 Mermaid errors (including the negative-axis `xychart-beta` in `ic-em-tracks` L2), 0 KaTeX errors, "Mark as done" enabled on all four. All quiz, no code topics.
+
+- **`ic-em-tracks`**: 7 topics, 77 items. Musician-and-baton opening; the old invented 2/4/8 weights chart is now computed from the demo's formula (lean −1, pressure 0–10 → −1, 1, 3, 5, 7, 9); dropped an invented "~15% of her week" bar.
+- **`peer-mentoring`**: 8 topics, 96 items (new L1 topic `skip-level-shape`). Replaced invented 75% / 80% bars with a two-column compare box; demo values checked in Node (65 at defaults, ~7 at directiveness 8, ~69 with trust 8; a first draft said 53).
+- **`staff-scope`**: 8 topics, 96 items. The unit is about career levels so "staff" / "senior" appear narratively only. Fixed a cost split ($18k / $14k / $8k) that contradicted the demo's even $4,444 per team per month; the chart uses 90% conformance (4,000 / 8,000 / 12,000 a month for 1 / 2 / 3 teams, rounded from 3,999.6 / 7,999.2 / 11,998.8). Folder slug and roadmap title unchanged.
+- **`market-research`**: 6 topics, 70 items. Fixed a bar that claimed 62% of the band ($179k in a $150–230k band is ~36%); removed real-sounding sources and index figures in favour of an assumed 1.25 cost-of-living factor; total comp $170,200 / $179,000 / $165,000 and the $17,700 gap checked in Node. The 3,200-RSU ask is the agent's own sizing (break-even for the median is 2,857; the counter of 2,400 matches the demo default).
+
+Length bias, correct strictly longest / shortest: `ic-em-tracks` 27% / 23% (exam longest 33%), `peer-mentoring` 19% / 30%, `staff-scope` 25% / 30% (practice shortest 34%), `market-research` 20% / 21%.
+
+`career-craft/` is at 12 of 13. Total migrated: 113 of 246. Remaining here: `negotiation-tactics` (in progress together with the first three `product-domain` units).
