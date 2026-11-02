@@ -3577,3 +3577,16 @@ Migrated 4 more `product-domain/` units via 4 parallel content-only subagents. `
 Length bias, correct strictly longest / shortest: `translating-capability-into-their-vocabulary-cfo` 27% / 13% (exam shortest 35%, at the ceiling), `value-based-selling` 26% / 20%, `discovery` 18% / 12%, `objection-handling` 22% / 30%.
 
 `product-domain/` is at 11 of 13. Total migrated: 125 of 246. Remaining here: `case-studies`, `presales-engineering` (its roadmap title and teaser carry a level label to fix, like `secure-by-design`); batch in progress together with the first two `corporate-politics` units.
+
+## 2026-11-03 — `product-domain/` final units and `corporate-politics/` batch 1: `case-studies`, `presales-engineering`, `power-real-resource`, `white`
+
+Migrated the last two `product-domain/` units and the first two `corporate-politics/` units via 4 parallel content-only subagents. `typecheck` 0 errors, `build` 273 pages; live click-through (iframe per unit) passed all 28 `DomainCheck` topics, 0 Mermaid errors (including the `timeline` block in `white` L3), 0 KaTeX errors, "Mark as done" enabled on all four. All quiz, no code topics.
+
+- **`case-studies`** (product-domain): 7 topics, 82 items. L2 reproduces the demo default (1 × 1.5 × 45% × $20,000 = $13,500 a quarter, $54,000 over four quarters); the old "$33,600" claim is now a pace "if the pattern holds"; one draft exam distractor ("$75,600 a year") corrected to follow quarters × 4.
+- **`presales-engineering`** (product-domain): 7 topics, 84 items. Fixed an inconsistent cutover figure (L1 "~40 min / under 90 s" vs L3 "under two minutes" → 35–40 min / under 2 min everywhere); removed "staff engineer" from the unit text and, here in the coordinator pass, from the roadmap title and the teaser in `src/data/unit-teasers.ts`; charts use the demo's numbers (credibility 0 / 0 / 11 / 36 / 66 / 91 at skepticism 40; deal-loss 0 / 30 / 50 / 65 / 75 / 83 / 88 with 2 rival vendors), labelled as teaching models.
+- **`power-real-resource`** (corporate-politics): 6 topics, 72 items. School-poster opening; neutral-skill vs abuse table keeps it ethical and descriptive; L3 numbers match the demo (70% × 20% = 14%, 70% × 90% = 63%); replaced an invented month-figure bar chart with an ordinal column.
+- **`white`** (corporate-politics): 8 topics, 96 items. Genuineness = 15 + 6.25 × months, capped at 12 (15 / 21 / 40 / 65 / 90 at 0 / 1 / 4 / 8 / 12), matching the demo and labelled a teaching model; "networking with senior people" reworded; a practice item's "none who actively did" is inferred from "polite but lukewarm" in the source.
+
+Length bias, correct strictly longest / shortest: `case-studies` 20% / 4%, `presales-engineering` 15% / 25%, `power-real-resource` 29% / 7%, `white` 29% / 28% (the first two and `power-real-resource` have a faint opposite tell).
+
+`product-domain/` is complete: 13 of 13. `corporate-politics/` is at 2 of 14. Total migrated: 129 of 246. Next in `corporate-politics/`: `who-holds-influence`, `favor-economy`, `strategic-ambiguity`, `framing` (batch in progress). Note: `corporate-politics/influence-tool-org-s-good` has a roadmap title with "staff engineer" to fix when it is migrated.
