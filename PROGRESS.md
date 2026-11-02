@@ -3564,3 +3564,16 @@ Migrated 4 more `product-domain/` units via 4 parallel content-only subagents. `
 Length bias, correct strictly longest / shortest: `bounded-contexts` 15% / 18%, `validation` 28% / 26%, `value-framing-over-feature-framing` 26% / 26%, `buyer-psychology` 22% / 28%.
 
 `product-domain/` is at 7 of 13. Total migrated: 121 of 246. Remaining here: `translating-capability-into-their-vocabulary-cfo`, `value-based-selling`, `discovery`, `objection-handling` (batch in progress), then `case-studies` and `presales-engineering`.
+
+## 2026-11-03 — `product-domain/` batch 3: `translating-capability-into-their-vocabulary-cfo`, `value-based-selling`, `discovery`, `objection-handling`
+
+Migrated 4 more `product-domain/` units via 4 parallel content-only subagents. `typecheck` 0 errors, `build` 273 pages; live click-through (iframe per unit) passed all 26 `DomainCheck` topics, 0 Mermaid errors, 0 KaTeX errors, "Mark as done" enabled on all four. All quiz, no code topics.
+
+- **`translating-capability-into-their-vocabulary-cfo`**: 5 topics, 60 items. One-house-three-audiences opening; the old "$288,000 a year saved" assumed every error is caught, now separated into $288,000 total error cost vs $216,000 actually saved (and an exam item tests exactly that); CFO case numbers (400 × $60 = $24,000 a month, 75% caught, payback ≈ 1.7 months) are labelled assumptions.
+- **`value-based-selling`**: 7 topics, 84 items. Robot-floor-cleaner opening (assumed round numbers); fixed the old L3 "five weeks if the saving were half" to about 18 weeks, and "just under seven weeks" to "about seven" (balance is still $5 short at the end of week 6); weekly saving $643.38 rather than $644. The workplace invoice case now opens L3 instead of L1 (rule 4c).
+- **`discovery`**: 6 topics, 66 items (practice items have 4 choices). Two-doctors-one-cough opening; deal size $28,800 vs $4,800 (6×), $1,200 a seat; the demo's $28,306 at 4 questions is described as "near" the $28,800 close.
+- **`objection-handling`**: 8 topics, 90 items. Fixed the old "pays for itself close to three times over" to about 1.7× ($33,600 a year of double-booking cost vs $19,800, assuming the incident rate continues, labelled); the demo's $20,520 at 17.5% off over 2 years assumes a 6% yearly list increase (labelled). Exam never has the correct answer longest (a slight inverse tell).
+
+Length bias, correct strictly longest / shortest: `translating-capability-into-their-vocabulary-cfo` 27% / 13% (exam shortest 35%, at the ceiling), `value-based-selling` 26% / 20%, `discovery` 18% / 12%, `objection-handling` 22% / 30%.
+
+`product-domain/` is at 11 of 13. Total migrated: 125 of 246. Remaining here: `case-studies`, `presales-engineering` (its roadmap title and teaser carry a level label to fix, like `secure-by-design`); batch in progress together with the first two `corporate-politics` units.
