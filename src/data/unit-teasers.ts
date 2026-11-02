@@ -658,7 +658,7 @@ export const UNIT_TEASERS: Record<string, UnitTeaser> = {
       "A documented case study turns a single win into a repeatable asset — proof that compounds into the next deal instead of staying anecdotal.",
   },
   "product-domain/presales-engineering": {
-    myth: "A staff engineer's job in a sale is just answering technical questions when asked.",
+    myth: "An engineer's job in a sale is just answering technical questions when asked.",
     reality:
       "Presales engineering uses technical credibility proactively to shape and close a strategic deal — participating, not just responding.",
   },
