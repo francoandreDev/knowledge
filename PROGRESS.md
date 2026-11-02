@@ -3512,3 +3512,16 @@ Started the `career-craft/` track (13 units, soft-skill: all-quiz, no code topic
 Length bias, correct strictly longest / shortest: 12% / 17%, 21% / 26%, 18% / 22%, 26% / 32%.
 
 `career-craft/` is at 4 of 13. Total migrated: 105 of 246. Batch 2 (`goal-setting`, `impact-scope-over-correctness`, `documentation-career-tool`, `calibration-processes`) was launched but is not yet reviewed or committed. Remaining after that: `ic-em-tracks`, `peer-mentoring`, `staff-scope`, `market-research`, `negotiation-tactics`.
+
+## 2026-11-02 — `career-craft/` batch 2: `goal-setting`, `impact-scope-over-correctness`, `documentation-career-tool`, `calibration-processes`
+
+Migrated 4 more `career-craft/` units via 4 parallel content-only subagents (the batch was interrupted by a usage limit; the agents were resumed from their saved work). `typecheck` 0 errors, `build` 273 pages; live click-through (iframe per unit) passed all 24 `DomainCheck` topics, 0 Mermaid errors, 0 KaTeX errors, "Mark as done" enabled on all four. All quiz, no code topics.
+
+- **`goal-setting`**: 6 topics, 66 items (3 exam items per topic). Two-runners opening (65 vs 55 min, labelled assumptions); chart matches the demo (0 / 70 / 100 / 100); "senior bar" and "junior engineer" replaced with "next level" and "newer teammate".
+- **`impact-scope-over-correctness`**: 5 topics, 60 items. Vocabulary table moved after the hook; arithmetic checked in Node (3,100 × 60 = 186,000; likelihood 0–100% gives 0 / 46,500 / 93,000 / 139,500 / 186,000). Open item: several exam-scenario figures (about 800 customers, 1,200 customers at $75, the bug A / bug B numbers) are invented and not all labelled "assumed"; L1's Priya bar is drawn at 1% so it is visible (true share ≈ 0.06%, labelled "scaled to Sam's").
+- **`documentation-career-tool`**: 6 topics, 72 items. 25% bar matches the demo's 6-month default; scenario figures labelled illustrative.
+- **`calibration-processes`**: 7 topics, 77 items. Glossary moved after the hook; 6 cases for 4 slots matches the demo; packet figures (2.1% → 0.3%, 40 → 12 min) labelled invented; a few practice distractors are deliberately silly ("weather", "pizza party").
+
+Length bias, correct strictly longest / shortest: `goal-setting` 23% / 20%, `impact-scope-over-correctness` 20% / 15%, `documentation-career-tool` 33% / 28%, `calibration-processes` 32% / 25% (practice longest 36%, just over the target).
+
+`career-craft/` is at 8 of 13. Total migrated: 109 of 246. Remaining here: `ic-em-tracks`, `peer-mentoring`, `staff-scope`, `market-research`, `negotiation-tactics` (batch 3 for the first four is in progress).
