@@ -3590,3 +3590,16 @@ Migrated the last two `product-domain/` units and the first two `corporate-polit
 Length bias, correct strictly longest / shortest: `case-studies` 20% / 4%, `presales-engineering` 15% / 25%, `power-real-resource` 29% / 7%, `white` 29% / 28% (the first two and `power-real-resource` have a faint opposite tell).
 
 `product-domain/` is complete: 13 of 13. `corporate-politics/` is at 2 of 14. Total migrated: 129 of 246. Next in `corporate-politics/`: `who-holds-influence`, `favor-economy`, `strategic-ambiguity`, `framing` (batch in progress). Note: `corporate-politics/influence-tool-org-s-good` has a roadmap title with "staff engineer" to fix when it is migrated.
+
+## 2026-11-03 — `corporate-politics/` batch 2: `who-holds-influence`, `favor-economy`, `strategic-ambiguity`, `framing`
+
+Migrated 4 more `corporate-politics/` units via 4 parallel content-only subagents. `typecheck` 0 errors, `build` 273 pages; live click-through (iframe per unit, served from `dist` with a static server because `astro preview --background` kept timing out) passed all 26 `DomainCheck` topics, 0 Mermaid errors (including the `pie showData` in `who-holds-influence`), 0 KaTeX errors, "Mark as done" enabled on all four. All quiz, no code topics.
+
+- **`who-holds-influence`**: 7 topics, 84 items; no `interactives.json` in this unit. Class-picks-where-to-eat opening; replaced engineering-heavy examples (CI jargon, a "senior IC") with general scenarios; illustrative numbers labelled assumed (4 of 5 class choices = 80%, consulted counts 3 / 1 / 1, 4 of 21 days = 19%).
+- **`favor-economy`**: 4 topics, 48 items. Borrowing-notes opening; chart values match the demo (55% with 4 deposits, 0% with none); L3 no longer uses schema / validation jargon for a domain-general concept. The name Priya also appears in `business-communication/change-management` in a different scenario (rename if the overlap bothers).
+- **`strategic-ambiguity`**: 8 topics, 96 items. The honesty line (a planted false belief, not an omission) is explicit in L1 and L3; demo numbers verified in Node (7 points a day, Day 3 to Day 12 = 63; Day 8 = 35; 12 points a day caps at 100), labelled a teaching model.
+- **`framing`**: 7 topics, 84 items. Honesty line explicit in L1 and a two-question check in L2; fixed an L3 table that implied drafts A and B differ in honesty (they differ only in deliberateness); the outage clause is 19 of 60 words; 3.2 → 1.9 is 40.6% faster. Exam item `default-frame-exam-3` makes a hedged recency-effect claim that the unit does not itself prove.
+
+Length bias, correct strictly longest / shortest: `who-holds-influence` practice 0% / 11%, exam 18% / 0% (faint opposite tell), `favor-economy` 31% / 21% (exam shortest 0%), `strategic-ambiguity` 26% / 28%, `framing` 23% / 24%.
+
+`corporate-politics/` is at 6 of 14. Total migrated: 133 of 246. Remaining here: `subtext`, `credit-stealing`, `warning-signs`, `documentation-discipline` (batch in progress), then `calibrated-confrontation`, `coalition-building-defense`, `staying-principled`, `influence-tool-org-s-good` (its roadmap title and teaser carry "staff engineer", to fix).
