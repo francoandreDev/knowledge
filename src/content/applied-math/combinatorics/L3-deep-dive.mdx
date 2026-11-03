@@ -1,263 +1,141 @@
 ---
-title: "L3 — Finding exactly which pair of flags the 8 test cases missed"
+title: "L3 — Finding exactly which pairs of flags the 8 test cases missed"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="The 8 test cases, as real data">
+export const unit = {
+  track: "applied-math",
+  unitSlug: "combinatorics",
+};
+
+<Scenario label="Eight hand-picked test cases, four flags, and a bug in a combination nobody ran">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🚩</span> <strong>4 flags</strong> — newCheckoutUI, applePay, promoCode, expressShipping</div>
-      <div class="flex items-center gap-1.5"><span>📋</span> <strong>8 test cases</strong> — picked by hand, felt like solid coverage</div>
+      <div class="flex items-center gap-1.5"><span>🚩</span> <strong>4 flags</strong> — newUI, applePay, promo, express</div>
+      <div class="flex items-center gap-1.5"><span>📋</span> <strong>8 test cases</strong> — of 16 possible states (half)</div>
+      <div class="flex items-center gap-1.5"><span>🔗</span> <strong>6 flag pairs</strong> — each needs all 4 settings seen</div>
+      <div class="flex items-center gap-1.5"><span>💥</span> <strong>Bug</strong> — applePay and promo on together</div>
+    </div>
+    <div class="not-prose mt-3 flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300">
+      <div>
+        <div class="flex justify-between"><span>Pairs fully covered by the 8 cases</span><span>3 of 6</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 50%"></div></div>
+      </div>
     </div>
   </Fragment>
 
-**Before reading further, predict: with 4 independent flags, how many
-distinct _pairs_ of flags are there to check together — and does 8
-test cases sound like enough to guarantee every pair was tested in
-all 4 of its on/off combinations?**
+A team ships a checkout behind four flags and tests 8 cases chosen by feel.
+Each flag appears on and off several times. Yet the combination `applePay` on
+and `promo` on, together, never runs, and production finds it first. **Before
+reading on: with 4 flags there are 6 pairs, each with 4 settings. Does having
+tried every flag individually mean every pair was tried together?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Generating and counting all flag states in code",
-    "Checking whether every flag pair was covered",
-    "Finding the exact gap that broke checkout",
+    "Building a pair-by-pair coverage table",
+    "Spotting the exact missing setting",
+    "Closing gaps and the true minimum suite",
   ]}
 />
 
-## The 16 states before code automates them
+## What did the 8 cases actually cover?
 
-Before reading the JavaScript, here is the full four-flag space by hand.
-Use `T` for true/on and `F` for false/off:
+The 8 cases (1 = on, 0 = off), in the order newUI, applePay, promo, express:
 
-| Case | New UI | Apple Pay | Promo Code | Express Shipping |
-| ---- | ------ | --------- | ---------- | ---------------- |
-| 1    | F      | F         | F          | F                |
-| 2    | T      | F         | F          | F                |
-| 3    | F      | T         | F          | F                |
-| 4    | F      | F         | T          | F                |
-| 5    | F      | F         | F          | T                |
-| 6    | T      | T         | F          | F                |
-| 7    | T      | F         | T          | F                |
-| 8    | T      | F         | F          | T                |
-| 9    | F      | T         | T          | F                |
-| 10   | F      | T         | F          | T                |
-| 11   | F      | F         | T          | T                |
-| 12   | T      | T         | T          | F                |
-| 13   | T      | T         | F          | T                |
-| 14   | T      | F         | T          | T                |
-| 15   | F      | T         | T          | T                |
-| 16   | T      | T         | T          | T                |
+| Case | newUI | applePay | promo | express |
+| ---- | ----- | -------- | ----- | ------- |
+| 1    | 0     | 0        | 0     | 0       |
+| 2    | 1     | 0        | 0     | 0       |
+| 3    | 0     | 1        | 0     | 0       |
+| 4    | 0     | 0        | 1     | 0       |
+| 5    | 0     | 0        | 0     | 1       |
+| 6    | 1     | 1        | 0     | 0       |
+| 7    | 1     | 0        | 0     | 1       |
+| 8    | 0     | 0        | 1     | 1       |
 
-L3's code does not invent a new idea; it automates this table so the
-count stays correct when there are too many flags to list by hand.
+**For each pair, which of the four settings 00, 01, 10, 11 appear somewhere in
+the eight rows?** Reading two columns at a time gives:
 
-## Counting the full combination space
+| Pair               | Settings never seen | Covered? |
+| ------------------ | ------------------- | -------- |
+| newUI + applePay   | none                | yes      |
+| newUI + promo      | 11                  | no       |
+| newUI + express    | none                | yes      |
+| applePay + promo   | 11                  | no       |
+| applePay + express | 11                  | no       |
+| promo + express    | none                | yes      |
 
-```js
-// combinatorics.mjs
-function factorial(n) {
-  let result = 1;
-  for (let i = 2; i <= n; i++) result *= i;
-  return result;
-}
+Three of six pairs have a hole, and in every case the hole is "both on". The
+cases are mostly "one thing switched on at a time", so interactions are
+exactly what they skip. Flag `applePay` is on in case 3 and `promo` is on in
+case 4, but never in the same row.
 
-function combinations(n, r) {
-  return factorial(n) / (factorial(r) * factorial(n - r));
-}
-
-function generateAllCombinations(flagNames) {
-  const n = flagNames.length;
-  const total = Math.pow(2, n);
-  const combos = [];
-  for (let i = 0; i < total; i++) {
-    const combo = {};
-    flagNames.forEach((name, idx) => {
-      combo[name] = Boolean(i & (1 << idx));
-    });
-    combos.push(combo);
-  }
-  return combos;
-}
-
-const flags = ["newCheckoutUI", "applePay", "promoCode", "expressShipping"];
-console.log(generateAllCombinations(flags).length); // 16
-console.log(combinations(4, 2)); // 6 — the number of distinct flag pairs
+```mermaid
+flowchart TD
+    A["8 hand-picked cases"] --> B["Each flag tested on and off"]
+    A --> C["Check each pair: do 00, 01, 10, 11 all appear?"]
+    C --> D["3 pairs covered"]
+    C --> E["3 pairs missing the 'both on' setting"]
+    E --> F["applePay + promo: the production bug"]
 ```
 
-`generateAllCombinations` confirms the exhaustive space directly: 16
-total combinations for 4 flags, matching `2^4`. `combinations(4, 2)`
-confirms there are 6 distinct pairs of flags among the 4 — and each
-pair has 4 possible on/off states (`true/true`, `true/false`,
-`false/true`, `false/false`), which is the actual thing that needs
-covering, not just "8 combinations somewhere in the list."
+<Checkpoint question="Both applePay and promo were on in some test case. Why does that not show the pair was covered?">
 
-For one pair like `applePay` and `promoCode`, "fully covered" means these
-four labels all appeared somewhere:
-
-```text
-applePay=true,  promoCode=true
-applePay=true,  promoCode=false
-applePay=false, promoCode=true
-applePay=false, promoCode=false
-```
-
-The `Set` in the code below is just a checklist of unique labels seen so
-far. `JSON.stringify([tc[flagA], tc[flagB]])` turns a pair of booleans
-into a stable label like `[true,false]` so the checklist can tell whether
-all 4 states appeared.
-
-<Checkpoint question="isPairCovered treats a pair as covered once seen.size === 4. Why 4, and not 2 or 8?">
-
-Because a pair of boolean flags has exactly 4 distinct on/off
-combinations: `true/true`, `true/false`, `false/true`, and
-`false/false` — the same `2^2 = 4` logic from L2 applied to just two
-flags instead of four. `seen` is a `Set` of stringified `[value, value]`
-labels, so its size can never exceed 4 for a single pair no matter how
-many test cases are scanned; it caps out exactly when all 4 states
-have shown up at least once. If the threshold were 2, a pair where
-only `applePay` varied while `promoCode` stayed `false` the whole time
-would be marked "covered" after seeing just `[true,false]` and
-`[false,false]` — which is precisely the kind of false confidence that
-let `applePay`/`promoCode` slip through the original 8 test cases.
+Coverage is a property of two flags in the same row. `applePay` being on in
+case 3 and `promo` being on in case 4 are two separate observations, and
+neither run exercises the interaction. The pair was covered only if some single
+case had both on, and none did.
 
 </Checkpoint>
 
-## Checking whether the 8 test cases actually covered every pair
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="pair-coverage"
+/>
 
-```js
-function isPairCovered(testCases, flagA, flagB) {
-  const seen = new Set();
-  for (const tc of testCases) {
-    seen.add(JSON.stringify([tc[flagA], tc[flagB]]));
-  }
-  return seen.size === 4;
-}
+## What does one more test case buy?
 
-function findUncoveredPairs(testCases, flagNames) {
-  const uncovered = [];
-  for (let i = 0; i < flagNames.length; i++) {
-    for (let j = i + 1; j < flagNames.length; j++) {
-      if (!isPairCovered(testCases, flagNames[i], flagNames[j])) {
-        uncovered.push([flagNames[i], flagNames[j]]);
-      }
-    }
-  }
-  return uncovered;
-}
+**Add a ninth case: newUI 1, applePay 1, promo 1, express 0. Which holes close?**
+It sets `newUI+promo` to 11 and `applePay+promo` to 11, so those two close. It
+sets `applePay+express` to 10, which was already seen, so that hole stays. One
+pair remains uncovered, and a case only fixes the settings it actually sets.
 
-const adHocTestCases = [
-  {
-    newCheckoutUI: false,
-    applePay: false,
-    promoCode: false,
-    expressShipping: false,
-  },
-  {
-    newCheckoutUI: true,
-    applePay: false,
-    promoCode: false,
-    expressShipping: false,
-  },
-  {
-    newCheckoutUI: false,
-    applePay: true,
-    promoCode: false,
-    expressShipping: false,
-  },
-  {
-    newCheckoutUI: false,
-    applePay: false,
-    promoCode: true,
-    expressShipping: false,
-  },
-  {
-    newCheckoutUI: false,
-    applePay: false,
-    promoCode: false,
-    expressShipping: true,
-  },
-  {
-    newCheckoutUI: true,
-    applePay: true,
-    promoCode: false,
-    expressShipping: false,
-  },
-  {
-    newCheckoutUI: true,
-    applePay: false,
-    promoCode: false,
-    expressShipping: true,
-  },
-  {
-    newCheckoutUI: false,
-    applePay: false,
-    promoCode: true,
-    expressShipping: true,
-  },
-];
+The true minimum is smaller than the naive estimate of `6 pairs × 4 settings =
+24` cases, because one row covers a setting for all six pairs at once. A
+brute-force search over all 16 states shows that 4 flags need at least 5 cases
+to cover every pair, for example `0000, 1100, 1010, 1001, 0111`, against 16 for
+all states. This is a worked case, not the whole territory.
 
-console.log(findUncoveredPairs(adHocTestCases, flags));
-// [ [ 'newCheckoutUI', 'promoCode' ],
-//   [ 'applePay', 'promoCode' ],
-//   [ 'applePay', 'expressShipping' ] ]
-```
+| Strategy                 | Cases for 4 flags | Guarantee                     |
+| ------------------------ | ----------------- | ----------------------------- |
+| Hand-picked "important"  | 8 (here)          | none, 3 pairs have holes      |
+| Every pair, all settings | 5 (minimum)       | any 2-flag interaction is run |
+| Every state              | 16                | any interaction at all        |
 
-Three of the six flag pairs were never fully covered by the 8
-hand-picked test cases — including `applePay`/`promoCode`, exactly the
-pair that broke checkout in production. Checking which specific
-on/off state was missing for that pair confirms it precisely:
-`applePay: true, promoCode: true` never appears anywhere in the list —
-the two features were simply never turned on _together_ in any test
-case, even though both were individually tested.
+## Extend it yourself
 
-<Checkpoint question="findUncoveredPairs reported applePay/promoCode as uncovered even though both flags individually appear in several of the 8 test cases (case 3 has applePay=true, case 4 has promoCode=true). Why does that not count as coverage?">
+- What changes with 12 flags: there are 66 pairs and 4,096 states. Does the
+  minimum pair suite grow like 66, like 4,096, or far more slowly?
+- A bug needs three flags on together. Which strategy in the table still
+  catches it, and which does not?
+- If one flag can never be on without another (a dependency), how many of
+  the 16 states are even reachable?
 
-Because coverage is checked per-pair, not per-flag — `isPairCovered`
-only looks at the two named flags together in each test case, and
-`applePay: true, promoCode: true` never occurs in the same row anywhere
-in the 8 test cases. `applePay` being `true` in case 3 (where
-`promoCode` is `false`) and `promoCode` being `true` in case 4 (where
-`applePay` is `false`) are two separate, individually-tested states —
-neither one exercises the interaction between the two flags being on
-_simultaneously_, which is exactly the state that broke checkout in
-production. This is the gap that "each flag was tested individually"
-intuition can't see: it takes checking pairs together, not flags in
-isolation, to catch it.
-
-</Checkpoint>
-
-## Extend it: what if a 9th test case were added to fix this?
-
-**Suppose one more test case is added:
-`{ newCheckoutUI: true, applePay: true, promoCode: true, expressShipping: false }`.
-Does `findUncoveredPairs` now report all six pairs as covered, or are
-some still missing?** Run it and check — not every gap closes from one
-added test case, since a single new test case can fill in the missing
-state for multiple pairs at once, but only for the pairs whose missing
-state happens to match what that one test case sets. **How many
-additional test cases, at minimum, would it take to guarantee all six
-pairs are fully covered, starting from zero? Is 6 × 4 = 24 test cases
-actually the minimum needed, or can specific combinations serve
-multiple pairs' coverage simultaneously — bringing the true minimum
-lower?**
-
-In this specific 9th-test-case extension, one pair remains uncovered:
-`applePay`/`expressShipping`. The point is not that one added test is
-useless; it fixed some gaps. The point is that a new case only covers the
-specific states it actually sets, so you still need the checker to know
-which gaps remain.
+This worked example is one case; the same pair-by-pair table applies to
+browser/OS settings, user roles, or any set of independent options.
 
 ## Failure modes
 
-| Failure mode                                                                        | What it gets wrong                                                                              |
-| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Treating "8 test cases" as inherently thorough                                      | Thoroughness depends on what those 8 actually cover, not how many there are                     |
-| Assuming flags combine additively (4 flags to 4 tests)                              | Independent flags combine multiplicatively — `2^n`, not `n`                                     |
-| Picking "important" combinations by intuition alone                                 | Intuition doesn't track which specific pairs got left uncovered                                 |
-| Confusing "each flag was tested individually" with "every pair was tested together" | A flag can appear in many test cases while never once appearing alongside a specific other flag |
-| Assuming more test cases always means better pairwise coverage                      | Coverage depends on which specific states the added test cases hit, not just the count          |
+| Mistake                                         | Why it fails                                     |
+| ----------------------------------------------- | ------------------------------------------------ |
+| Judging coverage by the number of cases         | Coverage depends on which settings the cases hit |
+| Treating each flag tested alone as pair testing | Interactions need both flags in one row          |
+| Assuming added cases always close gaps          | A case only closes the settings it sets          |
+| Forgetting pairs miss 3-way interactions        | Pairwise is cheaper, not complete                |
