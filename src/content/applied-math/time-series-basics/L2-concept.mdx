@@ -1,151 +1,172 @@
 ---
-title: "L2 — Why fitting a line to all the data beats eyeballing the last two points, and why even that can be fooled"
+title: "L2 — Why one line through all the data beats the last two points, and why seasonality breaks even that"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+import Plot from "../../../components/Plot.astro";
 
-L1 named the pieces — trend, noise, extrapolation, least squares — from the
-signups Scenario. This level works through why fitting a line to all twelve
-weeks actually beats reading a trend off the last two points, and why even
-a full regression can still be misled by a couple of unusual weeks.
+export const unit = {
+  track: "applied-math",
+  unitSlug: "time-series-basics",
+};
+
+L1 showed three methods giving $248, $93 and $56 for the same six electricity
+bills. L2 explains where the $93 line comes from, why a late odd month pulls
+it, and why a repeating yearly pattern can fool a line in a different way.
 
 <LevelIntro
   items={[
-    "Why two points aren't a trend",
-    "Fitting one line with least squares",
-    "Leverage and extrapolation risk",
+    "Least squares in one picture",
+    "Why the edge of the data pulls",
+    "Seasonality hides the trend",
   ]}
 />
 
-## What the naive forecast actually computed
+## What does "the best line through all the points" mean?
 
-**The Scenario's forecast used week 11 and week 12: 80 and 120
-signups. Is "the difference between the two most recent points" the
-same thing as "the trend"?** Not necessarily — with only two points,
-there is no way to distinguish a real change in direction from a
-single noisy week. The full twelve weeks of data:
+**Six bills never sit on one straight line. So what makes one line better than
+another?** Measure the vertical miss between each bill and the line, square
+each miss, and add them up. The line with the smallest total wins. That is
+**least squares**, and it is written $$y = m x + c$$ where $$m$$ is the slope
+(extra dollars per month) and $$c$$ is the intercept (where the line sits at
+month 0).
 
-| Week    | 1   | 2   | 3   | 4   | 5   | 6   | 7   | 8   | 9   | 10  | 11  | 12  |
-| ------- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Signups | 30  | 33  | 35  | 38  | 36  | 41  | 44  | 42  | 47  | 50  | 80  | 120 |
+| Piece | Meaning for the bills                  |
+| ----- | -------------------------------------- |
+| `x`   | month number                           |
+| `y`   | predicted bill for that month          |
+| slope | dollars the line adds each month: 4.34 |
+| start | the line at month 0: $41.13            |
 
-Weeks 1 through 10 climb steadily by roughly 2 signups a week. Weeks
-11 and 12 jump far above that pattern — consistent with the
-Scenario's detail that a post about the product went viral right
-before the forecast was made. The naive forecast treated that spike
-as if it were the new normal weekly growth rate, rather than a
-one-off event layered on top of a much gentler underlying trend.
-
-## Fitting one line through all the data: least squares
-
-**If two points aren't enough, what does using all twelve points
-actually do differently?** Least-squares linear regression fits a
-single straight line `y = slope × x + intercept` by choosing the
-slope and intercept that minimize the total squared vertical distance
-between the line and every one of the twelve points — not just the
-last two.
-
-In this unit, read that line as:
-
-| Piece       | Meaning here                                     |
-| ----------- | ------------------------------------------------ |
-| `x`         | week number                                      |
-| `y`         | predicted signups for that week                  |
-| `slope`     | how many signups the line adds per week          |
-| `intercept` | where the line would start if extended to week 0 |
-
-If a line predicts 42 signups and the real value was 47, its vertical error is
-`47 - 42 = 5`. Least squares compares many candidate lines by adding up those
-errors after squaring them.
+The line through all six bills is $$y = 4.34 x + 41.13$$. Month 12 gives
+4.34 x 12 + 41.13 = $93.25. The line through months 1-5 only has slope 0.5 and
+start $50.10, so month 12 gives $56.10.
 
 ```mermaid
 flowchart LR
-    A["Full time series\n(12 weeks of signups)"] --> B["Least-squares regression\nfits one line through\nevery point at once"]
-    B --> C["Trend line:\nslope + intercept"]
-    C --> D["Forecast = extend the\nline to a future week"]
-    D --> E{"How far past\nthe observed data?"}
-    E -->|"just past the edge"| F["Reasonably trustworthy"]
-    E -->|"far beyond it"| G["Uncertainty compounds —\ntreat as a rough guess, not a number"]
+    A["All six bills"] --> B["Try a line"]
+    B --> C["Measure each vertical miss"]
+    C --> D["Square and add the misses"]
+    D --> E{"Smallest total so far?"}
+    E -->|"no"| B
+    E -->|"yes"| F["Slope + intercept: the fitted line"]
+    F --> G["Extend to a future month"]
 ```
 
-Squaring the distances (rather than, say, just averaging them) means
-points far from the line count more heavily than points close to it —
-which matters for what comes next.
+Why square the misses instead of just adding them? Positive and negative misses
+would cancel, and squaring also makes big misses count much more than small ones.
 
-Tiny manual example: an error of `2` contributes `2² = 4`; an error of `10`
-contributes `10² = 100`. The large miss counts 25 times as much, not 5 times
-as much. That is why a very unusual week can pull the fitted line strongly,
-especially when it sits near the edge of the observed range.
+<Checkpoint question="One candidate line misses a bill by $2 and another misses a different bill by $10. How much more does least squares penalize the $10 miss?">
 
-<Checkpoint question="Two candidate lines both miss a given week's data point — one by 2 signups, the other by 10 signups. How much more heavily does least squares penalize the 10-signup miss compared to the 2-signup miss?">
-
-25 times as much, not 5 times as much — least squares compares errors after
-squaring them, and `10² = 100` versus `2² = 4` is a 25x gap. That's exactly
-why a single unusual week can pull a fitted line much harder than its "one
-week out of twelve" share would suggest, which is the mechanism the next
-section (leverage) depends on.
+Twenty-five times as much, not five. The penalty is the squared miss: 2 x 2 = 4
+and 10 x 10 = 100, and 100 / 4 = 25. That is the reason one extreme month can
+drag the fitted line toward itself, which the next section depends on.
 
 </Checkpoint>
 
-## Even a full regression can be fooled by one point
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="least-squares-fit"
+/>
 
-**So does running regression on all twelve weeks fix the Scenario's
-problem?** Only partially. Fitting a line to all twelve weeks
-produces a real, defensible slope — but weeks 11 and 12 sit right at
-the edge of a fairly small dataset, and squaring distances means those
-two outlying points pull the fitted line toward themselves more than
-an ordinary week would. A regression fit on just the first ten
-(pre-spike) weeks tells a noticeably different, much steadier story
-than a regression fit on all twelve — L3 verifies both fits directly
-and compares how well each line actually matches its data.
+## Why does the last month pull the line so hard?
 
-**Does that mean the spike should just be thrown out?** Not
-necessarily — a real spike might signal something worth
-investigating (did a marketing campaign work? is it one-time press
-coverage?). The point isn't "delete the outlier," it's that a single
-recent point — whether examined alone, as the naive forecast did, or
-folded into a regression at the edge of the data — can carry far more
-influence over a forecast than its status as "one week out of twelve"
-would suggest.
+**If month 6 is only one of six bills, why does it move the month-12 forecast
+from $56 to $93?** Two reasons stack. Its miss from the old pattern is large
+($80 versus about $53), and squaring makes a large miss expensive, so the line
+tilts toward it. And it sits at the end of the range: a forecast is the line
+extended past the end, so tilting the line around the end swings the far future
+a lot. This extra pull of a point at the edge of the data is called **leverage**.
 
-That edge influence is called **leverage**. A point near the end of the time
-range can rotate the future part of the line more dramatically than a point
-near the middle, because forecasts are made by extending the line beyond that
-edge.
+| Line fitted to     | Slope per month | Month-12 forecast |
+| ------------------ | --------------- | ----------------- |
+| Months 1-5 only    | 0.50            | $56.10            |
+| All six months     | 4.34            | $93.25            |
+| Last jump extended | 28.00           | $248.00           |
 
-<Checkpoint question="Why does a point near the edge of the observed weeks (like week 11 or 12) have more leverage over a forecast than an equally unusual point sitting in the middle of the range?">
+Should month 6 be deleted? Not automatically. If the heat wave was one-off it
+is noise; if the apartment now has a bigger cooling bill every month it is a
+real change. The data cannot tell you which, so the forecast should be reported
+with that assumption stated.
 
-Because a forecast is made by extending the fitted line beyond the edge of
-the data. Rotating the line around a point near the end swings the projected
-future further than rotating it around a point in the middle would, since
-the middle point is anchored by data on both sides. This is why weeks 11-12's
-spike matters more to the week-52 forecast than an equally sized spike in,
-say, week 5 or 6 would.
+<Checkpoint question="Why does a hot month at the end of the series move the month-12 forecast more than an equally hot month in the middle?">
+
+The forecast is the fitted line extended beyond the last month. A point at the
+end can rotate the line with nothing on its far side to hold it, so the rotation
+shows up in the projected future. A point in the middle is held in place by
+data on both sides, which limits how far it can tilt the line.
 
 </Checkpoint>
 
-## Extrapolation gets riskier the further out you go
+## What if the pattern repeats every year?
 
-**Once a trend line is fit, is projecting it forward to any future
-week equally safe?** No — every fitted line is only verified against
-the range of data actually observed (here, weeks 1–12). Projecting to
-week 13 or 14 stays close to that verified range; projecting to week
-52 assumes the same trend holds for forty more weeks nothing in the
-data has confirmed — new competitors, seasonality, market saturation,
-or simply the trend changing are all invisible to a straight line fit
-on the past.
+**What if the six bills were just the start of a yearly cycle, with summer and
+winter always higher?** Then a straight line is the wrong shape. Take eight
+made-up quarterly bills (illustrative numbers, not measured): a steady rise of
+$2 a quarter, plus a repeating seasonal bump of +30, -10, -20, 0 for the four
+quarters.
+
+| Quarter | 1   | 2   | 3   | 4   | 5   | 6   | 7   | 8   |
+| ------- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Bill    | 122 | 84  | 76  | 98  | 130 | 92  | 84  | 106 |
+
+Yearly averages are 95 and 103, so the real trend is up $8 a year. Yet the
+least-squares line through all eight quarters has slope -0.38 and R squared
+0.002: it says the bills are drifting down slightly and barely explains any of
+the variation. The repeating pattern cancels the trend inside the line.
+
+<Plot
+  mark="line"
+  x="quarter"
+  y="bill"
+  series="series"
+  xLabel="Quarter"
+  yLabel="Bill ($)"
+  caption="Made-up quarterly bills. The actual series zigzags with the seasons; the fitted line is almost flat and slightly downward."
+  data={[
+    { quarter: 1, bill: 122, series: "Actual" },
+    { quarter: 2, bill: 84, series: "Actual" },
+    { quarter: 3, bill: 76, series: "Actual" },
+    { quarter: 4, bill: 98, series: "Actual" },
+    { quarter: 5, bill: 130, series: "Actual" },
+    { quarter: 6, bill: 92, series: "Actual" },
+    { quarter: 7, bill: 84, series: "Actual" },
+    { quarter: 8, bill: 106, series: "Actual" },
+    { quarter: 1, bill: 100.3, series: "Straight line" },
+    { quarter: 8, bill: 97.7, series: "Straight line" },
+  ]}
+/>
+
+The fix is to compare like with like. Quarter 9 is a Q1, so forecast it from
+quarter 5 (the last Q1, $130) plus the yearly growth ($8): $138. The straight
+line would say about $97.
+
+| Method for quarter 9            | Forecast  |
+| ------------------------------- | --------- |
+| Straight line through all eight | about $97 |
+| Same quarter last year + $8     | $138      |
+
+<Checkpoint question="A series repeats every four steps and you fit one straight line to two full cycles. What can go wrong with the slope?">
+
+It can be badly misleading, even the wrong sign. Within each cycle the
+seasonal pattern itself rises and falls, and the line averages that tilt in with
+the real trend. In the quarterly bills the two cancel, giving a slope of -0.38
+when the true trend is +$2 a quarter. Comparing the same position in each cycle
+(Q1 with Q1) removes the seasonal part before reading the trend.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="seasonality"
+/>
 
 ## Failure modes at this level
 
-- **Treating two points as a trend.** Any two points define a
-  perfectly straight line by definition — that says nothing about
-  whether the data actually behaves that way.
-- **Trusting a regression's fit without checking it.** A line can be
-  fit through any data; whether it's a _good_ fit (how close the
-  points actually sit to the line) is a separate question, covered in
-  L3.
-- **Extrapolating arbitrarily far with the same confidence as
-  interpolating.** A forecast just past the observed range and one
-  forty weeks out do not carry the same risk, even from the same
-  fitted line.
+- **Two points treated as a trend.** Any two points make a perfect line; that proves nothing about the data.
+- **Late spike folded in silently.** A point at the edge pulls the forecast far more than "one of six" suggests.
+- **Seasonal data fitted with one line.** The slope can be flat or even negative while the real trend rises.

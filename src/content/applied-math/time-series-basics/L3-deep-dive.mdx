@@ -1,227 +1,227 @@
 ---
-title: "L3 — Implementing least-squares regression, and forecasting the Scenario's signups honestly"
+title: "L3 — Fitting the signups, measuring the fit, and knowing how far a forecast can be trusted"
 ---
 
+import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+import Plot from "../../../components/Plot.astro";
 
-L2 established the concepts — least squares, leverage, extrapolation risk —
-in words and a diagram. This level implements the actual regression from
-scratch, applies it to the Scenario's twelve weeks of signups, and compares
-three real forecasts for week 52.
+export const unit = {
+  track: "applied-math",
+  unitSlug: "time-series-basics",
+};
+
+<Scenario label="The board heard 1,720 signups a week by week 52. Your regression says 302 and your quieter line says 134. Which number do you defend?">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📊</span> <strong>Data</strong> — 30, 33, 35, 38, 36, 41, 44, 42, 47, 50, 80, 120 (weeks 1-12)</div>
+      <div class="flex items-center gap-1.5"><span>🚀</span> <strong>Weeks 11-12</strong> — a post went viral</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Question</strong> — what week-52 number is honest?</div>
+    </div>
+    <div class="not-prose mt-3 flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300">
+      <div>
+        <div class="flex justify-between"><span>Last jump extended</span><span>1,720</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 100%"></div></div>
+      </div>
+      <div>
+        <div class="flex justify-between"><span>Line through 12 weeks</span><span>302</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-sky-500 animate-fill-bar" style="--target-width: 17.6%"></div></div>
+      </div>
+      <div>
+        <div class="flex justify-between"><span>Line through weeks 1-10</span><span>134</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-emerald-500 animate-fill-bar" style="--target-width: 7.8%"></div></div>
+      </div>
+    </div>
+  </Fragment>
+
+Three methods, three numbers spanning more than a factor of twelve. A fitted
+line always returns an answer, so the answer alone cannot tell you whether to
+trust it. **What can you measure about a fit, and about the horizon, to decide
+how much weight each number deserves?**
+
+</Scenario>
 
 <LevelIntro
   items={[
-    "Implementing least-squares regression",
-    "Measuring fit quality with R²",
-    "Comparing three real forecasts",
+    "Computing the fit",
+    "Measuring fit with R squared",
+    "How forecast gaps grow with horizon",
   ]}
 />
 
-## Fitting a line through all the data
+## Where do slope and intercept actually come from?
 
-**Here's the actual data from the Scenario. How do we fit a single
-line through all twelve points, rather than just the last two?**
-
-If the code is new, keep the non-code picture in front: compute the average
-week and average signup count, measure how each point sits relative to those
-averages, then choose a line direction. `num` is "do later weeks generally
-have higher signups?" and `den` is "how spread out are the week numbers?"
+**Computing a fit is the one place where the arithmetic is the idea. What does
+it take?** Three steps on the signups: find the average week (6.5) and average
+signups (49.67); for each week multiply how far it is from the average week by
+how far its signups are from the average signups, and add those up (792); add up
+the squared distance of each week from the average week (143). The slope is the
+first sum over the second.
 
 ```js
-const weeks = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-const signups = [30, 33, 35, 38, 36, 41, 44, 42, 47, 50, 80, 120];
-
 function linearRegression(xs, ys) {
   const n = xs.length;
   const xMean = xs.reduce((a, b) => a + b, 0) / n;
   const yMean = ys.reduce((a, b) => a + b, 0) / n;
-
   let num = 0;
   let den = 0;
   for (let i = 0; i < n; i++) {
     num += (xs[i] - xMean) * (ys[i] - yMean);
     den += (xs[i] - xMean) ** 2;
   }
-
   const slope = num / den;
-  const intercept = yMean - slope * xMean;
-  return { slope, intercept };
+  return { slope, intercept: yMean - slope * xMean };
 }
 ```
 
-```js
-linearRegression(weeks, signups);
-// { slope: 5.54, intercept: 13.67 }  (rounded)
-```
+For all twelve weeks the slope is 792 / 143 = 5.54 and the intercept is
+49.67 - 5.54 x 6.5 = 13.67. For weeks 1-10 the sums are 168 and 82.5, so the
+slope is 2.04 and the intercept 28.40. Adding two viral weeks multiplied the
+slope by 5.54 / 2.04 = 2.7.
 
-`slope` and `intercept` together define the line `y = slope * x +
-intercept` that minimizes the total squared distance to every point —
-the "least squares" the technique is named for. `num` accumulates how
-much each week's deviation from the average week correlates with that
-week's deviation from the average signup count; `den` normalizes that
-by how spread out the weeks are.
+<Checkpoint question="The 12-week slope is about 5.54. Does that mean week 12 is predicted to be 5.54 above week 11?">
 
-`correlates` here means "moves together." If later weeks tend to have higher
-signup counts, slope is positive. If later weeks tend to have lower counts,
-slope is negative. If week number tells you almost nothing, slope stays close
-to zero.
-
-<Checkpoint question="linearRegression(weeks, signups) returns a slope of about 5.54. In plain terms, what does that number mean for this dataset?">
-
-It means the fitted line predicts roughly 5.54 additional signups per week,
-on average, across all twelve weeks of data — not "5.54 more signups than
-last week," which is a different (naive, two-point) calculation. This is the
-number that will get plugged into `forecast()` a few sections down to
-project week 52, so it's worth being clear on what it actually represents
-before that happens.
+No. It is the average extra signups per week across the whole fitted line, a
+trend over all twelve points. The jump from week 11 to week 12 is 40, which
+is the naive number. The slope is what gets multiplied by the horizon when you
+forecast, so being clear about what it summarizes matters for everything below.
 
 </Checkpoint>
 
-## How good is the fit? R²
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="fit-line-code"
+/>
 
-**A line can be fit through any set of points. How do we know if this
-particular line actually describes the data well?**
+## How good is the fit?
 
-`R²` compares two kinds of error:
+**A line can be drawn through anything. How do you know whether this one
+describes the data?** Compare two squared totals. The spread before fitting
+(each value against the average of all values) is `ssTot`; the spread left over
+after fitting (each value against the line) is `ssRes`. R squared is
+$$R^2 = 1 - ssRes / ssTot$$, the share of the spread the line explains: 1 means
+a perfect fit, 0 means no better than always guessing the average.
 
-| Error bucket | Plain meaning                                     |
-| ------------ | ------------------------------------------------- |
-| `ssRes`      | squared error the line still leaves behind        |
-| `ssTot`      | squared spread you had before fitting any line    |
-| `R²`         | fraction of spread the line explains, from 0 to 1 |
+| Fit                     | R squared | What it says                                |
+| ----------------------- | --------- | ------------------------------------------- |
+| Line through 12 weeks   | 0.606     | about 40% of the spread is left unexplained |
+| Line through weeks 1-10 | 0.944     | the pre-viral weeks follow a line closely   |
 
-An `R²` near 1 means the line explains most of the visible pattern. An `R²`
-near 0 means the line is not doing much better than guessing the average.
+The 12-week fit is not terrible, but the unexplained 40% sits where the viral
+weeks are. A high R squared on weeks 1-10 describes steady growth of about 2
+signups a week; it says nothing yet about whether the viral weeks will repeat.
 
-```js
-function rSquared(xs, ys, slope, intercept) {
-  const yMean = ys.reduce((a, b) => a + b, 0) / ys.length;
-  let ssRes = 0;
-  let ssTot = 0;
-  for (let i = 0; i < xs.length; i++) {
-    const predicted = slope * xs[i] + intercept;
-    ssRes += (ys[i] - predicted) ** 2;
-    ssTot += (ys[i] - yMean) ** 2;
-  }
-  return 1 - ssRes / ssTot;
-}
-```
+<Checkpoint question="The 10-week fit has R squared 0.944 and the 12-week fit has 0.606. Which better describes the underlying weekly growth, and what does it still not tell you?">
 
-```js
-const { slope, intercept } = linearRegression(weeks, signups);
-rSquared(weeks, signups, slope, intercept);
-// 0.606
-```
-
-`R²` (R-squared) measures how much of the actual variation in signups
-the line explains, from 0 (no better than just guessing the average
-every time) to 1 (the line passes through every point exactly). An
-`R²` of 0.606 means this line leaves a lot unexplained — consistent
-with L2's point that weeks 11–12 don't fit the same pattern as weeks
-1–10. Fitting the same function to just the first ten (pre-spike)
-weeks makes that concrete:
-
-```js
-const preSpikeWeeks = weeks.slice(0, 10);
-const preSpikeSignups = signups.slice(0, 10);
-const preSpikeFit = linearRegression(preSpikeWeeks, preSpikeSignups);
-rSquared(
-  preSpikeWeeks,
-  preSpikeSignups,
-  preSpikeFit.slope,
-  preSpikeFit.intercept,
-);
-// preSpikeFit.slope ≈ 2.04, preSpikeFit.intercept ≈ 28.40
-// R² ≈ 0.944
-```
-
-The pre-spike ten weeks fit a line almost perfectly (`R² ≈ 0.944`);
-adding the two viral weeks back in multiplies the slope by about 2.7
-(2.04 → 5.54) and drags `R²` down to 0.606. That gap is the
-number-level version of L2's warning: a couple of points at the edge
-of the data can swing the whole fitted line far more than "2 weeks
-out of 12" would suggest.
-
-<Checkpoint question="The full 12-week fit has R² ≈ 0.606; the pre-spike 10-week fit has R² ≈ 0.944. Which fit should you trust more as a description of the *underlying weekly growth rate*, and why?">
-
-The pre-spike fit — its much higher R² means the line explains nearly all
-the variation in those ten weeks, while the full fit's lower R² means a lot
-of the signups data isn't actually following that line. This matters for
-the very next section: three different forecasts for week 52 get built from
-these two fits (plus the naive one), and R² is the tool that tells you which
-of those forecasts to trust before you even look at the resulting numbers.
+The 10-week fit, because the line explains nearly all of the movement in those
+weeks, while the 12-week line leaves much unexplained once the viral weeks join.
+But a high R squared only measures fit inside the data it was fitted on. It does
+not say the next forty weeks will keep following the line, which is the horizon
+question in the next section.
 
 </Checkpoint>
 
-## Forecasting week 52, three ways
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="fit-quality-r2"
+/>
 
-**With a fitted line, forecasting is just plugging in a future week
-number. How differently do the naive, full-regression, and
-pre-spike approaches actually forecast the board's year-end
-number?**
+## How far out can a forecast be trusted?
 
-```js
-function forecast(slope, intercept, x) {
-  return slope * x + intercept;
-}
+**Two lines fitted to nearly the same data disagree by 30.8 signups at week 13. Why does the disagreement reach 167.4 at week 52?** Because each forecast is
+the slope times the week number, so a difference in slope is multiplied by the
+horizon. The gap between the two lines is
+(5.54 - 2.04) x week + (13.67 - 28.40), which grows in a straight line.
 
-// naive: extend the week 11 -> week 12 jump in a straight line
-const naiveWeeklyIncrease = signups[11] - signups[10]; // 40
-const naiveWeek52 = signups[11] + naiveWeeklyIncrease * (52 - 12);
-// 1720
+| Week | 12-week line | Weeks 1-10 line | Gap   |
+| ---- | ------------ | --------------- | ----- |
+| 13   | 85.7         | 54.9            | 30.8  |
+| 20   | 124.4        | 69.1            | 55.3  |
+| 30   | 179.8        | 89.5            | 90.3  |
+| 52   | 301.7        | 134.3           | 167.4 |
 
-// full regression: fit on all 12 weeks
-const fullFit = linearRegression(weeks, signups);
-const fullWeek52 = forecast(fullFit.slope, fullFit.intercept, 52);
-// ≈ 301.7
+<Plot
+  mark="line"
+  x="week"
+  y="signups"
+  series="series"
+  xLabel="Week"
+  yLabel="Signups per week"
+  caption="Actual weeks 1-12 and the two fitted lines carried out to week 52. The two lines agree near the data and fan apart with the horizon."
+  data={[
+    { week: 1, signups: 30, series: "Actual" },
+    { week: 2, signups: 33, series: "Actual" },
+    { week: 3, signups: 35, series: "Actual" },
+    { week: 4, signups: 38, series: "Actual" },
+    { week: 5, signups: 36, series: "Actual" },
+    { week: 6, signups: 41, series: "Actual" },
+    { week: 7, signups: 44, series: "Actual" },
+    { week: 8, signups: 42, series: "Actual" },
+    { week: 9, signups: 47, series: "Actual" },
+    { week: 10, signups: 50, series: "Actual" },
+    { week: 11, signups: 80, series: "Actual" },
+    { week: 12, signups: 120, series: "Actual" },
+    { week: 1, signups: 19.2, series: "Line through 12 weeks" },
+    { week: 12, signups: 80.1, series: "Line through 12 weeks" },
+    { week: 20, signups: 124.4, series: "Line through 12 weeks" },
+    { week: 30, signups: 179.8, series: "Line through 12 weeks" },
+    { week: 40, signups: 235.2, series: "Line through 12 weeks" },
+    { week: 52, signups: 301.7, series: "Line through 12 weeks" },
+    { week: 1, signups: 30.4, series: "Line through weeks 1-10" },
+    { week: 12, signups: 52.8, series: "Line through weeks 1-10" },
+    { week: 20, signups: 69.1, series: "Line through weeks 1-10" },
+    { week: 30, signups: 89.5, series: "Line through weeks 1-10" },
+    { week: 40, signups: 109.9, series: "Line through weeks 1-10" },
+    { week: 52, signups: 134.3, series: "Line through weeks 1-10" },
+  ]}
+/>
 
-// pre-spike regression: fit on weeks 1-10 only
-const preSpikeWeek52 = forecast(preSpikeFit.slope, preSpikeFit.intercept, 52);
-// ≈ 134.3
-```
+Inside weeks 1-12 the lines agree reasonably; beyond them they fan apart, and
+neither is checked by any data. A line also has no ceiling or floor. Suppose, as an
+assumption for illustration only, that the product's whole reachable audience can
+produce at most about 150 signups a week. Then 302 is impossible and even 134 is a
+guess about when growth stops. Straight-line extrapolation fails whenever
+something the line cannot see changes: a ceiling, a campaign ending, a
+competitor, a season turning.
 
-Three defensible-sounding methods, three very different year-end
-numbers: **1,720** (naive), **≈302** (full regression), **≈134**
-(pre-spike trend only). The naive number is the one the board actually
-heard — and it's roughly 5.7× the full-regression estimate, and about
-13× the pre-spike estimate, because it treated one unusually good
-week as the new weekly growth rate instead of as a single data point.
+<Checkpoint question="Two forecasts differ by 30.8 at week 13. Without refitting anything, roughly how large will the gap be at week 26 if both lines stay straight?">
 
-**Which of these three should actually go in front of the board?**
-Neither extreme, and the code above doesn't resolve that by itself —
-it's a modeling judgment, not a technical answer the regression can
-make for you. The full-regression number is defensible as a
-data-driven midpoint, but note where it lands: closer to the
-pre-spike trend line (≈134) than to the naive claim (1,720),
-because that's the direction the earlier, larger data points pull the
-fit. What the numbers rule out with more confidence is the naive
-approach standing unquestioned.
+Larger than 30.8, and you can compute it. The gap is a straight line itself:
+(5.54 - 2.04) x week - 14.73, so at week 26 it is about 3.50 x 26 - 14.73 = 76.3.
+(Check at week 13: 3.50 x 13 - 14.73 = 30.8.) The gap keeps growing because
+the slope difference is multiplied by the week number, so disagreement between
+two reasonable fits is itself a measure of how uncertain a distant forecast is.
 
-## What generalizes and what doesn't
+</Checkpoint>
 
-The core lesson — a trend fit from all the available data is more
-defensible than one read off the two most recent points, a fit's `R²`
-tells you how much to trust it, and any forecast's reliability drops
-the further it's projected past the observed range — applies to any
-time series: server load, revenue, churn, latency percentiles. What's
-specific to this worked example: `linearRegression` fits a single
-straight line, which assumes the underlying trend really is linear.
-`applied-math/statistics` explains the mean/variance language behind
-`R²`, while `applied-math/math-tool-prediction` covers the broader habit
-of choosing a model before trusting a forecast.
-**Try extending it yourself:** if the twelve weeks of signups instead
-showed a repeating pattern — say, every fourth week dipping because of
-a recurring maintenance window — would a single straight line fit
-through all the data still produce a high `R²`, or would the model
-itself need to change to capture a repeating pattern on top of a
-trend?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="extrapolation-limits"
+/>
+
+## What this worked example does and does not cover
+
+This is one case, not the whole territory. The numbers are specific: one series,
+one spike near the end, one straight-line model. Try changing it yourself.
+What would the 12-week slope do if the viral post had come in week 3 instead of
+week 12? What would change if every fourth week had a maintenance-window dip? And if the
+spike were not a one-off but the start of a new level, would the pre-spike line
+be the honest forecast or the stale one? Answering these means deciding what
+kind of change the data contains, which no fit can decide for you.
+
+The slider in L1 explores the first question's cousin: how much the 12-week
+forecast moves as the spike size changes.
 
 ## Failure modes
 
-| Failure mode                                                          | What it gets wrong                                                                                                                             |
-| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Computing a "trend" from only the two most recent points              | Any two points define a line by definition — it says nothing about whether the broader data actually behaves that way, as the `R²` gap shows   |
-| Reporting a regression's forecast without checking its `R²`           | A low `R²` (like the full fit's 0.606) means the line leaves most of the variation unexplained — the forecast inherits that uncertainty        |
-| Extrapolating forty weeks out with the same confidence as four        | Nothing in the observed range confirms the trend holds that far forward — the further past the data, the more the forecast is a guess          |
-| Assuming a linear model is the right model without checking the shape | Least-squares regression always returns _a_ line — it can't tell you the underlying process is actually curved, seasonal, or has a step change |
+| Failure mode                               | What it gets wrong                                                                  |
+| ------------------------------------------ | ----------------------------------------------------------------------------------- |
+| Reporting a forecast without its R squared | a low value means most of the variation is unexplained                              |
+| Reading a fit's slope as the latest change | the slope averages across all points; the last jump is a different number           |
+| Projecting as far as the line reaches      | the further out, the more the forecast depends on assumptions the data never tested |
+| Using a line for a repeating pattern       | the slope can be flat or even negative while the real trend rises                   |
