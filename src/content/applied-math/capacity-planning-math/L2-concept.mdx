@@ -1,48 +1,118 @@
 ---
-title: "L2 — The formulas: fleet sizing from a target utilization, and allocating a latency budget across hops"
+title: "L2 — From a peak to a server count, why latency bends before the limit, and how a time budget is split"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+import Plot from "../../../components/Plot.astro";
 
-L1 named the gap: StreamCast's fleet was sized against a guessed
-number, not a real peak, and had no explicit latency budget at all.
-This level turns both into actual formulas — how many servers a real
-peak requires at a chosen safety margin, and how a total time limit
-gets divided across hops that run in sequence versus hops that run
-at the same time.
+export const unit = {
+  track: "applied-math",
+  unitSlug: "capacity-planning-math",
+};
+
+L1 used a kitchen: plan for the peak, keep headroom, split a time promise
+across steps. This level uses the same three ideas on a real service,
+StreamCast's live-chat backend. The figures below are teaching numbers, not
+measurements of any real product: 650 messages/sec average, a measured
+peak-to-average ratio of 7.6 from one big event, and a load test showing one
+server really sustains 700 messages/sec.
 
 <LevelIntro
   items={[
-    "The fleet-sizing formula and why target utilization isn't 100%",
-    "Sequential vs. parallel hops in a latency budget",
-    "Combining both into one back-of-envelope capacity plan",
+    "From average traffic to a server count",
+    "The delay curve and the latency bound on utilization",
+    "Chained versus parallel steps, and Little's Law",
   ]}
 />
 
-## How many servers does a real peak actually require?
+## How do you get from today's traffic to a number to size for?
 
-**Given a peak traffic number and a per-server capacity, is the
-answer just "peak ÷ capacity, rounded up"?** Almost — but running
-every server at exactly 100% of its raw capacity is exactly what
-made StreamCast's latency (and then its retries) blow up. The
-formula needs a third input: a **target utilization**, the fraction
-of raw capacity a server is actually allowed to run at.
+**Today the dashboard says 650 messages/sec. Is that the number the fleet must
+handle?** No. The number to size for is the forecast peak:
 
-```js
-function computeServersNeeded(
-  peakRequestsPerSecond,
-  perServerCapacity,
-  targetUtilization,
-) {
-  const safeCapacityPerServer = perServerCapacity * targetUtilization;
-  return Math.ceil(peakRequestsPerSecond / safeCapacityPerServer);
-}
-```
+`peak = average × peak-to-average ratio`
 
-For a peak of 5,000 msgs/sec and a properly load-tested per-server
-capacity of 700 msgs/sec, the target utilization is the knob that
-decides how much of that capacity is actually usable:
+For StreamCast: $$650 \times 7.6 = 4940$$ messages/sec, which the team
+rounds up to 5,000 to plan with. Rounding up is deliberate: a measured ratio
+from one event is a floor on what the next event may bring, not a ceiling.
+
+<Checkpoint question="A team multiplies today's average by 7.6 and then plans for exactly that number, with every server allowed to run at 100% of its tested capacity. Which two assumptions in that plan are doing the most risky work?">
+
+The first is that the ratio will not grow: 7.6 was measured from one event,
+so a bigger event next quarter, or simply a larger audience, breaks it. The
+second is that 100% busy is a usable operating point. At 100% there is no
+spare time to drain a clump of arrivals, so latency climbs without bound
+even though the peak "fits" on paper. Both assumptions turn a plan that
+looks exact into one with no margin for the normal ways that forecasts miss.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="peak-vs-average"
+/>
+
+## Why does latency bend long before the limit?
+
+**If one server really handles 700 messages/sec, why not run it at 700?**
+Because requests wait behind each other, and the wait is what grows. For a
+single queue with random arrivals, time in the system is the unloaded time
+divided by the idle fraction left:
+
+$$W = T_0 / (1 - \rho)$$
+
+Here $$T_0$$ is the time at rest and $$\rho$$ is utilization. The multiplier
+$$1 / (1 - \rho)$$ is mild until the high 70s and then takes off:
+
+<Plot
+  mark="line"
+  x="utilization"
+  y="multiplier"
+  xLabel="Utilization (%)"
+  yLabel="Latency as a multiple of the at-rest time"
+  caption="Exact values of 1 / (1 - utilization). At 70% the multiplier is 3.33; at 92% it is 12.5; at 95% it is 20."
+  data={[
+    { utilization: 10, multiplier: 1.11 },
+    { utilization: 20, multiplier: 1.25 },
+    { utilization: 30, multiplier: 1.43 },
+    { utilization: 40, multiplier: 1.67 },
+    { utilization: 50, multiplier: 2 },
+    { utilization: 60, multiplier: 2.5 },
+    { utilization: 70, multiplier: 3.33 },
+    { utilization: 80, multiplier: 5 },
+    { utilization: 85, multiplier: 6.67 },
+    { utilization: 90, multiplier: 10 },
+    { utilization: 92, multiplier: 12.5 },
+    { utilization: 95, multiplier: 20 },
+  ]}
+/>
+
+This is a simplified single-queue model. It is right about the shape and
+about where the trouble starts, but it overstates the cost of steps that do
+not queue on your own machines (a network round trip, for instance). Use it
+for planning conversations, then confirm with a load test.
+
+The same curve gives a bound that a throughput number alone cannot. If the
+at-rest time is $$T_0$$ and the whole request must finish within a budget
+$$B$$, then you need $$T_0 / (1 - \rho) \le B$$, which rearranges to
+
+$$\rho \le 1 - T_0 / B$$
+
+So a request that already uses 80% of its budget at rest ($$T_0 = 40$$ ms,
+$$B = 50$$ ms) may run its servers at no more than 20% busy. A request that
+uses 40% of its budget at rest ($$T_0 = 20$$ ms) may run them at 60%.
+
+## From a utilization target to a fleet size
+
+**Given a peak and a busy ceiling, how many servers is that?** Each server
+contributes its tested capacity times the ceiling, and you round up:
+
+`servers = ceil(peak / (capacity × target))`
+
+For a 5,000 messages/sec peak and 700 per server, exact results:
 
 ```mermaid
 xychart-beta
@@ -52,104 +122,106 @@ xychart-beta
     line [15, 12, 11, 9, 8, 8]
 ```
 
-Two things worth noticing in that curve: going from 50% to 80%
-target utilization saves almost half the fleet (15 servers down to 9) — real money. But going from 80% to 100% only saves one more
-server (9 down to 8), while removing _all_ headroom for a traffic
-spike or a slow deploy. That last step is a bad trade: a small,
-uncertain saving for a system with zero margin left. Most real
-capacity plans land somewhere around 70–80% target utilization for
-exactly this reason — enough headroom to absorb normal variance
-without paying for a mostly-idle fleet.
+Going from 50% to 80% saves six servers. Going from 80% to 100% saves one
+more, and removes every bit of headroom. That last step buys almost nothing
+and costs everything the delay curve above warned about.
 
-<Checkpoint question="A team targets 95% utilization to squeeze out one extra server's worth of savings. Traffic comes in 8% above forecast on launch day — a routine miss, not a disaster. What actually happens to their fleet?">
+<Checkpoint question="At a 5,000 msgs/sec peak, the plan uses 11 servers at a 70% target (each safely handles 490). A launch overshoots the forecast by 10%. What happens, and what would 8 servers at a 100% target have done?">
 
-At 95% target utilization there's only 5% raw headroom left, and an
-8% traffic overshoot exceeds it entirely — the fleet has no spare
-capacity to absorb even a routine forecasting miss. This isn't a
-gentle overrun; it's the same mechanism from L1: as utilization
-pushes past what's left, per-request latency starts climbing faster
-than traffic itself is climbing, clients start retrying slow
-requests, and those retries add real load on top of a fleet that was
-already out of room. A team targeting 70–80% instead would have
-absorbed the same 8% overshoot as a shrug, not an incident.
+The 10% overshoot is 5,500 messages/sec. Eleven servers have a raw capacity of
+7,700, so they run at about 71% busy: a bit more waiting, still healthy. Eight
+servers have a raw capacity of 5,600, so the same overshoot puts them at
+about 98% busy, where the multiplier is above 50 and clients begin retrying
+requests that look stuck. Those retries add load on top of load. The saving
+from three fewer servers is real, but it is paid back the first time the
+forecast misses by a normal amount.
 
 </Checkpoint>
 
-## Sequential vs. parallel hops: it isn't always addition
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="headroom-queueing"
+/>
 
-**A request budget is 50ms. It passes through 5 hops, each
-individually well under 50ms. Is the request necessarily within
-budget?** Depends entirely on whether those hops run one after
-another or several at once — and treating every hop as if it adds to
-the total is one of the most common latency-budget mistakes:
+## When steps run side by side, what does the total become?
+
+**A request has a 50 ms budget and five steps, each far below 50 ms. Is it
+inside the budget?** It depends on the shape of the steps:
 
 ```mermaid
 flowchart TB
-    subgraph Sequential["Sequential hops — costs add up"]
+    subgraph Chain["Chained steps: costs add"]
         direction LR
-        A1["Network\n5ms"] --> A2["Load balancer\n3ms"] --> A3["Auth check\n10ms"] --> A4["Serialize\n4ms"]
+        A1["Network<br/>5 ms"] --> A2["Load balancer<br/>3 ms"] --> A3["Auth<br/>10 ms"]
     end
-    subgraph Parallel["Parallel hops — cost is the slowest branch"]
+    subgraph Fan["Parallel steps: cost is the slowest branch"]
         direction LR
-        B0["Auth check\n10ms"] --> B1["Push notification\n18ms"]
-        B0 --> B2["Analytics log\n6ms"]
-        B1 --> B3["Response\nwaits for slowest"]
+        B0["Start both<br/>at once"] --> B1["Push notification<br/>18 ms"]
+        B0 --> B2["Analytics write<br/>6 ms"]
+        B1 --> B3["Respond when<br/>both are done"]
         B2 --> B3
     end
+    Chain --> Fan
 ```
 
-A **sequential** chain's total time is the sum of every hop, because
-each one has to finish before the next starts. A **parallel**
-fan-out's total time is the _slowest_ branch, not the sum of all
-branches, because they all start at the same moment and the response
-can't go out until the last one finishes. Modeling a parallel
-fan-out as if it were sequential (adding every branch's cost) makes
-a system look far more over-budget than it actually is — and
-modeling a _sequential_ dependency as if it were parallel does the
-opposite, silently hiding real latency that's actually there.
+A chain costs the sum of its steps. A fan-out costs its slowest branch. For
+the request here: network 5, load balancer 3, auth 10, then push (18) and
+analytics (6) together, then 4 for serialization:
 
-<Checkpoint question="A request has a sequential chain — network (5ms) + load balancer (3ms) + auth (10ms) — followed by a fan-out to a push notification (18ms) and an analytics log write (6ms) that happen at the same time, followed by 4ms of response serialization. What's the total, and which single number in this plan matters most for staying under a 50ms budget?">
+$$5 + 3 + 10 + \max(18, 6) + 4 = 40$$ ms
 
-Total = 5 + 3 + 10 + max(18, 6) + 4 = 40ms — the fan-out contributes
-only its slowest branch (18ms), not both branches added together
-(which would wrongly suggest 24ms there and a 46ms total, still
-technically under 50 but with far less real margin than the true
-number shows). The single number that matters most is that 18ms push
-notification hop: it's both the slowest branch in the fan-out _and_
-the largest single line item in the whole plan, so it's the one hop
-where a small increase eats directly into the 10ms of margin the
-correct 40ms total actually has.
+Adding every step as if it were chained gives 46 ms and hides the real
+margin: 10 ms, not 4. The mistake in the other direction is worse. Treating a
+genuinely chained dependency as parallel makes the plan look faster than the
+system can ever be.
+
+<Checkpoint question="If the analytics write grows from 6 ms to 25 ms, how much does the 40 ms total change, and which step now decides the budget?">
+
+The total becomes $$5 + 3 + 10 + \max(18, 25) + 4 = 47$$ ms, a change of 7
+ms, not 19 ms. The analytics write has become the slowest branch, so it now
+decides the fan-out's cost and the push notification, which used to decide
+it, is off the critical path. The step that sets the total can change as
+costs change, which is why budgets get re-checked instead of assigned once.
 
 </Checkpoint>
 
-## Combining both into one back-of-envelope plan
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="latency-budget-hops"
+/>
 
-A real capacity plan needs both formulas together, not just one:
-the fleet-sizing formula answers "how many servers," and the latency
-budget answers "will a single request inside that fleet actually
-finish in time." A fleet sized correctly for throughput can still
-blow its latency budget if it's run too close to 100% utilization —
-which is exactly the connection L1 hinted at and L3 works through
-with real numbers: StreamCast's fleet wasn't just under-sized for
-peak throughput, it was also running close enough to its raw limit
-that ordinary hops started taking far longer than their nominal
-cost, blowing the latency budget on top of the throughput shortfall.
+## What does Little's Law add?
+
+**Latency and throughput are linked. Is there a quick cross-check?** Little's
+Law says the average number of requests in the system equals the arrival rate
+times the average time each spends there:
+
+$$L = \lambda W$$
+
+It needs no model of the queue at all, only a rate and a time. Using the
+numbers from this unit:
+
+| Situation                            | Rate      | Time in system | Requests in flight |
+| ------------------------------------ | --------- | -------------- | ------------------ |
+| At rest, 40 ms per request           | 5,000/sec | 0.04 s         | 200                |
+| Overloaded fleet, 500 ms per request | 3,860/sec | 0.5 s          | 1,930              |
+
+When latency rises, the same traffic holds far more work in flight at once:
+memory, connections and threads all have to carry the extra, which is one more
+reason a slow fleet tends to get slower. The law also works as a sizing check
+on connection pools and thread counts, not only on servers.
 
 ## Failure modes at this level
 
-- **Sizing from average traffic, or from a guessed per-server
-  number, instead of a measured or forecast peak.** Both were true
-  of StreamCast's original plan, and both understate the real
-  number needed.
-- **Targeting 100% (or close to it) utilization to save a server or
-  two.** The marginal savings shrink fast near the top of the curve
-  while the headroom lost is total — a bad trade almost every time.
-- **Adding every hop's cost as if all requests were purely
-  sequential.** Any real fan-out (parallel calls, concurrent lookups)
-  makes that overcount the budget — but the reverse mistake, treating
-  a genuinely sequential dependency as parallel, silently hides real
-  latency.
-- **Sizing throughput and latency budgets independently.** They
-  interact: a fleet with too little throughput headroom runs hot
-  enough that its latency budget blows too, even if the latency plan
-  looked fine on paper at low load.
+- **Sizing from the average, or from an untested guess at per-server capacity.**
+  Both understate the number the system must survive.
+- **Targeting close to 100% utilization to save a server or two.** The saving is
+  small and the headroom lost is total.
+- **Checking throughput and latency separately.** A fleet sized for throughput
+  can still miss its time budget because latency depends on how busy it runs.
+- **Adding branches of a fan-out as if they were chained** (overcounting) or
+  chained steps as if they were parallel (undercounting).
+- **Freezing a measured peak-to-average ratio.** It describes the past; revisit
+  it as the audience grows.

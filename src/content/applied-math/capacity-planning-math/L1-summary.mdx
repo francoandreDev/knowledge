@@ -1,130 +1,157 @@
 ---
-title: "L1 — How do I size a system for traffic that hasn't happened yet? (capacity planning math: throughput budgets, latency budgets, back-of-envelope sizing)"
+title: "L1 — How do I calculate capacity before I need it? (capacity planning math: throughput budgets, latency budgets, headroom)"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Provisioned for 600 msgs/sec on paper. Fell over at 420 — before the peak even arrived.">
+export const unit = {
+  track: "applied-math",
+  unitSlug: "capacity-planning-math",
+};
+
+<Scenario label="A kitchen that handled every ordinary night, then drowned on a Saturday.">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>📊</span> <strong>Average load</strong> — 500 messages/sec, every normal day</div>
-      <div class="flex items-center gap-1.5"><span>🖥️</span> <strong>Provisioned "paper" capacity</strong> — 6 servers × a guessed 100 msgs/sec each = 600 msgs/sec</div>
-      <div class="flex items-center gap-1.5"><span>🎫</span> <strong>Actual live-event peak</strong> — 3,800 msgs/sec, measured only after the fact</div>
-      <div class="flex items-center gap-1.5"><span>💥</span> <strong>Where it actually broke</strong> — ~420 msgs/sec, below its own paper number</div>
+      <div class="flex items-center gap-1.5"><span>🍳</span> <strong>Capacity</strong> — 3 cooks × 20 plates per hour = 60 plates per hour</div>
+      <div>
+        <div class="mb-0.5 flex justify-between text-xs"><span>Ordinary night: 40 plates/hr</span><span>67% of capacity</span></div>
+        <div class="h-2.5 w-full rounded bg-slate-200 dark:bg-slate-700"><div class="animate-fill-bar h-2.5 rounded bg-emerald-500" style="--target-width: 36%"></div></div>
+      </div>
+      <div>
+        <div class="mb-0.5 flex justify-between text-xs"><span>Capacity: 60 plates/hr</span><span>100%</span></div>
+        <div class="h-2.5 w-full rounded bg-slate-200 dark:bg-slate-700"><div class="animate-fill-bar h-2.5 rounded bg-sky-500" style="--target-width: 55%"></div></div>
+      </div>
+      <div>
+        <div class="mb-0.5 flex justify-between text-xs"><span>Saturday peak: 110 plates/hr</span><span>183% of capacity</span></div>
+        <div class="h-2.5 w-full rounded bg-slate-200 dark:bg-slate-700"><div class="animate-fill-bar h-2.5 rounded bg-rose-500" style="--target-width: 100%"></div></div>
+      </div>
+      <div class="text-xs">Bars are scaled to the 110 plates/hr peak.</div>
     </div>
   </Fragment>
 
-StreamCast's live-chat backend hums along fine on a normal day at 500
-messages/sec. Six servers sit behind a load balancer, each guessed
-to handle "about 100 msgs/sec," so on paper the fleet can absorb
-600 msgs/sec — comfortable headroom over the daily average. Then a
-major creator goes live. Chat volume climbs. The service doesn't
-fail gracefully at 600, and it doesn't even make it that far — it
-starts timing out and dropping messages around 420 msgs/sec, while
-the actual peak the event would have produced was measured afterward
-at 3,800 msgs/sec. **Nobody changed the code. The servers didn't
-crash from a bug. What number was the team actually planning
-around, and why was it the wrong one?**
+A small restaurant has three cooks. Each cook finishes one plate every
+3 minutes, which is 20 plates an hour, so the kitchen can plate 60 an hour.
+On an ordinary night about 40 plates an hour are ordered, and nobody
+complains. Then a Saturday brings 110 plates an hour. Tickets pile up, the
+wait grows every minute, and by the end of the night the first tables are
+still waiting while new ones sit down. **Nobody cooked more slowly than
+usual. Which number should the owner have been counting before Saturday, and
+what else was missing from the plan?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Throughput budget: the traffic number a system must actually sustain",
-    "Latency budget: splitting a total time limit across the hops a request takes",
-    "Why capacity on paper isn't the same as safe capacity",
+    "Planning for the peak, not the average",
+    "Headroom: why 100% busy is not usable",
+    "A latency budget split across the steps",
   ]}
 />
 
-## Throughput budget: what number are you actually planning for?
+## Which number is the kitchen actually planning for?
 
-**"600 msgs/sec" sounds like a plan. Is it the right number to have planned for?** A throughput budget names the traffic rate a system has to survive — and there are at least three different numbers that answer to that description, only one of which matters for sizing:
+**The owner knew "about 40 plates an hour." Was that the number to build around?**
+Three different numbers get called "the load", and only one of them is the
+right input to a throughput budget:
 
-| Number                   | StreamCast's value | What it actually tells you                                                                       |
-| ------------------------ | ------------------ | ------------------------------------------------------------------------------------------------ |
-| **Average traffic**      | 500 msgs/sec       | What a typical day costs to run — says nothing about a busy day                                  |
-| **Peak traffic**         | 3,800 msgs/sec     | What the system must survive without falling over — the real budget target                       |
-| **Provisioned capacity** | 600 msgs/sec       | What someone guessed the fleet could handle — untested, and not derived from either number above |
+| Number              | Kitchen value | What it tells you                                  |
+| ------------------- | ------------- | -------------------------------------------------- |
+| Average load        | 40 plates/hr  | What an ordinary night costs to run                |
+| Peak load           | 110 plates/hr | What the kitchen must survive without falling over |
+| Capacity (measured) | 60 plates/hr  | What the three cooks really deliver, per hour      |
 
-StreamCast's fleet was sized against a number that was neither its
-average nor its measured peak — it was a guess about per-server
-capacity, multiplied by a server count nobody had stress-tested. The
-gap between "600 on paper" and "3,800 in reality" is the entire
-story: a throughput budget has to come from the **peak** a system
-needs to survive, not from the average traffic that happens to be
-easy to remember, and not from an untested guess at per-server
-capacity.
+A **throughput budget** is the rate a system must sustain, and it comes from
+the **peak**. Here peak is $$110 / 60 \approx 1.83$$ times capacity, so the
+kitchen is short by a whole extra cook and a half before anything else goes
+wrong. The ratio of peak to average ($$110 / 40 = 2.75$$) is the
+**peak-to-average ratio**: the number that turns "what I see on a normal day"
+into "what I must plan for".
 
-## Latency budget: where does your time limit actually go?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="peak-vs-average"
+/>
 
-A throughput number alone doesn't catch everything that can go
-wrong. **If a request has a 50ms time limit end to end, and it
-passes through five different hops on the way to a response, how
-much time does any single hop actually get?** Without an explicit
-answer, every hop's owner tends to assume "plenty" — and those
-assumptions don't have to add up to anything sane:
+## If the peak fits, can the cooks run at 100% busy?
 
-| Hop                           | Time it actually costs      |
-| ----------------------------- | --------------------------- |
-| Network + TLS                 | 5ms                         |
-| Load balancer routing         | 3ms                         |
-| Auth check                    | 10ms                        |
-| Session lookup / fan-out work | up to 18ms                  |
-| Response serialization        | 4ms                         |
-| **Total (sequential parts)**  | **22ms fixed + up to 18ms** |
+**Suppose the owner hires enough cooks that peak equals exactly 100% of
+capacity. Is that safe?** No. Orders arrive in clumps, not evenly, and a
+fully busy cook has no spare time to drain a clump. Under a simple one-cook
+queue model, a plate that takes 3 minutes of actual cooking spends
+$$3 / (1 - \rho)$$ minutes from ticket to plate, where $$\rho$$ is how busy
+the cook is (see `applied-math/queueing-theory-basics`):
 
-A **latency budget** is the discipline of explicitly dividing a
-total time limit across every hop a request takes, so each owner
-knows their real margin instead of assuming an unlimited one. L2
-works through exactly how that division works — including the part
-that trips people up: not every hop happens one after another.
+| Cook is busy | Minutes from ticket to plate |
+| ------------ | ---------------------------- |
+| 50%          | 6                            |
+| 70%          | 10                           |
+| 90%          | 30                           |
+| 95%          | 60                           |
 
-## Why "capacity" on paper isn't the same as safe capacity
+The cook's own work never changes. Only the waiting does, and it explodes
+near the top. **Headroom** is the gap you keep below 100%; a **target
+utilization** (often somewhere around 70% for a latency-sensitive system) is
+the busy level you plan to stay under at peak.
 
-**If the fleet's paper capacity was 600 msgs/sec and it broke at
-420, what ate the missing 180?** Two things a throughput number
-alone doesn't capture: the real **peak-to-average ratio** (StreamCast
-assumed something mild; the actual event traffic was 7.6× the daily
-average, not the roughly 1.5× the team had implicitly planned for),
-and **headroom** — running a server near 100% of its raw capacity
-doesn't fail gracefully, it fails suddenly, because request latency
-doesn't grow at the same rate load does. As servers got busier, each
-message took longer to process, clients started retrying messages
-that seemed stuck, and those retries added _more_ load on top of an
-already-struggling fleet — a small feedback loop that turned "getting
-slow" into "falling over," well before the fleet's own paper number
-was reached.
+```mermaid
+flowchart LR
+    A["Measure or forecast<br/>the peak"] --> B["Measure what one unit<br/>really delivers"]
+    B --> C["Pick a target<br/>utilization"]
+    C --> D["Units needed =<br/>peak / (capacity x target)"]
+```
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="headroom-queueing"
+/>
+
+## How long may the whole trip take, and who gets how much?
+
+**The restaurant promises food in 25 minutes. Who owns which minutes?**
+A **latency budget** divides a total time limit across every step a request
+passes through, so each owner knows their share. The twist is that some steps
+run at the same time:
+
+| Step                                   | Minutes                 |
+| -------------------------------------- | ----------------------- |
+| Take the order                         | 4                       |
+| Cook: grill (12) and sides (8) at once | 12 (the slower one)     |
+| Plate                                  | 2                       |
+| Carry to the table                     | 2                       |
+| **Total**                              | **4 + 12 + 2 + 2 = 20** |
+
+Steps in a chain add up. Steps that run side by side cost only the slowest
+one. Against a 25-minute promise this plan has 5 minutes of margin, which is
+exactly the kind of number that disappears when the kitchen is overloaded.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="latency-budget-hops"
+/>
 
 ## Key terms
 
-- **Throughput budget** — the traffic rate (usually requests or
-  messages per second) a system must be provisioned to survive,
-  derived from measured or forecast **peak** traffic, not average
-  traffic.
-- **Peak-to-average ratio** — how many times higher peak traffic runs
-  compared to the average; assuming a low ratio when the real one is
-  much higher is one of the most common capacity-planning mistakes.
-- **Latency budget** — a total time limit (often a p99 SLA) divided
-  explicitly across every hop a request passes through, so each
-  hop's owner knows their real margin.
-- **Headroom** — the gap between a system's actual traffic and its
-  raw maximum capacity; the smaller that gap gets, the more each
-  additional unit of load costs in latency, not just in throughput
-  consumed.
-- **Back-of-envelope estimate** — a quick, defensible calculation
-  built from known unit costs (capacity per server, bytes per
-  request, time per hop) used to size a system before it's built or
-  load-tested, not a substitute for eventually load-testing it for
-  real.
+- **Throughput budget** — the rate (plates, requests, messages per second)
+  a system must sustain, set from the peak, not the average.
+- **Peak-to-average ratio** — peak divided by average; it is measured, and
+  it changes as a business grows.
+- **Headroom / target utilization** — the spare capacity you keep on purpose,
+  and the busy fraction you plan to run at during the peak.
+- **Latency budget** — a total time limit split across the steps of a request;
+  chained steps add, parallel steps cost the slowest.
+- **Back-of-envelope estimate** — a quick calculation from measured unit costs,
+  done before building, never a substitute for a real load test later.
 
-## What this unit covers
+## What the next levels do
 
-L2 works through the actual formulas: sizing a fleet from a peak
-throughput number and a target utilization, and allocating a latency
-budget across hops that run one after another versus hops that run
-at the same time. L3 implements all of it as real, runnable code —
-a throughput budget calculator, a latency budget allocator that
-handles both sequential and parallel hops, and a worked end-to-end
-capacity plan that reconstructs what StreamCast should have done
-before the event, not after it.
+L2 turns this into formulas for a real service: StreamCast, a live-chat
+backend with 650 messages/sec on average. It sizes a fleet from a peak and a
+target utilization, shows exactly how latency bends as utilization rises, and
+adds Little's Law as a cross-check. L3 combines both budgets into one plan and
+shows why the latency budget, not the throughput budget, can end up deciding
+how many servers you buy.
