@@ -3616,3 +3616,16 @@ Migrated 4 more `corporate-politics/` units via 4 parallel content-only subagent
 Length bias, correct strictly longest / shortest: `subtext` 27% / 26%, `credit-stealing` 23% / 18%, `warning-signs` 4% / 23%, `documentation-discipline` 3% / 15% (the last two have a faint opposite tell).
 
 `corporate-politics/` is at 10 of 14. Total migrated: 137 of 246. Remaining here: `calibrated-confrontation`, `coalition-building-defense`, `staying-principled`, `influence-tool-org-s-good` (batch in progress; the "staff engineer" label was removed from its roadmap title and teaser).
+
+## 2026-11-03 — `corporate-politics/` batch 4 (final): `calibrated-confrontation`, `coalition-building-defense`, `staying-principled`, `influence-tool-org-s-good`
+
+Migrated the last 4 `corporate-politics/` units via 4 parallel content-only subagents. `typecheck` 0 errors, `build` 273 pages; live click-through (iframe per unit, served from `dist` with a static server) passed all 24 `DomainCheck` topics, 0 Mermaid errors (including the string-category `xychart-beta` in `calibrated-confrontation`), 0 KaTeX errors, "Mark as done" enabled on all four. All quiz, no code topics.
+
+- **`calibrated-confrontation`**: 7 topics, 84 items. Classmate-presents-Mia's-dragon-drawing opening; demo numbers computed in Node (cost 54 at intensity 0, minimum at 35, 100 at 100); the "calibrated" facts bar is drawn at 2% width so it is visible but is labelled 0; "staff engineer" reworded to "much more established".
+- **`coalition-building-defense`**: 5 topics, 60 items. Modeled advocacy odds 6 / 19 / 40 / 67 / 100% at months 6 / 12 / 18 / 24 / 30 and exposure 100% vs 33% come from the demo's own formulas (labelled teaching models); sponsor renamed from "Marcel" to "Tomas" to avoid resembling "Marcus"; "senior" survives only as a plain description of a person.
+- **`staying-principled`**: 8 topics, 88 items. Fixed "two years" vs fourteen months (now fourteen months throughout); drift 6 / 17 / 33 / 42 / 52 / 75 / 100% at months 4 / 8 / 12 / 14 / 16 / 20 / 24 and credibility 100 / 70 / 50 / 35 / 25 / 12 / 3% at 0 / 1 / 2 / 3 / 4 / 6 / 10 fights a month, both teaching models.
+- **`influence-tool-org-s-good`**: 4 topics, 48 items. Removed "staff engineer", "junior" and "typically reached around staff level" from the unit text and titles; scale 1 / 8 / 10 gives 1 / 79 / 126 people and visibility 0 / 60 / 100 gives 5 / 51 / 95%. In the coordinator pass I also removed the "junior → staff-level" slider label and the "junior engineer … staff engineer" description from this unit's `interactives.json` (wording only, compute unchanged).
+
+Length bias, correct strictly longest / shortest: `calibrated-confrontation` 19% / 27%, `coalition-building-defense` 12% / 28% (practice shortest 35%, at the ceiling), `staying-principled` 19% / 16%, `influence-tool-org-s-good` 19% / 25% (exam longest 0%).
+
+`corporate-politics/` is complete: 14 of 14. Total migrated: 141 of 246. Next track in ROADMAP order: `learning-craft` (13 units; `breadth-depth-trade-off-scale` has a roadmap title with "staff engineer" to fix).
