@@ -1,218 +1,179 @@
 ---
-title: "L3 — Building a units-tracking value type, and a fast Fermi estimator, in real code"
+title: "L3 — Checking a number from a second route: a worked estimate, how far apart is too far, and where the check fails"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import Plot from "../../../components/Plot.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="The storage estimate that was 1,000x too big, reproduced in code">
+export const unit = {
+  track: "applied-math",
+  unitSlug: "orders-magnitude",
+};
+
+<Scenario label="Your quick estimate says 10 GB a day. The plan on the table says 10 TB. Which one do you trust?">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🧮</span> <strong>Correct chain</strong> — 2,000,000 records × 5 KB/record, converted KB→MB→GB</div>
-      <div class="flex items-center gap-1.5"><span>❌</span> <strong>The mistake</strong> — same raw number, relabeled MB instead of converted</div>
-      <div class="flex items-center gap-1.5"><span>💵</span> <strong>Consequence</strong> — storage provisioned at 1,000x the real requirement</div>
+      <div class="flex items-center gap-1.5"><span>📥</span> <strong>Input</strong> — 2,000,000 records a day, about 5 KB each (made-up pipeline)</div>
+      <div class="flex items-center gap-1.5"><span>📋</span> <strong>The plan</strong> — provision for 10 TB a day</div>
+      <div class="flex items-center gap-1.5"><span>🧠</span> <strong>Your estimate</strong> — about 10 GB a day, built from scratch</div>
     </div>
     <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
       <div class="rounded border border-emerald-300 bg-emerald-50 p-1.5 dark:border-emerald-800 dark:bg-emerald-950">
-        <p class="font-semibold text-emerald-600 dark:text-emerald-400">Correct</p>
-        10 GB/day
+        <p class="font-semibold text-emerald-600 dark:text-emerald-400">Estimate</p>
+        about 10 GB/day (10¹⁰ bytes)
       </div>
       <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
-        <p class="font-semibold text-rose-600 dark:text-rose-400">Mistaken</p>
-        10,000 GB/day (10 TB)
+        <p class="font-semibold text-rose-600 dark:text-rose-400">The plan</p>
+        10 TB/day (10¹³ bytes)
       </div>
     </div>
   </Fragment>
 
-**Before reading the code below, notice what kind of bug this actually is: nothing here is
-a typo or a logic error in the usual sense — the number `10,000,000` is completely correct.
-The bug is that a plain JavaScript number has no memory of what unit it's in, so nothing
-stops a KB figure from being silently treated as an MB figure two lines later.** The fix
-isn't better arithmetic — it's a value type that refuses to forget its unit.
+Two numbers disagree by 1,000x, and both came from someone who can do
+arithmetic. **Re-reading the plan's multiplication will not settle it, because
+the multiplication is probably fine. What would?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "A value type that carries its unit",
-    "A Fermi estimator, written as real code",
-    "A real-world unit-mismatch failure",
+    "A second route to the same quantity",
+    "How far apart counts as disagreement",
+    "Where the check itself goes wrong",
   ]}
 />
 
-## A units-tracking value type
+## How do you build a second route that cannot share the first one's mistake?
 
-This section assumes basic JavaScript syntax: `class` makes a small custom type, `.to()`
-is a method call, and `throw` stops the program when a unit mix would be unsafe. The
-non-code idea is simpler: carry both the number and the unit together, and refuse to add
-or convert quantities unless the units make sense.
+**If your estimate used the same steps as the plan, what would it prove?**
+Nothing. A useful check goes at the quantity from another side. The plan computed
+"records times size". The check below computes a data rate first, then scales it
+to a day. Every number is rounded, and every rounding is an assumption written
+down.
 
-```js
-// quantity.js — a minimal value type that carries its unit through every operation,
-// refusing to silently mix incompatible units or drop a conversion step.
+| Step | Quantity           | Rounded value             | Why                                    |
+| ---- | ------------------ | ------------------------- | -------------------------------------- |
+| 1    | Records per day    | 2 × 10⁶                   | Given                                  |
+| 2    | Seconds in a day   | about 10⁵ (really 86,400) | Assumption: round up to a power of ten |
+| 3    | Records per second | 2 × 10⁶ / 10⁵ = 20        | Step 1 divided by step 2               |
+| 4    | Bytes per record   | 5 × 10³                   | 5 KB                                   |
+| 5    | Bytes per second   | 20 × 5 × 10³ = 10⁵        | Step 3 times step 4                    |
+| 6    | Bytes per day      | 10⁵ × 10⁵ = 10¹⁰          | Step 5 times step 2                    |
 
-class Quantity {
-  constructor(value, unit) {
-    this.value = value;
-    this.unit = unit;
-  }
+Ten billion bytes is 10 GB. The exact value, from L2, is also 10 GB, so the
+rounding cost essentially nothing here. The plan's 10 TB is 10¹³ bytes.
 
-  static CONVERSIONS = {
-    "KB->MB": 1 / 1000,
-    "MB->GB": 1 / 1000,
-    "KB->GB": 1 / 1_000_000,
-  };
-
-  to(targetUnit) {
-    if (this.unit === targetUnit) return this;
-    const key = `${this.unit}->${targetUnit}`;
-    const factor = Quantity.CONVERSIONS[key];
-    if (factor === undefined) {
-      throw new Error(`No conversion known from ${this.unit} to ${targetUnit}`);
-    }
-    return new Quantity(this.value * factor, targetUnit);
-  }
-
-  add(other) {
-    if (this.unit !== other.unit) {
-      throw new Error(
-        `Cannot add incompatible units: ${this.unit} + ${other.unit}`,
-      );
-    }
-    return new Quantity(this.value + other.value, this.unit);
-  }
-
-  toString() {
-    return `${this.value} ${this.unit}`;
-  }
-}
-
-function dailyStorage(records, kbPerRecord) {
-  return new Quantity(records * kbPerRecord, "KB"); // unit is DERIVED, not chosen
-}
+```mermaid
+flowchart LR
+    subgraph Plan["Route A: the plan"]
+        A1["records × KB per record"] --> A2["10,000,000, unit assumed MB"] --> A3["10 TB"]
+    end
+    subgraph Check["Route B: the check"]
+        B1["records per day ÷ seconds per day"] --> B2["rate in bytes per second"] --> B3["× seconds per day"] --> B4["about 10 GB"]
+    end
+    A3 -. "compare" .- B4
 ```
 
-```js
-const correct = dailyStorage(2_000_000, 5).to("GB");
-console.log(correct.toString());
-// "10 GB" — the actual daily storage requirement
+Notice that route B follows its own unit chain too: records per second times
+bytes per record is bytes per second. The check uses the same discipline, in a
+different order.
 
-// The incident's exact mistake, reproduced: constructing a Quantity with the
-// right NUMBER but the wrong UNIT, exactly what happened when "10,000,000" got
-// labeled "MB" instead of correctly converted from KB.
-const mistaken = new Quantity(2_000_000 * 5, "MB");
-console.log(mistaken.to("GB").toString());
-// "10000 GB" — 1,000x too large, exactly matching the real incident
+<Checkpoint question="Route B multiplies by the seconds per day once, after dividing by it once. Why does it still count as an independent check instead of just cancelling out?">
 
-console.log(mistaken.to("GB").value / correct.value);
-// 1000 — the inflation factor, reproduced exactly
-```
-
-The `Quantity` class can't prevent someone from constructing `new Quantity(10_000_000,
-"MB")` by mistake — that's still a human judgment call. What it _can_ do is make every
-downstream `.add()` or `.to()` call check units explicitly, so an incompatible mix throws
-immediately instead of silently producing a wrong number three functions away from where
-the mistake was actually made:
-
-```js
-new Quantity(5, "KB").add(new Quantity(3, "MB"));
-// throws: "Cannot add incompatible units: KB + MB"
-```
-
-<Checkpoint question="dailyStorage(2_000_000, 5) returns new Quantity(10_000_000, 'KB') — not 'MB'. Why is KB the only unit that could correctly come out of that constructor, no matter what the caller expected?">
-
-Because the unit is _derived_ from multiplying `records` by `KB/record`, exactly the way L2's algebra showed `records` canceling against `record` and leaving `KB` behind — the constructor never chooses a unit from habit or memory, so there is no step where "MB" could sneak in. The incident's bug only became possible later, at `new Quantity(2_000_000 * 5, "MB")`, where a human typed a unit by hand instead of letting it be derived.
+The rounded value is not the same number each time it appears, and the order of
+operations is different. The route turns the quantity into a rate, which is
+something you can sanity check on its own: about 20 records every second, about
+100 KB per second. That intermediate figure is a thing a person can feel and
+challenge. The plan's route has no such waypoint, and its unit was never
+checked along the way.
 
 </Checkpoint>
 
-## A Fermi estimator, as real code
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="second-route"
+/>
 
-L2 used the hand estimate `(2 × 5) × 10^(6+3) = 10^10 bytes`. The function below makes
-that same split explicit: each input becomes a front number (the mantissa) times a power
-of ten (the exponent). It is an order-of-magnitude checker, not an exact storage-unit
-converter; use it to notice "this answer should be around 10 GB," then use dimensional
-analysis for the precise unit conversion.
+## How far apart do two numbers have to be before something is wrong?
 
-```js
-// fermi.js — split each factor into mantissa × 10^exponent, then multiply.
-// This is the "few seconds, independent sanity check" from L2, made runnable.
+**Rounding costs a small factor, so when does a gap stop being rounding?** Think
+in orders of magnitude of the ratio. This is a working rule of thumb for this
+unit, not a law:
 
-function fermiEstimate(...factors) {
-  let mantissaProduct = 1;
-  let exponentSum = 0;
-  for (const f of factors) {
-    const exponent = Math.floor(Math.log10(f));
-    const mantissa = f / Math.pow(10, exponent);
-    mantissaProduct *= mantissa;
-    exponentSum += exponent;
-  }
-  return mantissaProduct * Math.pow(10, exponentSum);
-}
-```
+| Ratio between plan and estimate | Likely meaning                                     | Action                          |
+| ------------------------------- | -------------------------------------------------- | ------------------------------- |
+| Under about 3x                  | Rounding and assumptions                           | Accept                          |
+| About 10x                       | One assumption may be off, or a real effect        | Look at the biggest assumption  |
+| 100x or more                    | A unit, a conversion, or a misread quantity        | Stop and hunt for the slip      |
+| About 1,000x                    | Almost always a skipped or doubled factor of 1,000 | Check KB / MB / GB labels first |
 
-```js
-fermiEstimate(2_000_000, 5_000); // 2e6 records, ~5e3 bytes/record (5 KB)
-// 10000000000 — that's 10^10 bytes, i.e. ~10 GB
+A gap of exactly a power of ten is a strong signature: mistakes in
+assumptions tend to give messy ratios like 2.7x, while a missing unit conversion tends to give
+1,000x on the nose.
 
-// Run this BEFORE trusting a reported "10,000 GB" figure, and the mismatch
-// (10 GB expected vs. 10,000 GB reported) is immediately obvious — three
-// orders of magnitude apart, not a rounding difference.
-```
+The chart plots four figures in GB on a log scale. The two good figures sit on
+the same grid line, the plan sits three lines above it, and an error in the other
+direction sits three lines below.
 
-Notice this function never touches the `Quantity` class or the original calculation at
-all — it's a genuinely independent estimate, computed from the same raw inputs (record
-count, bytes per record) but through an entirely separate code path. That independence is
-exactly what makes it a real check rather than a repeat of the same mistake.
+<Plot
+  mark="dot"
+  x="case"
+  y="gb"
+  yScale="log"
+  xLabel="1 = estimate, 2 = exact, 3 = plan (relabelled MB), 4 = divided by 1,000 once too often"
+  yLabel="Gigabytes per day"
+  caption="The mistake is not a small drift: it is three grid lines away in either direction."
+  data={[
+    { case: 1, gb: 10 },
+    { case: 2, gb: 10 },
+    { case: 3, gb: 10000 },
+    { case: 4, gb: 0.01 },
+  ]}
+/>
 
-If you want the more aggressive "nearest power of ten only" version, replace each mantissa
-with `1` or `10` after deciding which is closer. That is faster and rougher. Keeping the
-mantissas, as this code does, still teaches the same scale habit while preserving simple
-front-number arithmetic like `2 × 5`.
+## What does the check not protect you from?
 
-<Checkpoint question="fermiEstimate() never imports or calls the Quantity class, and never touches the original dailyStorage() calculation. Why does that separation matter for catching the incident's 1,000x error, rather than being a missed opportunity to share code?">
+| Failure mode                                        | Why the check misses it                                                                                                                                                  |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Both routes share an input that is wrong            | If 2,000,000 records a day is itself a misread, both routes inherit it                                                                                                   |
+| The ratio is small but the cost of being off is big | 3x on a bill or a safety limit can still matter; a rough check does not replace exact work                                                                               |
+| The check reuses the plan's unit table              | A wrong KB-to-MB factor copied into both routes makes them agree on a wrong answer                                                                                       |
+| Decimal versus binary units                         | 1,024³ / 1,000³ is about 1.07, so GB versus GiB is roughly a 7% drift, well inside rounding, not a 1,000x slip                                                           |
+| Believing it only happens to careless teams         | A 1999 spacecraft loss is attributed to one team's software output in pound-force seconds and another's expecting newton-seconds; one unit is about 4.45 times the other |
 
-If `fermiEstimate` reused the same conversion table or the same calculation path as `Quantity`, a bug baked into that shared code — like the incident's dropped KB→MB conversion — would silently pass both checks, because both checks would be running the same mistake. Its value as a sanity check comes specifically from being computed a different way, from the same raw inputs, so the two answers can actually disagree when one of them is wrong.
+The spacecraft case is the same structure as the logging plan. A number was
+correct in the unit it was produced in and wrong the moment a downstream system
+assumed a different one, with nothing forcing an explicit unit check between them.
+
+<Checkpoint question="Your estimate and the plan agree to within 2x, but both came from the same spreadsheet cell for 'records per day'. What has the check actually shown?">
+
+Only that the arithmetic and units downstream of that cell are consistent. The
+cell itself was never checked, because both routes depend on it. An independent
+check has to be independent of the input too, for example by asking how many
+users there are and how many records each makes. Agreement between two routes
+that share a source tells you nothing about that source.
 
 </Checkpoint>
 
-## A well-known real-world parallel
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="gap-signature"
+/>
 
-This class of bug — correct arithmetic, wrong unit, no code or process forcing the two to
-be checked against each other — isn't hypothetical. In 1999, NASA's Mars Climate Orbiter
-was lost because one engineering team's software produced thruster output in pound-force
-seconds (imperial units) while the navigation software that consumed those values expected
-newton-seconds (metric) — a unit mismatch that survived to the spacecraft's loss, at a cost
-of $327 million. The specific units differ from this unit's storage incident, but the
-underlying failure is identical: a number was correct in the unit it was computed in, and
-wrong the moment something downstream assumed a different one, with nothing in the system
-forcing an explicit check.
+## Extend the case: this is one worked example, not the whole territory
 
-You do not need to know spacecraft physics to use the lesson: both unit names describe
-"amount of push over time," but they are measured on different scales. The failure was not
-that one team forgot arithmetic; it was that the receiving system trusted a number without
-a unit check. That is the same structural risk as treating `10,000,000 KB` as
-`10,000,000 MB`.
-
-## Extend the incident: what if the error had gone the other direction?
-
-**This unit's incident was an overestimate (wasted spend on unneeded storage). What
-changes if the same class of error instead produces an _underestimate_ — say, someone
-divides by 1,000 an extra, unnecessary time, planning for 10 MB/day instead of 10 GB/day?**
-Trace it through: the consequence flips from "wasted budget" to "storage fills up and the
-pipeline starts dropping data or crashing under real load" — a live incident instead of a
-budget line item, and typically discovered much later (when the system is already under
-real production traffic) rather than caught in a cost-review meeting before anything ships.
-**The dimensional-analysis and Fermi-estimate discipline from L2 catches both directions
-equally** — neither technique cares whether the error inflates or deflates the number, only
-whether the reported figure and the independent estimate actually agree.
-
-## Failure modes
-
-| Failure mode                                                                    | What it gets wrong                                                                                                                                                                                                 |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Trusting a number because the arithmetic that produced it was correct           | Correct arithmetic can still carry the wrong unit — `2,000,000 × 5` is right regardless of whether the result is KB, MB, or mislabeled entirely                                                                    |
-| Skipping an independent sanity check because "the math checks out"              | A sanity check needs to be genuinely independent (different method, like a Fermi estimate) — re-verifying the same calculation can't catch a units error baked into that same calculation                          |
-| Treating unit conversion as a formality to do "at the end"                      | Converting at the end, from memory, is exactly how a KB figure gets casually relabeled MB — tracking units through every intermediate step prevents this                                                           |
-| Assuming a large-sounding number is inherently more suspicious than a small one | Both the storage incident (overestimate) and its "opposite" (underestimate) are equally dangerous — one wastes money, the other causes outages; magnitude of the NUMBER isn't what determines risk                 |
-| Assuming this class of bug only happens in "sloppy" teams or scripts            | The Mars Climate Orbiter mismatch happened at NASA, with professional engineering teams on both sides — the failure is structural (nothing forced an explicit unit check), not a matter of individual carelessness |
+The plan overestimated by 1,000x and cost money. **What changes if the same
+slip had gone the other way, planning for 10 MB a day instead of 10 GB?** The
+check flags it just the same, three grid lines low, but the consequence is
+different: storage fills and data is dropped or a service fails under real load,
+usually found later and in production instead of in a budget review. Now try
+changing other things yourself. What if the 5 KB were 5 MB per record? What if
+the estimate had no unit written down for one factor? What if the two routes
+disagreed by exactly 24, a number that looks like hours in a day? Each variant
+asks you to decide where in the chain the slip lives, which is the real skill;
+this scenario is only one place to practise it.
