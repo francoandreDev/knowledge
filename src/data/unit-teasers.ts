@@ -797,7 +797,7 @@ export const UNIT_TEASERS: Record<string, UnitTeaser> = {
       "It comes from deliberately calibrating against being wrong — years of experience without that feedback loop just produces confident, uncalibrated intuition.",
   },
   "learning-craft/breadth-depth-trade-off-scale": {
-    myth: "A staff engineer has to personally understand every domain they touch in depth.",
+    myth: "An engineer has to personally understand every domain they touch in depth.",
     reality:
       "At scale, credibility comes from knowing enough to ask the right expert the right question — not from personally mastering every domain.",
   },
