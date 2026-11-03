@@ -3629,3 +3629,16 @@ Migrated the last 4 `corporate-politics/` units via 4 parallel content-only suba
 Length bias, correct strictly longest / shortest: `calibrated-confrontation` 19% / 27%, `coalition-building-defense` 12% / 28% (practice shortest 35%, at the ceiling), `staying-principled` 19% / 16%, `influence-tool-org-s-good` 19% / 25% (exam longest 0%).
 
 `corporate-politics/` is complete: 14 of 14. Total migrated: 141 of 246. Next track in ROADMAP order: `learning-craft` (13 units; `breadth-depth-trade-off-scale` has a roadmap title with "staff engineer" to fix).
+
+## 2026-11-03 — `learning-craft/` batch 1: `exposure-understanding`, `source-evaluation`, `search-literacy`, `feynman-technique`
+
+Started the `learning-craft/` track (13 units, domain-general, all quiz so far) with 4 parallel content-only subagents (the batch was interrupted by a usage limit; the agents were resumed from their saved work). `typecheck` 0 errors, `build` 273 pages; live click-through (iframe per unit) passed all 21 `DomainCheck` topics, 0 Mermaid errors (including the two-line `xychart-beta` in `feynman-technique` L2), 0 KaTeX errors, "Mark as done" enabled on all four. No code topics.
+
+- **`exposure-understanding`**: 6 topics, 72 items. Seven-times-table quiz opening; numbers match the demo (felt 90%, cold 6/15 = 40%, retest 14/15 ≈ 93%); fixed "nine misses" vs "seven facts", removed an invented "close to the typical size" claim and an unverifiable "less than five full readings" comparison; the testing effect is described qualitatively only.
+- **`source-evaluation`**: 5 topics, 60 items. Demo values checked in Node (3 sources at 0% independence = 40%, at 100% = 78%, 10 sources at 0% = 40%); "a senior" in the rumour changed to "an older student"; the "Supplement X" case is invented and labelled so.
+- **`search-literacy`**: 5 topics, 60 items. Librarian opening; the results-remaining model (42,000 → 4,200 → 420 → 42, about 90% removed per anchor) is labelled illustrative.
+- **`feynman-technique`**: 5 topics, 60 items. Board-game opening; L3 swapped the bicycle-physics example for "why is it hotter in summer?" (covers the fluent-but-wrong trap); chart values 63 / 86 / 96% familiarity at 3 / 6 / 10 rereads computed from the demo.
+
+Length bias, correct strictly longest / strictly shortest: `exposure-understanding` 18% / 29%, `source-evaluation` 23% / 20%, `search-literacy` 25% / 20%, `feynman-technique` 28% / 23%.
+
+`learning-craft/` is at 4 of 13. Total migrated: 145 of 246. Remaining here: `spaced-repetition`, `systematic-exploration`, `weighing-credibility`, `verification-habits` (batch in progress), then `notes`, `prioritization`, `curation`, `calibration`, `breadth-depth-trade-off-scale` (its roadmap title carries "staff engineer", to fix).
