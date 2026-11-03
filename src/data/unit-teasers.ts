@@ -876,7 +876,7 @@ export const UNIT_TEASERS: Record<string, UnitTeaser> = {
   "applied-math/quantitative-modeling-design-decisions": {
     myth: "An architecture debate gets settled by whoever argues most persuasively.",
     reality:
-      "A staff engineer settles it with numbers — a quantitative model in the design doc that outlasts any one person's opinion in the room.",
+      "An engineer settles it with numbers — a quantitative model in the design doc that outlasts any one person's opinion in the room.",
   },
 
   // testing-quality/
