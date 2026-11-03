@@ -1,180 +1,160 @@
 ---
-title: "L2 — Combining a cost model, a capacity model, and a risk model into one number"
+title: "L2 — Combining cost, amortized build cost and outage risk into one monthly number"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named three ingredients — cost, capacity/latency, risk — and
-asserted they combine into one comparable number per option. This
-level covers how that combination actually works: what goes into
-each option's cost function, why Option A's cost doesn't just scale
-proportionally with traffic, and how a rare outage's expected cost
-gets added on top instead of ignored.
+export const unit = {
+  track: "applied-math",
+  unitSlug: "quantitative-modeling-design-decisions",
+};
+
+L1 compared two phone plans with a fixed part, a per-unit part and a
+break-even point. Real architecture choices add two more pieces: a
+one-time build cost and the chance of an outage. This level builds that
+fuller model for a made-up case. All figures below are **illustrative
+assumptions** chosen for the example, not measurements.
+
+**The case.** A notification service called NotifyCo sends 15 million
+messages a month, projected to reach 45 million by year end. Option A
+keeps the current synchronous design and adds servers. Option B puts a
+queue between ingestion and delivery, with an assumed one-time build cost
+of $18,000. One engineer argues for A because it is simpler; the other
+for B because it is more resilient.
 
 <LevelIntro
   items={[
-    "Why 'add servers' scales worse than proportionally with traffic",
-    "How a one-time build cost and a recurring risk cost both fold into the same monthly number",
-    "Where a crossover point comes from, and why it matters for a growing service",
+    "Fixed, per-unit, amortized and risk costs",
+    "Why Option A's unit cost climbs with volume",
+    "Running the model forward to find the crossover",
   ]}
 />
 
-## Why Option A's cost doesn't scale proportionally
+## What goes into one monthly number?
 
-**If traffic triples, does a synchronous, "just add servers"
-architecture's cost also just triple?** Not usually — it tends to get
-_worse_ than proportional, and the reason is exactly the
-`capacity-planning-math` distinction between average and peak
-traffic. A synchronous architecture has to be provisioned for
-**peak** load with real headroom, because every request is answered
-immediately or it fails. As a notification service grows, its
-traffic doesn't just get bigger — it tends to get _spikier_: bigger
-marketing sends, more simultaneous digest deliveries, a wider range
-of user time zones concentrating around specific send windows. The
-peak-to-average ratio itself tends to climb, not just the average.
-
-A queue-buffered architecture (Option B) doesn't have this problem
-the same way. A backlog forming during a burst isn't a failure — the
-queue absorbs it and workers drain it over the following minutes.
-Workers can run close to their real average throughput instead of
-being sized for the worst five minutes of the month. That's the
-entire mechanical reason Option B's cost curve bends _less_ steeply
-than Option A's as volume grows: it isn't buying extra resilience for
-free, it's trading upfront build cost for a genuinely different (and
-cheaper, at scale) capacity requirement.
-
-<Checkpoint question="A teammate says 'Option A's cost model should just be a flat $X per 1,000 notifications, same as Option B — why are you making it grow faster than volume?' What's the actual justification for letting Option A's per-unit cost increase as volume grows?">
-
-Because Option A has to be provisioned for **peak** traffic with
-enough headroom to survive it synchronously, and the peak-to-average
-ratio itself tends to worsen as the service scales — the same
-`capacity-planning-math` distinction between average, peak, and
-provisioned capacity. A flat per-unit rate would be modeling Option A
-as if it only ever had to handle its _average_ load, which is exactly
-the mistake StreamCast made when it sized its chat backend off "600
-on paper" instead of its real peak. Option B's per-unit cost stays
-closer to flat because the queue absorbs bursts instead of requiring
-the fleet itself to be sized for them.
-
-</Checkpoint>
-
-## Combining cost, amortized build cost, and risk into one monthly number
-
-**Once each option has an infrastructure cost function, is that the
-whole model?** Not quite — two more pieces still have to fold in
-before the numbers are actually comparable:
+**Which costs does each option actually carry?** Four kinds, all
+converted to dollars per month so they can be added:
 
 ```mermaid
 flowchart TD
-    V["Monthly volume"] --> IA["Option A infra cost\n(scales worse than linear)"]
-    V --> IB["Option B infra cost\n(closer to linear)"]
-    BC["One-time build cost, $18,000"] --> AM["Amortized over 12 months\n= $1,500/mo, months 1-12 only"]
+    V["Monthly volume"] --> IA["Option A per-message cost\n(unit cost rises with volume)"]
+    V --> IB["Option B per-message cost\n(roughly flat)"]
+    BC["One-time build cost\n$18,000"] --> AM["Spread over 12 months\n= $1,500 a month"]
     AM --> IB
-    OF["Outage frequency: 2/yr"] --> EV["Expected outage cost\n(EV, from expected-value)"]
-    COSTA["Cost per incident, Option A: $3,000"] --> EV
-    COSTB["Cost per incident, Option B: $300"] --> EV
-    IA --> TOTALA["Total monthly cost, A"]
-    EV --> TOTALA
-    IB --> TOTALB["Total monthly cost, B"]
-    EV --> TOTALB
+    OF["Outages per year: 2"] --> EV["Expected outage cost\n= outages x cost per incident / 12"]
+    EV --> TA["Option A monthly total"]
+    EV --> TB["Option B monthly total"]
+    IA --> TA
+    IB --> TB
 ```
 
-- **Amortized build cost** — Option B's $18,000 build cost isn't
-  free money spent once and forgotten; it's a real cost that has to
-  land _somewhere_ in the monthly comparison, or the model is quietly
-  pretending engineering time is free. Spreading it over the first 12
-  months (the same amortization idea from `unit-economics`) means
-  Option B's early months carry an extra $1,500/mo that disappears
-  once the build cost is paid off.
-- **Expected outage cost** — reusing `expected-value`'s exact formula:
-  `outages/year × cost per incident`, converted to a monthly figure.
-  Option A's $3,000-per-incident cost is higher than Option B's $300
-  because a synchronous failure drops requests that then need manual
-  reconciliation, while a buffered failure just delays delivery.
+| Piece                         | Option A                                  | Option B                      |
+| ----------------------------- | ----------------------------------------- | ----------------------------- |
+| Per-message cost              | $0.00035 per message, times a growth term | $0.00035 per message          |
+| Fixed monthly overhead        | none                                      | $200 for the queue            |
+| Build cost, spread over 12 mo | $0                                        | $18,000 / 12 = $1,500         |
+| Cost per outage (assumed)     | $3,000 (dropped requests to reconcile)    | $300 (delay, nothing dropped) |
+| Expected outage cost a month  | 2 × $3,000 / 12 = $500                    | 2 × $300 / 12 = $50           |
 
-| Component                                        | Option A      | Option B      |
-| ------------------------------------------------ | ------------- | ------------- |
-| Infra cost at 15M/mo                             | $6,234.38     | $5,250.00     |
-| Amortized build cost (months 1–12)               | $0            | $1,500.00     |
-| Fixed queue overhead                             | $0            | $200.00       |
-| Expected outage cost (2/yr × cost/incident ÷ 12) | $500.00       | $50.00        |
-| **Total, month 1**                               | **$6,734.38** | **$7,000.00** |
+The **expected outage cost** is frequency times cost per incident,
+turned into a monthly figure. A rare event still gets a real number
+instead of an unweighted "but what if". The **amortized** build cost
+makes sure the engineering effort is not pretended to be free.
 
-At today's volume, in month 1, Option A is actually **cheaper** —
-$265.62 cheaper. Marcus's instinct isn't wrong at today's traffic.
-The question the model still has to answer is whether that stays
-true as volume triples over the year.
+Option A's growth term is the multiplier `1 + volume / 80,000,000`.
+It encodes one idea: a synchronous design must be sized for its busiest
+moments, and busy moments get busier as the service grows. The 80M
+reference is an assumption, and L3 tests how much the answer depends on it.
 
-## The crossover point
+<Checkpoint question="A teammate says to model Option A as a flat $0.00035 per message, same as Option B, to keep things simple. What does that quietly assume?">
 
-**If Option A is cheaper today, when — if ever — does that flip?**
-Plot both total-cost functions against volume, and the answer is a
-specific number, not a vague "eventually":
-
-```mermaid
-xychart-beta
-    title "Total monthly cost vs. volume (month 1, build cost active)"
-    x-axis ["15M", "20.5M", "25.9M", "31.4M", "36.8M", "42.3M", "45M"]
-    y-axis "Total cost ($/mo)" 0 --> 26000
-    line [6734, 9490, 12505, 15780, 19317, 23114, 25109]
-    line [7000, 8909, 10818, 12727, 14636, 16545, 17500]
-```
-
-The two lines cross between 15M and 20M/month — right around
-**16.9M**. NotifyCo's traffic is already at 15M and growing toward
-45M within the year, so this isn't a hypothetical crossover far off
-in some future scenario: at the service's current growth rate, it
-happens within the first two months. Past that point, every
-additional month makes Option A's disadvantage bigger, not smaller —
-by month 12, at 45M/month, Option A costs $25,109.37 against Option
-B's $17,500.00.
-
-<Checkpoint question="Given the crossover happens around 16.9M/month and NotifyCo is already at 15M growing toward 45M within the year, does 'Option A is cheaper today' settle the design-doc debate in Marcus's favor?">
-
-No — and this is the entire reason a design decision needs the model
-to run _forward_, not just check today's number. "Cheaper today" is
-true and also nearly irrelevant here, because today's volume is
-already within a couple million of the crossover point, and the
-service's own growth projection carries it past that point within
-roughly a month or two. A model built only around today's traffic
-would hand Marcus a technically-correct number that becomes wrong
-almost immediately — which is exactly the kind of mistake a
-one-point-in-time cost comparison makes, and exactly why the model
-needs the growth trajectory as an input, not just the current
-snapshot.
+It assumes Option A never needs extra capacity for its busiest moments,
+so its cost per message never rises as the service grows. That is the
+exact claim under debate. Using a flat rate for A would decide the
+argument in A's favor before any arithmetic ran. At 45M messages a month
+it would make A look $1,250 cheaper than B, where the fuller model has A
+$7,609.37 more expensive.
 
 </Checkpoint>
 
-## What the model doesn't decide for you
+## What does month 1 look like?
 
-**Does the model settle the debate by itself?** It settles the
-arithmetic — it doesn't settle which assumptions are trustworthy, and
-that's still a judgment call the doc has to state explicitly, not
-hide inside the model's output:
+**At today's 15M messages, which option is cheaper?** Plug the inputs
+into each column:
 
-| Assumption in this model                                             | What happens if it's wrong                                                                                                                                                                    |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Outage frequency stays at 2/year                                     | Fewer outages narrows Option B's advantage slightly; more outages widens it — Option A's cost-per-incident is 10× Option B's, so this assumption matters more to Option A                     |
-| Growth reaches 45M/month by year end                                 | Slower growth delays the crossover; faster growth pulls it earlier — either way, the model should be re-run against the _actual_ trajectory, not treated as a one-time answer                 |
-| Diseconomy-of-scale reference volume (80M) is realistic for Option A | A worse (lower) reference number would move the crossover earlier and strengthen the case for B; this is the single most arguable number in the whole model, and the design doc should say so |
+| Component (15M messages, month 1) | Option A      | Option B      |
+| --------------------------------- | ------------- | ------------- |
+| Per-message cost                  | $6,234.38     | $5,250.00     |
+| Fixed overhead                    | $0            | $200.00       |
+| Amortized build cost              | $0            | $1,500.00     |
+| Expected outage cost              | $500.00       | $50.00        |
+| **Total**                         | **$6,734.38** | **$7,000.00** |
 
-A model that hides its assumptions is just an opinion wearing a
-spreadsheet. A model that states them is something a reviewer can
-actually push back on — which is the entire point of putting numbers
-in a design doc instead of adjectives.
+Option A is **$265.62 cheaper today**. The first engineer is right about
+today. Whether that stays true is a separate question.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="cost-pieces"
+/>
+
+## When does the answer flip?
+
+**Volume is heading from 15M to 45M. Does A stay ahead?** Solving
+"A total = B total" with month-1 prices gives a **crossover** at about
+**16.9M messages a month**. Volume reaches 17.7M in month 2, so the flip is
+about one month away. Running the whole year (volume rising evenly from
+15M to 45M):
+
+```mermaid
+xychart-beta
+    title "Total monthly cost by month: Option A (rising line) vs Option B"
+    x-axis [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    y-axis "Total cost ($ a month)" 0 --> 26000
+    line [6734, 8079, 9490, 10965, 12505, 14110, 15781, 17516, 19317, 21183, 23114, 25109]
+    line [7000, 7955, 8909, 9864, 10818, 11773, 12727, 13682, 14636, 15591, 16545, 17500]
+```
+
+| Month | Volume     | Option A   | Option B   | Cheaper |
+| ----- | ---------- | ---------- | ---------- | ------- |
+| 1     | 15,000,000 | $6,734.38  | $7,000.00  | A       |
+| 2     | 17,727,273 | $8,079.42  | $7,954.55  | B       |
+| 7     | 31,363,636 | $15,780.86 | $12,727.27 | B       |
+| 12    | 45,000,000 | $25,109.37 | $17,500.00 | B       |
+
+Added up over the year, A costs $183,903.42 and B costs $147,000.00, so
+**B is $36,903.42 cheaper over year one, even after paying for its own
+build**. A wins exactly one month of twelve. The interactive demo on this
+unit's page lets you drag volume, months since launch and outages per year
+to watch the crossover move. At month 13 the build cost is fully
+amortized and B at 45M drops to $16,000.
+
+<Checkpoint question="A is cheaper today by $265.62. Does that settle the debate in A's favor?">
+
+No. "Cheaper today" is true and nearly irrelevant, because 15M is close to
+the 16.9M crossover and the projection carries volume past it within a
+month or two. A model that only checks today's volume hands back a
+correct number that goes stale almost immediately. The model has to run
+forward over the growth trajectory, and the trajectory itself is an
+assumption the doc must state. If volume stayed flat at 15M all year,
+A would win the year by $3,187.44.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="growth-crossover"
+/>
 
 ## Failure modes at this level
 
-- **Modeling Option A's cost as flat per-unit, ignoring the
-  peak-driven headroom requirement.** This is the exact mistake that
-  makes "just add servers" look artificially cheap at scale — the
-  same trap StreamCast fell into by sizing against a guessed
-  per-server number instead of real peak traffic.
-- **Charging Option B's entire $18,000 build cost to month 1, or
-  never charging it at all.** Either one distorts the comparison —
-  amortize it across the months it should reasonably cover, the same
-  way `unit-economics` amortizes any lump-sum cost over time.
-- **Comparing options only at today's volume.** A model that ignores
-  the growth trajectory can hand back a technically correct answer
-  that's already wrong by the time the design ships.
+| Mistake                                         | What it does to the answer                           |
+| ----------------------------------------------- | ---------------------------------------------------- |
+| Charging all $18,000 to month 1, or to no month | Distorts every monthly comparison in one direction   |
+| Dropping the expected outage line               | Hides $450 a month of difference between the options |
+| Comparing only at today's volume                | Gives a correct number that is wrong within weeks    |
+| Mixing yearly and monthly figures               | Makes a cost 12 times too large or too small         |
