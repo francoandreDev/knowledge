@@ -3642,3 +3642,16 @@ Started the `learning-craft/` track (13 units, domain-general, all quiz so far) 
 Length bias, correct strictly longest / strictly shortest: `exposure-understanding` 18% / 29%, `source-evaluation` 23% / 20%, `search-literacy` 25% / 20%, `feynman-technique` 28% / 23%.
 
 `learning-craft/` is at 4 of 13. Total migrated: 145 of 246. Remaining here: `spaced-repetition`, `systematic-exploration`, `weighing-credibility`, `verification-habits` (batch in progress), then `notes`, `prioritization`, `curation`, `calibration`, `breadth-depth-trade-off-scale` (its roadmap title carries "staff engineer", to fix).
+
+## 2026-11-03 — `learning-craft/` batch 2: `spaced-repetition`, `systematic-exploration`, `weighing-credibility`, `verification-habits`
+
+Migrated 4 more `learning-craft/` units via 4 parallel content-only subagents. `typecheck` 0 errors, `build` 273 pages; Node sandbox check of 8 code items 0 failing assertions; live click-through (iframe per unit) passed all 20 `DomainCheck` topics (1 code topic run with the reference solution), 0 Mermaid errors, 0 KaTeX errors (the inline `$$1 - 0.35^n$$` in `verification-habits` renders), "Mark as done" enabled on all four.
+
+- **`spaced-repetition`**: 5 topics, 60 items, all quiz. Fixed the old L2 curve ending at 9% on day 28 (the demo and L3 say 10%, now 10%) and made day 1 an explicit session so six 30-minute sessions add up to 3 hours; numbers match the demo (10 + 16n, capped at 95%: 0 reviews = 10%, 5 reviews = 90%, 3 reviews = 58%). Diego's before/after retention table is carried over as labelled teaching numbers, not re-derived.
+- **`systematic-exploration`**: 5 topics, 56 items; one code topic `guard-before-mutate` (5 practice, 3 exam; the old unit had 4 code exercises). Opens with a broken-light-switch-in-an-unfamiliar-building analogy before the discount-bug case; "3 of 400 files" is a labelled assumption; the $81 reading matches the demo. The L3 extend-it question about a second code (SAVE10 then SAVE20) is left open for the reader.
+- **`weighing-credibility`**: 5 topics, 60 items, all quiz. Two-mechanics ($400 vs $40) scenario kept; standardised "four" vs "five" signals to five (recency included); the L3 price model is labelled teaching numbers; no `interactives.json` exists for this unit.
+- **`verification-habits`**: 5 topics, 60 items, all quiz. $84-bill calculator-slip opening; 65% per-check catch chain (0, 65, 87.8, 95.7, 98.5, 99.5) verified in Node and labelled assumed. Keeps the honey / infant-botulism example (no honey under 12 months) as a health-safety illustration, noted in case a different example is preferred. The agent could not re-run its own check after the final Prettier pass; the coordinator checks covered it.
+
+Length bias, correct strictly longest / strictly shortest: `spaced-repetition` 2% / 25% (practice longest 0%), `systematic-exploration` 21% / 27% (practice shortest 34%), `weighing-credibility` 3% / 17% (faint opposite tell), `verification-habits` 23% / 18%.
+
+`learning-craft/` is at 8 of 13. Total migrated: 149 of 246. Remaining here: `notes`, `prioritization`, `curation`, `calibration` (batch in progress), then `breadth-depth-trade-off-scale` (its roadmap title carries "staff engineer", to fix).
