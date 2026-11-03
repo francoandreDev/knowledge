@@ -2,69 +2,65 @@
 title: "L3 — Tracing the discount bug: entry point, execution, tests, fix"
 ---
 
+import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L2 explained why folder structure isn't execution order and worked out
-what each technique answers in the abstract. L3 runs all three
-techniques against the actual discount-bug scenario from L1, in real
-code, start to finish.
+export const unit = {
+  track: "learning-craft",
+  unitSlug: "systematic-exploration",
+};
+
+<Scenario label="The same bug, now in real code">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🧾</span> <strong>Order</strong> — total 100, code SAVE10 (10% off)</div>
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Expected</strong> — second SAVE10 is rejected, total stays 90</div>
+      <div class="flex items-center gap-1.5"><span>❌</span> <strong>Actual</strong> — total becomes 81 (100 × 0.9 × 0.9)</div>
+    </div>
+  </Fragment>
+
+L2 argued in the abstract. Here you run all three moves on the actual bug: an
+order of 100 with a 10% code. Applied once the total should be 90. Applied a
+second time it should be rejected, but the bug report says it reaches **81**.
+**Where in the code does 81 come from, and how do you fix it without clashing
+with how the rest of the code already behaves?**
+
+</Scenario>
 
 <LevelIntro
   items={[
-    "Finding the entry point in real code",
-    "Tracing three real layers of a bug",
-    "Reading tests, writing a fix, adding a regression test",
+    "Entry point and trace across three layers",
+    "Reading tests to learn the codebase's habit",
+    "A matching fix plus the missing test",
   ]}
 />
 
-## Step 1: finding the entry point
+## Step 1: find the entry point
 
-The bug report says "applying a discount code twice." The first
-concrete question: where does an "apply a discount" request enter
-this codebase? Searching for the route (not the business logic)
-finds it fast:
+Search for the route, not the business logic. One line of the router file
+gives the method, the path and the handler, so you can ignore `models/`,
+`middleware/` and every unrelated route:
 
-```js
-// routes/orders.js
-const express = require("express");
-const router = express.Router();
-const ordersController = require("../controllers/ordersController");
-
-router.post("/orders/:id/apply-discount", ordersController.applyDiscount);
-
-module.exports = router;
+```text
+POST /orders/:id/apply-discount  ->  ordersController.applyDiscount
 ```
 
-This is the entry point — one line tells us the HTTP path, the
-method, and which controller function actually handles it. No need
-yet to read `models/`, `middleware/`, or any other unrelated route in
-this file.
+## Step 2: trace through the layers
 
-## Step 2: tracing execution through the layers
-
-Following the one function this route calls, layer by layer:
-
-```js
-// controllers/ordersController.js
-const orderService = require("../services/orderService");
-const orders = require("../data/ordersStore");
-
-function applyDiscount(req, res) {
-  const order = orders.findById(req.params.id);
-  try {
-    const updated = orderService.applyDiscount(order, req.body.code);
-    res.status(200).json(updated);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-}
-
-module.exports = { applyDiscount };
+```mermaid
+flowchart TD
+    R["Route: POST /orders/:id/apply-discount"] --> C["Controller: finds the order, calls the service,<br/>turns a thrown Error into a 400"]
+    C --> S["Service: orderService.applyDiscount<br/>the only code that writes order.total and appliedDiscounts"]
+    S -->|"unknown code"| T1["throws Error: Unknown discount code"]
+    S -->|"valid code"| M["pushes code, multiplies total by 1 - rate"]
 ```
 
+Reading the service is where the trace pays off. This is the one place where
+reading code _is_ the point:
+
 ```js
-// services/orderService.js
 const discountCodes = { SAVE10: 0.1, SAVE20: 0.2 };
 
 function applyDiscount(order, code) {
@@ -74,38 +70,43 @@ function applyDiscount(order, code) {
   order.total = order.total * (1 - rate);
   return order;
 }
-
-module.exports = { applyDiscount };
 ```
 
-Three layers, three responsibilities: the route maps a URL to a
-function, the controller translates HTTP request/response into plain
-function calls, the service holds the actual business logic. **The
-most relevant place to inspect is `orderService.applyDiscount` — it's
-the only layer that touches `order.total` or `appliedDiscounts` at all**,
-which tracing just confirmed rather than assumed.
+Nothing checks whether `code` is already in `appliedDiscounts`, so a second call
+multiplies again. The numbers follow directly (move the sliders in the demo
+below to see the extra amount lost as the order and rate change; its defaults
+reproduce this exact 100 and 10% case):
 
-<Checkpoint question="Tracing has now confirmed that orderService.applyDiscount is the only layer that touches order.total or appliedDiscounts, and that nothing in it checks for a repeat code. Is that enough to go write the fix, or is a step still missing?">
+```mermaid
+xychart-beta
+    title "Order total after each SAVE10 call (starting at 100)"
+    x-axis ["start", "after call 1", "after call 2"]
+    y-axis "Total" 70 --> 100
+    bar [100, 90, 81]
+    line [100, 90, 90]
+```
 
-A step is still missing. Tracing has done its job — it narrowed the bug
-down to one specific function and confirmed what that function currently
-does. But it hasn't confirmed what that function is supposed to do, or
-what error-handling style the rest of the codebase already expects for
-rejecting bad input. Writing a fix straight from the trace risks bolting
-on a check that works but doesn't match how this codebase already
-signals invalid input elsewhere. The next step, reading the existing
-tests, is what supplies that missing half.
+The bars are the buggy behavior (100, 90, 81); the line is the intended one
+(100, 90, 90). The gap at the last point is the 9 lost to the bug.
+
+<Checkpoint question="The trace shows orderService.applyDiscount is the only code that writes order.total and that it never checks for a repeat code. Is that enough to write the fix?">
+
+Not yet. The trace narrowed the bug to one function and confirmed what it does.
+It did not say what this codebase expects when input is invalid. A fix written
+straight from the trace might work but disagree with how the rest of the code
+signals bad input. The next move, the existing tests, supplies that half.
 
 </Checkpoint>
 
-## Step 3: reading the existing tests before touching anything
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="trace-the-bug"
+/>
 
-Before writing a fix, the existing test file for this service:
+## Step 3: read the existing tests
 
 ```js
-// services/orderService.test.js
-const { applyDiscount } = require("./orderService");
-
 test("applies a valid discount code", () => {
   const order = { total: 100, appliedDiscounts: [] };
   const result = applyDiscount(order, "SAVE10");
@@ -119,83 +120,34 @@ test("rejects an unknown discount code", () => {
 });
 ```
 
-Neither test covers applying the same code twice — that's the gap
-that let the bug ship. But these tests still teach something
-essential: **this codebase's established pattern for rejecting bad
-input is to throw an `Error` with a specific message, checked before
-any mutation happens.** A fix that follows this same pattern will fit
-the codebase; a fix that, say, silently ignores the second call or
-returns `null` would work but clash with everything else in the file.
+Neither test applies the same code twice; that gap let the bug ship. But they
+teach the habit to follow: **bad input is rejected by throwing a specific
+error, before anything is changed.** The controller depends on that habit. It
+catches thrown errors and returns a 400.
 
-## Step 4: confirming the bug, then writing a fix that matches the pattern
+| Fix option                          | Stops the double discount? | Fits the codebase?                        |
+| ----------------------------------- | -------------------------- | ----------------------------------------- |
+| Throw "Discount already applied"    | Yes                        | Yes, same style as the unknown-code check |
+| Silently return the order unchanged | Yes                        | No, the caller sees success and no error  |
+| Return `null`                       | Yes                        | No, a second, inconsistent signal         |
 
-Running the current code against the exact scenario from the bug
-report confirms it:
+## Step 4: the fix and the missing test
 
-```js
-const order = { total: 100, appliedDiscounts: [] };
-applyDiscount(order, "SAVE10");
-applyDiscount(order, "SAVE10");
-console.log(order.total);
-// 81 — discounted twice: 100 * 0.9 * 0.9
-```
-
-The fix, following the exact validate-before-mutate, throw-with-message
-pattern the tests already established:
+The guard goes before any mutation, beside the existing check:
 
 ```js
-function applyDiscount(order, code) {
-  const rate = discountCodes[code];
-  if (rate === undefined) throw new Error("Unknown discount code");
-  if (order.appliedDiscounts.includes(code)) {
-    throw new Error("Discount already applied");
-  }
-  order.appliedDiscounts.push(code);
-  order.total = order.total * (1 - rate);
-  return order;
+if (order.appliedDiscounts.includes(code)) {
+  throw new Error("Discount already applied");
 }
 ```
 
-Verified against the same scenario:
-
-```js
-const order = { total: 100, appliedDiscounts: [] };
-applyDiscount(order, "SAVE10");
-try {
-  applyDiscount(order, "SAVE10");
-} catch (err) {
-  console.log(err.message, order.total);
-}
-// "Discount already applied" 90 — total stayed at the single-discount value
-```
-
-<Checkpoint question="The fix above throws an Error with a specific message, the same style as the existing 'Unknown discount code' check, instead of just silently returning the order unchanged when a duplicate code is applied. Silently returning would also stop the double discount — so why does the throw-based version matter, given that both would fix the reported bug?">
-
-Both would stop the double discount, but only one fits the codebase the
-fix has to live in. The existing tests already established that this
-service signals invalid input by throwing a specific, checkable error
-message — the controller layer even depends on that, catching thrown
-errors and turning them into a 400 response. A silent no-op would still
-pass the bug report's specific scenario, but it would introduce a second,
-inconsistent way of handling invalid input right next to the first, and
-the controller would have no way to tell the caller anything went wrong
-at all — the request would just come back looking like a success. Matching
-the established pattern isn't a style preference; it keeps the rest of
-the system (the controller, and whoever reads this code next) able to
-rely on one consistent contract instead of two.
-
-</Checkpoint>
-
-## Step 5: adding the missing regression test
-
-The old test file had two tests. The fix should add the third case that
-was missing, so this same bug cannot silently come back:
+The regression test pins the case that was missing, and its last two lines
+prove rejection happened _before_ the change:
 
 ```js
 test("rejects applying the same discount code twice", () => {
   const order = { total: 100, appliedDiscounts: [] };
   applyDiscount(order, "SAVE10");
-
   expect(() => applyDiscount(order, "SAVE10")).toThrow(
     "Discount already applied",
   );
@@ -204,42 +156,41 @@ test("rejects applying the same discount code twice", () => {
 });
 ```
 
-The last two expectations matter because they prove rejection happened
-before mutation: the total stayed at the single-discount value, and the
-code was not pushed into `appliedDiscounts` a second time. In JavaScript,
-`.includes(code)` means "is this value already in the array?", `.push()`
-adds a value to the array, and `throw new Error(...)` stops the operation
-with a visible failure instead of silently continuing.
+<Checkpoint question="Returning the order unchanged would also stop the double discount. Why does the throwing version matter when both fix the reported bug?">
 
-Total time spent: reading one route registration, two small files, and a
-small focused test file — not the whole repository.
+Both stop the double discount, but only one fits the codebase. The service
+already signals invalid input by throwing, and the controller relies on that to
+send a 400. A silent return would add a second, inconsistent way to handle bad
+input, and the caller would see success. Matching the pattern keeps one
+contract for everyone who reads this code next.
 
-## What this trace does and doesn't prove
+</Checkpoint>
 
-**Would this same three-step approach (entry point, trace, tests)
-work for a bug that isn't triggered by an HTTP request — say, a
-scheduled job that runs every night?** The specific entry point looks
-different (a cron registration or a queue consumer instead of a route
-file), but the _procedure_ generalizes: find wherever that trigger
-first reaches application code, trace what it calls in order, and
-read whatever tests exist for the layer where the bug is suspected to
-live. What doesn't generalize is the assumption that tests will
-always cover the gap — here, they didn't, and part of the fix is
-adding a new test for the case that was missing, not just trusting
-the old suite was already complete.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="guard-before-mutate"
+/>
 
-**Try extending it yourself:** suppose the bug report had instead
-been "applying an unknown discount code crashes the server with a 500
-error instead of returning a clean 400." Which of the three files
-above would you expect the actual fault to be in, and would tracing
-alone be enough to find it, or would you also need to read the tests?
+## This is a case, not the whole territory
+
+The worked example is one bug in one small service. It does not cover every
+shape a real investigation takes. **Try extending it yourself:**
+
+- Suppose the nightly job, not an HTTP route, sent the duplicate code. What is
+  the entry point now, and which of the three moves changes and which does not?
+- Suppose the report said a _second, different_ code (SAVE10 then SAVE20)
+  should also be rejected. Which function and which test change, and does the
+  throw-before-change habit still apply?
+- Suppose the tests already covered duplicates and still passed while the bug
+  happened. What would that tell you about where to look?
 
 ## Failure modes
 
-| Failure mode                                                                                                                        | What it gets wrong                                                                                                                                |
-| ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Reading `models/` or unrelated routes before finding the actual entry point                                                         | Wastes time on code that may never appear in the trace for this specific bug                                                                      |
-| Fixing the bug without reading the existing tests first                                                                             | Risks writing a fix that works but doesn't match the codebase's established error-handling pattern, creating inconsistency for the next person    |
-| Assuming the tests already cover every case, including the one that's broken                                                        | If the bug were already tested, it likely wouldn't have shipped — an untested gap is often exactly where a real bug hides                         |
-| Trusting a stale comment over what the test or the code actually does                                                               | Comments don't run and don't fail when wrong; a test or the traced execution path is closer to ground truth                                       |
-| Stopping the trace at the first layer that "looks related" without confirming it's the one that actually mutates the relevant state | The controller layer here handles HTTP concerns, not the discount logic itself — fixing at the wrong layer wouldn't have addressed the actual bug |
+| Failure mode                                             | What it gets wrong                                                      |
+| -------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Reading unrelated folders before finding the entry point | Spends time on code the trace never reaches                             |
+| Fixing before reading the tests                          | A working fix can still clash with the codebase's error-handling habit  |
+| Assuming the tests cover the broken case                 | If it were tested it likely would not have shipped; the gap is the clue |
+| Trusting a stale comment over the test or the trace      | Comments do not run, so they cannot fail when wrong                     |
+| Stopping at the first layer that looks related           | The controller handles HTTP; only the service touches the total         |
