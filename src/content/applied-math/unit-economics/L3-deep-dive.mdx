@@ -5,243 +5,127 @@ title: "L3 — Unit economics"
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Turning the model into code">
+export const unit = {
+  track: "applied-math",
+  unitSlug: "unit-economics",
+};
 
-L2 left the reply-suggestions numbers as hand-worked arithmetic: a $3,200 fixed cost, an $11.34 contribution margin for paid users, a break-even of ~282 paid users. That's fine for one calculation, but a real team re-runs this analysis every time pricing, volume, or vendor rates change — and hand arithmetic is exactly where a sign error or a forgotten segment split creeps back in. This level turns every L2 formula into a small, tested TypeScript module, then runs the full reply-suggestions numbers through it end to end.
+<Scenario label="Two spreadsheets, one bill">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>👥</span> <strong>By users</strong> — free tier carries $2,666.67 of fixed cost</div>
+      <div class="flex items-center gap-1.5"><span>📈</span> <strong>By usage</strong> — free tier carries $2,162.16 of fixed cost</div>
+      <div class="flex items-center gap-1.5"><span>🧾</span> <strong>Same bill</strong> — $19,480 in total either way</div>
+    </div>
+    <div class="not-prose mt-3 flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300">
+      <div>
+        <div class="flex justify-between"><span>Free-tier loss, split by users</span><span>$13,666.67</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 100%"></div></div>
+      </div>
+      <div>
+        <div class="flex justify-between"><span>Free-tier loss, split by usage</span><span>$13,162.16</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-amber-500 animate-fill-bar" style="--target-width: 96.3%"></div></div>
+      </div>
+    </div>
+  </Fragment>
 
-<Fragment slot="facts">
-
-**What gets built**
-
-- `costPerUnit()` — fixed + variable → a per-unit figure
-- `amortizationSchedule()` — spread a lump sum over months
-- `breakEvenUnits()` / `marginPercent()` — the two sustainability questions
-- A worked run against the real reply-suggestions numbers from L1/L2
-
-</Fragment>
+Two analysts cost the same reply-suggestions feature from the same $19,480 bill. One
+splits the $3,200 fixed cost by head count, the other by how many suggestions each
+segment generated. They report two different free-tier losses and each insists the other
+is wrong. **Who is right, and does the disagreement change the decision?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "A cost-per-unit calculator that separates fixed, variable, and segment volume",
-    "An amortization schedule function, month by month",
-    "Break-even and margin functions, run against the real reply-suggestions numbers",
+    "Allocation methods and what they change",
+    "Break-even as a small function with a guard",
+    "A full worked run, and where it stops applying",
   ]}
 />
 
-## Cost per unit, as a function
+## How do two allocations of one bill both stay honest?
 
-The formula from L2 — `fixed / units + variable` — is one line, but a real calculator needs to handle the case that broke the reply-suggestions estimate: **segment-specific volume**, not a single company-wide user count.
+**Neither analyst made an arithmetic error.** Fixed cost belongs to the whole feature,
+so any split is a modelling choice. Everything here is computed from the L1 assumptions
+(round-number figures, not real prices):
 
-```typescript
-interface CostInputs {
-  fixedCostPerMonth: number;
-  variableCostPerUnit: number;
-  unitsThisSegment: number;
-}
+| Allocation of the $3,200                   | Free-tier share | Paid-tier share | Free-tier total cost | Free-tier loss |
+| ------------------------------------------ | --------------- | --------------- | -------------------- | -------------- |
+| By users (40,000 : 8,000)                  | $2,666.67       | $533.33         | $13,666.67           | $13,666.67     |
+| By usage (1,000,000 : 480,000 suggestions) | $2,162.16       | $1,037.84       | $13,162.16           | $13,162.16     |
 
-function costPerUnit(inputs: CostInputs): number {
-  const { fixedCostPerMonth, variableCostPerUnit, unitsThisSegment } = inputs;
-  if (unitsThisSegment <= 0) {
-    throw new Error(
-      "unitsThisSegment must be positive — cost is undefined for zero volume",
-    );
-  }
-  return fixedCostPerMonth / unitsThisSegment + variableCostPerUnit;
-}
-
-function totalSegmentCost(
-  fixedCostShare: number,
-  variableCostPerUnit: number,
-  unitsThisSegment: number,
-): number {
-  return fixedCostShare + variableCostPerUnit * unitsThisSegment;
-}
-
-// Split a shared fixed cost across segments proportional to their user count —
-// the "even split" allocation from L2's checkpoint. Other allocation
-// strategies (e.g. by usage share) are valid too; this is the simplest one,
-// and worth naming explicitly since the allocation choice changes the story.
-function allocateFixedCostByUsers(
-  fixedCostPerMonth: number,
-  segmentUsers: number,
-  totalUsers: number,
-): number {
-  return fixedCostPerMonth * (segmentUsers / totalUsers);
-}
-```
-
-Notice the guard clause: dividing by zero units is a real failure mode (a brand-new segment with no users yet), not an edge case to skip. A cost-per-unit function that silently returns `Infinity` or `NaN` will corrupt every calculation built on top of it.
-
-<Checkpoint question="Two engineers each write a break-even calculator. One uses `fixedCost / (price - variableCost)`, the other uses `fixedCost / (variableCost - price)` by a sign slip. For the free tier (price $0, variableCost $0.011), what does the second (wrong) version return, and why is that a useful tell that something's broken?">
-
-The wrong version returns a **negative** break-even count: `3200 / (0.011 - 0) = 290,909`, but with the denominator's sign flipped the whole expression comes out negative once contribution margin is genuinely negative in the correct formula (price below variable cost). A negative number of "units to break even" is nonsensical — you can't reach negative users — so a negative result is a strong signal to check the formula's sign convention rather than to report "-290,909 users to break even" as if it meant something. In production code this is exactly the kind of thing worth asserting on: a break-even function should probably throw or return `null`/`Infinity` for a segment with non-positive contribution margin, rather than return a number that happens to be negative and easy to eyeball-mistake as a small positive one, especially if a further calculation squares or absolute-values it downstream and quietly loses the sign entirely.
-
-</Checkpoint>
-
-## Amortization schedule
-
-The $9,600 / 12-month migration cost from L2 needs a real month-by-month breakdown, not just the $800/month monthly figure — a schedule is what a finance review actually asks for.
-
-```typescript
-interface AmortizationRow {
-  month: number;
-  amount: number;
-  cumulative: number;
-  remaining: number;
-}
-
-function amortizationSchedule(
-  totalCost: number,
-  months: number,
-): AmortizationRow[] {
-  if (months <= 0) throw new Error("months must be positive");
-
-  const monthlyAmount = Math.round((totalCost / months) * 100) / 100;
-  const schedule: AmortizationRow[] = [];
-  let cumulative = 0;
-
-  for (let month = 1; month <= months; month++) {
-    // Last month absorbs any rounding remainder so the schedule sums exactly
-    // to totalCost instead of drifting a few cents short or over.
-    const amount =
-      month === months
-        ? Math.round((totalCost - cumulative) * 100) / 100
-        : monthlyAmount;
-    cumulative = Math.round((cumulative + amount) * 100) / 100;
-    schedule.push({
-      month,
-      amount,
-      cumulative,
-      remaining: Math.round((totalCost - cumulative) * 100) / 100,
-    });
-  }
-
-  return schedule;
-}
-```
-
-Running `amortizationSchedule(9600, 12)` produces twelve $800 rows, cumulative climbing from $800 to $9,600, remaining falling from $8,800 to $0 — exactly the shape that turns "month 1 looks catastrophic" (L2's checkpoint) into "every month looks the same, because the cost genuinely is the same every month."
-
-| month | amount | cumulative | remaining |
-| ----- | ------ | ---------- | --------- |
-| 1     | $800   | $800       | $8,800    |
-| 2     | $800   | $1,600     | $8,000    |
-| ...   | ...    | ...        | ...       |
-| 12    | $800   | $9,600     | $0        |
-
-## Break-even and margin, as functions
-
-```typescript
-function contributionMargin(
-  pricePerUnit: number,
-  variableCostPerUnit: number,
-): number {
-  return pricePerUnit - variableCostPerUnit;
-}
-
-// Returns Infinity when a unit's contribution margin is zero or negative —
-// there is no finite volume at which revenue catches up to cost, which is
-// exactly the free tier's situation and needs to be representable, not
-// thrown away as an error.
-function breakEvenUnits(
-  fixedCostPerMonth: number,
-  pricePerUnit: number,
-  variableCostPerUnit: number,
-): number {
-  const margin = contributionMargin(pricePerUnit, variableCostPerUnit);
-  if (margin <= 0) return Infinity;
-  return fixedCostPerMonth / margin;
-}
-
-function marginPercent(revenue: number, cost: number): number {
-  if (revenue === 0) return revenue === cost ? 0 : -Infinity;
-  return ((revenue - cost) / revenue) * 100;
-}
-```
-
-## Worked example: the full reply-suggestions numbers
-
-Putting all four functions together against the real scenario numbers:
-
-```typescript
-const FIXED_COST = 3200;
-const VARIABLE_RATE = 0.011;
-
-const freeUsers = 40000;
-const freeGenerationsPerUser = 25;
-const paidUsers = 8000;
-const paidGenerationsPerUser = 60;
-const paidPrice = 12;
-
-const totalUsers = freeUsers + paidUsers;
-
-const freeFixedShare = allocateFixedCostByUsers(
-  FIXED_COST,
-  freeUsers,
-  totalUsers,
-);
-const paidFixedShare = allocateFixedCostByUsers(
-  FIXED_COST,
-  paidUsers,
-  totalUsers,
-);
-
-const freeSegmentCost = totalSegmentCost(
-  freeFixedShare,
-  VARIABLE_RATE,
-  freeUsers * freeGenerationsPerUser,
-);
-const paidSegmentCost = totalSegmentCost(
-  paidFixedShare,
-  VARIABLE_RATE,
-  paidUsers * paidGenerationsPerUser,
-);
-
-const paidRevenue = paidUsers * paidPrice;
-
-console.log("Free-tier cost:", freeSegmentCost.toFixed(2)); // "13666.67"
-console.log("Free-tier margin %:", marginPercent(0, freeSegmentCost)); // -Infinity
-console.log("Paid-tier cost:", paidSegmentCost.toFixed(2)); // "5813.33"
-console.log(
-  "Paid-tier margin %:",
-  marginPercent(paidRevenue, paidSegmentCost).toFixed(1),
-); // "93.9"
-console.log(
-  "Paid break-even users:",
-  Math.ceil(
-    breakEvenUnits(
-      FIXED_COST,
-      paidPrice,
-      VARIABLE_RATE * paidGenerationsPerUser,
-    ),
-  ),
-); // 283 (per paid user, using their monthly generation volume folded into an effective per-user variable cost)
-```
-
-The chart below shows why 8,000 paid users is comfortably past break-even, while the free tier's cost line never meets a revenue line at all — there's nothing to plot, because free-tier revenue is a flat $0 regardless of volume.
+The totals do not move: $2,666.67 + $533.33 and $2,162.16 + $1,037.84 both equal
+$3,200. Allocation shifts blame between segments by $504.51 without changing the company's
+bill. The decision is untouched because the free tier is a loss under either method: its
+$11,000 of variable cost alone exceeds its $0 revenue.
 
 ```mermaid
-xychart-beta
-    title "Paid tier: cumulative revenue vs. cumulative cost by user count"
-    x-axis "paid users" [0, 100, 283, 500, 2000, 4000, 8000]
-    y-axis "cumulative $/month"
-    line "revenue" [0, 1200, 3396, 6000, 24000, 48000, 96000]
-    line "cost" [3200, 3266, 3387, 3530, 4520, 5840, 8480]
+flowchart TD
+    A["Shared fixed cost"] --> B{"What does the decision need?"}
+    B -->|"Is this segment worth keeping?"| C["Look at contribution margin first: no allocation needed"]
+    B -->|"Does the feature pay for itself?"| D["Total revenue vs total cost: no allocation needed"]
+    B -->|"Which team owns the bill?"| E["Pick an allocation, state it, keep it stable"]
 ```
 
-Break-even lands at 283 paid users, right where the revenue line crosses the cost line — everything to the right of that crossing point is the feature's actual profit.
+<Checkpoint question="The team caps free users at 5 suggestions a month instead of 25. Does that fix the free tier, or just shrink the loss?">
 
-<Checkpoint question="If the reply-suggestions team's actual fix was 'cap free-tier generations at 5/month instead of 25,' what does that do to the free-tier numbers above — does it fix the loss, or just shrink it?">
-
-It shrinks the loss without eliminating it — free-tier revenue is still $0 regardless of volume, so contribution margin per free user stays negative (`0 - 0.011 × 5 = -$0.055` instead of `-$0.275`), meaning break-even is still infinite for that segment; there is no volume of free usage that turns $0 revenue into a profitable line. Capping usage reduces the _variable_ portion of the loss (roughly 5× smaller, from $11,000 to $2,200 for the free tier's generation cost) but does nothing about the segment's ~$2,667 share of fixed cost, which it still absorbs regardless of how many suggestions get generated. A usage cap is a mitigation for a segment with negative contribution margin, not a cure — the only real fixes are raising price above variable cost (make the tier non-free, or add a paid add-on) or removing the feature from that segment entirely.
+It shrinks it without fixing it. Variable cost falls from 40,000 x 25 x $0.011 = $11,000 to
+40,000 x 5 x $0.011 = $2,200, so the free tier's total cost drops from $13,666.67 to
+$4,866.67 once its $2,666.67 fixed share is added back. But revenue is still $0, so the
+segment still loses $4,866.67 every month and its contribution margin per user is still
+negative at -$0.055. A cap is a mitigation for a negative-margin segment, and the real
+fixes are a price above variable cost or removing the feature from that tier.
 
 </Checkpoint>
 
-**Extend it yourself:** the worked example above assumes fixed cost is allocated by _user count_. What changes if you allocate it by _usage share_ instead (each segment pays a fraction of the $3,200 proportional to its share of total generations, not its share of total users)? Recompute the free tier's cost under that allocation — does the free tier's loss get larger, smaller, or does the total company-wide cost stay the same either way? (It's worth actually running the numbers: free tier generates 1,000,000 of the 1,480,000 total monthly suggestions — a very different ratio from its 40,000-of-48,000 share of _users_.)
+## How do you turn break-even into something you can rerun?
 
-## A note on which language, and why
+**Pricing, volume and vendor rates change every quarter. Doing the division by hand again
+risks a sign slip.** Break-even is the one place here where code earns its keep, because
+the failure case (a margin of zero or less) must be handled on purpose:
 
-This unit uses TypeScript for the narrative code because the domain — money, schedules, percentages — benefits from the interfaces (`CostInputs`, `AmortizationRow`) documenting exactly what a real calculator expects and returns, the same way a finance-adjacent internal tool would in practice. The exercises below run as plain JavaScript in a sandboxed browser Worker (no Node globals, no imports) — the same functions, same logic, just without the type annotations a bundler would normally strip before shipping to a browser anyway.
+```js
+function breakEvenUnits(fixed, price, variablePerUnit) {
+  const margin = price - variablePerUnit;
+  if (margin <= 0) return Infinity; // no volume ever breaks even
+  return Math.ceil(fixed / margin);
+}
+```
+
+`breakEvenUnits(20, 2, 0.5)` returns 14 cups, and `breakEvenUnits(3200, 12, 0.66)`
+returns 283 paid users. A free user has price 0, so the margin is negative and the answer
+is `Infinity`, which is the honest answer rather than a negative count of users that is
+easy to misread.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="break-even-calc"
+/>
+
+## What does the full picture look like once it is all run?
+
+| Question                        | Number                                |
+| ------------------------------- | ------------------------------------- |
+| Total monthly cost              | $3,200 + 1,480,000 x $0.011 = $19,480 |
+| Paid-tier profit                | $96,000 - $5,813.33 = $90,186.67      |
+| Paid-tier margin                | 93.9%                                 |
+| Free-tier loss (split by users) | $13,666.67                            |
+| Feature as a whole              | $96,000 - $19,480 = $76,520 profit    |
+| Paid break-even                 | 283 users (8,000 actual)              |
+| Free break-even                 | none (margin -$0.275 per user)        |
+
+The feature as a whole is profitable, which is exactly why nobody noticed. Whether to keep
+free access is a product decision: the free tier may bring in paying users later. Unit
+economics does not make that call, but it replaces "shouldn't cost much" with a number the
+decision can argue about.
+
+**This is one case, not the whole territory.** Extend it yourself: what changes if the
+paid price drops from $12 to $6? What if free users stay capped at 5 suggestions but the
+GPU pool doubles to $6,400 once volume passes a threshold, so fixed cost is a staircase
+and not a flat line? And what if you must justify the free tier as a marketing expense
+paid for by a conversion rate you can only estimate? Work out which of the numbers above
+still hold and which need new inputs before you present them.
