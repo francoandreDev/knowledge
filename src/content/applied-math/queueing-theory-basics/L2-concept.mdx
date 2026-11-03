@@ -1,153 +1,160 @@
 ---
-title: "L2 — Why the wait-time curve stays flat, then bends sharply near full capacity"
+title: "L2 — Why the delay curve stays flat and then bends, and what Little's Law promises"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+import Plot from "../../../components/Plot.astro";
 
-L1 named the pieces — arrival rate, service rate, utilization, Little's
-Law — and pointed at the core surprise: wait time doesn't grow in a
-straight line as utilization climbs. This level works through why the
-curve bends the way it does, and what Little's Law actually promises.
+export const unit = {
+  track: "applied-math",
+  unitSlug: "queueing-theory-basics",
+};
+
+L1 gave the pieces (`λ`, `μ`, `ρ`) and the lane's puzzle: 50% more shoppers,
+four times the time. L2 explains the shape behind that, then a second,
+simpler law that needs no shape at all.
 
 <LevelIntro
   items={[
-    "Why the wait-time curve bends sharply near 100% utilization",
-    "Little's Law, and what it holds regardless of the specifics",
-    "Why throughput and latency can move in opposite directions",
+    "The wait-time knee near full utilization",
+    "Little's Law and what it holds regardless",
+    "Latency and throughput moving apart",
   ]}
 />
 
-## The curve behind the checkout service's cliff
+## Why does the lane hardly notice 10% to 60%, then fall apart by 90%?
 
-**If traffic only grew 50% but wait time grew 4x, what shape of
-relationship produces that?** Not a straight line — a curve that
-stays nearly flat through most of its range and then rises sharply as
-utilization approaches 100%:
+**If the cashier is idle 40% of the time at 60% load, why is a line there at all?**
+Because arrivals are random. Shoppers do not walk up on an even beat; two show
+up together, then nobody for a while. A clump forms a short line, and the
+spare capacity is what drains it. The more spare capacity, the faster the line
+clears; the less, the longer it lingers while the next clump lands on top.
 
-```mermaid
-xychart-beta
-    title "Average wait time vs. utilization (service rate fixed at 10 req/sec)"
-    x-axis ["10%", "30%", "50%", "70%", "90%", "95%"]
-    y-axis "Average time in system (seconds)" 0 --> 2
-    line [0.111, 0.143, 0.2, 0.333, 1.0, 2.0]
-```
+With `μ = 10` per minute the exact average time in the system is `1 / (μ - λ)`.
+Plotting it against utilization shows the whole story:
 
-Notice how gentle the curve is from 10% to 50% utilization — wait
-time barely moves. Then from 70% to 95%, it climbs from a third of a
-second to two full seconds. **A load test run at 60% utilization sits
-entirely in the flat region of this curve — it has no way to reveal
-what happens in the steep region**, because the two regions don't
-look anything alike.
+<Plot
+  mark="line"
+  x="utilization"
+  y="minutes"
+  xLabel="Utilization (%)"
+  yLabel="Average time in system (minutes)"
+  caption="M/M/1 with service rate 10 per minute: W = 1 / (10 - λ), exact values."
+  data={[
+    { utilization: 10, minutes: 0.111 },
+    { utilization: 20, minutes: 0.125 },
+    { utilization: 30, minutes: 0.143 },
+    { utilization: 40, minutes: 0.167 },
+    { utilization: 50, minutes: 0.2 },
+    { utilization: 60, minutes: 0.25 },
+    { utilization: 70, minutes: 0.333 },
+    { utilization: 80, minutes: 0.5 },
+    { utilization: 85, minutes: 0.667 },
+    { utilization: 90, minutes: 1 },
+    { utilization: 95, minutes: 2 },
+  ]}
+/>
 
-## Why the curve bends: the server never catches up
+From 10% to 60% the time moves from about 0.11 to 0.25 minute. From 60% to 95%
+it moves from 0.25 to 2. A test run only at 60% load sits entirely on the flat
+part and cannot see the steep part. The interactive demo on this level lets
+you drag the arrival rate and watch the same curve.
 
-**What's actually happening, mechanically, as utilization approaches
-100%?** At low utilization, the server finishes each request with
-capacity to spare before the next one arrives — a request rarely
-waits behind another. As utilization climbs, requests increasingly
-arrive while the server is still busy with the previous one, so they
-queue up. Right at 100% utilization, the server is _exactly_ keeping
-pace on average — but any brief burst of arrivals (which happens
-constantly in real traffic) has no slack to absorb, so the queue
-that forms during a burst never fully drains before the next one
-hits. The math reflects this: wait time scales with `1 / (1 - ρ)`,
-and that expression grows without bound as ρ approaches 1 — it's not
-a special case, it's the direct consequence of a server with less and
-less spare capacity to absorb any variation in arrivals.
+Two equivalent ways to read the formula:
 
-There are two closely related ways to read the formula:
+| Form              | Plain meaning                                                   |
+| ----------------- | --------------------------------------------------------------- |
+| `1 / (μ - λ)`     | actual average time, given real rates                           |
+| `(1/μ) / (1 - ρ)` | one service time, stretched by the inverse of the free fraction |
 
-| Formula       | What it says in plain language                                |
-| ------------- | ------------------------------------------------------------- |
-| `1 / (1 - ρ)` | relative shape: divide by the fraction of capacity still free |
-| `1 / (μ - λ)` | actual average time when you know service speed and arrivals  |
+<Checkpoint question="With μ = 10 per minute, arrivals rise from λ = 8 to λ = 9. Does the average time rise by roughly the same small amount, or by something much bigger in proportion?">
 
-If `μ = 10` requests/second and `λ = 6`, then `1 / (10 - 6) = 0.25`
-seconds. If arrivals rise to `λ = 9`, then `1 / (10 - 9) = 1`
-second. The traffic rose 1.5x, but the spare capacity fell from 4
-requests/second to 1 request/second.
-
-<Checkpoint question="Service rate stays fixed at μ = 10 req/sec. Arrival rate rises from λ = 8 to λ = 9 — a 1-request increase. Does average wait time also rise by roughly the same small amount?">
-
-No. Spare capacity (`μ - λ`) drops from 2 requests/second to 1
-request/second — it's cut in half, not reduced by a small fraction.
-Since wait time scales with `1 / (μ - λ)`, halving the spare capacity
-roughly doubles the wait time, even though the arrival-rate increase
-itself looks modest. This is exactly the mechanism from the section
-above: the closer utilization gets to 100%, the less slack is left to
-absorb any given increase, so the same-sized bump in arrivals produces
-a much bigger jump in wait time near the top of the curve than it does
-near the bottom.
+Much bigger. Spare capacity `μ - λ` falls from 2 to 1, so it halves, and the
+time `1 / (μ - λ)` doubles from 0.5 to 1 minute. The same extra shopper per
+minute at `λ = 2` would change the time from 0.125 to 0.143. Near the top
+there is almost no slack left to absorb it.
 
 </Checkpoint>
 
-## Little's Law: a relationship that doesn't care about the details
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="wait-knee"
+/>
 
-**Does the sharp-curve behavior depend on assuming a very specific
-kind of system?** No — but a separate, simpler relationship holds
-regardless of the specific arrival pattern, service pattern, or even
-whether the curve above bends sharply or not:
+## Where does the delay come from if the average rates fit?
+
+**If arrivals average 9 per minute and the cashier averages 10, why isn't the
+wait zero?** Because only the averages fit; the individual gaps vary.
+
+| Arrival pattern at `λ = 9`, `μ = 10`                           | Lane behaviour             |
+| -------------------------------------------------------------- | -------------------------- |
+| every shopper exactly 6.67 s apart, each served in exactly 6 s | no waiting at all, ever    |
+| random gaps and random service times (M/M/1)                   | average 60 s in the system |
+
+The knee is a product of variability meeting thin spare capacity, not of
+capacity alone. That is why a clean, even-paced load test understates real
+traffic.
+
+## Little's Law: what holds regardless of the details
+
+**Is there a relationship that survives any arrival pattern and any service
+pattern?** Yes, and it needs only averages.
 
 ```mermaid
 flowchart LR
-    A["Arrival rate (λ)\nrequests/sec"] --> C["L = λ × W"]
-    B["Average time in\nsystem (W)\nseconds"] --> C
-    C --> D["Average number of\nrequests in the\nsystem at any moment (L)"]
+    A["Arrival rate λ<br/>per minute"] --> C["L = λ × W"]
+    B["Average time in<br/>system W"] --> C
+    C --> D["Average number in the<br/>system at a moment, L"]
 ```
 
-**Little's Law (`L = λW`)** says the average number of requests
-sitting in a system at any given moment equals the arrival rate times
-the average time each request spends there. It holds for almost any
-stable queueing system — this is what makes it useful as a sanity
-check: if you know two of the three numbers (say, arrival rate and
-observed average latency), you can compute the third (how many
-requests are "in flight" at once) without needing to know anything
-about the specific distribution of arrival or service times.
+Written as math, $$L = \lambda W$$. It holds for almost any stable system, which
+makes it a cross-check: from two measured numbers you get the third. In the
+lane, `λ = 9` and `W = 1` minute give `L = 9` shoppers on average.
 
-This connects directly to `applied-math/statistics`: the law uses
-averages, not worst cases. A queue can satisfy the average relationship
-while still having bursts, outliers, and peak-hour behavior that need
-separate measurement.
+It says nothing about the shape of the curve, the worst case, or the slowest
+1% of requests. It describes averages of a stable system.
 
-<Checkpoint question="A dashboard reports 5 requests/second arriving on average, and an average response time of 400ms. According to Little's Law, roughly how many requests are 'in flight' in the system at any given moment?">
+<Checkpoint question="A dashboard shows an average of 5 requests per second arriving and an average response time of 400 ms. Roughly how many requests are in flight at any moment?">
 
-About 2 (`L = λW = 5 × 0.4 = 2`). This is Little's Law used exactly the
-way it's meant to be used — as a sanity check computed from two numbers
-you can already observe (arrival rate and average latency) to get a
-third (how much concurrent work the system is actually carrying),
-without needing to know anything about the underlying arrival or
-service distribution. L3 leans on this same computation directly:
-`avgNumberInSystem` in the simulation is derived from measured
-throughput and average wait time, the same way this dashboard estimate
-was.
+About 2: `L = λW = 5 × 0.4 = 2`. This is the intended use. You combined two
+numbers you can observe to learn how much concurrent work the system carries,
+without knowing anything about the distribution of arrivals or service times.
 
 </Checkpoint>
 
-## Throughput and latency are related, but not interchangeable
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="littles-law"
+/>
 
-**If a system is handling more requests per second than ever, does
-that mean it's performing well?** Not necessarily — throughput
-(requests completed per second) and latency (time per individual
-request) can move in opposite directions. A system pushed close to
-its capacity limit can sustain high throughput while individual
-requests wait far longer than they used to — the checkout service in
-the opening scenario didn't lose throughput at 90% utilization, it
-lost latency. Optimizing for one without watching the other is how a
-system can look "fine" on a dashboard tracking requests-per-second
-while users are experiencing multi-second waits.
+## If the shop completes more shoppers per minute, is it doing better?
+
+**Can throughput rise while the experience gets worse?** Yes, and the lane
+shows it. Throughput is arrivals served; latency is the time each takes.
+
+| Arrivals `λ` per minute | Throughput (long run)   | Average time in system |
+| ----------------------- | ----------------------- | ---------------------- |
+| 6                       | 6 per minute            | 0.25 minute            |
+| 9                       | 9 per minute            | 1 minute               |
+| 12 (above `μ = 10`)     | capped at 10 per minute | grows without bound    |
+
+Going from 6 to 9, throughput rose 1.5x and latency 4x. At 12, throughput
+cannot follow arrivals any more, and the surplus piles up in the line.
+A dashboard that only shows requests per second would call all three rows healthy.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="latency-throughput"
+/>
 
 ## Failure modes at this level
 
-- **Load-testing only up to a "reasonable" utilization level.** If
-  the test never approaches the steep part of the curve, it can't
-  reveal what happens there — the flat region gives false confidence
-  about the steep one.
-- **Assuming utilization headroom scales linearly with latency
-  headroom.** Going from 60% to 90% utilization isn't "50% more load"
-  in terms of user-facing impact — per the curve, it can be several
-  times worse in wait time.
-- **Watching throughput dashboards without watching latency.** A
-  system can sustain its requests-per-second numbers right up to the
-  point where latency has already become unacceptable to users —
-  throughput staying flat doesn't mean nothing is wrong.
+- **Load-testing only at a comfortable utilization.** The flat region gives false confidence about the steep one.
+- **Treating headroom as linear.** Going from 60% to 90% is 1.5x the traffic but 4x the time.
+- **Watching throughput alone.** It can stay healthy while latency has already become unacceptable.
+- **Assuming an even-paced test equals real traffic.** Real arrivals clump.

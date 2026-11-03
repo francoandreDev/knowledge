@@ -1,108 +1,125 @@
 ---
-title: "L1 — How do I predict how a system behaves under load before it's built? (queueing theory basics: Little's Law, latency vs. throughput)"
+title: "L1 — Why does one more bit of traffic suddenly make the line crawl? (queueing basics: utilization, Little's Law)"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Load test looks fine, then the same service falls over in production">
+export const unit = {
+  track: "applied-math",
+  unitSlug: "queueing-theory-basics",
+};
+
+<Scenario label="One checkout lane: 50% more shoppers, four times the time in line">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>📊</span> <strong>Load test at 60% capacity</strong> — average response time: 250ms, looks great</div>
-      <div class="flex items-center gap-1.5"><span>📈</span> <strong>Traffic climbs to 90% capacity</strong> — average response time: over 1,000ms</div>
-      <div class="flex items-center gap-1.5"><span>😱</span> <strong>Only 50% more traffic</strong> — but response time is 4x worse, not 1.5x worse</div>
+      <div class="flex items-center gap-1.5"><span>🧑‍💼</span> <strong>One cashier</strong> — serves 10 shoppers per minute when never idle</div>
+      <div class="flex items-center gap-1.5"><span>🚶</span> <strong>Quiet hour</strong> — 6 shoppers arrive per minute; average time in the lane system: 15 seconds</div>
+      <div class="flex items-center gap-1.5"><span>🚶‍♀️</span> <strong>Busy hour</strong> — 9 shoppers arrive per minute; average time: 60 seconds</div>
+    </div>
+    <div class="not-prose mt-3 flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300">
+      <div>
+        <div class="flex justify-between"><span>Quiet hour: cashier busy</span><span>60%</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-emerald-500 animate-fill-bar" style="--target-width: 60%"></div></div>
+      </div>
+      <div>
+        <div class="flex justify-between"><span>Busy hour: cashier busy</span><span>90%</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 90%"></div></div>
+      </div>
     </div>
   </Fragment>
 
-**A checkout service is load-tested at 60% of its maximum capacity and
-performs great — 250ms average response time. Traffic grows, and at
-90% of capacity the same service now averages over 1,000ms — a full
-second. Traffic only grew 50%. Why did response time grow 4x instead
-of roughly 1.5x, and why wasn't this visible in the 60%-capacity load
-test at all?**
+A shop has one checkout lane and one cashier who can serve 10 shoppers a
+minute. In a quiet hour, 6 shoppers arrive per minute and the average shopper
+spends 15 seconds from joining the line to leaving. In a busy hour, 9 arrive
+per minute, which is only 50% more traffic. **Why does the average time jump
+to 60 seconds, four times longer, instead of rising by about half?**
 
-The relationship between how busy a system is and how long requests
-wait isn't linear — it's a curve that stays nearly flat for most of
-its range and then rises sharply as the system approaches its actual
-capacity. A load test that never goes near that region will never see
-the cliff coming.
+The cashier is not twice as slow. What changed is how much spare capacity is
+left to absorb the random clumps of shoppers that always happen.
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Arrival rate, service rate, and utilization",
-    "Little's Law (L = λW)",
-    "Why latency and throughput aren't the same thing",
+    "Arrival rate, service rate, utilization",
+    "Little's Law (people in the system = rate x time)",
+    "Why the delay curve has a knee",
   ]}
 />
 
-## The shape of the problem
+## What are the pieces of a line?
 
-Before the symbols, use a line at a store. If 6 people arrive every minute
-and one cashier can serve 10 people every minute, the cashier is using `6 / 10
-= 60%` of capacity. If 9 people arrive every minute, the cashier is using
-`9 / 10 = 90%`. The second case still has "some room left," but only 1 person
-per minute of slack; any small burst now turns into a visible line.
+**If you wanted to predict the lane's behaviour before the shop is even built,
+what would you need to know?** Only two rates.
 
-| Everyday queue piece           | Systems word     | Example at 60% capacity    |
-| ------------------------------ | ---------------- | -------------------------- |
-| people entering line           | arrival rate `λ` | 6 requests/second          |
-| cashier speed                  | service rate `μ` | 10 requests/second         |
-| fraction busy                  | utilization `ρ`  | `6 / 10 = 0.60`            |
-| people waiting or being served | in system `L`    | average requests in flight |
-| time from joining to leaving   | latency `W`      | average time per request   |
+| Everyday piece                  | Systems word     | Quiet hour         |
+| ------------------------------- | ---------------- | ------------------ |
+| shoppers joining the line       | arrival rate `λ` | 6 per minute       |
+| how fast the cashier works      | service rate `μ` | 10 per minute      |
+| fraction of time cashier busy   | utilization `ρ`  | `6 / 10 = 0.60`    |
+| shoppers in line or at the till | in system `L`    | 1.5 on average     |
+| time from joining to leaving    | latency `W`      | 0.25 minute (15 s) |
 
-- **Queueing theory** studies what happens when requests (or
-  customers, or packets, or anything else) arrive at a system faster
-  than, or comparably close to, the rate the system can process them.
-- **Utilization** (often written ρ, "rho") is the fraction of a
-  system's maximum processing capacity currently being used —
-  arrival rate divided by service rate. A system at 60% utilization
-  is using 60% of its maximum throughput.
-- **Little's Law** is a simple, general relationship: the average
-  number of requests in a system equals the arrival rate multiplied
-  by the average time each request spends in the system (`L = λW`).
-  It holds for almost any queueing system, regardless of the specific
-  arrival or service pattern — which makes it a powerful sanity check
-  on capacity planning.
-- The core surprise: as utilization approaches 100%, average wait
-  time doesn't grow proportionally — it grows toward infinity. A
-  system doesn't fail gracefully as it nears capacity; it fails
-  sharply, often well before "100% busy" is actually reached.
-- "Stable in the long run" means the line eventually drains instead
-  of growing forever. If the average arrival rate is lower than the
-  average service rate, bursts can clear. If arrivals equal or exceed
-  service for long enough, the queue has no mathematical reason to
-  shrink.
+- **Queueing theory** studies what happens when work arrives at a system that
+  can only handle so much per unit time.
+- **Utilization** is `ρ = λ / μ`: the share of capacity in use. It must stay
+  below 1 or the line grows forever.
+- **Little's Law** says `L = λW`: the average number in the system equals the
+  arrival rate times the average time each spends there. In the quiet hour,
+  `6 × 0.25 = 1.5`. In the busy hour, `9 × 1 = 9`.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="queue-pieces"
+/>
+
+## What does the delay look like as the cashier gets busier?
+
+For the simplest random model (one server, random arrivals, random service
+times, called M/M/1), the average time in the system is exactly
+`1 / (μ - λ)`. With `μ = 10` per minute:
+
+| Utilization `ρ` | Arrivals `λ` per minute | Average time in system |
+| --------------- | ----------------------- | ---------------------- |
+| 50%             | 5                       | 0.2 minute (12 s)      |
+| 60%             | 6                       | 0.25 minute (15 s)     |
+| 80%             | 8                       | 0.5 minute (30 s)      |
+| 90%             | 9                       | 1 minute (60 s)        |
+| 95%             | 9.5                     | 2 minutes              |
+
+```mermaid
+flowchart LR
+    A["Spare capacity<br/>μ - λ"] -->|"shrinks"| B["Random clumps of<br/>arrivals can't be absorbed"]
+    B --> C["Line builds and<br/>drains slowly"]
+    C --> D["Average time<br/>1 / (μ - λ) climbs steeply"]
+```
+
+The same arithmetic holds for any system with a rate in and a rate out: web
+requests per second, packets, jobs on a worker. The unit of time cancels.
 
 ## Key terms
 
-- **Arrival rate (λ)** — how often new requests arrive, on average
-  (e.g. requests per second).
-- **Service rate (μ)** — how many requests a system can complete per
-  unit time when continuously busy.
-- **Utilization (ρ)** — the fraction of capacity in use, `ρ = λ / μ`.
-  Must stay below 1 for a queue to remain stable in the long run.
-- **Little's Law (`L = λW`)** — average number in system equals
-  arrival rate times average time in system; a general, distribution-
-  independent relationship.
-- **Latency vs. throughput** — throughput is how much work a system
-  completes per unit time; latency is how long any individual request
-  takes. They're related but not interchangeable — a system can have
-  high throughput and terrible latency at the same time.
-- **Capacity before build** — when the real system does not exist yet,
-  the service rate is an estimate from a prototype, benchmark, vendor
-  limit, previous system, or explicit assumption. `applied-math/orders-magnitude`
-  and `applied-math/math-tool-prediction` cover that "rough first number"
-  discipline.
+- **Arrival rate (`λ`)** — how often work arrives, on average.
+- **Service rate (`μ`)** — how much work the server finishes per unit time
+  when it never idles.
+- **Utilization (`ρ = λ / μ`)** — share of capacity in use. A stable queue needs `ρ < 1`.
+- **Little's Law (`L = λW`)** — average number in the system equals arrival
+  rate times average time in the system.
+- **Latency vs. throughput** — latency is how long one request takes;
+  throughput is how many finish per unit time. In the busy hour throughput
+  rose 1.5x while latency rose 4x.
+- **The knee** — the utilization range where delay stops creeping and starts climbing.
 
-## What this unit covers
+When the real system does not exist yet, `μ` is an estimate from a prototype,
+a vendor limit, or an explicit assumption. `applied-math/orders-magnitude` and
+`applied-math/math-tool-prediction` cover getting that first rough number.
 
-L2 works through why the wait-time-vs-utilization curve bends sharply
-near full capacity rather than growing in a straight line, and what
-Little's Law actually says (and doesn't say) about a system's
-behavior. L3 builds a real, verified queueing simulation, confirms it
-matches the closed-form math at several utilization levels, and uses
-it to show exactly where the checkout service's cliff in the opening
-scenario comes from.
+## What the next levels cover
+
+L2 explains why the curve bends, what Little's Law does and does not promise,
+and why latency and throughput can diverge. L3 plays the line out customer by
+customer, checks the formula against a 50,000-customer simulation, and asks
+how far the model can be trusted.
