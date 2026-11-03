@@ -3655,3 +3655,16 @@ Migrated 4 more `learning-craft/` units via 4 parallel content-only subagents. `
 Length bias, correct strictly longest / strictly shortest: `spaced-repetition` 2% / 25% (practice longest 0%), `systematic-exploration` 21% / 27% (practice shortest 34%), `weighing-credibility` 3% / 17% (faint opposite tell), `verification-habits` 23% / 18%.
 
 `learning-craft/` is at 8 of 13. Total migrated: 149 of 246. Remaining here: `notes`, `prioritization`, `curation`, `calibration` (batch in progress), then `breadth-depth-trade-off-scale` (its roadmap title carries "staff engineer", to fix).
+
+## 2026-11-03 — `learning-craft/` batch 3: `notes`, `prioritization`, `curation`, `calibration`
+
+Migrated 4 more `learning-craft/` units via 4 parallel content-only subagents. `typecheck` 0 errors, `build` 273 pages; live click-through (iframe per unit) passed all 26 `DomainCheck` topics, 0 Mermaid errors (including the `timeline` block in `prioritization` L3), 0 KaTeX errors, "Mark as done" enabled on all four. All quiz, no code topics.
+
+- **`notes`**: 5 topics, 60 items. Shoebox-of-receipts-vs-filing-cabinet opening (25 min vs 2 min, assumed); curve 0 / 37.4 / 60.1 / 73.8 / 82.1 / 87.2 / 94.4 at 0 / 1 / 2 / 3 / 4 / 5 / 10 minutes matches the demo and is labelled an assumed model. The exercises use new topic ids, so any `exercise:` progress saved in a browser under the old structure no longer applies.
+- **`prioritization`**: 7 topics, 79 items. L2 chart 20 h × 0.75 ÷ n (15, 7.5, 5, 3.75, 3, 2.5) matches the demo; the 75% reserve is stated as an assumption; replaced a contradictory timeline ("week three" vs "three days before the window closed") with an assumed one (arrives day 0, residency clears day 10, window closes day 20, she finds out day 17); "relocated staff" → "employees".
+- **`curation`**: 7 topics, 77 items. Sixty-pieces-of-mail opening (3 of 60 = 5%, assumed); curve 0.52 / 1.90 / 1.98 at 1 / 10 / 15 hours from the demo; added an L2 note that at 10 hours Elena still surfaces about 95% of the useful items and pays in time and unsortable fizzles, not missed signal.
+- **`calibration`**: 7 topics, 84 items. Rebuilt the L3 log from integer hits (3/6, 4/7, 4/6, 4/5, gaps 30 / 23 / 13 / 0, with a small-sample caveat); exact binomial figures (8 of 10 at 80% = 30.2%, 6 or fewer = 12.1%, 65 or fewer of 100 ≈ 0.03%, 13 or fewer of 20 at 95% ≈ 1 in 30,000); the demo curve is smooth while Tomás's monthly gaps bounce because each month has 5–7 calls.
+
+Length bias, correct strictly longest / strictly shortest: `notes` 25% / 25%, `prioritization` 24% / 32%, `curation` 12% / 21%, `calibration` 7% / 18% (the last two have a mild opposite tell).
+
+`learning-craft/` is at 12 of 13. Total migrated: 153 of 246. Remaining here: `breadth-depth-trade-off-scale` (in progress; its roadmap title and teaser no longer carry "staff engineer"). Next track in ROADMAP order: `applied-math` (15 units).
