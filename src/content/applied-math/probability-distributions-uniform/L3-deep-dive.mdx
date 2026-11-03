@@ -1,249 +1,170 @@
 ---
-title: "L3 — Simulating all three distributions, and checking the load balancer's numbers by hand"
+title: "L3 — Putting numbers on the load balancer, the alert threshold, and the latency sum"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Was server 3's 32% actually suspicious?">
+export const unit = {
+  track: "applied-math",
+  unitSlug: "probability-distributions-uniform",
+};
+
+<Scenario label="Server 3 got 64 of 200 requests. Is the load balancer broken?">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — compute exactly how many standard deviations 64/200 is from the expected 50/200</div>
-      <div class="flex items-center gap-1.5"><span>🔔</span> <strong>Second goal</strong> — pick a defensible alert threshold for a 2%-failure-rate dependency</div>
-      <div class="flex items-center gap-1.5"><span>📶</span> <strong>Third goal</strong> — show that summed independent delays really do look normal</div>
+      <div class="flex items-center gap-1.5"><span>⚖️</span> <strong>The setup</strong> — 4 servers, each request picked uniformly at random</div>
+      <div class="flex items-center gap-1.5"><span>📊</span> <strong>Expected</strong> — 200 × 1/4 = 50 per server</div>
+      <div class="flex items-center gap-1.5"><span>🚨</span> <strong>Observed</strong> — 64 on server 3 (32%)</div>
+    </div>
+    <div class="not-prose mt-3 flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300">
+      <div>
+        <div class="flex justify-between"><span>Expected</span><span>50</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-sky-500 animate-fill-bar" style="--target-width: 78%"></div></div>
+      </div>
+      <div>
+        <div class="flex justify-between"><span>Observed</span><span>64</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 100%"></div></div>
+      </div>
     </div>
   </Fragment>
 
-**Before running the numbers: server 3 got 64 of 200 requests against
-an expected 50. Is that 14-request gap large or small, relative to
-what a fair 4-way random split naturally produces over 200 tries?**
+The dice question again, now with stakes: a load balancer should send each of 4
+servers about a quarter of the traffic. After 200 requests, server 3 has 64.
+**Is a 14-request gap big or small compared with what a fair 4-way split produces?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Z-score for the load balancer's 64/200 result",
-    "A defensible binomial alert threshold",
-    "Central Limit Theorem in a simulated latency sum",
+    "The z-score of 64 out of 200",
+    "Choosing an alert threshold from the tail",
+    "Latency as a sum of delays",
   ]}
 />
 
-## Checking the load balancer: how many standard deviations is 64 from 50?
+## How far out is 64?
 
-For `n` independent trials each with probability `p`, the count of
-"successes" (here, "request went to server 3") has mean `n × p` and
-standard deviation `√(n × p × (1 − p))` — this is the binomial
-distribution's exact formula, not an approximation:
+Treat "went to server 3" as a yes/no trial with `p = 1/4`.
 
-Without code, the first numbers are:
+| Step                       | Arithmetic             | Result     |
+| -------------------------- | ---------------------- | ---------- |
+| Expected count             | `200 × 1/4`            | 50         |
+| Gap                        | `64 − 50`              | 14         |
+| Standard deviation         | `√(200 × 0.25 × 0.75)` | about 6.12 |
+| Z-score                    | `14 / 6.12`            | about 2.29 |
+| Exact chance of 64 or more | binomial tail          | about 1.5% |
 
-| Step                       | Arithmetic             | Result             |
-| -------------------------- | ---------------------- | ------------------ |
-| Expected count             | `200 × 1/4`            | 50 requests        |
-| Observed gap               | `64 - 50`              | 14 extra requests  |
-| Typical spread             | `√(200 × 0.25 × 0.75)` | about 6.1 requests |
-| Gap in standard deviations | `14 / 6.1`             | about 2.3 stddevs  |
+Verdict: unusual but not damning. There is a subtlety. You looked at server 3 _after_ seeing
+it was high. Four servers each get a chance to look odd, so the chance that _some_ server reaches
+64 or more is at most `4 × 1.5% ≈ 6.2%`. Picking the target after seeing the data inflates how
+surprising it looks.
 
-The code below verifies that table and gives the more precise decimal.
-
-```js
-function binomialStats(n, p) {
-  const mean = n * p;
-  const variance = n * p * (1 - p);
-  const stddev = Math.sqrt(variance);
-  return { mean, variance, stddev };
-}
-
-function zScore(observed, mean, stddev) {
-  return (observed - mean) / stddev;
-}
-
-const n = 200;
-const p = 0.25; // 1 of 4 servers
-const { mean, stddev } = binomialStats(n, p);
-const z = zScore(64, mean, stddev);
-
-console.log({ mean, stddev: stddev.toFixed(3), z: z.toFixed(3) });
-// { mean: 50, stddev: '6.124', z: '2.286' }
+```mermaid
+flowchart LR
+    A["Observed count"] --> B["Subtract expected\nn × p"]
+    B --> C["Divide by standard deviation"]
+    C --> D{"Z-score"}
+    D -- "under about 2" --> E["Ordinary wobble"]
+    D -- "2 to 3" --> F["Keep watching"]
+    D -- "far beyond 3" --> G["Suspect the process"]
 ```
 
-Verified: server 3's 64 hits are **2.286 standard deviations** above
-the expected 50. That's a real, noticeable deviation — worth watching
-if it persists — but it's not the kind of extreme outlier (5+ standard
-deviations) that would prove the random selection itself is broken. A
-purely fair 4-way split does occasionally produce results this
-lopsided over only 200 requests; the honest answer to the scenario's
-question is "keep watching, not yet conclusive," not a flat yes or no.
+<Checkpoint question="Server 3 later reads 5.5 standard deviations above expected. Is 'keep watching' still the right verdict?">
 
-<Checkpoint question="Suppose a different server had instead gotten 5.5 standard deviations above its expected count, rather than server 3's 2.286. Would the same 'keep watching, not conclusive' verdict still apply?">
-
-No. 2.286 standard deviations is unusual but well within the range a
-fair random process produces now and then over 200 trials — that's
-why the verdict was "watch it, not proof of a bug." 5.5 standard
-deviations is a different situation entirely: for any roughly
-bell-shaped spread, results that far from the mean are astronomically
-rare by chance alone (fractions of a percent of a percent). At that
-distance, "the selection logic is actually broken, biased, or
-non-random" becomes the far more credible explanation than "this is
-what fair randomness occasionally looks like." The verdict tracks how
-many standard deviations away the result is, not just whether it's
-above or below expected.
+No. Beyond about 3 standard deviations, chance alone becomes a poor explanation, and 5.5 is far
+past it. Look for biased selection, sticky routing, or a bug. The verdict follows the z-score, not
+whether the count is merely above average.
 
 </Checkpoint>
 
-## Setting a binomial alert threshold for a flaky dependency
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="gap-in-stddevs"
+/>
 
-**If a downstream dependency independently fails 2% of the time, what
-failure count in the next 500 requests should actually trigger a
-page?** Computing the exact probability of "20 or more failures"
-requires the binomial probability mass function — the chance of
-exactly `k` successes in `n` trials:
+## Setting an alert threshold
 
-This next part is advanced because it computes exact binomial probabilities.
-The beginner-level idea is enough to follow the result: if the expected count
-is `500 × 0.02 = 10` failures and the standard deviation is about `3.13`, then
-20 failures is more than three typical spreads above the mean. That is rare
-enough to be alert-worthy, but the code quantifies "rare" precisely.
+**A dependency fails independently 2% of the time. How many failures in 500 requests should page someone?**
+Mean 10, standard deviation about 3.13. Exact binomial tails (verified):
 
-```js
-function logFactorial(x) {
-  let sum = 0;
-  for (let i = 2; i <= x; i++) sum += Math.log(i);
-  return sum;
-}
+| Threshold (failures) | z-score | Chance of reaching it by luck |
+| -------------------- | ------- | ----------------------------- |
+| 12                   | 0.64    | about 30%                     |
+| 15                   | 1.60    | about 8.1%                    |
+| 20                   | 3.19    | about 0.31% (1 in 320)        |
 
-function binomialPMF(n, p, k) {
-  const logCoefficient =
-    logFactorial(n) - logFactorial(k) - logFactorial(n - k);
-  return Math.exp(logCoefficient + k * Math.log(p) + (n - k) * Math.log(1 - p));
-}
+A threshold at 12 would fire on ordinary noise roughly 3 batches in 10. Pages stop meaning anything.
+At 20, a crossing almost always means something changed. The demo below uses these exact numbers: drag the threshold and watch the luck probability collapse.
 
-function probabilityAtLeast(n, p, k) {
-  let sum = 0;
-  for (let i = k; i <= n; i++) sum += binomialPMF(n, p, i);
-  return sum;
-}
+The math assumes independence. If failures cluster because they share a database that is down, one outage produces
+a burst of failures together and the 0.31% figure no longer applies.
 
-const n2 = 500;
-const p2 = 0.02;
-const prob20Plus = probabilityAtLeast(n2, p2, 20);
-console.log(prob20Plus.toFixed(5), "≈ 1 in", Math.round(1 / prob20Plus));
-// 0.00313 ≈ 1 in 320
-```
+<Checkpoint question="Failures actually come in bursts because a shared dependency stalls. Does the 0.31% still describe how often 20 failures happens?">
 
-(The log-factorial trick avoids computing `500!` directly, which would
-overflow — a `500 choose 20` computed the naive way isn't
-representable as a normal floating-point number, but its logarithm
-is.)
-
-Verified: under pure chance, 20+ failures out of 500 happens only
-about **0.31% of the time** — roughly 1 batch in 320. That rarity is
-exactly what makes 20 a defensible alert threshold: it's set far
-enough past the expected 10 ± 3.13 that crossing it is genuinely
-informative, not just noise from the dependency's normal 2% failure
-rate.
-
-<Checkpoint question="If the alert threshold were instead set to 12 failures — just above the expected mean of 10 — rather than 20, what would go wrong operationally?">
-
-It would page far too often on pure noise. The standard deviation here
-is about 3.13 failures, so 12 failures is less than one standard
-deviation above the mean — well within the range a perfectly healthy
-2%-failure dependency produces routinely just from chance. A threshold
-that close to the mean would fire on ordinary variation constantly,
-training whoever's on call to ignore or silence the alert — which
-defeats the point of having one. The 20-failure threshold works
-specifically because it sits far enough into the tail (about 0.31%
-probability under normal conditions) that crossing it actually means
-something changed, not that the model was clever, and the same
-"how many standard deviations past the mean" question is exactly what
-should set any alert threshold.
+No. The 0.31% assumes independent failures. Correlated failures make large counts far more common than the
+independent model predicts, so this threshold would page more often than 1 in 320 windows, and the calculation gives false comfort.
 
 </Checkpoint>
 
-## Demonstrating the Central Limit Theorem: summed delays look normal
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="gap-in-stddevs"
+/>
 
-**If six independent hops each contribute a delay uniformly spread
-between 1ms and 5ms — not remotely bell-shaped on their own — what
-does their total look like after summing thousands of simulated
-requests?**
+## Latency as a sum
 
-Here `uniform(1, 5)` means a continuous uniform delay anywhere in the interval
-from 1ms to 5ms. The chance of landing between 2ms and 4ms is half the total
-interval, because `(4 - 2) / (5 - 1) = 2 / 4 = 50%`. The simulation repeats
-that interval pick six times per request, adds the six delays, and then looks
-at the shape of the totals.
+**Six independent hops, each a flat uniform delay between 1 and 5 ms. What does the total look like?**
+Each hop has mean 3 ms and variance `16/12 ≈ 1.333`. The total has mean `6 × 3 = 18` ms and variance 8 (standard deviation about 2.83 ms).
+A simulation of 20,000 requests (seeded, verified) gave:
 
-```js
-function mulberry32(seed) {
-  return function () {
-    seed |= 0;
-    seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+| Quantity | Theory     | Simulation |
+| -------- | ---------- | ---------- |
+| Mean     | 18         | 18.03      |
+| Variance | 8          | 7.98       |
+| Median   | 18         | 18.00      |
+| p99      | not needed | 24.48      |
 
-function simulateLatency(rand) {
-  let total = 0;
-  for (let i = 0; i < 6; i++) {
-    total += 1 + rand() * 4; // uniform(1, 5)
-  }
-  return total;
-}
+No single hop is bell-shaped, but the total clusters around 18 ms. Because variances add, you can reason
+about a total latency budget from its parts.
 
-const rand = mulberry32(42);
-const samples = [];
-for (let i = 0; i < 20000; i++) samples.push(simulateLatency(rand));
-samples.sort((a, b) => a - b);
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="sums-look-normal"
+/>
 
-const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
-const variance =
-  samples.reduce((a, b) => a + (b - mean) ** 2, 0) / samples.length;
-const p50 = samples[Math.floor(samples.length * 0.5)];
-const p99 = samples[Math.floor(samples.length * 0.99)];
+## Compute it yourself
 
-console.log({
-  mean: mean.toFixed(3),
-  variance: variance.toFixed(3),
-  p50: p50.toFixed(3),
-  p99: p99.toFixed(3),
-});
-// { mean: '18.026', variance: '7.977', p50: '18.004', p99: '24.483' }
-```
+The last exercise set asks you to write the z-score function. Writing the three-line formula is the
+understanding: observed minus expected, over the binomial standard deviation.
 
-Verified against the theoretical values: a single `uniform(1, 5)` has
-mean `3` and variance `(5 − 1)² / 12 ≈ 1.333`; summing 6 independent
-copies gives theoretical mean `6 × 3 = 18` and theoretical variance
-`6 × 1.333 ≈ 8` — matching the simulation's `18.026` and `7.977`
-almost exactly. None of the six individual delays was bell-shaped
-(each was flat, uniform), but their sum's `p50` (18.0) and `p99`
-(24.5) sit right where a normal distribution with that mean and
-variance would predict — this is the Central Limit Theorem showing up
-directly in a latency budget, which is why a `p99` latency SLO can
-often be reasoned about from its component hops rather than only
-measured after the fact.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="zscore-code"
+/>
 
-## Extend it: what if there were 20 hops instead of 6, each faster?
+## Extend it
 
-**Using the same simulation shape, what would change about the
-resulting latency distribution if there were 20 hops instead of 6,
-each independently `uniform(0.5, 1.5)`ms — same total expected latency
-range, more, smaller pieces? Would the relative spread (`stddev /
-mean`) get wider or narrower than the 6-hop case, and why might that
-matter for how tight a `p99` SLO can realistically be set?** The
-Central Limit Theorem's guarantee gets _stronger_, not weaker, as more
-independent pieces are summed — try adjusting the loop bound and
-`rand()` range above and re-running to see the relative spread
-actually shrink.
+This is a case, not the whole territory. Try changing it:
+
+- If the same 14-request gap appeared out of 2,000 requests across 4 servers, would the z-score grow or shrink, and why?
+  (Hint: expected count and standard deviation both change.)
+- With 20 hops instead of 6, each uniform from 1 to 5 ms, mean and standard deviation of the total scale differently. Does relative
+  spread (`stddev / mean`) get wider or narrower? Theory says it falls as `1/√n`: about 0.157 for 6 hops and about 0.086 for 20.
+- What would change if the 4 servers were not equally weighted?
 
 ## Failure modes
 
-| Failure mode                                                                          | What it gets wrong                                                                                                                                        |
-| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Treating any deviation from the exact expected value as a bug                         | A fair random process routinely produces uneven-looking results at small sample sizes — check standard deviations, not raw gaps                           |
-| Assuming a metric is "roughly normal" without checking why                            | Normal distributions arise from sums of independent effects (CLT) — a single skewed cause won't automatically look bell-shaped                            |
-| Picking an alert threshold from intuition instead of the distribution's actual spread | An intuitive-sounding threshold can trigger on pure noise, or miss real problems, depending on how far it actually is from the mean                       |
-| Assuming independence when trials aren't actually independent                         | Binomial math assumes each trial doesn't affect the next — correlated failures (e.g. a shared dependency having an outage) break this assumption entirely |
-| Confusing "uniform" (equally likely outcomes) with "evenly distributed in practice"   | Uniform describes the underlying process, not any single finite sample of it — small samples from a uniform process still look lumpy                      |
+| Failure mode                                        | What goes wrong                                                           |
+| --------------------------------------------------- | ------------------------------------------------------------------------- |
+| Treating any gap from expected as a bug             | Small samples are lumpy by nature; use z-scores                           |
+| Choosing which server to test after seeing the data | The chance that some server looks odd is larger than for one named server |
+| Picking an alert threshold by intuition             | It may fire on noise or sleep through real problems                       |
+| Assuming independence when failures are correlated  | Tail probabilities are badly underestimated                               |
+| Adding standard deviations instead of variances     | Overestimates the spread of a sum of independent parts                    |
