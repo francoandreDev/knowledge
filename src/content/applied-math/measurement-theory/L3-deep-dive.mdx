@@ -1,187 +1,191 @@
 ---
-title: "L3 — Reproducing the Goodhart curve with real code, and measuring sampling error directly"
+title: "L3 — Error bounds, sampling error, and where a measurement quietly goes wrong"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="The scenario">
+export const unit = {
+  track: "applied-math",
+  unitSlug: "measurement-theory",
+};
+
+<Scenario label="The lunch-menu survey">
   <Fragment slot="facts">
-    <p class="not-prose mb-1 text-xs font-semibold tracking-wide text-slate-400 uppercase">Test coverage (the proxy)</p>
-    <div class="not-prose mb-3 flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-2">
-        <span class="w-16 shrink-0">Team A</span>
-        <div class="h-2 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-          <div class="h-full rounded-full bg-sky-500 animate-fill-bar" style="--target-width: 100%"></div>
-        </div>
-        <span class="w-10 text-right text-xs">100%</span>
-      </div>
-      <div class="flex items-center gap-2">
-        <span class="w-16 shrink-0">Team B</span>
-        <div class="h-2 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-          <div class="h-full rounded-full bg-sky-500 animate-fill-bar" style="--target-width: 98%"></div>
-        </div>
-        <span class="w-10 text-right text-xs">98%</span>
-      </div>
-    </div>
-
-    <p class="not-prose mb-1 text-xs font-semibold tracking-wide text-slate-400 uppercase">Real defect-freedom (the target)</p>
+    <p class="not-prose mb-1 text-xs font-semibold tracking-wide text-slate-400 uppercase">Typical error of a "share who like it" estimate (assumes a fair 50/50 split)</p>
     <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
       <div class="flex items-center gap-2">
-        <span class="w-16 shrink-0">Team A</span>
-        <div class="h-2 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-          <div class="h-full rounded-full bg-emerald-500 animate-fill-bar" style="--target-width: 90%"></div>
-        </div>
-        <span class="w-10 text-right text-xs">90</span>
+        <span class="w-20 shrink-0">10 asked</span>
+        <div class="h-2 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 100%"></div></div>
+        <span class="w-14 text-right text-xs">±15.8 pts</span>
       </div>
       <div class="flex items-center gap-2">
-        <span class="w-16 shrink-0">Team B</span>
-        <div class="h-2 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-          <div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 30%"></div>
-        </div>
-        <span class="w-10 text-right text-xs">30</span>
+        <span class="w-20 shrink-0">40 asked</span>
+        <div class="h-2 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-amber-500 animate-fill-bar" style="--target-width: 50%"></div></div>
+        <span class="w-14 text-right text-xs">±7.9 pts</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="w-20 shrink-0">160 asked</span>
+        <div class="h-2 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-emerald-500 animate-fill-bar" style="--target-width: 25%"></div></div>
+        <span class="w-14 text-right text-xs">±4.0 pts</span>
       </div>
     </div>
-
   </Fragment>
 
-Team A and Team B both drove test coverage from 40% toward 100% over a
-quarter. Team A's real defect-freedom climbed alongside it, to 90. Team B's
-peaked around 53 partway through the quarter and then fell to 30, even as
-their coverage number kept climbing to 98%.
+A school wants to know what share of its students like the new lunch menu.
+Asking every student is a lot of work, so a volunteer asks 10 students and
+finds 6 of 10 like it. The principal says "that is too few, ask 40." After 40
+answers the number moves a little, and the principal says "ask 160 to be sure."
+Each time the volunteer has to ask four times as many people.
+
+**Quadrupling the effort helps. But does it help four times as much, or less?
+And what if the 160 people asked are all standing in the lunch queue for the
+new menu?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Reproducing the Goodhart curve in code",
-    "Simulating sampling error directly",
-    "Failure modes to watch for",
+    "Carrying error through a calculation",
+    "How sampling error shrinks with sample size",
+    "Failure modes: bias and stale proxies",
   ]}
 />
 
-## Reproducing the proxy/target divergence numerically
+## How wide is the range after you combine readings?
 
-This is the exact formula behind L2's chart and the interactive demo — implementing it directly makes the "why does Team B's real target eventually decline" claim checkable, not just asserted:
+**L1 said the suitcase is 22 to 24 kg. Where did that range come from, and can
+you compute it for any combination?** Work from the rule: a reading with
+resolution `step` is uncertain by half a step either way. Combining readings
+turns those into bounds on the result.
 
-You can read the first calculation without JavaScript by following this small table. "Pressure" means how strongly the team is rewarded for pushing the proxy, and "correlation" means how well the proxy still tracks the real target.
-
-| Pressure | Proxy score | Strong proxy, `corr = 0.9` | Weak proxy, `corr = 0.3` |
-| -------- | ----------- | -------------------------- | ------------------------ |
-| 0        | 40          | 40                         | 40                       |
-| 25       | 55          | 54                         | 51                       |
-| 50       | 70          | 68                         | 53                       |
-| 75       | 85          | 79                         | 46                       |
-| 100      | 100         | 90                         | 30                       |
-
-The code below only reproduces that table mechanically.
-
-```js
-// goodhart.mjs — proxy score always climbs with pressure; whether the
-// real target climbs WITH it depends entirely on correlation strength.
-function proxyScore(pressure) {
-  return Math.min(100, 40 + 0.6 * pressure);
-}
-
-function realTarget(pressure, correlation) {
-  const penalty = Math.pow(pressure, 2) * (1 - correlation) * 0.01;
-  return Math.max(0, 40 + 0.6 * pressure - penalty);
-}
-
-for (const pressure of [0, 25, 50, 75, 100]) {
-  console.log(
-    `pressure=${pressure}: proxy=${proxyScore(pressure).toFixed(0)}, ` +
-      `real (Team B, corr=0.3)=${realTarget(pressure, 0.3).toFixed(0)}, ` +
-      `real (Team A, corr=0.9)=${realTarget(pressure, 0.9).toFixed(0)}`,
-  );
-}
-// pressure=0:   proxy=40, real(B)=40, real(A)=40
-// pressure=25:  proxy=55, real(B)=51, real(A)=54
-// pressure=50:  proxy=70, real(B)=53, real(A)=68
-// pressure=75:  proxy=85, real(B)=46, real(A)=79
-// pressure=100: proxy=100 (capped), real(B)=30, real(A)=90
+```mermaid
+flowchart TD
+    A["Reading with suitcase: 93, step 1<br/>true in 92.5 to 93.5"] --> L["Lowest difference:<br/>92.5 - 70.5 = 22"]
+    B["Reading alone: 70, step 1<br/>true in 69.5 to 70.5"] --> L
+    A --> H["Highest difference:<br/>93.5 - 69.5 = 24"]
+    B --> H
+    L --> V{"Compare to the 23 kg limit"}
+    H --> V
+    V -->|"high is 23 or less"| OK["Certainly within"]
+    V -->|"low is above 23"| NO["Certainly over"]
+    V -->|"limit inside the range"| UNK["Cannot tell"]
 ```
 
-At `corr=0.9` (Team A — a genuinely strong proxy, like "the code compiles and passes a real, meaningful test suite" as a quality proxy), the real target tracks the proxy closely even under heavy optimization pressure. At `corr=0.3` (Team B — a weak proxy, like raw test-count as a quality proxy, gameable by writing many low-value tests), the real target visibly peaks around pressure 50 and _declines_ afterward even as the proxy keeps climbing to its cap — the exact Goodhart's Law shape from L1's scenario, now backed by a specific, re-runnable calculation instead of just an assertion.
+The worst case for a difference pairs the highest first reading with the lowest
+second one, so the range is the displayed difference minus and plus one full
+step. For a sum of `n` readings every reading adds half a step each way, so the
+range grows to `n` half-steps on each side. A constant systematic offset is the
+exception: it shifts both readings equally and cancels in the difference, which
+is why subtracting is a good trick for a scale that reads 2 kg heavy.
 
-<Checkpoint question="Two teams both apply the same optimization pressure to their proxy. Team A's proxy has corr=0.9, Team B's has corr=0.3. Both proxy scores hit the same number at pressure=100. Does that shared proxy score tell you their real targets are also close together?">
+The three verdicts in the diagram are the point. A rounded number can prove
+"within the limit" or "over the limit", but when the limit falls inside the
+range the only honest verdict is "cannot tell". Getting a better answer means
+buying a finer scale (smaller step), not computing harder.
 
-No. `proxyScore` doesn't depend on `correlation` at all — it always climbs the same way with pressure, capping at 100 regardless of which team you're looking at. The `penalty` term in `realTarget` is what depends on correlation, and it grows with the square of pressure for a low-correlation proxy, so at high pressure the two real targets can be far apart (90 vs. 30) even while their proxy scores are identical. A proxy score alone never tells you how well it's tracking the real target — you need to know the correlation separately, and that's exactly the thing a dashboard showing only the proxy number can't show you.
+<Checkpoint question="You switch to a scale that shows 0.5 kg steps and read 70.0 alone and 93.0 with the suitcase. What is the new range for the suitcase, and does it settle the 23 kg question?">
+
+The displayed difference is still 23.0 kg, but the range is now the difference
+minus and plus one step of 0.5, so 22.5 to 23.5 kg. The limit of 23 is still
+inside the range, so it still does not settle it, only narrows it. Halving the
+step halves the width of the doubt; it never removes it. With 0.1 kg steps the
+same 23.0 difference would give 22.9 to 23.1, still undecided. A difference of
+22.0 on that scale (range 21.9 to 22.1) would finally clear the limit.
 
 </Checkpoint>
 
-## Measuring sampling error directly
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="error-bounds"
+/>
 
-A second, distinct kind of measurement error — not "is the proxy valid," but "how much does measuring a sample instead of the whole population cost in accuracy." **Before running this: if quadrupling the sample size from 10 to 40 cuts the error roughly in half, what would you guess happens going from 40 to 160 — another halving, or something smaller?**
+## How fast does sampling error shrink as you ask more people?
 
-The school version is a survey: asking 10 students gives a shaky estimate of the whole school; asking 40 usually helps a lot; asking 160 helps again, but not four times as much. The usual rule is `1 / √n`: to cut random sampling error in half, you need about four times as many random observations.
+**Before reading on: if 10 answers leave you about 15.8 percentage points
+unsure, what do you guess 40 answers do, and 160?** Sampling error is separate
+from instrument error: even a perfect instrument reading a random subset gives
+an estimate that differs from the whole population by chance. The usual measure
+for a random sample is the standard error, which shrinks with the square root
+of the sample size:
 
-```js
-// sampling-error.mjs — demonstrates that sampling error shrinks with
-// sample size, and specifically HOW (proportional to 1/sqrt(n), not
-// linearly) — a real, checkable statistical fact, not a rule of thumb.
-function simulateSamplingError(
-  populationMean,
-  populationStdDev,
-  sampleSize,
-  trials,
-) {
-  let totalSquaredError = 0;
-  for (let t = 0; t < trials; t++) {
-    let sampleSum = 0;
-    for (let i = 0; i < sampleSize; i++) {
-      // Simulate one random draw from a population with the given mean/stddev
-      // using a simple Box-Muller-style approximation for a normal draw.
-      const u1 = Math.random(),
-        u2 = Math.random();
-      const normalDraw =
-        Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-      sampleSum += populationMean + normalDraw * populationStdDev;
-    }
-    const sampleMean = sampleSum / sampleSize;
-    totalSquaredError += (sampleMean - populationMean) ** 2;
-  }
-  return Math.sqrt(totalSquaredError / trials); // root-mean-squared error
-}
-
-for (const n of [10, 40, 160, 640]) {
-  const rmse = simulateSamplingError(100, 20, n, 2000);
-  console.log(`n=${n}: sampling error ≈ ${rmse.toFixed(2)}`);
-}
-// n=10:  error ≈ 6.3
-// n=40:  error ≈ 3.1   (roughly half of n=10's error, for 4x the sample)
-// n=160: error ≈ 1.6   (roughly half again, for another 4x)
-// n=640: error ≈ 0.8   (halved again, for another 4x)
-```
+| Sample size n | Error for a 50/50 yes-no share (0.5 / sqrt(n)) | Error for a measure with spread 20 (20 / sqrt(n)) |
+| ------------- | ---------------------------------------------- | ------------------------------------------------- |
+| 10            | 15.8 points                                    | 6.32                                              |
+| 40            | 7.9 points                                     | 3.16                                              |
+| 160           | 4.0 points                                     | 1.58                                              |
+| 640           | 2.0 points                                     | 0.79                                              |
 
 ```mermaid
 xychart-beta
-    title "Sampling error vs. sample size (each 4x in n roughly halves the error)"
+    title "Sampling error of a 50/50 share, in percentage points"
     x-axis ["n=10", "n=40", "n=160", "n=640"]
-    y-axis "RMS sampling error" 0 --> 7
-    bar [6.3, 3.1, 1.6, 0.8]
+    y-axis "Standard error (points)" 0 --> 18
+    bar [15.8, 7.9, 4.0, 2.0]
 ```
 
-Quadrupling the sample size roughly halves the error, every time — this is the real, checkable content of "sampling error shrinks proportional to 1 / √n," not a hand-wavy "more data is better." It also has a direct practical implication: going from a 1% sample to a 4% sample of production traffic cuts sampling error roughly in half; going from 1% to 100% (i.e. dropping sampling entirely) only cuts it by another factor of 5, at 100x the instrumentation cost — a real, quantifiable trade-off, not just an intuition.
+Each 4x increase in n halves the error. So quadrupling the effort helps, but
+with sharply diminishing returns: the first 30 extra answers buy 7.9 points, the
+next 120 buy 3.9, the next 480 buy 2.0. The assumptions behind the numbers are
+a random sample, independent answers, and (for the second column) an assumed
+spread of 20, not a measured one.
 
-<Checkpoint question="You're sampling 1% of production requests and want to cut sampling error roughly in half without changing anything else about how you sample. Does doubling the sample rate to 2% get you there?">
+For production traffic the same rule applies. Going from a 1% sample to a 4%
+sample halves the error. Going from 4% to 100% is 25 times more data for a
+further 5 times less error, at the instrumentation cost of full tracing from
+L2.
 
-No — cutting sampling error in half needs roughly 4x the sample size, not 2x, because the error shrinks proportional to `1 / √n`. Doubling from 1% to 2% only shrinks the error by a factor of about `1/√2` (≈0.71), not `1/2`. To actually halve the error you'd need to go from 1% to 4%. This is also why the last stretch of sampling (going from a partial sample to 100%, i.e. dropping sampling entirely) buys comparatively little additional accuracy for a large jump in instrumentation cost — the `1/√n` curve flattens out.
+<Checkpoint question="You sample 1% of requests and want half the sampling error. Does doubling the rate to 2% do it?">
+
+No. Error scales with 1 / sqrt(n), so doubling n only divides the error by
+sqrt(2), about 1.41, which is a 29% reduction rather than 50%. Halving needs 4x
+the sample, so 1% would have to become 4%.
 
 </Checkpoint>
 
-## Failure modes
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="sampling-error"
+/>
 
-- **Treating a proxy's initial validity as permanent.** L1/L2's whole point is that a proxy correlated with the target under _normal_ conditions can decouple from it specifically once people start optimizing for the proxy directly — revalidating a metric periodically, especially after it becomes a target people are evaluated on, is necessary, not paranoid.
-- **Increasing sample size without checking whether the sample is actually representative.** The 1/√n error-reduction result assumes random, unbiased sampling — a larger but systematically biased sample (e.g. only sampling requests during business hours) doesn't converge to the true population value no matter how large it gets; it converges to the biased subpopulation's value instead, precisely and confidently.
-- **Ignoring instrumentation overhead until it's already a production incident.** Measurement cost is easy to treat as negligible in development (where load is low) and then discover it's a real, load-dependent cost once traffic is high enough that the overhead itself becomes a bottleneck — the trade-off from L2 needs to be evaluated at production scale, not dev-environment scale.
-- **Reporting a number with no unit or comparison baseline as if it were meaningful on its own.** "Latency improved by 40%" is meaningless without knowing 40% of what (median? p99? which endpoint?) — the dimensional-consistency point from L1 applies just as much to informal engineering claims as to physics-style unit analysis.
+## What can go wrong that more data does not fix?
 
-## Beyond this example
+**Back to the lunch queue: 160 answers from the queue for the new menu. Is the
+error now 4.0 points?** The 4.0 assumes a random sample. A large biased sample
+does not converge on the school's opinion; it converges, with a very small
+error bar, on the opinion of the queue.
 
-Team A and Team B's quarter is one case, not the whole territory — questions to test whether the model actually transferred, not just the specific numbers above:
+- **Biased sampling.** Sampling only business hours, only the fastest
+  servers, or only people who chose to answer measures a different population
+  precisely. Standard error says nothing about this kind of error, because it
+  only describes chance variation.
+- **A proxy that quietly decoupled.** A proxy validated once can stop tracking
+  its target after people are rewarded for it (L2). Re-check it periodically,
+  especially after it becomes something people are evaluated on.
+- **Instrumentation cost found late.** Overhead that is invisible at
+  development load can become the bottleneck at production load; evaluate the
+  trade-off from L2 at production scale.
+- **A claim without a unit or a baseline.** "Latency improved 40%" does not say
+  which percentile, which endpoint, or compared with what.
 
-- `realTarget` never goes below 0 by construction (the `Math.max(0, ...)` floor). What would you need to change about the formula to model a proxy so badly chosen that pushing it actively makes the real target worse from the very first unit of pressure, not just eventually — i.e. `correlation` effectively negative? What would that look like on the chart?
-- The sampling-error simulation assumes a normal (bell-curve) population. What would you expect to happen to the 1/√n relationship if the underlying population were heavily skewed instead (e.g. request latencies, where a few extreme outliers dominate the tail) — would the same sample size give you the same confidence in the estimate?
-- If you had to pick a real proxy for "developer productivity" at your own team, what's the first thing you'd check before trusting it — and what would optimizing it hard enough to break, the way Team B broke test coverage, actually look like in practice?
+## A case, not the whole territory
+
+The suitcase, the lunch survey and the two coverage teams are three cases of
+one model, not the whole territory. Try to extend them:
+
+- **What changes if the scale shows 2 kg steps instead of 1?** What range does a
+  93 and 70 reading give now, and could any displayed difference still prove
+  "within 23 kg"?
+- **What changes if the survey population is heavily lopsided**, say 95% of
+  students like the menu instead of 50%? Does the error still shrink as
+  1 / sqrt(n), and is the error in points the same size as in the 50/50 case?
+- **What if a proxy is so poorly chosen that pushing it makes the target worse
+  from the first unit of effort?** What would the real-target line in the L2
+  chart look like?
+- **Pick a proxy from your own team** (for example "tickets closed" for
+  "support quality"). What is the first check you would do before trusting it,
+  and what would hammering on it do to the target?
