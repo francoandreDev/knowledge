@@ -1,151 +1,171 @@
 ---
-title: "L3 — Reproducing the wait-time blowup with real code, and a real capacity-planning near-miss"
+title: "L3 — The capacity near-miss, worked end to end, and where formulas stop being true"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+import Plot from "../../../components/Plot.astro";
+import { Icon } from "astro-icon/components";
+
+export const unit = { track: "applied-math", unitSlug: "math-tool-prediction" };
 
 <Scenario label="The near-miss">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>📊</span> <strong>Today</strong> — 60% utilization, normal day, no complaints</div>
-      <div class="flex items-center gap-1.5"><span>📈</span> <strong>Growth forecast</strong> — +50% traffic over 2 quarters</div>
-      <div class="flex items-center gap-1.5"><span>🧮</span> <strong>Linear read</strong> — "60% → 90%, tight but survivable"</div>
-      <div class="flex items-center gap-1.5"><span>⏱️</span> <strong>Actual formula</strong> — relative wait time 1.5x → 9x, a 6x jump from a 1.5x traffic jump</div>
+      <div class="flex items-center gap-1.5"><Icon name="lucide:gauge" class="h-4 w-4" /> <strong>Today</strong> — 60% utilization, nobody complains</div>
+      <div class="flex items-center gap-1.5"><Icon name="lucide:trending-up" class="h-4 w-4" /> <strong>Forecast</strong> — 1.5x traffic (assumed forecast figure)</div>
+      <div class="flex items-center gap-1.5"><Icon name="lucide:calculator" class="h-4 w-4" /> <strong>Utilization after</strong> — 0.6 x 1.5 = 0.9</div>
+    </div>
+    <div class="not-prose mt-3 flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300">
+      <div>
+        <div class="mb-0.5">Traffic change (1.5x)</div>
+        <div class="h-3 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-sky-500 animate-fill-bar" style="--target-width: 25%"></div></div>
+      </div>
+      <div>
+        <div class="mb-0.5">Wait-time change (6x)</div>
+        <div class="h-3 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 100%"></div></div>
+      </div>
     </div>
   </Fragment>
 
-A team's service runs at 60% average utilization and handles a normal day
-fine. Growth projections call for 50% more traffic over the next two
-quarters. The naive read: "50% more traffic on a system at 60%
-utilization — we'll be at maybe 90%, tight but survivable, we'll add
-capacity next year."
+A team's service is 60% busy on a normal day. Product expects 50% more
+traffic over two quarters. The plan on the table: "That puts us near 90%.
+Tight, but survivable. We will add capacity next year."
 
-**Is that a reasonable plan, or does it undercount something the formula
-already knows?**
+The plan is simple arithmetic, and the first step of it is right: `0.6 x 1.5 =
+0.9`. **Is the plan still reasonable once you ask what 90% busy does to the
+wait?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "The ρ/(1−ρ) wait curve, in real code",
-    "Working the near-miss with real numbers",
-    "Failure modes of treating a formula as ground truth",
+    "The near-miss worked with real numbers",
+    "Which assumptions the answer depends on",
+    "What changes when the case changes",
   ]}
 />
 
-## The queueing approximation, implemented and verified
+## What does the formula say about the 60% to 90% move?
 
-The relative-wait-time curve from L2 comes from a standard queueing-theory approximation for a single-server queue: mean wait time scales with **ρ / (1 − ρ)**, where ρ (rho) is utilization, a number between 0 and 1. This is real, checkable math — implementing it directly reproduces the exact numbers claimed in L2:
+Apply the wait curve from L2, `ρ / (1 - ρ)`, to both ends. Everything is
+relative, so no real milliseconds are needed.
 
-Before the code, read the formula without programming: `ρ` is "how busy the server is," and `1 - ρ` is "how much breathing room remains." The computer below is only repeating the same division for several busy-ness levels. If `ρ = 0.9`, then `ρ / (1 - ρ) = 0.9 / 0.1 = 9`; if `ρ = 0.95`, then `0.95 / 0.05 = 19`. The code is a calculator trace, not a new prerequisite idea.
+| Step              | Today (`ρ` = 0.6) | After growth (`ρ` = 0.9) |
+| ----------------- | ----------------- | ------------------------ |
+| Room left `1 - ρ` | 0.4               | 0.1                      |
+| `ρ / (1 - ρ)`     | 0.6 / 0.4 = 1.5   | 0.9 / 0.1 = 9            |
+| Change in wait    | baseline          | 9 / 1.5 = **6x**         |
 
-```js
-// wait-time.mjs — mean wait time scales with ρ / (1 - ρ) as utilization
-// (ρ) approaches 1 (100% busy). This blows up as ρ → 1 because a busy
-// server queues new arrivals behind an already-growing backlog, not
-// just behind "the average case."
-function relativeWaitTime(utilization) {
-  if (utilization <= 0 || utilization >= 1) {
-    throw new RangeError("utilization must be strictly between 0 and 1");
-  }
-  return utilization / (1 - utilization);
-}
-
-const baseline = relativeWaitTime(0.5); // reference point: 50% utilization
-
-for (const util of [0.5, 0.6, 0.7, 0.8, 0.9, 0.95]) {
-  const relative = relativeWaitTime(util) / baseline;
-  console.log(
-    `${util * 100}% utilization -> ${relative.toFixed(1)}x the wait at 50%`,
-  );
-}
-// 50% utilization -> 1.0x the wait at 50%
-// 60% utilization -> 1.5x the wait at 50%
-// 70% utilization -> 2.3x the wait at 50%
-// 80% utilization -> 4.0x the wait at 50%
-// 90% utilization -> 9.0x the wait at 50%
-// 95% utilization -> 19.0x the wait at 50%
-```
-
-Every one of these numbers matches L2's chart exactly, because they were generated by the same formula — this is the entire point of predictive math: the claim isn't a vibe about "things get worse near capacity," it's a specific, checkable number that a team can plan against (e.g. "don't run this service above 80% utilization, because past that the wait-time cost of each additional point of utilization roughly doubles").
-
-<Checkpoint question="If relativeWaitTime(0.8) returns 4.0 and the 50%-utilization baseline is 1.0, roughly how many times worse is wait time at 80% utilization than at 50% — and does that match L2's chart?">
-
-About 4x worse — and yes, that's exactly the value L2's chart showed at 80% utilization. The code isn't introducing a new number; it's reproducing the same `ρ / (1 − ρ)` relationship with real, runnable arithmetic instead of a chart someone has to trust on faith.
-
-</Checkpoint>
-
-## Running the near-miss numbers for real
-
-**Does "60% → 90% utilization" actually mean "somewhat worse than 60%," or does the curve say something sharper?**
-
-```js
-// capacity-plan.mjs — the same near-miss the Scenario above describes,
-// worked with real numbers instead of a gut-feel read of the percentages.
-function relativeWaitTime(utilization) {
-  return utilization / (1 - utilization);
-}
-
-const baselineUtil = 0.5;
-const currentUtil = 0.6;
-const trafficGrowth = 1.5; // +50% traffic over two quarters
-// Assumption worth flagging explicitly (see failure modes below):
-// projected utilization assumes service time per request stays constant.
-const projectedUtil = currentUtil * trafficGrowth; // 0.9
-
-const baseline = relativeWaitTime(baselineUtil);
-const currentRelative = relativeWaitTime(currentUtil) / baseline;
-const projectedRelative = relativeWaitTime(projectedUtil) / baseline;
-const waitTimeMultiplier = projectedRelative / currentRelative;
-
-console.log(`Traffic growth: ${trafficGrowth}x`);
-console.log(`Utilization: ${currentUtil} -> ${projectedUtil}`);
-console.log(
-  `Relative wait time: ${currentRelative.toFixed(1)}x -> ${projectedRelative.toFixed(1)}x baseline`,
-);
-console.log(
-  `Wait time itself grows ${waitTimeMultiplier.toFixed(1)}x, from a ${trafficGrowth}x traffic increase`,
-);
-// Traffic growth: 1.5x
-// Utilization: 0.6 -> 0.9
-// Relative wait time: 1.5x -> 9.0x baseline
-// Wait time itself grows 6.0x, from a 1.5x traffic increase
-```
-
-60% utilization scaled by 1.5x traffic lands at **90% utilization** — the linear read of the percentages was correct that far. But the wait-time consequence isn't linear: relative wait time goes from **1.5x** to **9x** the 50%-baseline, a **6x** jump in wait time from a 1.5x jump in traffic. "Tight but survivable" was a linear read of a non-linear relationship; the actual prediction shows the service would very plausibly breach latency SLOs well before the full 50% traffic growth materialized, not just get "a bit slower."
+Traffic grew 1.5 times. Utilization grew 1.5 times. The wait grew 6 times.
+"Tight but survivable" was a linear read of a non-linear curve; in practice
+the latency target would very likely be missed well before the full growth
+arrived.
 
 ```mermaid
-xychart-beta
-    title "Wait-time multiplier vs. traffic-growth multiplier (from a 60% util baseline)"
-    x-axis "Traffic growth" [1.0, 1.17, 1.33, 1.5]
-    y-axis "Wait-time multiplier (vs. today)" 0 --> 7
-    line [1.0, 1.6, 2.7, 6.0]
+flowchart LR
+    T["Traffic x 1.5"] --> U["Utilization<br/>0.6 to 0.9"]
+    U --> W["Wait curve<br/>1.5 to 9"]
+    W --> R["6x the wait"]
 ```
 
-The x-axis is what the team was budgeting for (a 1.5x traffic increase, planned gradually); the y-axis is what actually happens to wait time. The line isn't straight — it's exactly the gap between "we planned for 1.5x more traffic" and "we got 6x more wait time," and it's what the linear read missed.
+Partway through the growth the picture is already bad. With traffic at 7/6,
+4/3 and 3/2 of today's (utilization 0.7, 0.8 and 0.9):
 
-Caught early via this calculation, the team moved capacity work from "next year" to "before the next major traffic milestone" — a decision the linear intuition never would have produced, because it undercounted how much wait time changes near saturation.
+<Plot
+  mark="line"
+  x="growth"
+  y="multiplier"
+  xLabel="Traffic growth (multiple of today)"
+  yLabel="Wait multiplier vs. today"
+  caption="Wait time relative to today's wait, as traffic grows from 1x to 1.5x. Exact values from rho / (1 - rho) with rho = 0.6 x growth."
+  data={[
+    { growth: 1, multiplier: 1 },
+    { growth: 1.1667, multiplier: 1.5556 },
+    { growth: 1.3333, multiplier: 2.6667 },
+    { growth: 1.5, multiplier: 6 },
+  ]}
+/>
 
-<Checkpoint question="The near-miss calculation projects utilization from 0.6 to 0.9 by multiplying by the 1.5x traffic growth. What real-world change in per-request behavior would break that projection's accuracy, even if the traffic-growth number itself is correct?">
+Caught at planning time, this moves the capacity work from "next year" to
+"before traffic gets anywhere near the full 1.5x". That is a decision the
+linear guess could never have produced.
 
-Any change in how long each request takes to service. `projectedUtil = currentUtil * trafficGrowth` implicitly assumes service time per request stays constant as load increases — if contention (lock waiting, CPU scheduling, GC pauses) makes each request slower under heavier load, the real utilization at 1.5x traffic would land higher than 0.9, and the wait-time consequence would be worse than the calculation shows. This is exactly the "assuming service time stays constant" failure mode below.
+<Checkpoint question="The projection multiplies today's utilization (0.6) by the traffic growth (1.5) to get 0.9. What real-world change would make the true utilization higher than 0.9 even if the 1.5x traffic forecast is exactly right?">
+
+Anything that makes each request take longer to serve under load: lock
+contention, memory pressure, a slower downstream service. The projection
+quietly assumed the time to serve one request stays the same. If each request
+gets slower as load rises, the same traffic keeps the server busy for more of
+each second, so utilization lands above 0.9 and the wait lands on a steeper
+part of the curve.
 
 </Checkpoint>
 
-## Failure modes
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="near-miss"
+/>
 
-- **Treating an average-case formula as a worst-case guarantee.** L=λW and the utilization curve both describe _averages_ — real traffic has variance (bursts, retries, correlated failures), and a system planned to the average will still see individual periods far worse than the average predicts. Predictive math narrows uncertainty, it doesn't eliminate the need for headroom.
-- **Assuming service time stays constant as load increases.** The near-miss calculation above assumed per-request service time doesn't change with load — in reality, contention (lock waiting, CPU scheduling, GC pauses under memory pressure) often makes service time itself increase under load, compounding the utilization effect rather than acting independently of it. A more careful prediction would measure this rather than assume it away.
-- **Applying a steady-state formula to a system that never reaches steady state.** Little's Law and the utilization curve both assume the system has settled into a stable average — a system with a sharp traffic spike (a flash sale, a viral post) is, for that window, not in the steady state the formula describes, and needs burst-capacity planning as a separate concern, not just a higher average-utilization target.
-- **Using the existence of a formula as an excuse to stop measuring reality.** The formula predicts what _should_ happen given clean assumptions — real systems have real deviations from those assumptions (non-uniform request costs, non-random arrival patterns). The correct use of predictive math is to generate a specific, falsifiable expectation and then check it against real measurements, not to treat the formula's output as ground truth on its own.
+## When is a correct formula still the wrong answer?
 
-For the neighboring tools behind those failure modes, continue with `applied-math/queueing-theory-basics` for queues, `applied-math/probability-distributions-uniform` for probability and spread, `applied-math/statistics` for variance and averages, and `applied-math/orders-magnitude` for rough checks before exact prediction.
+**The formula was applied correctly. Where can a correct calculation still
+mislead?** Every formula comes with conditions, and the answer is only as true
+as they are.
 
-## Extend the worked example
+| Hidden assumption                        | What happens when it is false                                    |
+| ---------------------------------------- | ---------------------------------------------------------------- |
+| The numbers are averages that hold       | Real traffic has bursts; some minutes are far worse than average |
+| Time to serve one request stays constant | Contention raises it under load, so the real curve is steeper    |
+| The system is in steady state            | A flash spike is a different problem: plan burst headroom        |
+| The formula is the truth                 | It is a prediction; measure and compare it to reality            |
 
-The `capacity-plan.mjs` script above is one case — a single service, a smooth 50% growth forecast, a service-time assumption held constant. It's not the whole territory. Two questions worth actually working through, not just reading:
+```mermaid
+flowchart TD
+    F["Formula says:<br/>wait 6x"] --> C{"Do the assumptions<br/>hold in production?"}
+    C -->|"yes"| P["Plan against the number,<br/>keep headroom"]
+    C -->|"no or unknown"| M["Measure, then<br/>correct the model"]
+    P --> V["Compare predicted vs. observed"]
+    M --> V
+```
 
-- **What changes if the growth doesn't arrive smoothly over two quarters, but as a single traffic spike** (a launch, a viral post) that hits in one day? Which of the four failure modes above applies directly, and does `relativeWaitTime` still mean anything for that window?
-- **What if the service's own dependency — a database, a downstream API — has a _lower_ saturation point** than the service itself, so it hits its own 90%-utilization cliff first? Sketch how you'd adapt `capacity-plan.mjs` to track two independent utilization curves instead of one, and what number you'd actually alert on.
+A formula's job is to produce a specific, falsifiable expectation (for
+example "do not run this above 80%"). Then you check it against measurements.
+Predictive math narrows uncertainty; it does not remove the need for headroom.
+
+<Checkpoint question="A team plans exactly to the average utilization its formula says is safe. Why can it still miss its latency target some minutes of the day?">
+
+Because the formula describes the average and real traffic varies around it.
+During a burst the instantaneous utilization sits higher on the curve, where
+a small extra load costs a lot of wait. Planning to the average with no
+headroom is planning to be wrong during every busy minute.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="assumptions"
+/>
+
+## A case, not the whole territory
+
+The near-miss is one case: one service, a smooth forecast, one wait curve. It
+is not the whole territory. Try changing it yourself:
+
+- **What changes if the growth arrives as one spike in a single day** instead
+  of smoothly over two quarters? Which row of the assumptions table is
+  broken, and does `ρ / (1 - ρ)` still describe that day?
+- **What if a database behind the service saturates at 70% while the service
+  has room to 90%?** Which curve do you plan against, and what number do you
+  alert on?
+- **What if the team could cut the service time per request by a third?**
+  What utilization would 1.5x traffic reach then, and what is the wait
+  multiplier?
+
+For the neighbouring tools, continue with `applied-math/queueing-theory-basics`
+for queues, `applied-math/statistics` for averages and variance, and
+`applied-math/orders-magnitude` for rough checks before exact prediction.

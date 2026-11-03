@@ -4,98 +4,138 @@ title: "L2 — Little's Law: one relationship, used to predict capacity before b
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+import Plot from "../../../components/Plot.astro";
 
-L1 named the split between correctness math and predictive math and warned about linear intuition applied to non-linear reality. L2 makes that concrete with one durable relationship — Little's Law — and shows exactly how sharply "a bit more load" can turn into "a lot more wait."
+export const unit = { track: "applied-math", unitSlug: "math-tool-prediction" };
+
+L1 showed that a test covers the case you tried and a formula covers the case
+you did not, and that guessing "50% more input, 50% more result" is often
+wrong. L2 makes that concrete with two durable relationships for anything
+that waits in line: Little's Law, and the way waiting explodes near full
+capacity.
 
 <LevelIntro
   items={[
-    "Little's Law: L = λW",
-    "Why wait time blows up near saturation",
-    "Little's Law as one instance of a general habit",
+    "Little's Law: things inside = arrivals x stay",
+    "Why waiting explodes near full capacity",
+    "One habit, many formulas",
   ]}
 />
 
-## A system passes every test and still falls over — what got skipped?
+## A store has 200 customers an hour and each stays 15 minutes. How many are inside?
+
+Gut feeling says "a lot, 200 sounds like a crowd". But 200 is how many arrive
+over a whole hour, not how many are inside at once. Each person leaves after
+a quarter of an hour, so the shop is never holding all 200.
+
+Little's Law gives the exact answer for any stable system, with no
+assumptions about the shape of the traffic:
+
+$$L = \lambda W$$
+
+| Symbol | Plain meaning                       | Store             | Web service             |
+| ------ | ----------------------------------- | ----------------- | ----------------------- |
+| `L`    | how many are inside, on average     | customers in shop | requests in flight      |
+| `λ`    | how many arrive per unit of time    | 200 per hour      | 200 requests per second |
+| `W`    | how long each one stays, on average | 0.25 hours        | 0.15 seconds (150 ms)   |
+
+Store: `200 x 0.25 = 50` customers inside. Web service: `200 x 0.15 = 30`
+requests in flight, not 200. The units check you: `per second x seconds =
+a count`.
 
 ```mermaid
 flowchart LR
-    Code["Code / design"] --> Correctness{"Correctness math:\ndoes it do what it claims?"}
-    Correctness -- "type checker, tests, proofs" --> Verified["Internally consistent"]
-    Code --> Prediction{"Predictive math:\nwhat happens under conditions\nnot yet observed?"}
-    Prediction -- "formulas, models, estimation" --> Forecast["Expected behavior at scale,\nunder load, over time"]
+    A["Arrivals<br/>λ = 200 per second"] --> S["Inside the system<br/>L = 200 x 0.15 = 30"]
+    S --> D["Departures<br/>after W = 0.15 s"]
 ```
 
-A system can be 100% verified-correct by the first branch and still fall over under load nobody predicted, because the second branch was never asked. They're genuinely separate questions requiring separate tools — this unit is entirely about the right branch.
+<Checkpoint question="A support queue gets 40 new tickets per hour and each ticket takes 45 minutes (0.75 hours) to resolve on average. How many tickets are open at any moment?">
 
-## How many concurrent requests should a service actually be provisioned for?
-
-Guessing from "200 requests per second sounds like a lot" gives no usable number. There's an exact answer, and it comes from one small, durable relationship: **Little's Law**.
-
-**L = λW** — the average number of items in a system (L) equals the average arrival rate (λ) times the average time each item spends in the system (W). It holds for _any_ stable queueing system — a web server's request queue, a support ticket backlog, items on a factory line — regardless of the arrival pattern's specific shape, which is what makes it so reusable.
-
-Read the symbols as ordinary school arithmetic first:
-
-| Symbol | Plain-language meaning                       | In the example below                |
-| ------ | -------------------------------------------- | ----------------------------------- |
-| `L`    | how many things are inside, on average       | concurrent requests                 |
-| `λ`    | how many things arrive per unit of time      | `200` requests each second          |
-| `W`    | how long each thing stays inside, on average | `150ms = 0.150` seconds per request |
-
-So the sentence is simply: **things inside = things arriving each second × seconds each thing stays**. The units do the checking for you: `requests/second × seconds = requests`.
-
-```python
-function estimate_concurrent_requests(requests_per_second, avg_time_in_system_seconds):
-    # Little's Law: L = λW
-    return requests_per_second * avg_time_in_system_seconds
-
-# A service handling 200 req/s, each taking 150ms end-to-end on average:
-estimate_concurrent_requests(200, 0.15)  # => 30 concurrent requests, on average
-```
-
-This single line answers a question that's easy to get badly wrong by intuition alone: "how many concurrent requests should this server be provisioned to handle?" Guessing from "200 requests per second sounds like a lot" gives no usable number; plugging the same two known quantities into the actual relationship gives a concrete, defensible one — 30, not 200, because most requests finish in a small fraction of a second.
-
-<Checkpoint question="A support queue receives 40 new tickets per hour, and each ticket takes an average of 45 minutes (0.75 hours) to resolve. Using L = λW, about how many tickets are open at any given moment?">
-
-About 30 (`L = λW = 40 × 0.75 = 30`). The same relationship that predicts concurrent requests on a server predicts concurrent tickets in a support queue — it doesn't care what's actually flowing through the system, only the arrival rate and the average time each item spends inside.
+About 30, because `40 x 0.75 = 30`. The tickets are not requests and the
+queue is not a server, but the law only cares about the arrival rate and the
+average stay. The 45 minutes had to become 0.75 hours first, since the rate is
+per hour: the units must match before you multiply.
 
 </Checkpoint>
 
-## If utilization goes from 60% to 90%, does wait time go up by about the same 1.5x?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="littles-law"
+/>
 
-The dangerous part of L = λW is what happens as a system approaches saturation: **W (average time in system) isn't constant** — it grows as the system gets busier, often sharply, not linearly. A system near its capacity limit doesn't degrade gracefully in proportion to extra load; queueing delay tends to blow up non-linearly as utilization approaches 100%, because a busy server queues _new_ arrivals behind an already-growing backlog, not just behind the average case.
+## Going from 60% busy to 90% busy: does waiting grow by about 1.5 times?
 
-The arithmetic reason is small but brutal: the wait curve divides by the room left before 100% busy. At 50% busy, the remaining room is `1 - 0.50 = 0.50`; at 90% busy, it is only `1 - 0.90 = 0.10`. Dividing by a shrinking leftover makes the result grow faster than the original percentage change.
+Little's Law takes `W` as given. But `W` is not fixed: the busier a server is,
+the longer new arrivals wait behind the ones already queued. The standard
+approximation for a single-server queue says the average wait scales with:
 
-| Utilization `ρ` | Leftover room `1 - ρ` | `ρ / (1 - ρ)` |
-| --------------- | --------------------- | ------------- |
-| 0.50            | 0.50                  | 1             |
-| 0.90            | 0.10                  | 9             |
-| 0.95            | 0.05                  | 19            |
+$$\rho / (1 - \rho)$$
 
-```mermaid
-xychart-beta
-    title "Average wait time as utilization approaches capacity (relative to 50%)"
-    x-axis "Utilization (%)" [50, 60, 70, 80, 90, 95]
-    y-axis "Relative wait time" 0 --> 20
-    line [1, 1.5, 2.3, 4, 9, 19]
-```
+where `ρ` (rho) is utilization, the fraction of time the server is busy, from
+0 to 1. Read it as "how busy" divided by "how much room is left". At 50% busy
+the room left is `0.50`; at 90% it is only `0.10`. Dividing by a shrinking
+number makes the result grow faster than the percentage did.
 
-Going from 50% to 80% utilization looks like "more load, somewhat more wait" — going from 90% to 95% alone very nearly doubles it, and pushing further toward 99% is where the curve goes almost vertical. A capacity plan built on "we're at 60% today, we can probably handle 90%" is exactly the linear-intuition mistake this unit warns about: the same-sized jump in utilization produces a wildly different-sized jump in wait time depending on where you start. (These values come from a standard queueing approximation, reproduced and verified with real code in L3.)
+| Utilization `ρ` | Room left `1 - ρ` | `ρ / (1 - ρ)` | vs. the 50% baseline |
+| --------------- | ----------------- | ------------- | -------------------- |
+| 0.50            | 0.50              | 1.0           | 1x                   |
+| 0.60            | 0.40              | 1.5           | 1.5x                 |
+| 0.80            | 0.20              | 4.0           | 4x                   |
+| 0.90            | 0.10              | 9.0           | 9x                   |
+| 0.95            | 0.05              | 19.0          | 19x                  |
 
-<Checkpoint question="A team at 70% utilization plans for a traffic increase that would push them to 90%. Going purely by the table above, is the jump from 70% to 90% about as painful as the jump from 50% to 70%, or worse?">
+<Plot
+  mark="line"
+  x="utilization"
+  y="wait"
+  xLabel="Utilization (%)"
+  yLabel="Relative wait (50% busy = 1)"
+  caption="The wait curve rho / (1 - rho) divided by its value at 50%. Exact values."
+  data={[
+    { utilization: 50, wait: 1 },
+    { utilization: 60, wait: 1.5 },
+    { utilization: 70, wait: 2.3333 },
+    { utilization: 80, wait: 4 },
+    { utilization: 85, wait: 5.6667 },
+    { utilization: 90, wait: 9 },
+    { utilization: 95, wait: 19 },
+  ]}
+/>
 
-Worse — noticeably so. From 50% to 70%, the relative-wait figure goes from 1 to about 2.3, roughly a 1.3x increase. From 70% to 90%, it goes from about 2.3 to 9, nearly a 4x increase — a much bigger jump in wait time for the same 20-point move in utilization, because each additional point of utilization costs more as the leftover room `(1 - ρ)` keeps shrinking.
+So "we are at 60% today, 90% is tight but survivable" is a linear read of a
+curve. The same 30-point move that costs 1.5x at the bottom costs 6x between
+60% and 90% (`9 / 1.5 = 6`).
+
+<Checkpoint question="Using only the table, is the jump from 70% to 90% utilization about as painful as the jump from 50% to 70%, or worse?">
+
+Worse, by a lot. From 50% to 70% the relative wait goes from 1 to about 2.3,
+roughly 2.3 times. From 70% to 90% it goes from about 2.3 to 9, nearly 4
+times. Same 20-point move, but each extra point costs more because the room
+left keeps shrinking.
 
 </Checkpoint>
 
-## Is Little's Law the actual lesson here, or just one example of it?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="utilization-curve"
+/>
 
-Just one example. Little's Law is one specific instance of a broader habit: identify the actual mathematical relationship connecting a few measurable quantities, write it down explicitly, and use it to predict an unmeasured fourth quantity — instead of eyeballing a percentage change and assuming the relationship it applies to is linear by default. The specific formula changes per problem (queueing uses L=λW; growth-curve problems use exponential/compound formulas; reliability problems use probability multiplication) — the discipline of reaching for the actual relationship, not intuition, is the transferable part.
+## Is the lesson "memorize Little's Law", or something wider?
 
-| Problem shape                                 | Formula family                   | What it predicts                           |
-| --------------------------------------------- | -------------------------------- | ------------------------------------------ |
-| Queueing (requests, tickets, jobs)            | Little's Law, ρ/(1−ρ) wait curve | Concurrency, wait time near saturation     |
-| Growth over time (users, data, cost)          | Exponential / compound growth    | Whether "steady growth" is actually linear |
-| Repeated independent risk (retries, failures) | Probability compounding          | Failure rate over many trials, not one     |
+Wider. Both tools follow one habit: **name the relationship between a few
+quantities you can measure, write it down, and use it to predict one you
+cannot measure yet.** The formula changes with the problem; reaching for it
+instead of eyeballing a percentage is the transferable skill.
 
-Try dragging the utilization slider yourself in "Try it" below — the point isn't to memorize the 9x figure, it's to feel how fast an average-case formula stops looking average as it approaches its own limit.
+| Problem shape                           | Formula family             | What it predicts                         |
+| --------------------------------------- | -------------------------- | ---------------------------------------- |
+| Things waiting in line                  | Little's Law, wait curve   | How many inside, how long they wait      |
+| Repeated independent chances of failure | Probability multiplication | Odds over many tries, not one            |
+| Everyone interacting with everyone      | Pair counting              | Interactions grow much faster than users |
+
+The utilization demo below lets you drag the numbers yourself. The point is
+not the 9x figure but how quickly an average-case formula stops looking
+average as it nears its limit.
