@@ -2,101 +2,224 @@
 title: "L2 — Graph theory basics"
 ---
 
-import Checkpoint from "../../../components/Checkpoint.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+import Plot from "../../../components/Plot.astro";
 
-L1 named the parts — nodes, edges, directed/undirected, weighted/unweighted — and named BFS and Dijkstra as the two shortest-path tools that answer different questions. L2 is about the layer underneath both of those algorithms: how a graph actually lives in memory, and the mechanics each algorithm runs on top of that representation.
+export const unit = {
+  track: "applied-math",
+  unitSlug: "graph-theory-basics",
+};
+
+L1 drew the subway map as nodes and edges and showed that "shortest" means
+different things for fewest rides and fewest minutes. L2 opens the box: how a
+program holds that map, and how BFS and Dijkstra actually walk it.
 
 <LevelIntro
   items={[
-    "Adjacency list vs. adjacency matrix, and why it matters",
-    "How BFS explores a graph layer by layer",
-    "How Dijkstra generalizes BFS to handle weights",
+    "Adjacency list versus adjacency matrix",
+    "How BFS explores in layers",
+    "How Dijkstra relaxes costs",
   ]}
 />
 
-## How do you represent a graph in code?
+## How does a program hold the map so it can ask "who touches Mall?"
 
-Before any algorithm can run, the graph needs a shape a program can walk. There are two standard shapes, and the choice between them isn't cosmetic — it changes how fast "who is X connected to" is to answer, and how much memory the graph costs to hold.
+**A program cannot look at a picture. What does it store instead?** There are two
+standard answers, and they trade space against lookup style.
 
-**Adjacency list** — each node keeps a list of its direct neighbors (and, for a weighted graph, the weight to each one):
+**Adjacency list**: each station keeps a list of its neighbours and the minutes
+to each.
 
-```
-SEA -> [(DEN, 120), (ORD, 150)]
-DEN -> [(ATL, 130)]
-ORD -> [(ATL, 70)]
-ATL -> [(MIA, 50)]
-MIA -> []
-```
+| Station | Neighbours (minutes)              |
+| ------- | --------------------------------- |
+| Home    | Central (6), Park (4)             |
+| Central | Home (6), School (17)             |
+| Park    | Home (4), Mall (5)                |
+| Mall    | Park (5), School (6), Library (3) |
+| School  | Central (17), Mall (6)            |
+| Library | Mall (3)                          |
 
-**Adjacency matrix** — an N×N grid, one row and one column per node, where cell `[i][j]` holds the weight of the edge from node `i` to node `j` (or 0/∞ if none exists):
+**Adjacency matrix**: a grid with one row and one column per station. Cell
+(row, column) holds the minutes of the track between them, or a dash if there is
+none.
 
-|         | SEA | DEN | ORD | ATL | MIA |
-| ------- | --- | --- | --- | --- | --- |
-| **SEA** | 0   | 120 | 150 | -   | -   |
-| **DEN** | -   | 0   | -   | 130 | -   |
-| **ORD** | -   | -   | 0   | 70  | -   |
-| **ATL** | -   | -   | -   | 0   | 50  |
-| **MIA** | -   | -   | -   | -   | 0   |
+|             | Home | Central | Park | Mall | School | Library |
+| ----------- | ---- | ------- | ---- | ---- | ------ | ------- |
+| **Home**    | -    | 6       | 4    | -    | -      | -       |
+| **Central** | 6    | -       | -    | -    | 17     | -       |
+| **Park**    | 4    | -       | -    | 5    | -      | -       |
+| **Mall**    | -    | -       | 5    | -    | 6      | 3       |
+| **School**  | -    | 17      | -    | 6    | -      | -       |
+| **Library** | -    | -       | -    | 3    | -      | -       |
 
-The flight network only has 5 real routes, but the matrix has 25 cells — most of them empty. That's the tell: a matrix costs `V²` cells no matter how sparse the graph is, while a list costs roughly `V + E` — one entry per node plus one per edge. Real-world graphs (flight networks, service dependencies, social graphs) are almost always **sparse** — most pairs of nodes have no direct edge — which is why adjacency lists are the default choice in practice. A matrix earns its keep only when the graph is dense (most pairs _are_ connected) or when "is there an edge from A to B" needs to be an instant lookup rather than a scan.
+Count what each holds. The matrix always has $$V^2$$ cells for $$V$$ stations:
+36 here, of which only 12 are filled. The list holds $$V + 2E$$ entries for $$E$$
+undirected tracks: $$6 + 12 = 18$$ here. A directed graph stores each edge once,
+so it needs $$V + E$$.
 
-<Checkpoint question="A service dependency graph has 200 services, and each service directly calls about 4 others on average. Roughly how many cells would an adjacency matrix need, versus an adjacency list?">
+Real networks are **sparse**: each station touches a handful of others, not
+most of them. So the matrix wastes more space the bigger the network gets. In
+the chart below every station has 4 tracks, so the list holds $$5V$$ entries
+while the matrix holds $$V^2$$.
 
-The matrix needs `200 × 200 = 40,000` cells, regardless of how connected the graph actually is — that number is fixed by the node count alone. The list needs roughly `200 + (200 × 4) = 1,000` entries — one slot per node plus one per actual edge. This is a sparse graph (each service touches ~2% of the others, not most of them), so the list wins by a factor of 40 here. That gap only grows as the service count grows, because the matrix scales with `V²` while the list scales with `V + E`.
+<Plot
+  mark="line"
+  x="stations"
+  y="cells"
+  series="layout"
+  xScale="log"
+  yScale="log"
+  xLabel="Stations (V)"
+  yLabel="Cells or entries"
+  caption="Storage for a network where every station has 4 tracks: list = 5V, matrix = V squared (exact formulas, log-log axes)."
+  data={[
+    { stations: 10, cells: 50, layout: "list" },
+    { stations: 10, cells: 100, layout: "matrix" },
+    { stations: 50, cells: 250, layout: "list" },
+    { stations: 50, cells: 2500, layout: "matrix" },
+    { stations: 100, cells: 500, layout: "list" },
+    { stations: 100, cells: 10000, layout: "matrix" },
+    { stations: 200, cells: 1000, layout: "list" },
+    { stations: 200, cells: 40000, layout: "matrix" },
+    { stations: 400, cells: 2000, layout: "list" },
+    { stations: 400, cells: 160000, layout: "matrix" },
+  ]}
+/>
+
+The matrix earns its place in two cases: the graph is dense, or you need "is
+there a track from A to B?" to be one instant cell lookup.
+
+<Checkpoint question="A network has 200 stations and each station has about 4 tracks. Roughly how many cells does a matrix need, compared with a list?">
+
+The matrix needs 200 × 200 = 40,000 cells no matter how few tracks
+exist, because its size depends only on the station count. With 4 tracks per
+station there are about 200 × 4 / 2 = 400 tracks, so the list holds
+200 + 2 × 400 = 1,000 entries. That is 40 times smaller, and the ratio
+keeps growing as the network does, since the matrix grows with the square of the
+station count while the list grows only with stations plus tracks.
 
 </Checkpoint>
 
-## How does BFS find the fewest-hops path?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="representation"
+/>
 
-BFS (breadth-first search) answers exactly the question an unweighted graph poses: "fewest edges from start to end." It does this by exploring in **layers** — every node reachable in 1 hop, then every _new_ node reachable in 2 hops, then 3, and so on — never skipping ahead to a farther layer before the current one is exhausted.
+## How does BFS find the fewest rides?
+
+**If you must visit stations in an order that guarantees you find the
+fewest-rides route first, which order is it?** Closest first: everything one ride
+away, then everything two rides away, then three. That is **breadth-first
+search**.
 
 ```mermaid
 flowchart TD
-    subgraph "Layer 0"
-        SEA
+    subgraph L0["0 rides"]
+        Home
     end
-    subgraph "Layer 1"
-        DEN
-        ORD
+    subgraph L1["1 ride"]
+        Central
+        Park
     end
-    subgraph "Layer 2"
-        ATL
+    subgraph L2["2 rides"]
+        School
+        Mall
     end
-    subgraph "Layer 3"
-        MIA
+    subgraph L3["3 rides"]
+        Library
     end
-    SEA --> DEN
-    SEA --> ORD
-    DEN --> ATL
-    ORD --> ATL
-    ATL --> MIA
+    Home --- Central
+    Home --- Park
+    Central --- School
+    Park --- Mall
+    Mall --- School
+    Mall --- Library
 ```
 
-Mechanically, BFS keeps two things: a **queue** of nodes waiting to be explored (first in, first out — this is what forces layer-by-layer order) and a **visited set** so it never re-enters a node it already reached by a shorter path. Starting from SEA: visit SEA, enqueue its neighbors DEN and ORD (layer 1). Dequeue DEN, enqueue its unvisited neighbor ATL (layer 2). Dequeue ORD — ATL is already visited, skip it. Dequeue ATL, enqueue MIA (layer 3). Dequeue MIA — done, 3 hops.
+BFS needs two things. A **queue** (first in, first out) forces the layer-by-layer
+order. A **visited set** stops it from entering a station it already reached by
+an equal or shorter route. Starting at Home:
 
-Notice what BFS _doesn't_ look at anywhere in that trace: cost. It reached ATL via DEN because DEN happened to be dequeued first, not because DEN→ATL is cheaper than ORD→ATL. That's exactly the $300-vs-$270 ambiguity from L1's scenario — BFS is answering "fewest hops," and both routes tie on hops, so which one it reports depends on queue order, not price.
+| Step | Take from queue | New stations added | Queue afterwards |
+| ---- | --------------- | ------------------ | ---------------- |
+| 1    | Home            | Central, Park      | Central, Park    |
+| 2    | Central         | School             | Park, School     |
+| 3    | Park            | Mall               | School, Mall     |
+| 4    | School          | (none new)         | Mall             |
+| 5    | Mall            | Library            | Library          |
+| 6    | Library         | (none new)         | (empty)          |
 
-<Checkpoint question="Does BFS guarantee the shortest path by cost, or only by hop count? What has to be true about the graph for those two to be the same thing?">
+School was first reached at step 2, through Central, at 2 rides. Nothing in this
+table looked at minutes, so BFS reports Home, Central, School: **2 rides, 23
+minutes**, not the 15-minute route.
 
-Only by hop count — BFS has no concept of edge weight at all, so it can't optimize for cost even in principle. The two notions of "shortest" only coincide when the graph is unweighted, or every edge happens to carry the exact same weight — in that special case, fewest hops and lowest total cost are the same ranking by construction. The flight network isn't that case (edges range from $50 to $150), which is exactly why BFS and the cheapest route disagreed in L1.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="bfs-layers"
+/>
+
+## How does Dijkstra find the fewest minutes?
+
+**What has to change when edges have different lengths?** Closest by rides is no
+longer closest by minutes, so the queue must hand out the station with the
+**lowest total minutes known so far**. That is a **priority queue**. Each time
+Dijkstra takes a station, it checks every neighbour: does going through this
+station beat the best total recorded for that neighbour? If yes, it overwrites
+the record. That overwrite is called **relaxing** the edge.
+
+Running it from Home:
+
+| Take (total) | What it records                                      |
+| ------------ | ---------------------------------------------------- |
+| Home (0)     | Central = 6, Park = 4                                |
+| Park (4)     | Mall = 9                                             |
+| Central (6)  | School = 23                                          |
+| Mall (9)     | School = 15 (**relaxed down from 23**), Library = 12 |
+| Library (12) | nothing to improve                                   |
+| School (15)  | done: Home, Park, Mall, School in 15 minutes         |
+
+The School row is the lesson. Early on, Dijkstra believed School cost 23 (via
+Central). Only after reaching Mall did it find 15, and it replaced the estimate.
+BFS never needs this, because a later layer can never reach a station in fewer
+rides.
+
+Dijkstra rests on one assumption: **a station taken from the queue has its final
+cost, because every other route would still have to add non-negative minutes.**
+Negative weights break that. With tracks A to B costing 2, A to C costing 5 and C
+to B costing -4, Dijkstra takes B at 2 and never revisits it, yet the route
+through C costs $$5 - 4 = 1$$.
+
+<Checkpoint question="Dijkstra relaxed School from 23 down to 15. Why could BFS never have to do that kind of correction?">
+
+BFS orders stations by number of rides, and every ride counts exactly 1. By the
+time it reaches a station in layer $$k$$, any route that would use fewer rides
+would have been found in an earlier layer, so the first time a station is reached
+is already its best. Minutes vary per track, so the first route Dijkstra finds to
+School (23) can still lose to a route that needs more rides but less time. Relaxing
+is how Dijkstra corrects an estimate it had no way to know was beatable yet.
 
 </Checkpoint>
 
-## How does Dijkstra find the cheapest path?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="dijkstra-relax"
+/>
 
-Dijkstra's algorithm is BFS's generalization to weighted edges: instead of a plain FIFO queue, it always expands whichever _reachable-so-far_ node currently has the **lowest known total cost from the start** — tracked in a priority queue instead of a plain queue. Every time it visits a node, it checks whether going through that node gives any of its neighbors a cheaper total cost than what was previously known, and updates it if so (this update step is called **relaxing an edge**).
+## Picking the tool
 
-Run on the flight network from SEA: start at cost 0. Expand SEA's neighbors — DEN at $120, ORD at $150. The cheapest known unvisited node is DEN ($120), so expand it next — that reaches ATL at $120+$130=$250. Now compare unvisited nodes: ORD ($150) is cheaper than the ATL-via-DEN cost ($250), so expand ORD next — that reaches ATL via ORD at $150+$70=$220, which is cheaper than the $250 already recorded for ATL, so ATL's cost is _relaxed_ down to $220. Finally expand ATL ($220) and reach MIA at $220+$50=$270 — the cheapest total, matching L1's answer.
+| What you are asking                              | Edge weights            | Tool                           |
+| ------------------------------------------------ | ----------------------- | ------------------------------ |
+| Fewest rides, fewest hops, degrees of separation | All equal or irrelevant | BFS                            |
+| Lowest total minutes, cost or distance           | Differ, none negative   | Dijkstra                       |
+| Does any route exist at all                      | Either                  | BFS (ignore the weights)       |
+| Lowest total, but some weights are negative      | Can be negative         | Neither: a different algorithm |
 
-The key difference from BFS: Dijkstra is willing to revisit its cost estimate for a node (relaxing ATL from $250 down to $220) as cheaper paths are discovered, because "closest by hop count" and "closest by total cost" aren't the same ordering. BFS never needs to do this — once a node is reached in a BFS layer, no _later_ layer can possibly reach it in fewer hops, so there's nothing to reconsider.
-
-## Picking the right tool
-
-| Question you're actually asking                                      | Edge weights                | Algorithm                                |
-| -------------------------------------------------------------------- | --------------------------- | ---------------------------------------- |
-| Fewest hops / fewest layovers / fewest degrees of separation         | All equal (or don't matter) | BFS                                      |
-| Cheapest total cost / shortest total distance / lowest total latency | Vary per edge               | Dijkstra                                 |
-| Does a path exist at all                                             | Either                      | BFS (cheaper to run, ignore the weights) |
-
-Running Dijkstra on an unweighted graph still works — it just does extra bookkeeping (the priority queue) to arrive at the same answer BFS gets more cheaply. Running BFS on a weighted graph when you actually care about cost gives you a _wrong_ answer that looks plausible, which is the more dangerous failure mode of the two. L3 implements both, plus what happens when the graph you're walking has a cycle in it.
+Running Dijkstra on an unweighted graph still gives the right answer, with extra
+bookkeeping. Running BFS on a weighted graph and trusting the answer gives a
+plausible wrong one. L3 uses a walk of a different kind, depth-first, to catch
+cycles.

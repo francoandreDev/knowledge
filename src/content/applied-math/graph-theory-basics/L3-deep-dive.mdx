@@ -5,246 +5,216 @@ title: "L3 — Graph theory basics"
 import Scenario from "../../../components/Scenario.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="The problem">
+export const unit = {
+  track: "applied-math",
+  unitSlug: "graph-theory-basics",
+};
 
-A teammate just added a dependency: `pricing-service` now calls `checkout-service` for a promo check. Nobody noticed that `checkout-service` already depends on `inventory-service`, which depends on `pricing-service`. There is now no valid order to bring these three services up — whichever one starts first, it's waiting on something that's waiting on it. The deploy script hangs, on-call gets paged, and the postmortem question is: **how do we catch this before it reaches prod, not after it pages someone at 2am?**
+<Scenario label="Three programs each wait for another one to start first. What is the start order?">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🧩</span> <strong>checkout</strong> — needs <strong>inventory</strong> running first</div>
+      <div class="flex items-center gap-1.5"><span>📦</span> <strong>inventory</strong> — needs <strong>pricing</strong> running first</div>
+      <div class="flex items-center gap-1.5"><span>💲</span> <strong>pricing</strong> — needs <strong>checkout</strong> running first <span>⚠️</span></div>
+      <div class="flex items-center gap-1.5"><span>🔁</span> <strong>Result</strong> — every one of them waits on another; none can start</div>
+    </div>
+  </Fragment>
 
-Eyeballing a dependency diagram works at 5 services. It stops working well before 50. This level builds the actual code that answers "does this graph have a cycle" — and, along the way, the code for the fewest-hops and cheapest-path questions from L1/L2 — in a form you'd really run, not pseudocode.
+Three small programs (names invented for this example) start up in some order.
+`checkout` cannot start until `inventory` is running. `inventory` cannot start
+until `pricing` is running. A teammate has just added a requirement that
+`pricing` cannot start until `checkout` is running.
 
-<Fragment slot="facts">
+**Is there any order in which all three can start? And if the system had 50
+programs instead of 3, how would you find out before the deploy hangs, rather
+than after?**
 
-**Service dependency edges (directed — "A calls B"):**
-
-| Caller            | Depends on          |
-| ----------------- | ------------------- |
-| checkout-service  | inventory-service   |
-| inventory-service | pricing-service     |
-| pricing-service   | checkout-service ⚠️ |
-
-**The cycle:** checkout → inventory → pricing → checkout — no service in this triangle can safely be the first one started.
-
-</Fragment>
+Looking at a diagram works at 3 programs. It stops working long before 50. The
+question needs a procedure.
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Building an adjacency list from a raw edge list",
-    "BFS and Dijkstra as real, runnable functions",
-    "Detecting a cycle with DFS before it reaches prod",
+    "Why 'already visited' is not enough to spot a loop",
+    "Three colours: untouched, on the current path, finished",
+    "A valid start order, and when none exists",
   ]}
 />
 
-## Building the adjacency list
+## Why can't the search from L2 just remember "visited"?
 
-Every algorithm below runs on top of the adjacency-list shape from L2. In practice you rarely receive a graph pre-built as a `Map` — you receive a flat list of edges (from a config file, a database query, a service registry) and build the list yourself:
+**BFS marked each station visited and moved on. Why isn't that enough to detect a
+loop?** Because "visited" mixes up two different situations. Compare two graphs
+(arrows mean "needs this running first"):
 
-```ts
-type Edge = { from: string; to: string; weight?: number };
-
-function buildAdjacencyList(edges: Edge[]): Map<string, Edge[]> {
-  const adj = new Map<string, Edge[]>();
-
-  for (const edge of edges) {
-    // Ensure both endpoints exist as keys, even a "to" node with no
-    // outgoing edges of its own — otherwise a lookup on it later
-    // throws instead of returning an empty neighbor list.
-    if (!adj.has(edge.from)) adj.set(edge.from, []);
-    if (!adj.has(edge.to)) adj.set(edge.to, []);
-
-    adj.get(edge.from)!.push(edge);
+```dot
+digraph G {
+  rankdir=LR;
+  node [shape=ellipse];
+  subgraph cluster_a {
+    label="Diamond: not a loop";
+    a1 [label="app"]; a2 [label="search"]; a3 [label="checkout"]; a4 [label="pricing"];
+    a1 -> a2; a1 -> a3; a2 -> a4; a3 -> a4;
   }
-
-  return adj;
+  subgraph cluster_b {
+    label="Loop";
+    b1 [label="checkout"]; b2 [label="inventory"]; b3 [label="pricing"];
+    b1 -> b2; b2 -> b3; b3 -> b1 [style=dashed, label="new"];
+  }
 }
-
-const flightEdges: Edge[] = [
-  { from: "SEA", to: "DEN", weight: 120 },
-  { from: "SEA", to: "ORD", weight: 150 },
-  { from: "DEN", to: "ATL", weight: 130 },
-  { from: "ORD", to: "ATL", weight: 70 },
-  { from: "ATL", to: "MIA", weight: 50 },
-];
-
-const flightGraph = buildAdjacencyList(flightEdges);
-// flightGraph.get("SEA") -> [{from:"SEA",to:"DEN",weight:120}, {from:"SEA",to:"ORD",weight:150}]
 ```
 
-The two guard lines (`if (!adj.has(...))`) matter more than they look — without them, a node that only ever appears as a _destination_ (like `MIA`, which has no outgoing flights in this data) would be missing from the map entirely, and every algorithm below would need a special case for "neighbor list doesn't exist" instead of safely getting back `[]`.
+In the diamond, `pricing` is reached twice, once from each side. It is
+visited both times, and there is no loop: two paths simply meet. In the loop,
+`pricing` leads back to `checkout`, which is still waiting for it. A single
+"visited" flag cannot tell these apart. A search that depends on that distinction
+needs three states per node.
 
-## BFS: fewest hops, in code
+| Colour | Meaning                                          | Reaching it again means                    |
+| ------ | ------------------------------------------------ | ------------------------------------------ |
+| White  | Not looked at yet                                | Explore it                                 |
+| Gray   | On the path being walked right now (an ancestor) | **A loop**: the path came back on itself   |
+| Black  | Fully explored; nothing under it leads back      | Fine: two paths meeting, as in the diamond |
 
-```ts
-function bfsShortestPath(
-  adj: Map<string, Edge[]>,
-  start: string,
-  end: string,
-): string[] | null {
-  const queue: string[] = [start];
-  const visited = new Set<string>([start]);
-  const cameFrom = new Map<string, string>();
+This walk is **depth-first search (DFS)**: follow one dependency as far as it
+goes before trying the next. Here is the whole run on the full six-edge graph
+(the three-program loop plus an `app` and a `search` program that were already
+there). The rule is: explore dependencies in the order listed.
 
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    if (current === end) {
-      // Walk cameFrom backwards to rebuild the path, then reverse it.
-      const path: string[] = [];
-      let node: string | undefined = current;
-      while (node !== undefined) {
-        path.push(node);
-        node = cameFrom.get(node);
-      }
-      return path.reverse();
-    }
+| Step | Action                                        | Gray path (current)                                    |
+| ---- | --------------------------------------------- | ------------------------------------------------------ |
+| 1    | Start at `app`, mark gray                     | app                                                    |
+| 2    | Go to `checkout`, mark gray                   | app, checkout                                          |
+| 3    | Go to `inventory`, mark gray                  | app, checkout, inventory                               |
+| 4    | Go to `pricing`, mark gray                    | app, checkout, inventory, pricing                      |
+| 5    | `pricing` needs `checkout`, which is **gray** | **loop found**: checkout, inventory, pricing, checkout |
 
-    for (const edge of adj.get(current) ?? []) {
-      if (!visited.has(edge.to)) {
-        visited.add(edge.to);
-        cameFrom.set(edge.to, current);
-        queue.push(edge.to);
-      }
-    }
-  }
+The edges are: `app` needs `checkout` and `search`; `checkout` needs `inventory`;
+`inventory` needs `pricing`; `search` needs `pricing`; and the new one, `pricing`
+needs `checkout`. The loop is read straight from the gray path, from the first
+appearance of `checkout` onward.
 
-  return null; // end is unreachable from start
-}
+<Checkpoint question="In the diamond, pricing is reached a second time and DFS does not report a loop. Which colour is pricing when that happens, and why does that colour mean it is safe?">
 
-bfsShortestPath(flightGraph, "SEA", "MIA");
-// -> ["SEA", "DEN", "ATL", "MIA"]  (3 hops — matches L2's queue-order trace)
-```
-
-`queue.shift()` is what makes this breadth-_first_ rather than depth-first — it always pulls the oldest-enqueued node, which is exactly what keeps the search moving layer by layer instead of racing down one branch. Swap `queue.shift()` for `queue.pop()` and this becomes depth-first search instead, which still finds _a_ path but no longer guarantees the fewest hops.
-
-<Checkpoint question="bfsShortestPath returned SEA → DEN → ATL → MIA, the $300 route, not the $270 one. Is that a bug?">
-
-No — it's doing exactly what it was asked to do. `bfsShortestPath` never reads `edge.weight` anywhere in its body; it only tracks hop count via BFS's layer-by-layer order. Both SEA→DEN→ATL→MIA and SEA→ORD→ATL→MIA are 3 hops, so either is a correct answer to "fewest hops" — which one comes back depends on which neighbor gets enqueued first, not on price. Getting the cheaper route requires an algorithm that actually looks at weight, which is exactly what Dijkstra is for, next.
+Black. By the time the second branch reaches `pricing`, the first branch has
+already finished exploring it and everything under it, so it has been fully
+explored and nothing under it leads back to a path still being walked. Gray is
+the only colour that means "still on the path I am currently on", which is the
+only situation in which arriving there closes a loop. A single visited flag would
+treat black and gray the same and report a loop that is not there.
 
 </Checkpoint>
 
-## Dijkstra: cheapest total, in code
+## What does the walk give you besides a yes or no?
 
-```ts
-function dijkstraShortestPath(
-  adj: Map<string, Edge[]>,
-  start: string,
-  end: string,
-): { path: string[]; cost: number } | null {
-  const costSoFar = new Map<string, number>([[start, 0]]);
-  const cameFrom = new Map<string, string>();
-  const unvisited = new Set(adj.keys());
+**If the graph has no loop, is there a start order?** Yes, and the same walk
+produces it. Every time DFS turns a node black, all of its dependencies are
+already black. So the order in which nodes turn black, first to last, starts every
+dependency before the thing that needs it.
 
-  while (unvisited.size > 0) {
-    // Pick the unvisited node with the lowest known cost so far.
-    // A real implementation uses a binary heap here for O(log V) per
-    // pick instead of this O(V) scan — see the Big-O table below.
-    let current: string | null = null;
-    let currentCost = Infinity;
-    for (const node of unvisited) {
-      const cost = costSoFar.get(node) ?? Infinity;
-      if (cost < currentCost) {
-        current = node;
-        currentCost = cost;
-      }
-    }
-    if (current === null || currentCost === Infinity) break; // rest is unreachable
-    unvisited.delete(current);
-    if (current === end) break;
+Take the graph without the new `pricing` to `checkout` edge. Running the same walk
+turns nodes black in this order:
 
-    for (const edge of adj.get(current) ?? []) {
-      const candidateCost = currentCost + (edge.weight ?? 1);
-      if (candidateCost < (costSoFar.get(edge.to) ?? Infinity)) {
-        costSoFar.set(edge.to, candidateCost); // relax the edge
-        cameFrom.set(edge.to, current);
-      }
-    }
-  }
+| Order finished | Node        | Its dependencies, all earlier in the list |
+| -------------- | ----------- | ----------------------------------------- |
+| 1              | `pricing`   | none                                      |
+| 2              | `inventory` | `pricing`                                 |
+| 3              | `checkout`  | `inventory`                               |
+| 4              | `search`    | `pricing`                                 |
+| 5              | `app`       | `checkout`, `search`                      |
 
-  if (!costSoFar.has(end)) return null;
-
-  const path: string[] = [];
-  let node: string | undefined = end;
-  while (node !== undefined) {
-    path.push(node);
-    node = cameFrom.get(node);
-  }
-  return { path: path.reverse(), cost: costSoFar.get(end)! };
-}
-
-dijkstraShortestPath(flightGraph, "SEA", "MIA");
-// -> { path: ["SEA", "ORD", "ATL", "MIA"], cost: 270 }
-```
-
-The `candidateCost < (costSoFar.get(edge.to) ?? Infinity)` line is the relax step from L2's trace, in code: every time a cheaper route to a node is found, both its recorded cost _and_ its `cameFrom` pointer get overwritten — which is exactly how ATL's best-known predecessor flips from DEN to ORD partway through the run.
-
-## Cycle detection: catching the deploy deadlock
-
-Back to the scenario: three services calling each other in a loop. BFS and Dijkstra both assume you can eventually run out of new nodes to visit — a cycle doesn't stop them (the `visited` set still prevents infinite looping), but neither one _tells you_ a cycle exists. Detecting one needs a different walk: depth-first search that tracks not just "visited" but **"currently on the path I'm exploring right now."**
-
-```ts
-function hasCycle(adj: Map<string, Edge[]>): boolean {
-  const WHITE = 0; // not yet visited
-  const GRAY = 1; // on the current DFS path (an ancestor of the node being explored)
-  const BLACK = 2; // fully explored, safe
-
-  const color = new Map<string, number>();
-  for (const node of adj.keys()) color.set(node, WHITE);
-
-  function visit(node: string): boolean {
-    color.set(node, GRAY);
-
-    for (const edge of adj.get(node) ?? []) {
-      const neighborColor = color.get(edge.to);
-      if (neighborColor === GRAY) return true; // back edge -> a cycle
-      if (neighborColor === WHITE && visit(edge.to)) return true;
-    }
-
-    color.set(node, BLACK);
-    return false;
-  }
-
-  for (const node of adj.keys()) {
-    if (color.get(node) === WHITE && visit(node)) return true;
-  }
-  return false;
-}
-
-const serviceEdges: Edge[] = [
-  { from: "checkout-service", to: "inventory-service" },
-  { from: "inventory-service", to: "pricing-service" },
-  { from: "pricing-service", to: "checkout-service" }, // the newly-added edge
-];
-
-hasCycle(buildAdjacencyList(serviceEdges)); // -> true
-```
-
-The three colors are the whole trick: **white** means "haven't looked at this yet," **black** means "fully explored, definitely no cycle through here." **Gray** is the important one — it means "still an ancestor of the node I'm currently exploring." Reaching a gray node means the current path has looped back onto itself; reaching a black one is fine, because black means that subtree was already proven cycle-free by an earlier, unrelated visit. Without the three-way distinction — just a single "visited" flag like BFS uses — `hasCycle` would incorrectly flag _any_ node reachable by two different paths as a cycle, even in a perfectly valid graph like the flight network (both DEN and ORD can reach ATL; that's not a cycle, it's just two routes converging).
-
-<Checkpoint question="Why can't hasCycle just reuse BFS's single visited Set the way bfsShortestPath does, instead of the three-color scheme?">
-
-A single "visited" set can't tell the difference between "this node is an ancestor on the path I'm currently walking" and "this node was already fully explored via some other, unrelated branch." Both look identical under a plain visited/not-visited flag. The flight graph proves why that distinction matters: ATL is reachable from both DEN and ORD, so a plain-visited check would mark it visited the first time (via DEN) and then flag it as "already visited" again when reached via ORD — reporting a cycle where there isn't one. Gray specifically means "still open, still on the current path," which is the only signal that actually indicates a loop.
-
-</Checkpoint>
-
-## Big-O summary
-
-| Operation                             | Adjacency list   | Adjacency matrix |
-| ------------------------------------- | ---------------- | ---------------- |
-| Build from `V` nodes, `E` edges       | O(V + E)         | O(V²)            |
-| Memory                                | O(V + E)         | O(V²)            |
-| BFS / DFS over the whole graph        | O(V + E)         | O(V²)            |
-| Dijkstra (array-scan version above)   | O(V² )           | O(V²)            |
-| Dijkstra (binary-heap priority queue) | O((V + E) log V) | O(V² log V)      |
+So `pricing, inventory, checkout, search, app` is a valid start order. Add the new
+edge back and no order of the five works for the three looped programs, because
+each must come before and after another. A loop in a dependency graph means no
+valid start order exists, and the walk above finds it without trying orders.
 
 ```mermaid
-xychart-beta
-    title "Adjacency list vs. matrix: cells needed as a sparse graph grows"
-    x-axis "Nodes (V)" [10, 50, 100, 200, 400]
-    y-axis "Cells / entries"
-    bar "List (V + 4V edges)" [50, 250, 500, 1000, 2000]
-    bar "Matrix (V²)" [100, 2500, 10000, 40000, 160000]
+flowchart LR
+    P["pricing"] --> I["inventory"] --> C["checkout"] --> S["search"] --> A["app"]
 ```
 
-The array-scan Dijkstra above is O(V²) — fine for a few hundred services, but the standard production fix once a graph gets large is swapping the `for (const node of unvisited)` scan for a binary min-heap, which is what turns "always find the cheapest unvisited node" from an O(V) scan into an O(log V) pop.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="cycle-detection"
+/>
 
-**Something to extend on your own:** every example above is a directed graph. What would actually need to change in `hasCycle` if the edges were undirected instead — say, a graph of mutual service _awareness_ rather than one-way _calls_? (Hint: in an undirected graph, the edge you just walked in on always points back to a gray node — your immediate parent — so the naive version above would flag every single edge as a cycle. What extra piece of information does `visit` need to track to tell "I looped back to an ancestor" apart from "I just walked back along the edge I arrived on"?)
+## Why is this affordable when the system is large?
+
+**Why not simply test every pair of programs for a loop?** Counting shows the
+difference. A walk touches each node and each edge about once, so its cost grows
+like $$O(V + E)$$. Looking at every pair grows like $$V(V-1)/2$$. The demo below
+uses these two counts as a scale illustration, with no claim that testing pairs
+is how anyone detects loops:
+
+| Programs (V) | Dependencies per program | Walk: V + E steps | Pairs: V(V-1)/2 |
+| ------------ | ------------------------ | ----------------- | --------------- |
+| 12           | 3                        | 48                | 66              |
+| 300          | 3                        | 1,200             | 44,850          |
+
+At 12 programs the two are close, so either is tolerable. At 300 the pair count
+is about 37 times larger (44,850 / 1,200 is roughly 37), and the gap keeps
+widening because one count grows with the number of programs and the other with
+its square. The same $$O(V + E)$$ cost applies to BFS and to DFS on a list.
+
+## The same walk as code
+
+This is one of the few places where reading code teaches something the table does
+not: how little there is to it. Dependencies are given as an object mapping each
+program to the list it needs.
+
+```js
+function hasCycle(deps) {
+  const state = {}; // missing = white, "open" = gray, "done" = black
+  function visit(name) {
+    state[name] = "open";
+    for (const next of deps[name] ?? []) {
+      if (state[next] === "open") return true; // reached a gray node: a loop
+      if (state[next] === undefined && visit(next)) return true;
+    }
+    state[name] = "done";
+    return false;
+  }
+  return Object.keys(deps).some((n) => state[n] === undefined && visit(n));
+}
+```
+
+Three states, one recursive call per white node, and a check at the single point
+where a gray node is reached. The exercises below ask you to write this kind of
+walk yourself in a few shapes.
+
+<Checkpoint question="If the loop is removed from this graph, what exactly makes the walk still visit every node exactly once?">
+
+Only white nodes are explored. The moment a node is entered it turns gray, and
+when its dependencies are done it turns black, so it can never be white again. The
+outer loop restarts from any node that is still white, which covers parts of the
+graph the first start could not reach. Each node is therefore entered once and
+each edge is looked at once, which is where the $$O(V + E)$$ cost comes from.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="graph-code"
+/>
+
+## This is one case, not the whole territory
+
+Everything above used one directed dependency graph. Try changing the scene and
+see which parts survive.
+
+- **Undirected edges.** Suppose the edges are mutual awareness rather than "needs".
+  Every edge you just walked along now points back at a gray node, your own
+  parent. What extra piece of information must the walk carry to tell "I came
+  back along the edge I arrived on" from "I found a genuine loop"?
+- **Weights that can be negative.** What would break in Dijkstra from L2, and would
+  a loop then matter in a new way?
+- **A million nodes.** Which of the layouts from L2 stays usable, and which part of
+  the walk becomes the cost you worry about first?
+
+There is no single correct answer to these. They are prompts for checking whether
+you hold the idea or only the example.
