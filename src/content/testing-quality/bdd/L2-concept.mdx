@@ -4,108 +4,114 @@ title: "L2 — Where the line between behavior and implementation actually sits"
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 showed the symptom — 15 tests broke on a refactor that changed nothing
-observable. L2 works out exactly where the line sits between what a test
-should and shouldn't be allowed to depend on, and what a behavior-based
-test looks like in practice.
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "bdd",
+};
+
+L1 showed the symptom: 15 tests broke on a change nobody could observe. L2
+works out where the line sits between what a test may depend on and what it may
+not, and how Given-When-Then keeps a test on the right side of it.
 
 <LevelIntro
   items={[
-    "Public interface vs. internal state",
-    "Given-When-Then as a test structure",
-    "What behavior tests do and don't protect against",
+    "Public interface versus internal state",
+    "Given-When-Then structure",
+    "What behavior tests do and do not protect",
   ]}
 />
 
-## Two things a test can point at
+## Who is allowed to depend on what?
 
-**If a test has to check something about the cart, what are its two
-possible targets?** It can check the cart's _public interface_ — the
-methods anything else in the codebase would actually call — or it can
-reach into the cart's _internals_ — the specific data structure and
-private fields the class happens to use right now.
+**If a cart's storage is free to change, why would a test be allowed to depend
+on it?** It is not. Other code in the codebase only calls the public methods, so
+those methods are the contract. Storage is private to the class.
+
+| Layer                | Who may rely on it            | Free to change?                         |
+| -------------------- | ----------------------------- | --------------------------------------- |
+| Public methods       | Every caller, including tests | Only deliberately, as a behavior change |
+| Return values        | Every caller, including tests | Same                                    |
+| Internal data layout | Only the class itself         | Yes, any time                           |
+
+A test that reads internal layout quietly turns a private detail into a
+promise. Every later refactor then has to either keep the detail alive or
+rewrite the test.
+
+<Checkpoint question="A test asserts that the cart's internal storage has length 2 after two different items are added. The storage is changed from an array to a Map. Is the red test evidence that the cart broke?">
+
+No. The cart still adds, counts and totals correctly. The test was checking a
+detail that was never part of the contract (that the storage is an array with a
+length), so its failure is a false alarm about the refactor. The test, not the
+cart, is what needs fixing.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="behavior-vs-implementation"
+/>
+
+## How does a test say what it checks without naming internals?
+
+**What shape keeps a test about behavior?** Three parts, each phrased only in
+terms an outside caller could see.
 
 ```mermaid
 flowchart LR
-    T["Test"] -->|"through the\npublic interface"| A["addItem(), getTotal(),\ngetItemCount()"]
-    T -.->|"reaching into\ninternals"| B["cart.items\n(array or Map, private detail)"]
-    A --> C["Survives internal\nrefactors"]
-    B --> D["Breaks on internal\nrefactors, even with\nno behavior change"]
+    G["Given\nan empty cart"] --> W["When\nWidget at 10 x 2 and\nGadget at 20 x 1 are added"] --> T["Then\ngetTotal() is 40"]
 ```
 
-Only one of these two targets is actually part of the cart's contract
-with the rest of the codebase. The other is free to change any time the
-class's author wants, for reasons that have nothing to do with whether
-the cart still works correctly.
+| Part  | Question it answers                | Must not mention                  |
+| ----- | ---------------------------------- | --------------------------------- |
+| Given | What situation are we starting in? | How the situation is stored       |
+| When  | What does the caller do?           | Private helper steps              |
+| Then  | What can the caller observe?       | Fields, arrays, maps, call counts |
 
-<Checkpoint question="A test asserts cart.getTotal() === 40. A different test asserts cart.items[0].price === 10. Both are technically 'checking the cart' — which one is a behavior test, and which one would break if the cart's storage changed from an array to some other structure?">
+Given-When-Then is a way to narrate a behavior test, not a different kind of
+test. Relabelling an assertion on internals as three lines does not make it a
+behavior test.
 
-`cart.getTotal() === 40` is the behavior test — `getTotal()` is a public
-method, part of the cart's actual contract, and it stays valid no matter
-what data structure sits behind it. `cart.items[0].price === 10` reaches
-past that contract into the array specifically: it assumes `items` is
-indexable by number, which is true for an array and false for a Map or
-any other structure. That second assertion would break the moment
-storage changed, even though nothing about what the cart _does_ changed
-at all.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="given-when-then"
+/>
 
-</Checkpoint>
+## What do behavior tests protect you from, and what not?
 
-## Given-When-Then
+**If behavior tests survive refactors, are they a complete safety net?** No.
+They protect against two things and are silent about a third.
 
-**How does this distinction show up in how a test is actually written?**
-A behavior-based test is structured around three questions, phrased
-entirely in terms of what the system does, never how:
+| Situation                             | Behavior test result |
+| ------------------------------------- | -------------------- |
+| Internal refactor, same behavior      | Stays green          |
+| A real change in what callers observe | Goes red, correctly  |
+| A behavior nobody wrote a test for    | Nothing, either way  |
 
-| Part  | Question it answers            | Example                                     |
-| ----- | ------------------------------ | ------------------------------------------- |
-| Given | What's the starting state?     | Given a cart with two Widgets already added |
-| When  | What action happens?           | When a third Widget is added                |
-| Then  | What's the observable outcome? | Then getItemCount() returns 3               |
+A green suite means "no tested behavior changed", not "nothing changed". The
+fix for a gap is writing a test for the missing behavior, not reaching into
+internals to feel safer.
 
-Notice "Then" never mentions how the count is computed or stored — only
-what a caller would observe by using the public interface. An
-implementation-coupled version of the same test might instead assert
-`cart.items.length === 3` or `cart.items[0].quantity === 3`, both of
-which describe internal storage, not behavior.
+<Checkpoint question="After the refactor, all behavior tests are green. Does that prove the cart behaves exactly as before in every respect?">
 
-## Why implementation-coupled tests still feel natural to write
-
-**If reaching into internals is the wrong target, why do
-implementation-coupled tests get written so often?** Because they're
-usually easier to write in the moment — the internal state is right
-there, already familiar from writing the implementation, while
-figuring out the right public-interface assertion sometimes takes a
-little more thought. That shortcut is exactly what creates the L1
-scenario: the easier test to write today is the one that breaks
-tomorrow for no real reason.
-
-## What BDD tests protect you from, and what they don't
-
-|                                | Testing through the public interface             | Testing through internals                                   |
-| ------------------------------ | ------------------------------------------------ | ----------------------------------------------------------- |
-| Survives an internal refactor  | Yes, as long as behavior is unchanged            | No — breaks even when behavior is identical                 |
-| Catches an actual behavior bug | Yes — that's exactly what it's designed to check | Yes, but often indirectly, mixed in with unrelated failures |
-| Tells you what actually broke  | Clearly — the behavior itself failed             | Ambiguous — did behavior break, or just internal structure? |
-
-<Checkpoint question="A test reaching into cart internals fails after a refactor. Based on the table above, does that failure by itself tell you whether the refactor introduced a real bug?">
-
-No, not by itself. Because an implementation-coupled test can fail for
-two very different reasons — an actual behavior regression, or nothing
-more than internal structure changing shape — a red result from that
-kind of test is ambiguous on its own. Someone has to go read the
-assertion and the diff to figure out which one happened, which is
-exactly the extra work a behavior-based test would have avoided: its
-failures only ever mean the observable behavior changed.
+No. It proves the behaviors that have a test are unchanged. A behavior without
+a test (say, what happens when the same item is added twice) can change
+silently. Behavior tests are only as complete as the list of behaviors someone
+decided to write down.
 
 </Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="refactor-safety"
+/>
 
 ## The generalizable lesson
 
-**Does this only apply to shopping carts?** No — the same shape
-applies to any class or module with both a public interface and
-private internal state: a parser, a cache, a queue, a validator. The
-diagnostic question is always the same: does this assertion describe
-what the code does, or does it describe how the code currently happens
-to do it?
+A test should fail for exactly one reason: something a caller can observe has
+changed. Anything else it reacts to is noise, and noise teaches the team to
+distrust red tests.

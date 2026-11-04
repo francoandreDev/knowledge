@@ -1,72 +1,91 @@
 ---
-title: "L1 — Why does my test suite pass locally but fail in CI? (flaky tests, non-determinism, environment leakage)"
+title: "L1 — Why does my test suite pass locally but fail in CI?"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Passes every time on your laptop. Fails about once every twenty runs in CI — always a different test.">
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "flaky-tests",
+};
+
+<Scenario label="Two tests share one notepad. Run in one order they pass; in the other, one fails.">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>💻</span> <strong>Locally</strong> — 100/100 runs pass, always the same order</div>
-      <div class="flex items-center gap-1.5"><span>🤖</span> <strong>In CI</strong> — fails roughly 1 in 20 runs, no code change in between</div>
-      <div class="flex items-center gap-1.5"><span>❓</span> <strong>The actual cause</strong> — two tests share one mutable in-memory store, and CI runs tests in a different order than a developer's machine ever does</div>
+      <div class="flex items-center gap-1.5"><span>📒</span> <strong>One shared list</strong> — both tests read and write it</div>
+      <div class="flex items-center gap-1.5"><span>💻</span> <strong>Locally</strong> — always the same order, always passes</div>
+      <div class="flex items-center gap-1.5"><span>🤖</span> <strong>In CI</strong> — order sometimes differs, one test fails</div>
+      <div class="flex items-center gap-1.5"><span>🟰</span> <strong>Same code, same tests</strong> — only the order changed</div>
     </div>
   </Fragment>
 
-A test suite has 40 tests. Every one passes, every time, on every
-developer's laptop. In CI, about once every twenty runs, one test
-fails — never the same one twice, and re-running the exact same commit
-usually makes it pass. Nobody touched the failing test recently.
-**If the code and the test are both unchanged between a passing run
-and a failing run, what's actually different?**
+A suite has two tests. Test A adds one pending order to a shared list and
+checks the list has one item. Test B checks the same list starts empty. Run
+B then A: both pass. Run A then B: B fails, because A's order is still in
+the list. Nobody changed any code between the two runs.
+**If the code and the tests are identical in a passing run and a failing run,
+what is actually different?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "What makes a test 'flaky'",
-    "Why the test's logic usually isn't the culprit",
-    "Why CI exposes flakiness local runs hide",
+    "What makes a test flaky",
+    "Where the hidden dependency lives",
+    "Why CI exposes what a laptop hides",
   ]}
 />
 
-## The shape of the problem
+## What is a flaky test?
 
-- A **flaky test** is one that produces different results (pass or
-  fail) across runs of the _same_ code with no relevant input change
-  — its outcome depends on something the test itself doesn't control
-  or account for.
-- Flakiness is almost never about the assertion being wrong — the
-  logic under test is usually fine. It's about the test's outcome
-  secretly depending on something outside the test: execution order,
-  real timing, real randomness, or state left behind by another test.
-- CI often exposes flakiness that local runs never do, not because CI
-  is "less reliable," but because CI frequently runs tests in a
-  different order, in parallel, or under different timing than a
-  single developer running the same suite the same way every time.
+| Run order | Test A (adds an order) | Test B (list starts empty) | Suite |
+| --------- | ---------------------- | -------------------------- | ----- |
+| B, then A | passes                 | passes                     | green |
+| A, then B | passes                 | **fails**                  | red   |
+
+A **flaky test** gives different results on the same code with no relevant
+change. Look at the table: neither test has a wrong assertion. The result
+depends on something outside the tests, here the order they ran in.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="flaky-meaning"
+/>
+
+## Why does CI show it and a laptop doesn't?
+
+```mermaid
+flowchart LR
+    S["Same suite, same code"] --> L["Laptop: one fixed order"]
+    S --> C["CI: shuffled order, parallel workers, busy machines"]
+    L --> LP["Bad order never happens: green"]
+    C --> CP["Bad order happens sometimes: red"]
+```
+
+CI is not less reliable. It simply samples more execution conditions than one
+developer's machine does, so it reaches the order that exposes the bug.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="ci-exposure"
+/>
 
 ## Key terms
 
-- **Non-determinism** — a test's outcome can vary between runs of
-  identical code, because it depends on something that isn't fixed
-  (the system clock, random number generation, network latency,
-  thread/task scheduling).
-- **Test isolation** — the property that one test's outcome doesn't
-  depend on whether, or in what order, any other test ran before it.
-- **Environment leakage** — state (in-memory, on disk, in a shared
-  service) created or modified by one test that isn't cleaned up,
-  and ends up affecting a different test that runs afterward.
-- **Race condition (in a test)** — a test asserts on the result of an
-  asynchronous operation before that operation has actually finished,
-  so the outcome depends on unpredictable timing rather than logic.
+- **Non-determinism**: the outcome can vary between runs of identical code
+  because something it depends on is not fixed (clock, randomness, timing,
+  order).
+- **Test isolation**: one test's result does not depend on whether, or in
+  what order, other tests ran.
+- **Environment leakage**: state left behind by one test that changes the
+  result of a later one.
 
-## What this unit covers
+## What the next levels cover
 
-L2 maps the main categories of flakiness (shared state, real time,
-real randomness, unresolved async work) and why CI's execution model
-surfaces them more often than a single developer's local runs do. L3
-walks the module-level shared-store bug behind this unit's Scenario
-through a full fix, plus a second, equally common flakiness cause: an
-async assertion that runs before the operation it's checking has
-actually completed.
+L2 sorts the hidden dependencies into four causes and shows why the usual
+quick fixes only hide them. L3 fixes the shared-list bug and a timing bug
+step by step, then makes a clock-dependent check deterministic.

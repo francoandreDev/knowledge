@@ -1,256 +1,163 @@
 ---
-title: "L3 — Mutating a shipping-fee calculator: which mutants survive, and what that reveals"
+title: "L3 — Mutating a shipping-fee function: which mutants survive, and why"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="A suite that looks thorough, four mutants, two survivors">
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "mutation-testing",
+};
+
+<Scenario label="Three passing tests, four mutants, two survivors">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>📦</span> <strong>Code</strong> — a shipping-fee calculator: base fee + weight + distance, plus a heavy-weight surcharge and a long-distance discount</div>
-      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Suite</strong> — 3 tests, all pass, none sit exactly on a threshold</div>
-      <div class="flex items-center gap-1.5"><span>🧬</span> <strong>4 mutants</strong> — 2 killed, 2 survive</div>
-      <div class="flex items-center gap-1.5"><span>🕳️</span> <strong>Survivors</strong> — both are boundary mutants, both at untested exact-threshold values</div>
+      <div class="flex items-center gap-1.5"><span>📦</span> <strong>Code</strong> — base 5, plus 0.5 per kg, plus 0.1 per km</div>
+      <div class="flex items-center gap-1.5"><span>⚖️</span> <strong>Rules</strong> — over 20 kg adds 10; 500 km or more takes 10% off</div>
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Suite</strong> — 3 tests, none exactly on 20 kg or 500 km</div>
+      <div class="flex items-center gap-1.5"><span>🧬</span> <strong>Mutants</strong> — 4 planted, 2 killed, 2 survive</div>
     </div>
   </Fragment>
 
-Three tests, all passing, covering the base fee, a heavy package, and a
-long-distance package. **Before running any mutants: does "one test per
-branch of the function" sound like a thorough suite to you?** Keep that
-guess — the mutants are about to check it directly instead of asking you
-to eyeball the code.
+The suite has one test per branch: a small nearby package, a heavy one, and a
+far one. **Does "one test per branch" sound like a thorough suite?** Hold that
+guess; the mutants are about to test it without anyone eyeballing the code.
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Killed vs. survived, worked by hand on real code",
-    "What each survivor reveals about the actual test gap",
-    "Equivalent mutants, and why teams run this selectively",
+    "Killed and survived, traced by hand",
+    "What each survivor says about the test gap",
+    "Equivalent mutants and the cost of the technique",
   ]}
 />
 
-## The function and its suite
+## The function and its three tests
+
+The code is small enough that reading it is the point:
 
 ```js
-// shipping.js
 function calculateShippingFee(weightKg, distanceKm) {
-  const BASE_FEE = 5;
-  const PER_KG = 0.5;
-  const PER_KM = 0.1;
-
-  let fee = BASE_FEE + weightKg * PER_KG + distanceKm * PER_KM;
-
-  if (weightKg > 20) {
-    fee += 10; // heavy-package surcharge
-  }
-  if (distanceKm >= 500) {
-    fee *= 0.9; // long-distance discount
-  }
-
+  let fee = 5 + weightKg * 0.5 + distanceKm * 0.1;
+  if (weightKg > 20) fee += 10; // heavy-package surcharge
+  if (distanceKm >= 500) fee *= 0.9; // long-distance discount
   return Math.round(fee * 100) / 100;
 }
 ```
 
-```js
-// shipping.test.js
-test("base fee for a small, nearby package", () => {
-  expect(calculateShippingFee(2, 10)).toBe(7);
-});
+| Test | Weight (kg) | Distance (km) | Expected fee |
+| ---- | ----------- | ------------- | ------------ |
+| 1    | 2           | 10            | 7            |
+| 2    | 25          | 10            | 28.5         |
+| 3    | 2           | 600           | 59.4         |
 
-test("heavy package gets the surcharge", () => {
-  expect(calculateShippingFee(25, 10)).toBe(28.5);
-});
+All pass, and every line runs: 100% line coverage.
 
-test("long-distance package gets the discount", () => {
-  expect(calculateShippingFee(2, 600)).toBe(59.4);
-});
+## What happens to each of four mutants?
+
+**For each mutant, which test (if any) sees a different answer?** Running the
+three tests against each gives:
+
+| Mutant                   | Change                         | First test that fails                 | Result       |
+| ------------------------ | ------------------------------ | ------------------------------------- | ------------ |
+| 1 arithmetic replacement | `weightKg * 0.5` to `/ 0.5`    | Test 1 gives 10 instead of 7          | Killed       |
+| 2 statement removal      | surcharge line deleted         | Test 2 gives 18.5 instead of 28.5     | Killed       |
+| 3 conditional boundary   | `weightKg > 20` to `>= 20`     | None (weights 2 and 25 unchanged)     | **Survived** |
+| 4 conditional boundary   | `distanceKm >= 500` to `> 500` | None (distances 10 and 600 unchanged) | **Survived** |
+
+```mermaid
+flowchart LR
+    S[4 mutants] --> K[Killed: 1 and 2]
+    S --> V[Survived: 3 and 4]
+    K --> R1[Tests checked computed values]
+    V --> R2[No test sits exactly on 20 kg or 500 km]
 ```
 
-All three pass. Line coverage is 100% — every branch runs at least once.
-This is exactly the kind of suite that looks complete on a dashboard.
+Score: 2 killed out of 4 is **50%**, on a suite with 100% line coverage.
 
-## Introducing four mutants by hand
+<Checkpoint question="Would adding a fourth test at 100 kg and 1000 km kill either surviving mutant?">
 
-**Mutant 1 — arithmetic operator replacement:** `weightKg * PER_KG` →
-`weightKg / PER_KG`.
-
-```js
-let fee = BASE_FEE + weightKg / PER_KG + distanceKm * PER_KM;
-```
-
-Run the suite against it: test 1 expects `calculateShippingFee(2, 10)`
-to be `7`. With the mutant, `2 / 0.5 = 4` instead of `2 * 0.5 = 1`, so
-the result becomes `10`, not `7`. **Test 1 fails. Mutant killed.**
-
-**Mutant 2 — statement removal:** delete the surcharge line entirely.
-
-```js
-if (weightKg > 20) {
-  // fee += 10; ← deleted
-}
-```
-
-Test 2 expects `calculateShippingFee(25, 10)` to be `28.5`. Without the
-surcharge, the result is `18.5`. **Test 2 fails. Mutant killed.**
-
-**Mutant 3 — conditional boundary:** `weightKg > 20` → `weightKg >= 20`.
-
-```js
-if (weightKg >= 20) {
-  fee += 10;
-}
-```
-
-Run all three tests: `2` and `25` are both unaffected (`2 >= 20` and
-`25 >= 20` give the same branch outcome as `2 > 20` and `25 > 20`).
-None of the three tests use a weight of exactly `20`. **All three tests
-still pass. Mutant survives.**
-
-**Mutant 4 — conditional boundary:** `distanceKm >= 500` →
-`distanceKm > 500`.
-
-```js
-if (distanceKm > 500) {
-  fee *= 0.9;
-}
-```
-
-Same story: `10`, `10`, and `600` are all unaffected by whether the
-comparison is `>=` or `>`. None of the three tests use a distance of
-exactly `500`. **All three tests still pass. Mutant survives.**
-
-<Checkpoint question="Mutants 3 and 4 both survived by changing a boundary comparison operator. Would adding a fourth test at weight=100, distance=1000 (comfortably past both thresholds) kill either of them?">
-
-No. A test comfortably past a threshold exercises the same branch either
-way the comparison is written — `100 > 20` and `100 >= 20` both evaluate
-to `true`, so that test can't distinguish the two versions of the
-mutant. Only a test at the exact boundary value (weight exactly `20`,
-distance exactly `500`) produces a different result depending on which
-comparison operator is used — that's the only kind of test that can
-kill a conditional-boundary mutant. This is the same lesson
-`assertions-matter` draws from a single boundary: the boundary value
-itself has to be a test input, not a value comfortably on either side of
-it.
+No. A test well past a threshold takes the same branch whether the comparison is
+written `>` or `>=`: `100 > 20` and `100 >= 20` are both true. Only an input
+exactly on the threshold produces a different result under each version, so only
+that input can kill a boundary mutant.
 
 </Checkpoint>
 
-## Reading the score, and fixing the gap
+## How do the survivors point to the fix?
 
-4 mutants, 2 killed, 2 survived: **mutation score = 2 / 4 = 50%**, on a
-suite with 100% line coverage. Both survivors point at the exact same
-kind of gap: neither threshold (`20`, `500`) is ever tested at its exact
-value. The spec is "over 20kg" (strictly greater) gets the surcharge and
-"500km or more" (inclusive) gets the discount — so the boundary values
-themselves have known-correct expected results:
+**What does each survivor tell you to write?** Both name the same gap: neither
+threshold is ever tested at its exact value. The rules say "over 20 kg" is
+surcharged (so exactly 20 is not) and "500 km or more" is discounted (so exactly
+500 is). Those boundary inputs have known right answers:
 
-```js
-test("exactly at the heavy-package threshold does NOT get the surcharge", () => {
-  // fee = 5 + 20*0.5 + 10*0.1 = 5 + 10 + 1 = 16; weight is not > 20, no surcharge
-  expect(calculateShippingFee(20, 10)).toBe(16);
-});
+| New test | Weight | Distance | Expected | Original | Mutant 3 or 4 gives |
+| -------- | ------ | -------- | -------- | -------- | ------------------- |
+| 4        | 20     | 10       | 16       | 16       | 26 (mutant 3)       |
+| 5        | 2      | 500      | 50.4     | 50.4     | 56 (mutant 4)       |
 
-test("exactly at the long-distance threshold gets the discount", () => {
-  // fee = 5 + 2*0.5 + 500*0.1 = 5 + 1 + 50 = 56; distance is >= 500, discount applies: 56 * 0.9 = 50.4
-  expect(calculateShippingFee(2, 500)).toBe(50.4);
-});
-```
+Both mutants are now killed: **4 of 4, a score of 100%.** Coverage was 100% before
+and 100% after, so it could never have told the two suites apart.
 
-Re-run all four mutants against the five-test suite. Mutant 3
-(`weightKg >= 20`) now applies the surcharge at `weight = 20`, producing
-`26` instead of `16` — the new first test expects `16` and fails against
-the mutant. **Killed.** Mutant 4 (`distanceKm > 500`) now withholds the
-discount at `distance = 500`, producing `56` instead of `50.4` — the new
-second test expects `50.4` and fails against the mutant. **Killed.**
-**Mutation score: 4/4 = 100%.**
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="boundary-tests"
+/>
 
-<Checkpoint question="Before this fix, coverage was already 100% — every line ran. After the fix, coverage is still 100%. What changed?">
+## When is a survivor not a real gap?
 
-Coverage didn't change at all, because coverage was never the thing that
-was broken — every line was already executing under the original suite.
-What changed is that the suite now has two tests whose _expected value_
-depends on the exact behavior at each threshold, instead of two more
-tests that happen to run the same lines without checking anything a
-boundary bug would break. This is the entire point of the unit: coverage
-was a flat 100% throughout, while mutation score moved from 50% to 100%
-— coverage never had the information to tell the two suites apart.
+**Could a mutant survive even with a perfect suite?** Yes. Reorder the sum so it
+reads `weightKg * 0.5 + 5 + distanceKm * 0.1`. Addition gives the same number
+for every input, so no test can ever tell the two apart. That is an
+**equivalent mutant**: technically a survivor, but there is nothing to fix.
 
-</Checkpoint>
+Deciding whether two programs are equivalent is undecidable in general, so no
+tool can filter these out perfectly. A person has to review survivors and
+dismiss the equivalent ones. That review is a real, recurring cost of the
+technique, and it is why a survivor is a prompt to look, not an automatic ticket
+to write a test.
 
-## Equivalent mutants: a false survivor
+<Checkpoint question="If the function became async and fetched a live rate before computing the fee, what would change about this exercise?">
 
-Not every survivor is a real gap. Take this mutation, reordering the sum
-in the fee calculation:
-
-```js
-// Original
-let fee = BASE_FEE + weightKg * PER_KG + distanceKm * PER_KM;
-// Mutant: operands reordered
-let fee = weightKg * PER_KG + BASE_FEE + distanceKm * PER_KM;
-```
-
-No test can ever kill this mutant — addition here is commutative, and
-the reordering produces the exact same numeric result for every input.
-It's a **survivor with no fix available**, because there's nothing to
-fix: the mutant is **equivalent** to the original, its behavior is
-identical, and the tool flagging it as "survived" is technically correct
-but practically noise. Real mutation-testing tools generate a nonzero
-rate of these — one of the genuine, hard costs of the technique is a
-human periodically reviewing survivors to tell "real gap" from
-"equivalent mutant, safe to ignore," since no static analysis can decide
-that in general (deciding true program equivalence is undecidable).
-
-## Why this doesn't run on every commit
-
-The five-test suite above takes milliseconds. Multiply that by even a
-modest mutant count and the cost stops being trivial:
-
-| Mutants generated | Suite runtime per run | Total mutation-testing time |
-| ----------------- | --------------------- | --------------------------- |
-| 20                | 2s                    | 40s                         |
-| 200               | 2s                    | ~7 min                      |
-| 200               | 30s (a larger suite)  | ~100 min                    |
-
-Real modules generate far more than four mutants, and real suites take
-far longer than milliseconds — the combinatorial cost (mutants × suite
-runtime) is why teams scope mutation testing to critical modules and run
-it nightly or weekly in CI, not on every pull request the way a linter
-or the suite itself runs. The output (mutation score plus the list of
-survivors) is a diagnostic to act on periodically, not a merge gate.
-
-<Checkpoint question="What would change about this whole exercise if calculateShippingFee were async — say, it looked up a live fuel-surcharge rate from an API before computing the fee?">
-
-The mutation mechanics themselves don't change — a tool still generates
-mutants and reruns the suite against each one — but two things get
-harder. First, the suite runtime itself is no longer near-instant, and
-since mutation testing multiplies suite runtime by mutant count, an
-async dependency (even a mocked one with artificial delay) makes the
-whole run slower in exactly the way the cost table above warns about.
-Second, a new class of mutant becomes possible: mutating _await_ itself
-or error-handling around the API call — a dropped `await`, a swallowed
-rejection — which a synchronous function like this one can't even
-express. Extending the example to async wouldn't just add cost; it would
-add operators worth testing that don't exist in the synchronous version.
+The loop itself stays the same, but two things shift. The suite gets slower, and
+since total time is mutants times suite time, the whole run gets slower in
+proportion. Also, new mutants become possible that a synchronous function cannot
+express, such as a dropped wait or a swallowed failure around the lookup. The
+extension adds cost and adds new operators worth probing.
 
 </Checkpoint>
 
-**One more direction to extend this yourself**: this example generalizes
-readily to any function with more than one independent threshold — what
-would the mutant list, and the survivor pattern, look like for a
-function with three separate boundary checks instead of two? And in a
-codebase without a numeric threshold at all — say, a state machine with
-several `if`/`else` branches — which mutation operator from L2's table
-would be the one most likely to catch a bug a human reviewer would
-otherwise miss?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="equivalent-mutants"
+/>
+
+## This is one case, not the whole territory
+
+The shipping function has two thresholds and four mutants. Try extending it
+yourself:
+
+- What would the mutant list and survivor pattern look like with **three**
+  independent thresholds instead of two?
+- For a state machine with many `if` and `else` branches and no numbers at all,
+  which operator from L2's table is most likely to expose a gap a reviewer would
+  miss?
+- If a team ran this nightly on one module and saw the score fall from 80% to
+  60%, what would you check first, and what would change if the mutant count had
+  also doubled?
 
 ## Failure modes and trade-offs
 
-| Failure mode / trade-off                                               | What it gets wrong (or costs)                                                              |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Treating a high mutation score as a merge gate on every PR             | Combinatorial cost makes this too slow for the inner loop; use coverage/lint there instead |
-| Treating every survivor as an automatic "add a test" ticket            | Some survivors are equivalent mutants — no test can or should kill them                    |
-| Running mutation testing across an entire large codebase routinely     | Cost scales with mutants × suite runtime; scope it to critical modules instead             |
-| Assuming 100% coverage implies a trustworthy suite                     | Coverage and mutation score measure different things — this whole unit's opening scenario  |
-| Assuming a killed mutant proves the surrounding code has no other bugs | A kill only proves that one specific mutation was caught, not that the function is correct |
+| Failure mode or trade-off                           | What it gets wrong or costs                                          |
+| --------------------------------------------------- | -------------------------------------------------------------------- |
+| Making the score a merge gate on every change       | Mutants times suite time is too slow for the inner loop              |
+| Treating every survivor as a ticket to write a test | Equivalent mutants cannot and should not be killed                   |
+| Running it across a whole large codebase            | Cost scales with mutants times suite time; scope to critical modules |
+| Assuming 100% coverage means a trustworthy suite    | Coverage and mutation score measure different things                 |
+| Assuming a kill proves the code is correct          | A kill shows one specific mutation was caught, nothing more          |

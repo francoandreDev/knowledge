@@ -1,108 +1,104 @@
 ---
-title: "L2 — The four main causes of flakiness, and why CI surfaces them"
+title: "L2 — The four hidden dependencies, and fixes that only hide them"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named the shape of the problem — a test's outcome secretly depending on
-something it doesn't control — without yet naming what that "something"
-usually is. L2 breaks it into the four concrete causes and works out why
-CI, specifically, is where they tend to surface.
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "flaky-tests",
+};
+
+L1 showed a test whose result secretly depended on run order. L2 asks what
+else a test can secretly depend on, and which fixes actually remove the
+dependency instead of just making it rarer.
 
 <LevelIntro
   items={[
-    "The four things a test's outcome can secretly depend on",
-    "Why CI surfaces flakiness that local runs hide",
-    "Failure modes that treat the symptom, not the cause",
+    "The four hidden dependencies",
+    "How often a small flake shows up",
+    "Fixes that hide instead of remove",
   ]}
 />
 
-## The four things a test's outcome can secretly depend on
+## What can a correct test still secretly depend on?
 
-**If a test's logic is correct, what else could make it fail
-unpredictably?** Anything the test doesn't fully control but its
-outcome quietly depends on:
+**If the assertion is right, what else could change the result?** Anything
+the test does not control:
 
-| Cause                 | What it looks like                                                                        | Why it's non-deterministic                                                              |
-| --------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Shared state leakage  | Two tests read/write the same in-memory store, file, or database row without resetting it | Whichever test happens to run first changes what the next one starts with               |
-| Real time             | A test uses the actual system clock (`Date.now()`, `setTimeout`) instead of a fixed one   | Execution speed varies between machines and runs, so a hardcoded delay isn't reliable   |
-| Real randomness       | A test relies on `Math.random()` or a real UUID generator without a fixed seed            | The exact value differs every run, so an assertion tied to a specific value is a gamble |
-| Unresolved async work | A test asserts on the result of a promise/callback before it has actually resolved        | The assertion's timing depends on how fast the event loop happens to get to it          |
+| Hidden dependency | What it looks like                                  | Why the result varies                         | Deterministic fix                            |
+| ----------------- | --------------------------------------------------- | --------------------------------------------- | -------------------------------------------- |
+| Shared state      | Two tests use the same list or file                 | Result depends on which test ran first        | Fresh state per test                         |
+| Real time         | Code reads the current clock or waits a fixed delay | Machines and moments differ                   | Pass in or freeze the time                   |
+| Real randomness   | Random values with no fixed seed                    | A different value every run                   | Seed it, or inject the value                 |
+| Unfinished async  | Assertion runs before the operation completes       | Depends on how fast the event loop gets to it | Wait for exactly the operation being checked |
 
-**Is this table saying flaky tests are always caused by bad luck?**
-No — every one of these has a deterministic fix (reset state, inject
-a fake clock, seed the randomness, actually await the async work).
-Flakiness isn't inherent to testing async or stateful code — it's a
-sign that one of these four dependencies was left uncontrolled.
+Every row has a deterministic fix. Flakiness is not an unavoidable cost of
+testing stateful or async code; it marks a dependency nobody pinned down.
 
-<Checkpoint question="A test calls a function that reads Date.now() internally to decide which discount tier applies, and the test's expected value was hardcoded based on today's date. Which of the four causes is this, and what's the deterministic fix?">
+<Checkpoint question="A test expects the string 'Monday discount' but the function reads the system date to choose the label. It passes on Mondays only. Which of the four is this, and what is the fix?">
 
-This is the "real time" cause — the test's outcome depends on the actual
-system clock rather than a value the test controls. The fix isn't to make
-the test run faster or to update the hardcoded expectation periodically;
-it's to inject a fake or fixed clock (freeze `Date.now()`, or pass the
-current time in as a parameter the test controls) so the test's expected
-value and the code's actual behavior are both anchored to the same fixed
-point in time, regardless of when the test actually runs.
+It is the real-time dependency. The function's output depends on the actual
+date, which the test does not control. The fix is to hand the function the
+date as an input (or freeze the clock) so the expected value and the code
+agree no matter when the test runs. Editing the expectation each week would
+just move the failure to a different day.
 
 </Checkpoint>
 
-## Why CI surfaces flakiness that local runs hide
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="four-causes"
+/>
 
-**If the same shared-state bug exists locally too, why does it almost
-only show up in CI?**
+## How often does a small flake actually show up?
 
-```mermaid
-flowchart TD
-    A["Same 40 tests, same code"] --> B["Local: same dev machine,\nsame order, every time"]
-    A --> C["CI: parallel workers,\nrandomized order, variable load"]
-    B --> D["Shared-state bug never\ntriggers — order never changes"]
-    C --> E["Shared-state bug triggers\nwhenever order differs"]
-```
+**A test fails on 5% of runs. Is that rare enough to ignore?** The chance of
+at least one failure in `n` runs is `1 - 0.95^n`, assuming each run is
+independent (an assumption: real flakes are sometimes correlated).
 
-A local run on one machine tends to execute tests in the same fixed
-order every single time — if that order happens to never expose the
-shared-state dependency, the bug is invisible locally no matter how
-many times it's run. CI frequently shuffles test order, runs tests
-across multiple parallel workers, and experiences more variable
-timing (shared build machines under load) — all of which increase the
-chance that whatever order-dependency or timing-dependency exists
-actually gets triggered.
+| Runs | Chance of at least one failure |
+| ---- | ------------------------------ |
+| 1    | 5.0%                           |
+| 10   | 40.1%                          |
+| 20   | 64.2%                          |
+| 50   | 92.3%                          |
 
-**Does this mean CI is "flakier" than local, as if CI itself is the
-problem?** No — CI isn't introducing new bugs, it's exposing bugs that
-were always there but never had the right conditions to surface
-locally. Treating "it passes locally" as proof of correctness ignores
-that local runs are a much narrower sample of possible execution
-conditions than CI actually exercises.
+So a "rare" flake becomes a near certainty across a week of CI. The
+interactive demo for this unit lets you drag both numbers.
 
-<Checkpoint question="A team's rule is 'if it passes locally, it's fine to merge — CI failures on that PR are probably just CI being flaky.' What's wrong with that reasoning, given what makes CI surface bugs that local runs don't?">
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="flake-odds"
+/>
 
-The reasoning has cause and effect backwards. CI isn't unreliable in the
-sense of producing false failures out of nowhere — it's exercising a wider
-range of execution conditions (shuffled order, parallel workers, variable
-timing) than a single developer's machine ever does, so a CI failure is
-more likely to be a real, pre-existing non-determinism the local run
-simply never had the right conditions to expose. Treating "passes locally"
-as sufficient proof of correctness, and a CI failure as noise to dismiss,
-means the team will keep merging code with real order- or timing-
-dependent bugs and just wait for them to surface again later, in
-production or in an even harder-to-reproduce form.
+## Which quick fixes treat the symptom?
+
+**Rerunning the red build made it green. Is the problem solved?** No. The
+dependency is still there:
+
+| Quick fix                                     | What it does              | What remains                        |
+| --------------------------------------------- | ------------------------- | ----------------------------------- |
+| Re-run until green                            | Hides this failure        | The dependency, plus wasted CI time |
+| Longer fixed delay before asserting           | Shrinks the timing window | A window still exists, now slower   |
+| Reset the shared state at the top of one test | Fixes that one test       | Every other test must also remember |
+| Fresh state built for each test               | Removes the shared object | Nothing: nothing is left to forget  |
+
+<Checkpoint question="Why is 'fresh state per test' a stronger fix than 'each test resets the shared state first'?">
+
+The reset approach depends on every author, forever, remembering a step; one
+new test that forgets reintroduces the order-dependent bug. Fresh state per
+test removes the shared object, so correctness no longer depends on anyone
+remembering anything.
 
 </Checkpoint>
 
-## Failure modes at this level
-
-- **Re-running a failing test until it passes, then moving on.**
-  This treats the symptom, not the cause — the underlying
-  non-determinism is still there and will trigger again.
-- **Assuming a flaky test is "probably fine" because it usually
-  passes.** A test that fails 1 in 20 times is still exposing a real
-  dependency the code or the test doesn't control — "usually passes"
-  isn't the same as "correct."
-- **Fixing flakiness by adding a longer `setTimeout` delay.** This
-  narrows the window for the race condition without eliminating it —
-  it's still non-deterministic, just less likely to trigger, which
-  makes the eventual failure harder to reproduce and debug.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="weak-fixes"
+/>

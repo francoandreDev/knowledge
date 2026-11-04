@@ -4,91 +4,93 @@ title: "L1 — How do I test something that depends on time, randomness, or exte
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="A test that passes today and fails tomorrow, for no code reason">
+export const unit = { track: "testing-quality", unitSlug: "test-doubles" };
+
+<Scenario label="A test that passes today and fails 57 days from now, with no code change">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🕐</span> <strong>The function</strong> — calls <code>Date.now()</code> directly to check if a trial has expired</div>
-      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Passes today</strong> — the hardcoded test date is still in the past</div>
-      <div class="flex items-center gap-1.5"><span>❌</span> <strong>Fails next year</strong> — the same hardcoded date is now in the future</div>
+      <div class="flex items-center gap-1.5"><span>🕐</span> <strong>The function</strong> — asks the real system clock whether a trial has ended</div>
+      <div class="flex items-center gap-1.5"><span>📅</span> <strong>The test</strong> — hardcodes a trial end date of 31 Dec 2026 and expects "not expired"</div>
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Written on 4 Nov 2026</strong> — passes</div>
+      <div class="flex items-center gap-1.5"><span>❌</span> <strong>Run on 1 Jan 2027</strong> — the same test fails</div>
+    </div>
+    <div class="not-prose mt-3 rounded border border-rose-300 bg-rose-50 p-1.5 text-xs dark:border-rose-800 dark:bg-rose-950">
+      <p class="font-semibold text-rose-600 dark:text-rose-400">The test never controlled time</p>
+      time controlled the test, from outside, whenever it happened to run
     </div>
   </Fragment>
 
-**A test for `isTrialExpired(user)` passes every day for months. Then
-one morning it starts failing — nobody touched the function, nobody
-touched the test. The test hardcoded a date; the function calls
-`Date.now()` directly. Eventually "today" caught up to and passed
-that hardcoded date, silently flipping the test's expected result.
-How do you test a function that depends on the literal current
-moment, without the test's correctness depending on what day it
-happens to run?**
+Ines writes a function, `isTrialExpired(user)`, that answers one
+question: has this user's free trial ended? It reads the real clock
+inside its own body. Her test creates a user whose trial ends on
+31 December 2026 and checks that the answer is "not expired". On
+4 November 2026 it passes. Fifty-seven days later, with nobody touching
+the function or the test, it fails. **How do you test a function that
+depends on the current moment, so the result does not depend on the day
+the test runs?**
 
-The function was never given a way to be told what time it is —
-it reached out and asked the real system clock directly. Nothing
-about the test _touched_ time; time touched the test, from outside,
-whenever it happened to run.
+Picture a quiz that asks "is it before noon?" and is marked by looking at
+the wall clock in the classroom. The answer changes with when the
+teacher grades it. The fix is not a better quiz question; it is handing
+the quiz a clock whose hands you set yourself.
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "What a seam is, and why its absence makes code untestable",
-    "The three test doubles covered in depth: stub, fake, spy",
-    "Which question each kind of double is built to answer",
+    "What a seam is, and why its absence blocks testing",
+    "Stub, fake, spy and mock told apart",
+    "Which question each kind of double answers",
   ]}
 />
 
+```mermaid
+flowchart LR
+    A["Test sets up a user:<br/>trial ends 31 Dec 2026"] --> B["Function reads the<br/>real clock itself"]
+    B --> C{"Real date<br/>before 31 Dec 2026?"}
+    C -->|"Yes: run in Nov 2026"| D["Answer: not expired<br/>(test passes)"]
+    C -->|"No: run in Jan 2027"| E["Answer: expired<br/>(test fails)"]
+```
+
 ## The shape of the problem
 
-- Some code depends on things that are hard to control in a test:
-  the current time, a random number, a real network call to another
-  service, a real database. Testing this code directly means the
-  test's outcome depends on things the test itself doesn't control.
-- A **seam** is a point in the code where a dependency can be swapped
-  out — usually by accepting it as a parameter or injecting it,
-  instead of reaching out and grabbing it directly (like calling
-  `Date.now()` inline). Without a seam, there's nowhere to substitute
-  anything.
-- A **test double** is a stand-in object used in place of a real
-  dependency during a test, injected through a seam. Different kinds
-  of test doubles answer different questions: does the code under
-  test _behave correctly given controlled inputs_ (stubs, fakes), or
-  did the code under test _call the dependency correctly_ (spies —
-  what most people mean when they casually say "mock")?
+Some code depends on things a test cannot easily control: the current
+time, a random number, a call to another service, a real database. If the
+code reaches out and grabs those things directly, the test's result
+depends on things the test does not own.
+
+| Dependency      | Why a test cannot control it directly     |
+| --------------- | ----------------------------------------- |
+| Current time    | Changes every moment the test runs        |
+| Random number   | Different on every run                    |
+| Another service | May be slow, down, or cost real effort    |
+| Real database   | Shared state left behind by earlier tests |
+
+The remedy has two parts. First a **seam**: a place where the dependency
+can be swapped. Then a **test double**: the stand-in that gets swapped in.
+
+<PracticeCheck track={unit.track} unitSlug={unit.unitSlug} topicId="seam" />
 
 ## Key terms
 
-- **Seam** — a point in the code where a dependency is injected
-  (a parameter, a constructor argument) rather than reached for
-  directly, making it possible to substitute something else in a test.
-- **Stub** — a test double that returns canned, predetermined values
-  when called, with no real logic and no tracking of how it was
-  called.
-- **Fake** — a test double with a real, working implementation that's
-  simpler than production (like an in-memory list standing in for a
-  real database) — it behaves correctly, just not at production scale
-  or with production infrastructure.
-- **Spy** — a test double that records how it was called (arguments,
-  call count, order) so a test can assert, _after the call happens_,
-  that the code under test interacted with it correctly.
-- **Mock** (strict sense) — a test double pre-programmed with
-  expectations about how it should be called _before_ the call
-  happens; it fails itself, during the test, if those expectations
-  go unmet — rather than letting the test inspect a recording
-  afterward the way a spy does.
+| Term              | One-line meaning                                                                              | The question it answers                          |
+| ----------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| **Seam**          | A point where a dependency arrives from outside (a parameter) instead of being grabbed inside | "Can I substitute anything here at all?"         |
+| **Stub**          | Returns canned values; no logic, no memory of calls                                           | "What happens if the dependency returns X?"      |
+| **Fake**          | A real but simplified working version (an in-memory list instead of a database)               | "Does my code work against something realistic?" |
+| **Spy**           | Records how it was called; the test inspects the record afterward                             | "Did my code call it correctly?"                 |
+| **Mock** (strict) | Told its expectations before the call; fails itself during the call if they are not met       | "Did my code call it correctly, checked live?"   |
 
-A lot of everyday usage (including popular tools like Jest, whose
-`jest.fn()` is technically a spy) calls all of the above "mocks."
-That's a workable house convention, not an error — but this unit uses
-the precise terms, because L3's own payment-gateway example only ever
-records-then-asserts, which is exactly what a spy does.
+Everyday speech calls all of these "mocks", and many testing libraries do
+too. That is a workable habit, not a mistake. This unit uses the precise
+terms because the mechanisms differ, and the difference decides which one
+to reach for.
 
 ## What this unit covers
 
-L2 works through why "hard to test" often really means "no seam
-exists," and how to tell a stub, a fake, and a spy apart by what
-question each one is built to answer — and where a stricter "mock"
-differs from a spy. L3 rewrites the trial-expiry scenario with a real
-seam for time and a real seam for an external payment service, using
-a stub clock, a fake payment gateway, and a spy payment gateway to
-test three different things about the same function.
+L2 shows why "hard to test" usually means "no seam", and how to pick a
+double by the question being asked, including where a strict mock differs
+from a spy. L3 adds seams to the trial function and the refund function it
+feeds, then tests the same code with a stub, a fake and a spy.

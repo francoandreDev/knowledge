@@ -1,96 +1,110 @@
 ---
-title: "L1 — How do I know if my tests are actually testing anything? (mutation testing, coverage as a signal, not a target)"
+title: "L1 — How do I know if my tests are actually testing anything?"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="95% coverage, and the bug shipped anyway">
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "mutation-testing",
+};
+
+<Scenario label="Every line ran, and the bug still got through">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
       <div>
         <div class="mb-1 flex items-center justify-between">
-          <span>Line coverage</span><span class="font-semibold">95%</span>
+          <span>Line coverage</span><span class="font-semibold">100%</span>
         </div>
         <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-          <div class="h-full rounded-full bg-emerald-500 animate-fill-bar" style="--target-width: 95%"></div>
+          <div class="h-full rounded-full bg-emerald-500 animate-fill-bar" style="--target-width: 100%"></div>
         </div>
       </div>
       <div>
         <div class="mb-1 flex items-center justify-between">
-          <span>Mutation score</span><span class="font-semibold">42%</span>
+          <span>Mutation score (4 mutants, 2 killed)</span><span class="font-semibold">50%</span>
         </div>
         <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-          <div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 42%"></div>
+          <div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 50%"></div>
         </div>
       </div>
-      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>The bug</strong> — a heavy-package surcharge boundary flipped from <code>&gt;</code> to <code>&gt;=</code>, and shipped anyway</div>
-      <div class="flex items-center gap-1.5"><span>✅</span> <strong>The existing test</strong> — ran that exact line, but never checked the value it produced at the boundary</div>
+      <div class="flex items-center gap-1.5"><span>📦</span> <strong>The code</strong> — a shipping fee with a heavy-package surcharge for weight over 20 kg</div>
+      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>The bug</strong> — <code>&gt;</code> became <code>&gt;=</code>, so exactly 20 kg is wrongly surcharged</div>
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>The tests</strong> — all pass, none weighs exactly 20 kg</div>
     </div>
   </Fragment>
 
-A shipping-fee calculator has a test suite. The team's dashboard shows
-**95% line coverage** — almost every line in the file runs during the
-test run. Then a one-character bug ships: the surcharge boundary for
-heavy packages got flipped from `weight > 20` to `weight >= 20`, and a
-package weighing exactly 20kg gets charged a surcharge it shouldn't.
+A shipping-fee function charges a surcharge for packages **over** 20 kg. The
+team has three tests, and every line of the function runs during them: **100%
+line coverage**. Then a one-character slip ships: `weight > 20` becomes
+`weight >= 20`, and a 20 kg package is wrongly surcharged.
 
-| Signal                                   | Value | Would a reviewer trust it?                |
-| ---------------------------------------- | ----- | ----------------------------------------- |
-| Line coverage (did the code run?)        | 95%   | Looks great on a dashboard                |
-| Mutation score (would a bug get caught?) | 42%   | Reveals most of that 95% never got tested |
+| Signal                                   | Value | What it tells you                      |
+| ---------------------------------------- | ----- | -------------------------------------- |
+| Line coverage (did the line run?)        | 100%  | Looks perfect on a dashboard           |
+| Mutation score (would a bug be noticed?) | 50%   | Half of the injected bugs go unnoticed |
 
-**The buggy line ran during the test suite. Coverage counted it as
-"tested." So why didn't any test fail?**
+The numbers above come from the worked example in L3; they are not industry
+averages.
 
-Because coverage only asks _did this line execute_ — never _would a test
-fail if this line's logic were wrong_. A test can run a line and never
-inspect the value that line produced. That gap is exactly what mutation
-testing is built to expose.
+**The buggy line ran in the tests. So why did no test fail?**
+
+Because coverage asks only _did this line run_. It never asks _would a test fail
+if this line were wrong_. A test can run a line and never check what it
+produced. Mutation testing exists to measure exactly that gap.
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Why coverage can be near-100% and still miss real bugs",
-    "What a 'mutant', a 'kill', and a 'survivor' are",
-    "What a mutation score actually measures",
+    "Why full coverage can still miss bugs",
+    "Mutants, kills, and survivors",
+    "What a mutation score measures",
   ]}
 />
 
-## The shape of the problem
+## Why can coverage be full and the suite still weak?
 
-- **Coverage measures execution, not verification.** A line counted as
-  "covered" only means some test made it run — not that any test checked
-  whether it ran correctly.
-- **Mutation testing measures verification directly**, by asking a
-  sharper question: if this line's logic were subtly wrong, would any
-  test in the suite actually fail?
-- It answers that question mechanically: it makes a tiny, deliberate
-  change to the code (a **mutant**) — like flipping `>` to `>=`, or `+`
-  to `-` — then reruns the test suite against that mutated code.
-- If a test fails, the mutant is **killed** — the suite caught it. If
-  every test still passes, the mutant **survived** — nothing in the
-  suite would have noticed that exact bug either.
-- The **mutation score** is the percentage of mutants killed. A low
-  score on high-coverage code is the tell: the tests run the code but
-  don't check the right things — the same gap `assertions-matter`
-  describes for a single test, generalized into a repeatable, automated
-  check across an entire file.
+**If a line is "covered", has anyone checked its result?** Not necessarily.
 
-## Key terms
+```mermaid
+flowchart LR
+    A[Test calls the function] --> B[Line runs]
+    B --> C{Does the test check the value this line affects?}
+    C -- Yes --> D[A bug here makes the test fail]
+    C -- No --> E[A bug here goes unnoticed]
+    B -.-> F[Coverage counts both paths as covered]
+```
 
-- **Mutant** — a copy of the code with one small, deliberate change
-  applied (one operator, one comparison, one line).
-- **Mutation operator** — the rule used to generate a mutant (e.g.
-  "replace `>` with `>=`", "delete this statement").
-- **Kill** — at least one test fails against the mutant; the suite
-  caught the injected bug.
-- **Survive** — every test still passes against the mutant; the suite
-  has a real gap at that exact spot.
-- **Mutation score** — killed mutants ÷ total mutants, as a percentage.
-  The mutation-testing analogue of a coverage percentage, but measuring
-  whether tests actually assert on the right thing.
-- **Equivalent mutant** — a mutant that can't actually be killed because
-  the change never affects observable behavior (a false survivor, not a
-  real gap — covered in L3).
+Coverage measures **execution**. Mutation testing measures **verification**:
+it plants a small bug on purpose and checks whether any test notices.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="coverage-vs-verification"
+/>
+
+## What are mutants, kills, and survivors?
+
+**How can a tool plant bugs without a human writing each one?** It applies a
+tiny mechanical change, one at a time, then reruns the suite.
+
+| Term                  | Meaning                                                                 |
+| --------------------- | ----------------------------------------------------------------------- |
+| **Mutant**            | A copy of the code with one small deliberate change                     |
+| **Kill**              | At least one test fails against the mutant: the suite caught it         |
+| **Survive**           | Every test still passes: the suite has a gap exactly there              |
+| **Mutation score**    | Killed mutants divided by total mutants, as a percentage                |
+| **Equivalent mutant** | A change that cannot alter behavior, so no test could ever kill it (L3) |
+
+A survivor is a statement about the **tests**, not about the original code.
+The original code is never the thing being broken.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="kill-survive"
+/>

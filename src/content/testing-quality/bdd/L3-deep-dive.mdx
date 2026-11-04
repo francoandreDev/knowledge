@@ -5,186 +5,131 @@ title: "L3 — Running both kinds of tests through a real internal refactor"
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "bdd",
+};
 
 <Scenario label="Same refactor, two different test suites">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>📦</span> <strong>V1</strong> — <code>ShoppingCart</code> backed by an array</div>
-      <div class="flex items-center gap-1.5"><span>🗺️</span> <strong>V2</strong> — the same public methods, backed by a <code>Map</code> instead</div>
+      <div class="flex items-center gap-1.5"><span>📦</span> <strong>V1</strong> — cart stores items in an array</div>
+      <div class="flex items-center gap-1.5"><span>🗺️</span> <strong>V2</strong> — same methods, items stored in a Map</div>
       <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — run both test styles against both versions</div>
     </div>
   </Fragment>
 
-**Before reading the code below, predict: `cart.items[0].name` and
-`cart.getItemCount()` are both ways of learning something about the
-cart's contents. Which one will still work after the array is replaced
-with a Map, and why does the answer depend on more than just "both are
-reading a property of the cart"?**
+**Before reading on, predict.** `cart.items[0].name` and `cart.getItemCount()`
+both tell you something about the cart's contents. After the array becomes a
+Map, which one still works, and why does it depend on more than "both read a
+property"?
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Implementation-coupled tests, run against a refactor",
-    "Behavior-based tests, run against the same refactor",
-    "Given-When-Then as a narration of behavior tests, not a new test type",
+    "Both test styles run against both versions",
+    "Reading a red test: regression or false alarm",
+    "Where behavior tests stop helping",
   ]}
 />
 
-## Version 1: array-backed cart
+## What do the two versions share, and what differs?
+
+V1 and V2 expose the same three methods. Only the storage differs, and V2 also
+merges quantities when the same item is added twice.
+
+| Aspect                      | V1 (array)         | V2 (Map)                       |
+| --------------------------- | ------------------ | ------------------------------ |
+| `addItem(name, price, qty)` | pushes an entry    | sets or merges by name         |
+| `getItemCount()`            | sum of quantities  | sum of quantities              |
+| `getTotal()`                | sum of price x qty | sum of price x qty             |
+| `cart.items.length`         | a number           | `undefined` (a Map has `size`) |
+| `cart.items[0]`             | first entry        | `undefined`                    |
+
+Test input: Widget at 10 x 2 and Gadget at 20 x 1. Count is 2 + 1 = 3 and the
+total is 10 x 2 + 20 x 1 = 40.
+
+## Which assertions survive?
+
+The only code that matters is the pair of assertions themselves:
 
 ```js
-class ShoppingCartV1 {
-  constructor() {
-    this.items = [];
-  }
-
-  addItem(name, price, quantity = 1) {
-    this.items.push({ name, price, quantity });
-  }
-
-  getItemCount() {
-    return this.items.reduce((sum, i) => sum + i.quantity, 0);
-  }
-
-  getTotal() {
-    return this.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  }
-}
+// Implementation-coupled: reads storage
+expect(cart.items.length).toBe(2);
+// Behavior-based: asks the public interface
+expect(cart.getTotal()).toBe(40);
 ```
 
-## Version 2: Map-backed cart — same public methods, different internals
-
-```js
-class ShoppingCartV2 {
-  constructor() {
-    this.items = new Map(); // keyed by item name
-  }
-
-  addItem(name, price, quantity = 1) {
-    const existing = this.items.get(name);
-    if (existing) {
-      existing.quantity += quantity;
-    } else {
-      this.items.set(name, { name, price, quantity });
-    }
-  }
-
-  getItemCount() {
-    let total = 0;
-    for (const item of this.items.values()) total += item.quantity;
-    return total;
-  }
-
-  getTotal() {
-    let total = 0;
-    for (const item of this.items.values()) total += item.price * item.quantity;
-    return total;
-  }
-}
+```mermaid
+flowchart TD
+    R["Array to Map refactor"] --> A["cart.items.length"]
+    R --> B["cart.items[0].name"]
+    R --> C["getItemCount() is 3"]
+    R --> D["getTotal() is 40"]
+    A --> X["Red: a Map has no length"]
+    B --> Y["Red: a Map is not indexed by number"]
+    C --> Z["Green"]
+    D --> Z2["Green"]
 ```
 
-`addItem`, `getItemCount`, and `getTotal` behave identically from the
-outside in both versions — V2 even adds a small behavior improvement
-(adding the same item twice now merges quantities instead of creating
-a duplicate entry), while still exposing the same three methods.
+<Checkpoint question="Both test styles build the cart with the same addItem calls. What actually separates them, if not the setup?">
 
-## Running implementation-coupled tests against both versions
-
-```js
-function testImplementationCoupled(CartClass) {
-  const cart = new CartClass();
-  cart.addItem("Widget", 10, 2);
-  cart.addItem("Gadget", 20, 1);
-  console.log("items.length === 2:", cart.items.length === 2);
-  console.log("items[0].name === Widget:", cart.items[0]?.name === "Widget");
-}
-
-testImplementationCoupled(ShoppingCartV1);
-// items.length === 2: true
-// items[0].name === Widget: true
-
-testImplementationCoupled(ShoppingCartV2);
-// items.length === 2: false   <- Map has no .length
-// items[0].name === Widget: false  <- Map isn't indexable by number
-```
-
-Verified: both assertions pass against V1, and **both fail against
-V2** — not because anything observable about the cart changed, but
-because `.length` and `[0]` are array-specific, and V2 doesn't use an
-array internally anymore.
-
-<Checkpoint question="V2's public behavior is identical to V1's (same methods, same results from the outside), yet testImplementationCoupled's assertions fail against it. Does that failure mean V2 broke something a user of the cart would notice?">
-
-No. Nothing a caller of `addItem`, `getItemCount`, or `getTotal` can
-observe has changed — the failure is entirely about `.length` and
-`[0]`, which are properties of arrays specifically, not properties of
-"a shopping cart." The test failed because it was never really testing
-the cart's behavior; it was testing one implementation detail (that
-`items` happens to be an array) that the refactor was free to change.
-A red test here is a false alarm about the refactor, not a real
-regression.
+What they check afterwards. Both use the public `addItem` to set up. One then
+inspects private storage (`items.length`, `items[0]`), the other asks the cart's
+own reporting methods. The setup is identical; the question asked of the result
+is not, and only one of those questions is part of the cart's contract.
 
 </Checkpoint>
 
-## Running behavior-based tests against both versions
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="behavior-vs-implementation"
+/>
 
-```js
-function testBehaviorBased(CartClass) {
-  const cart = new CartClass();
-  cart.addItem("Widget", 10, 2);
-  cart.addItem("Gadget", 20, 1);
-  console.log("getItemCount() === 3:", cart.getItemCount() === 3);
-  console.log("getTotal() === 40:", cart.getTotal() === 40);
-}
+## How do you read a red test after a refactor?
 
-testBehaviorBased(ShoppingCartV1);
-// getItemCount() === 3: true
-// getTotal() === 40: true
+**When a test goes red after an internal change, is it a regression?** Ask what
+it was checking.
 
-testBehaviorBased(ShoppingCartV2);
-// getItemCount() === 3: true
-// getTotal() === 40: true
-```
+| What the red test checked                        | What the red means                      |
+| ------------------------------------------------ | --------------------------------------- |
+| An observable result (a total, a count)          | A real regression: investigate the code |
+| An internal layout (a field, an index)           | A false alarm: fix or delete the test   |
+| An observable result that was changed on purpose | Update the test along with the change   |
 
-Verified: **both assertions pass against both versions, unchanged**.
-The predicted answer from the scenario above is confirmed —
-`cart.getItemCount()` survives because it goes through the public
-interface, which both versions implement identically; `cart.items[0]`
-doesn't survive because it depends on the array specifically being an
-array, a detail the refactor was explicitly free to change.
+The interactive demo makes the cost concrete: with N tests reading internals, a
+storage refactor turns exactly N red, while behavior tests stay at 0 however many
+there are. At 15 it reproduces L1's scenario.
 
-<Checkpoint question="testBehaviorBased and testImplementationCoupled both call addItem() the same way and both check something about the resulting cart. What's the actual dividing line between the two, if it's not 'one calls addItem and the other doesn't'?">
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="refactor-safety"
+/>
 
-The dividing line is what gets checked afterward, not how the cart is
-set up — both functions build the cart identically through `addItem`,
-which is itself a public method either style is free to use.
-`testImplementationCoupled` reaches past the public interface to
-inspect `.items.length` and `.items[0]`, private storage details that
-happen to be reachable but were never part of the cart's contract.
-`testBehaviorBased` only calls `getItemCount()` and `getTotal()`,
-methods the cart explicitly exposes. Same setup, different question
-being asked of the result — one asks "does the internal storage look a
-certain way," the other asks "does the cart report the right numbers."
+## Extend it yourself
 
-</Checkpoint>
+This is one case, not the whole territory. Try these:
 
-## Extend it: what would a Given-When-Then version of these tests look like?
-
-**Using the terms from L2's table, how would you phrase the
-`getTotal()` behavior test as Given-When-Then?** One answer: _Given_ an
-empty cart, _When_ a Widget priced at 10 (quantity 2) and a Gadget
-priced at 20 (quantity 1) are added, _Then_ `getTotal()` returns 40.
-Notice this phrasing never mentions arrays, Maps, or any internal
-detail — it's the exact same test as `testBehaviorBased` above, just
-narrated in the Given-When-Then structure instead of plain assertions.
+- The Given-When-Then for the total: _Given_ an empty cart, _When_ Widget (10 x 2)
+  and Gadget (20 x 1) are added, _Then_ `getTotal()` is 40. Write one for the
+  merge behavior V2 introduced. What does the Then say, and why does it need no
+  mention of a Map?
+- What if the cart exposed `items` publicly and other code relied on it being an
+  array? Is reading it still an implementation detail?
+- What if the refactor were slower but the tests only check results: should the
+  behavior suite catch that?
 
 ## Failure modes
 
-| Failure mode                                                                    | What it gets wrong                                                                                                                       |
-| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Asserting on a private field because it's convenient to reach                   | Convenience today creates a test that breaks on unrelated refactors tomorrow, for no real reason                                         |
-| Assuming "testing through the interface" means never inspecting return values   | The public interface includes what methods _return_, not just whether they were called — behavior tests should check outputs             |
-| Treating every failing test after a refactor as a regression                    | An implementation-coupled test failing after an internal-only change is a test problem, not evidence the refactor broke anything         |
-| Writing Given-When-Then as a formatting exercise without changing what's tested | Renaming an implementation-coupled assertion into three labeled lines doesn't make it a behavior test if it still reaches into internals |
-| Never refactoring internals because "it'll break the tests"                     | This is usually a sign the tests are coupled to implementation, not a real signal the refactor is risky                                  |
+| Failure mode                                             | What it gets wrong                                                  |
+| -------------------------------------------------------- | ------------------------------------------------------------------- |
+| Asserting on a private field because it is handy         | Convenience now, breakage on an unrelated refactor later            |
+| Thinking the public interface excludes return values     | Outputs are part of the interface and are what behavior tests check |
+| Treating every red test after a refactor as a regression | An implementation-coupled failure is a test problem                 |
+| Relabelling internals checks as Given-When-Then          | Three labelled lines still reaching into storage are not behavior   |
+| Avoiding refactors because "it breaks the tests"         | Usually a sign the tests are coupled to storage                     |

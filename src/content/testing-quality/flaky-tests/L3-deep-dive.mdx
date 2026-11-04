@@ -1,199 +1,160 @@
 ---
-title: "L3 — Fixing shared-state leakage and an async race condition"
+title: "L3 — Fixing a shared list, a timing race, and a clock dependency"
 ---
 
+import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L2 named the four causes of flakiness in the abstract. L3 takes the
-shared-state bug behind this unit's Scenario and works it through a full
-fix, then does the same for the second most common cause: an assertion
-that runs before the async work it depends on has actually finished.
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "flaky-tests",
+};
+
+<Scenario label="Three flaky tests, three different hidden dependencies">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📒</span> <strong>Test 1</strong> — shares one list with another test</div>
+      <div class="flex items-center gap-1.5"><span>⏱️</span> <strong>Test 2</strong> — checks a result before the work finished</div>
+      <div class="flex items-center gap-1.5"><span>🕒</span> <strong>Test 3</strong> — expiry check reads the real clock</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> <strong>Goal</strong> — fix the cause, not the symptom</div>
+    </div>
+  </Fragment>
+
+**Before reading on, pick one of these three and say what you would change
+so the test could not fail on a slow machine, on a shuffled order, or at
+midnight.**
+
+</Scenario>
 
 <LevelIntro
   items={[
-    "Fixing a module-level shared store that leaks between tests",
-    "Fixing an unawaited async assertion",
-    "What generalizes between the two fixes, and what doesn't",
+    "Removing a shared list from two tests",
+    "Waiting for exactly what is asserted",
+    "Making a clock check deterministic",
   ]}
 />
 
-## The bug behind the Scenario: a module-level store nobody resets
+## How do you fix the shared list?
 
-**Here's the shape of the failing suite. What makes it order-dependent
-rather than reliably broken or reliably fine?**
+**Why is the failure order-dependent instead of always failing?** Two tests
+use one module-level list. Test A leaves an item behind; test B expects the
+list empty.
 
-```js
-let orderStore = [];
-
-function addOrder(order) {
-  orderStore.push(order);
-}
-
-function getPendingOrders() {
-  return orderStore.filter((o) => o.status === "pending");
-}
-
-function testAddsOnePendingOrder() {
-  addOrder({ id: 1, status: "pending" });
-  const pending = getPendingOrders();
-  if (pending.length !== 1)
-    throw new Error(`expected 1, got ${pending.length}`);
-}
-
-function testPendingStartsEmpty() {
-  const pending = getPendingOrders();
-  if (pending.length !== 0)
-    throw new Error(`expected 0, got ${pending.length}`);
-}
+```mermaid
+flowchart TD
+    subgraph before["Shared list"]
+        A1["Test A adds 1 item"] --> L1["list: 1 item"]
+        L1 --> B1["Test B expects 0: FAILS if A ran first"]
+    end
+    subgraph after["Fresh list per test"]
+        A2["Test A makes its own list, adds 1"] --> OK1["A sees 1: passes"]
+        B2["Test B makes its own list"] --> OK2["B sees 0: passes in any order"]
+    end
 ```
 
-Both tests read and write the same module-level `orderStore` array —
-neither one resets it. Run `testPendingStartsEmpty` before
-`testAddsOnePendingOrder` and both pass, because the store really is
-empty at that point. Run them in the other order and
-`testPendingStartsEmpty` fails, because the previous test's order is
-still sitting in `orderStore`:
-
-```js
-// order A: passes
-orderStore = [];
-testPendingStartsEmpty(); // pending.length === 0 ✓
-testAddsOnePendingOrder(); // pending.length === 1 ✓
-
-// order B: testPendingStartsEmpty fails
-orderStore = [];
-testAddsOnePendingOrder(); // pending.length === 1 ✓
-testPendingStartsEmpty(); // pending.length === 1 ✗ — leftover from the previous test
-```
-
-Locally, a single developer's test runner tends to execute these two
-tests in the same order every time — so only one of the two orderings
-above ever actually runs, and the bug stays invisible. CI's shuffled
-or parallelized execution eventually hits the other ordering.
-
-## The fix: give every test its own store, not a shared one
-
-**What has to change so the outcome stops depending on order at
-all?**
+The fix gives each test its own list, built by a small factory:
 
 ```js
 function makeStore() {
-  return [];
-}
-
-function addOrderTo(store, order) {
-  store.push(order);
-}
-
-function getPendingOrdersFrom(store) {
-  return store.filter((o) => o.status === "pending");
-}
-
-function testAddsOnePendingOrderFixed() {
-  const store = makeStore();
-  addOrderTo(store, { id: 1, status: "pending" });
-  const pending = getPendingOrdersFrom(store);
-  if (pending.length !== 1)
-    throw new Error(`expected 1, got ${pending.length}`);
-}
-
-function testPendingStartsEmptyFixed() {
-  const store = makeStore();
-  const pending = getPendingOrdersFrom(store);
-  if (pending.length !== 0)
-    throw new Error(`expected 0, got ${pending.length}`);
+  return { orders: [] };
 }
 ```
 
-Each test now calls `makeStore()` itself, so there is no shared object
-for one test's writes to leak into another test's read. This passes
-in every possible order, every time, because the tests no longer have
-anything to disagree about — they were never sharing state to begin
-with. (A real test framework's `beforeEach` hook that constructs a
-fresh store is the same idea — the point isn't "avoid module-level
-variables," it's "make sure every test starts from state it fully
-controls.")
+Each test calls `makeStore()` first. With two tests there are 2 orders; both
+pass in both. A reset line at the top of B would also pass today but would
+rely on every future test remembering it.
 
-<Checkpoint question="A teammate suggests fixing testPendingStartsEmpty by adding a line at the top that resets orderStore to an empty array, instead of switching to makeStore() per test. Would that actually fix the flakiness, and is it as good as the per-test store?">
+<Checkpoint question="Test B is fixed by building its own list. Does test A still need to change?">
 
-Resetting `orderStore = []` at the top of each test would fix this
-specific pair of tests, because it removes the leftover state from
-whichever test ran before. But it's a weaker fix than `makeStore()`
-per test: it only works if every test in the suite remembers to do the
-reset, and a single test added later that forgets to reset reintroduces
-the exact same order-dependent bug. Giving each test its own store via
-`makeStore()` (or a `beforeEach` hook that does the same) removes the
-shared object entirely, so there's nothing left to forget to reset —
-correctness no longer depends on every author remembering a step.
+Not for correctness today, since A only ever reads what it just wrote. But
+if A kept using the shared list it would still leave an item behind for
+every other test that touches it. The principle is that every test owns its
+state, so the fix is applied to all tests using the list, not only the one
+that failed.
 
 </Checkpoint>
 
-## The second common cause: asserting before an async operation finishes
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="shared-state-fix"
+/>
 
-**A different flaky test in the same suite checks that an order gets
-marked `"processed"`. What makes this one flaky?**
+## How do you fix a result checked too early?
 
-```js
-function processOrderAsync(order, delayMs) {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      order.status = "processed";
-      resolve(order);
-    }, delayMs);
-  });
-}
+**The code starts work that finishes after 10 ms. Why does the check sometimes pass?**
+Because the check runs immediately, and only a stalled machine could let the
+work finish first.
 
-async function testRaceFlaky() {
-  const order = { id: 1, status: "pending" };
-  processOrderAsync(order, 10); // BUG: the returned promise is never awaited
-  return order.status === "processed"; // runs immediately, before the timeout fires
-}
+```mermaid
+sequenceDiagram
+    participant T as Test
+    participant W as Background work
+    T->>W: start (done in 10 ms)
+    T->>T: check status right away
+    Note over T: status still pending, check fails or passes by luck
+    W-->>T: status set later
 ```
 
-`processOrderAsync` returns a promise that resolves after a 10ms
-timeout, but the test never awaits it — it calls the function and
-immediately checks `order.status` on the very next line, which runs
-before the event loop has gotten anywhere near that timeout callback.
-The check almost always finds `"pending"`, not `"processed"` — but
-"almost always" is exactly the kind of window a slow CI machine, a
-GC pause, or a busy event loop can occasionally close, making this
-test's actual pass rate a matter of timing luck.
-
 ```js
-async function testRaceFixed() {
-  const order = { id: 1, status: "pending" };
-  await processOrderAsync(order, 10); // fixed: waits for the promise to resolve
-  return order.status === "processed";
-}
+await processOrderAsync(order, 10); // wait for exactly this operation
 ```
 
-Adding `await` makes the test actually wait for the operation it's
-asserting on to complete before checking the result — there's no
-longer a race, because there's no longer a window where the check can
-run before the thing it depends on has happened.
+Waiting on the operation itself removes the race. Waiting a longer fixed
+time only shrinks the window.
 
-## What generalizes and what doesn't
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="await-race"
+/>
 
-Both bugs share the same underlying shape: **the test's outcome
-depended on something it didn't actually control** — shared state in
-the first case, real timing in the second. The fix in both cases is
-the same principle: give the test full, isolated control over
-everything its assertion depends on (its own store; an operation it
-actually waits for). What's specific to each: a shared-state fix
-means constructing fresh state per test, while a race-condition fix
-means awaiting the exact operation being asserted on — one doesn't
-substitute for the other. **Try extending it yourself:** if
-`processOrderAsync` also read from the same kind of shared
-`orderStore` this unit's first bug used, would fixing only the
-`await` (and not the shared store) be enough to make the test
-reliable, or would both fixes be needed together?
+## How do you make a clock check deterministic?
 
-## Failure modes
+**An order is expired if it is older than 30 minutes. How can a test check
+this without waiting 30 real minutes?** Pass the current time in. The
+function becomes a pure comparison, so the test supplies both timestamps.
 
-| Failure mode                                                     | What it gets wrong                                                                                                                                            |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Re-running a flaky test in CI until it passes                    | Treats the symptom, not the cause — the shared-state or timing dependency is still there and will fail again unpredictably                                    |
-| Adding a longer delay to "fix" a race condition                  | Narrows the window without eliminating it — still non-deterministic, and now slower and harder to reproduce when it does eventually fail                      |
-| Assuming module-level state is fine because "it's just a helper" | Any state shared across test calls, regardless of how it's described, can leak between tests unless it's reset or reconstructed per test                      |
-| Fixing only the test that's currently flaky, not the pattern     | If one test shares state or races on an unawaited promise, other tests using the same helper or pattern are equally likely to be flaky, just not yet observed |
+| Created (min) | Now (min) | Age | Expired (limit 30)?    |
+| ------------- | --------- | --- | ---------------------- |
+| 0             | 29        | 29  | no                     |
+| 0             | 30        | 30  | no, equal is not older |
+| 0             | 31        | 31  | yes                    |
+
+The exact boundary row is the one a real clock makes impossible to test
+reliably, and a passed-in time makes it a one-line check.
+
+<Checkpoint question="Why is the boundary row (age exactly 30) worth a dedicated test, and why was it impractical with the real clock?">
+
+Off-by-one mistakes (`>` versus `>=`) live exactly at the boundary. With the
+real clock you cannot land on "exactly 30 minutes" on purpose, so the test
+would pass or fail by timing luck. With the time passed in, the boundary is
+just two numbers you choose.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="injected-clock"
+/>
+
+## What generalizes, and what is only this case?
+
+All three bugs share a shape: the outcome depended on something the test did
+not control. The fixes share a principle too: give the test full control
+(own state, an awaited operation, a supplied time). But the fixes do not
+substitute for each other.
+
+This is one worked case, not the whole territory. **Try extending it:** if
+the awaited operation also wrote into the old shared list, would the
+`await` alone make the test reliable? And what changes if the test needed
+random identifiers instead of a clock?
+
+| Failure mode                               | Why it is wrong                                    |
+| ------------------------------------------ | -------------------------------------------------- |
+| Re-running until green                     | The dependency remains and fails again             |
+| Longer delay for a race                    | Narrows the window; slower and harder to reproduce |
+| Fixing only the test that is currently red | Other tests sharing the pattern flake later        |

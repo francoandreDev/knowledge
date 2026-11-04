@@ -3721,3 +3721,11 @@ Migrated to the three-tier exercise model and rule-9 diagrams-first content: `ca
 Checks: typecheck 0 errors, 273 pages built, 46 code items with 0 failing sandbox assertions, every DomainCheck topic passes live, no Mermaid/KaTeX errors, Mark as done enabled. Also removed "staff engineer" from the `quality-culture` roadmap title and teaser.
 
 Total migrated: 173 of 246. Next: testing-quality batch 2 (`bdd`, `test-doubles`, `flaky-tests`, `mutation-testing`).
+
+## 2026-11-04 — testing-quality batch 2 (4 units)
+
+Migrated to the three-tier model: `bdd` (3 topics, 36 items, all quiz), `test-doubles` (5 topics, 57 items, code topic `build-doubles`), `flaky-tests` (8 topics, 92 items, code topic `injected-clock`), `mutation-testing` (6 topics, 72 items, all quiz). Long code listings replaced by tables and diagrams; mutation-testing L1 numbers now match its L3 example and demo.
+
+Checks: typecheck 0 errors, 273 pages built, 17 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (3/5/8/6), no Mermaid errors, Mark as done enabled.
+
+Total migrated: 177 of 246. Next: testing-quality batch 3 (`property-based-testing`, `contract-testing`, `fault-injection`, `test-suite-architecture`), then `quality-culture`.
