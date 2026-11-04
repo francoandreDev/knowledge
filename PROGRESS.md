@@ -3753,3 +3753,11 @@ Migrated to the three-tier model: `dry` (7 topics, 84 items, all quiz; L3 cap sn
 Checks: typecheck 0 errors, 273 pages built, 19 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (7/6/5/7), no Mermaid errors, Mark as done enabled.
 
 Total migrated: 189 of 246. Next: software-design batch 3 (`classic-design-patterns`, `refactoring-technique`, `technical-debt-deliberate-trade-off`, `api-design`), then `evolutionary-design`, `long-term-design-judgment`.
+
+## 2026-11-04 — software-design batch 3 (4 units)
+
+Migrated to the three-tier model: `classic-design-patterns` (6 topics, 69 items, all quiz; PayPal mention removed, cost-model numbers labelled as the unit's teaching model), `refactoring-technique` (9 topics, 107 items, code topic `capped-rates`; original function re-run to confirm every total), `technical-debt-deliberate-trade-off` (5 topics, 55 items, code topic `break-even-calc`; "junior engineer" wording and a muddled "$6,600 more" comparison replaced), `api-design` (9 topics, 100 items, code topic `parse-channel`).
+
+Checks: typecheck 0 errors, 273 pages built, 26 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (6/9/5/9), no Mermaid errors, Mark as done enabled.
+
+Total migrated: 193 of 246. Next: `evolutionary-design`, `long-term-design-judgment` (closes software-design), plus `architecture/architecture-styles` and `domain-driven-design`.

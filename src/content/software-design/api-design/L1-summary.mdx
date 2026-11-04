@@ -4,134 +4,144 @@ title: "L1 — How do I design an interface or API that's hard to misuse? (API d
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="A page that never went off, during a real outage">
+export const unit = { track: "software-design", unitSlug: "api-design" };
+
+<Scenario label="A function that accepted a call that could never work">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
       <div class="flex items-center gap-1.5">
-        <span>📟</span> <strong>The API</strong> — `sendAlert(recipientId,
-        message, channel, isUrgent, emailAddress?, phoneNumber?,
-        deviceToken?)` — 3 optional string params, 1 boolean
+        <span>📟</span> <strong>The function</strong> — `sendAlert` takes a channel name plus 3 optional contact fields and 1 boolean
       </div>
       <div class="flex items-center gap-1.5">
-        <span>🐛</span> <strong>The call</strong> —{" "}
-        `channel: "sms"` was passed, but `phoneNumber` was left
-        `undefined` — nothing stopped it
+        <span>🐛</span> <strong>The call</strong> — channel `"sms"`, but only a push-notification token supplied
       </div>
       <div class="flex items-center gap-1.5">
-        <span>🔇</span> <strong>What happened</strong> — the SMS
-        provider client silently no-opped on a missing number; no
-        exception, no log line
+        <span>🔇</span> <strong>The result</strong> — accepted without complaint, nothing sent, nothing logged loudly
       </div>
       <div class="flex items-center gap-1.5">
-        <span>⏱️</span> <strong>Cost</strong> — 45 minutes of a live
-        payments outage with the on-call engineer unpaged
+        <span>❓</span> <strong>Question</strong> — whose job was it to reject that call?
       </div>
+    </div>
+    <div class="not-prose mt-3 rounded border border-rose-300 bg-rose-50 p-1.5 text-xs dark:border-rose-800 dark:bg-rose-950">
+      <p class="font-semibold text-rose-600 dark:text-rose-400">The signature allowed it</p>
+      a shape that can express a nonsense call will eventually receive one
     </div>
   </Fragment>
 
-**Maya is on-call at Alertly, a company whose whole product is paging
-people during incidents. At 3 a.m., the payments service goes down. An
-automated escalation calls the internal `sendAlert()` function with
-`channel: "sms"` — but the code path that assembled that call never set
-`phoneNumber`, only `deviceToken` (copy-pasted from a push-notification
-call three lines above). The function accepts the call without
-complaint. Maya's phone stays silent. The outage runs 45 minutes longer
-than it should have, because the one system whose entire job is "tell a
-human, reliably" had a signature that let a nonsensical combination —
-`channel: "sms"` with no phone number — compile, ship, and run.**
+Picture a toaster with a single dial that has two other switches beside
+it: "bagel" and "defrost". Someone sets the dial to zero, flips both
+switches, and walks away. The toaster does something, or nothing, and
+nobody finds out until the bread is cold.
 
-Nothing here was a typo caught in review, and nothing here was a
-runtime crash loud enough to page someone about the paging system
-itself. The bug is that the function's own shape allowed a combination
-of arguments that could never be valid, and trusted the caller to
-never send it. **Whose job was it to make sure `channel: "sms"` always
-came with a phone number — the caller's, or the function's?**
+Now the software version. Maya is the on-call engineer at Alertly, an
+imaginary company whose only product is paging people. A script calls
+`sendAlert` with `channel: "sms"` but forgets the phone number, passing a
+push-notification token instead. The function accepts the call, sends
+nothing, and Maya's phone stays silent during an outage. (The incident is
+invented for teaching; no real company or figures are involved.)
+**Whose job was it to refuse that call, the caller's or the function's?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Illegal states unrepresentable, and parse-don't-validate",
-    "Defensive design principles: fail fast, minimal surface, least astonishment",
-    "The traps: boolean parameters and stringly-typed arguments",
+    "Illegal states unrepresentable, and parse, don't validate",
+    "Fail fast, minimal surface, least astonishment",
+    "Boolean and stringly-typed traps",
   ]}
 />
 
+```mermaid
+flowchart LR
+    A["Call: channel sms,<br/>phone number missing"] --> B{"Where does the<br/>mistake get caught?"}
+    B -->|"In the type itself"| C["Rejected before the code runs"]
+    B -->|"By a check somewhere inside"| D["Rejected at runtime, if anyone reads the log"]
+    B -->|"Nowhere"| E["Silent wrong behaviour in production"]
+```
+
 ## The core idea: make the bad call impossible to write
 
-An interface — a function signature, a class's public methods, a
-REST endpoint's request body — is a contract. **Illegal states
-unrepresentable** is the discipline of shaping that contract so a
-caller cannot construct an invalid combination of inputs at all, not
-even by accident: the compiler or type system rejects it before the
-code runs, rather than a comment, a docstring, or a runtime `if`
-statement catching it (or not) after the fact.
+An interface is a contract: a function signature, a class's public
+methods, a REST request body. **Illegal states unrepresentable** means
+shaping that contract so a caller cannot build an invalid combination at
+all. The type system rejects it before the code runs, instead of a
+comment or a scattered `if` catching it later, or not at all.
 
-- **Parse, don't validate** — the companion technique. _Validating_
-  checks a shapeless input (a string, a bag of optional fields) against
-  rules and either continues or throws, but the checked-ness of the
-  data is not remembered by its type — every downstream function has to
-  assume it might still be wrong. _Parsing_ converts that shapeless
-  input, once, into a new type that can only represent valid data — so
-  every function after the parse step doesn't need to re-check, because
-  the type itself is the proof.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="illegal-states"
+/>
 
-| Where the check lives                    | Who has to remember to run it     | What happens on `channel: "sms"` with no phone    |
-| ---------------------------------------- | --------------------------------- | ------------------------------------------------- |
-| Nowhere (Alertly's actual bug)           | No one — it silently passes       | Silent no-op, page never sent                     |
-| A runtime `if` deep in the SMS client    | Every caller, every time, forever | Throws — but only if someone is watching that log |
-| The type itself (parsed at the boundary) | No one — it cannot be constructed | Doesn't compile; caught before merge              |
+The companion technique is **parse, don't validate**. Validating checks a
+loose input and carries on with the same loose input. Parsing converts
+that input once, at the edge, into a type that can only hold valid data.
 
-## Defensive design principles
+| Approach              | What continues downstream               | Who must remember the rules        |
+| --------------------- | --------------------------------------- | ---------------------------------- |
+| Validate              | The same loose input, still unproven    | Every function that touches it     |
+| Parse at the boundary | A new type that proves its own validity | Only the one parsing function      |
+| Do nothing            | The loose input, unchecked              | Nobody, until production finds out |
 
-- **Fail fast at the boundary** — reject bad input at the edge of the
-  system (the function signature, the API's request-parsing layer),
-  loudly and immediately, instead of letting it travel inward and fail
-  quietly three layers deep where the failure is hard to trace back to
-  its cause.
-- **Minimal surface area** — expose the fewest parameters, methods, and
-  configuration knobs that solve the real problem. Every extra optional
-  parameter is another combination a caller can get wrong.
-- **Least astonishment** — a well-designed call should do what its name
-  and shape suggest, with no hidden side effects or surprising
-  interactions between parameters that only show up in the
-  documentation (if they're written down at all).
-- **Sensible defaults** — when a parameter isn't required, the default
-  behavior should be the safe one, not the dangerous one made
-  convenient.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="parse-dont-validate"
+/>
 
-## The two traps this unit names
+## Defensive design in four moves
 
-- **The boolean-parameter trap** — a function taking two or more
-  booleans (`isUrgent`, `isSilent`, `skipVerification`) invites
-  combinations the author never intended and the reader can't tell
-  apart at the call site (`sendAlert(id, msg, true, false)` — which
-  flag was which?), and some combinations may be flatly nonsensical
-  (urgent _and_ silent?).
-- **Stringly-typed APIs** — using a bare `string` where a fixed, known
-  set of options exists (`channel: "sms"` instead of a real `Channel`
-  type) means typos (`"sm"`), unsupported values, and missing-field
-  combinations are all accepted at compile time and only surface (if
-  ever) at runtime.
+- **Fail fast at the boundary**: reject bad input at the edge, loudly,
+  instead of letting it travel inward and fail quietly far from its cause.
+- **Minimal surface area**: expose the fewest knobs that solve the real
+  problem. Every extra optional parameter is another way to get it wrong.
+- **Least astonishment**: a call should do what its name and shape
+  suggest, with no surprise interactions between parameters.
+- **Safe defaults**: when something is optional, the default should be the
+  safe behaviour, never the dangerous one made convenient.
 
-L2 works out the mental model — why a parsed, typed boundary catches
-what a runtime check only might catch — and L3 rebuilds Alertly's
-`sendAlert()` from the permissive version that let Maya's page get lost
-into a version where that exact mistake no longer compiles.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="defensive-moves"
+/>
+
+## Two traps that invite misuse
+
+- **The boolean-parameter trap**: `sendAlert(id, msg, true, false)`. At
+  the call site nobody can tell which flag is which, and some combinations
+  (urgent and silent?) make no sense.
+- **Stringly-typed arguments**: a bare `string` where a fixed set of
+  options exists. A typo like `"sm"` is accepted exactly as happily as
+  `"sms"`.
+
+| Trap            | What the caller writes          | What the compiler says |
+| --------------- | ------------------------------- | ---------------------- |
+| Two booleans    | `send(id, msg, true, false)`    | Fine                   |
+| Bare string     | `channel: "sm"`                 | Fine                   |
+| Closed set type | `channel: "sm"` (not an option) | Error, caught early    |
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="boolean-string-traps"
+/>
+
+L2 explains why a typed boundary catches what a deep runtime check only
+might, and L3 rebuilds `sendAlert` so Maya's exact call no longer
+compiles.
 
 ## Key terms
 
-- **Illegal states unrepresentable** — designing types/interfaces so an
-  invalid combination of data cannot be constructed at all.
-- **Parse, don't validate** — converting shapeless input into a type
-  that proves its own validity, once, at the boundary — instead of
-  re-checking a shapeless type over and over downstream.
-- **Fail fast** — reject bad input immediately and loudly, at the
-  boundary, rather than letting it propagate.
-- **Minimal surface area** — the fewest parameters/methods that solve
+- **Illegal states unrepresentable**: designing types so an invalid
+  combination of data cannot be constructed at all.
+- **Parse, don't validate**: convert loose input into a self-proving type
+  once, at the boundary.
+- **Fail fast**: reject bad input immediately and loudly.
+- **Minimal surface area**: the fewest parameters and methods that solve
   the real problem.
-- **Boolean-parameter trap** — multiple boolean parameters that invite
-  ambiguous or nonsensical combinations at the call site.
-- **Stringly-typed** — using a bare string where a closed, known set of
-  values exists, losing compile-time checking.
+- **Boolean-parameter trap**: several booleans that hide meaning and
+  allow nonsense combinations.
+- **Stringly-typed**: a bare string standing in for a closed set of values.

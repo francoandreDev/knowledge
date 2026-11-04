@@ -2,354 +2,217 @@
 title: "L3 — How do I recognize a design pattern I actually need vs. cargo-culting one? (classic design patterns, when they help vs. hurt)"
 ---
 
+import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-This level writes both of L2's scenarios out in real code: the shipping
-calculator both ways (over-applied Strategy, then right-sized), and the
-payment-processing case where Strategy is the right call — plus a Decorator
-example doing real work on top of it. Code is TypeScript: patterns are
-fundamentally about interfaces and the contracts between types, and
-TypeScript's `interface` keyword lets the code say precisely what L2's
-table says in prose, with the compiler checking it stays true. Every
-example is written the way you'd actually defend it in review — no
-placeholder logic, no invented helper calls standing in for real behavior.
+export const unit = {
+  track: "software-design",
+  unitSlug: "classic-design-patterns",
+};
+
+<Scenario label="Eighteen months later, the same pattern review comment is right">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>💳</span> <strong>Payment processors</strong> — 5 live: card, wallet, bank transfer, crypto, buy-now-pay-later</div>
+      <div class="flex items-center gap-1.5"><span>👥</span> <strong>Owners</strong> — a different team per processor, separate release schedules</div>
+      <div class="flex items-center gap-1.5"><span>📜</span> <strong>Checkout function</strong> — a 40-line if/else chain (assumed size for this example)</div>
+      <div class="flex items-center gap-1.5"><span>🔥</span> <strong>Pain</strong> — every new processor edits the same function, so teams collide</div>
+    </div>
+  </Fragment>
+
+At the same fictional company, Widgetly, the payments code looks nothing like
+the shipping calculator. Five processors are live, each added by a different
+team. Every addition edits one shared checkout function, and teams keep
+colliding in it. **The same reviewer says "use Strategy" again. Last time that
+was wrong. What changed about the code, and how do you prove it is right this
+time rather than just repeating the slogan?**
+
+</Scenario>
 
 <LevelIntro
   items={[
-    "The shipping calculator: over-applied Strategy vs. the right-sized version",
-    "Payment processing: where Strategy is genuinely earned, plus Decorator layered on top",
-    "Trade-offs, failure modes, and what the checklist misses in practice",
+    "The right-sized shipping version, and where it stops being enough",
+    "Strategy and Decorator earned by payment processing",
+    "Failure modes: patterns that outlive their reason",
   ]}
 />
 
-## Scenario 1: the shipping calculator, over-applied
+This level is a worked case, not the whole territory: two scenarios and two
+patterns. The closing question asks you to extend it to a third.
 
-Here's what Priya's review comment produces if Sam follows it literally —
-the full Strategy-pattern treatment for two branches:
+## What does the right-sized shipping version look like?
 
-```ts
-// --- Over-applied: Strategy pattern for 2 stable branches ---
-
-interface ShippingStrategy {
-  calculate(orderTotal: number): number;
-}
-
-class DomesticShippingStrategy implements ShippingStrategy {
-  calculate(orderTotal: number): number {
-    return 5.99;
-  }
-}
-
-class InternationalShippingStrategy implements ShippingStrategy {
-  private readonly CUSTOMS_FEE = 12.5;
-
-  calculate(orderTotal: number): number {
-    return 5.99 + this.CUSTOMS_FEE;
-  }
-}
-
-class ShippingStrategyFactory {
-  static create(region: "domestic" | "international"): ShippingStrategy {
-    switch (region) {
-      case "domestic":
-        return new DomesticShippingStrategy();
-      case "international":
-        return new InternationalShippingStrategy();
-    }
-  }
-}
-
-function getShippingCost(
-  region: "domestic" | "international",
-  orderTotal: number,
-): number {
-  const strategy = ShippingStrategyFactory.create(region);
-  return strategy.calculate(orderTotal);
-}
-```
-
-**What did this buy?** Nothing L2's Q4 asks for: nobody swaps the strategy
-at runtime, nothing here gets tested that a plain function couldn't test
-just as easily, and no new region has ever been added independently of the
-other. What it cost is on the page: 1 interface, 2 classes, 1 factory, and
-a reader now has to open four definitions to answer "what does shipping
-cost for an international order," instead of reading one function
-top to bottom.
-
-Here's the right-sized version — the same behavior, written directly:
+Over-applied, the review comment produces an interface, two classes, a factory
+and a function that calls them: five declarations for what a lookup does. The
+right-sized version is the same behavior as data:
 
 ```ts
-// --- Right-sized: a lookup table, no pattern ---
-
-const SHIPPING_RATES: Record<"domestic" | "international", number> = {
-  domestic: 5.99,
-  international: 5.99 + 12.5, // base rate + customs fee
-};
-
-function getShippingCost(region: "domestic" | "international"): number {
-  return SHIPPING_RATES[region];
-}
+const SHIPPING_COST = { domestic: 5.99, international: 5.99 + 12.5 };
+const getShippingCost = (region: "domestic" | "international") =>
+  SHIPPING_COST[region];
 ```
 
-Same answer for the same inputs, five fewer types, and the entire behavior
-is visible in one place. If a third region shows up next quarter, adding it
-is a one-line addition to `SHIPPING_RATES` — the direct version isn't
-"less extensible," it's exactly as extensible as this problem currently
-needs, at a fraction of the reading cost.
+A third region is a one-line addition. The direct version is not "less
+extensible"; it is exactly as extensible as the problem currently needs.
 
-<Checkpoint question="A reviewer objects to the lookup-table version: 'What if `international` shipping later needs a totally different calculation — say, weight-based pricing instead of a flat customs fee? A plain object can't hold logic like that.' Is this a real problem with the direct version?">
+<Checkpoint question="A reviewer objects: 'what if international later needs weight-based pricing? A plain object cannot hold logic.' Does that force the Strategy pattern?">
 
-It's a real limitation of a lookup _object_, but not of staying pattern-free
-— the fix is a lookup table of _functions_, not a jump straight to
-Strategy: `const SHIPPING_CALCULATORS: Record<Region, (total: number) =>
-number> = { domestic: (total) => 5.99, international: (total) =>
-5.99 + 12.5 + total * 0.02 }`. That's still one file, no interface, no
-factory, and it already supports per-region logic of arbitrary complexity —
-because JavaScript functions are values, a map of functions gets most of
-what Strategy buys (swappable behavior per key) without any of Strategy's
-ceremony. The honest reason to reach for the full class-based Strategy
-pattern instead is when the behavior needs _more state or lifecycle_ than a
-closure comfortably holds (open connections, multi-step setup, injected
-collaborators) — not "the calculation got slightly more complex." Complexity
-in the calculation is not, by itself, one of L2's four questions.
+It exposes a limit of a lookup of numbers, not of staying pattern-free. A
+lookup of functions, one per region, already gives per-region logic of any
+complexity, because functions are values. That gets most of what Strategy buys
+(swappable behavior per key) with no interface or factory. The honest reason to
+move to full class-based Strategy is when each variant needs state or lifecycle
+a closure holds badly: open connections, multi-step setup, injected
+collaborators. A calculation getting somewhat harder is not one of the four
+questions.
 
 </Checkpoint>
 
-## Scenario 2: payment processing, where Strategy earns its cost
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="right-sized-first"
+/>
 
-Eighteen months later, Widgetly's payment code looks nothing like the
-shipping calculator. Five processors are live — credit card, PayPal, ACH
-bank transfer, a crypto gateway, and a buy-now-pay-later provider — each
-added by a different team, each with its own SDK, its own retry semantics,
-and its own test suite that has to run without hitting the real network.
-The checkout function had grown to a 40-line `if/else if` chain before
-anyone touched Strategy, and every new processor meant editing that same
-function — exactly the shared-file conflict every one of those teams hit at
-least once.
+## Payment processing: do all four questions pass?
 
-Run L2's checklist against this, not from theory but against what actually
-happened:
+Run the test against what the payments code actually looks like:
 
-- **Q1 (≥2 real variants today)** — yes, 5, all live in production.
-- **Q2 (vary independently)** — yes; the crypto team ships on its own
-  release schedule, unrelated to the ACH team's.
-- **Q3 (direct version already costing something)** — yes; the 40-line
-  chain was the single most merge-conflicted function in the checkout
-  service.
-- **Q4 (indirection buys something concrete)** — yes; each processor needs
-  to be unit-tested against a fake, in isolation, without spinning up the
-  other four.
+| Question | Evidence in this scenario                                               | Result |
+| -------- | ----------------------------------------------------------------------- | ------ |
+| Q1       | 5 variants live in production                                           | Yes    |
+| Q2       | The crypto team ships on a schedule unrelated to the bank-transfer team | Yes    |
+| Q3       | The shared chain is the most conflict-prone function in the service     | Yes    |
+| Q4       | Each processor must be unit-tested against a fake, alone                | Yes    |
 
-All four are "yes." Here's the Strategy implementation this actually earns:
+All four pass, so Strategy is earned. The part that earns it is not the
+interface; it is the registry that lets a team add a variant without editing a
+shared file:
 
 ```ts
-// --- Strategy: genuinely earned by 5 independent, growing variants ---
-
-interface PaymentResult {
-  success: boolean;
-  transactionId: string;
-}
-
 interface PaymentStrategy {
-  charge(amountCents: number, customerId: string): Promise<PaymentResult>;
+  charge(amountCents: number, customerId: string): Promise<{ ok: boolean }>;
 }
-
-class CreditCardStrategy implements PaymentStrategy {
-  async charge(
-    amountCents: number,
-    customerId: string,
-  ): Promise<PaymentResult> {
-    // real implementation calls a card network SDK; simplified here
-    return { success: true, transactionId: `cc_${customerId}_${amountCents}` };
-  }
-}
-
-class AchTransferStrategy implements PaymentStrategy {
-  async charge(
-    amountCents: number,
-    customerId: string,
-  ): Promise<PaymentResult> {
-    return { success: true, transactionId: `ach_${customerId}_${amountCents}` };
-  }
-}
-
-// A registry, not a switch statement — this is the part a switch-based
-// "factory" can't give you: a new processor registers itself without
-// anyone editing this file.
-class PaymentRegistry {
-  private strategies = new Map<string, PaymentStrategy>();
-
-  register(name: string, strategy: PaymentStrategy): void {
-    this.strategies.set(name, strategy);
-  }
-
-  resolve(name: string): PaymentStrategy {
-    const strategy = this.strategies.get(name);
-    if (!strategy) {
-      throw new Error(`No payment strategy registered for "${name}"`);
-    }
-    return strategy;
-  }
-}
-
-const registry = new PaymentRegistry();
-registry.register("credit_card", new CreditCardStrategy());
-registry.register("ach_transfer", new AchTransferStrategy());
-// The crypto team adds their own line, in their own PR, touching no
-// code any other team owns:
-// registry.register("crypto", new CryptoGatewayStrategy());
-
-async function processPayment(
-  method: string,
-  amountCents: number,
-  customerId: string,
-): Promise<PaymentResult> {
-  const strategy = registry.resolve(method);
-  return strategy.charge(amountCents, customerId);
-}
+const registry = new Map<string, PaymentStrategy>();
+registry.set("card", new CardStrategy());
+registry.set("bank", new BankTransferStrategy());
+// the crypto team adds one line in their own change, touching nobody else's code
 ```
 
-The difference from Scenario 1 isn't the code shape — it's `implements`
-being backed by five real classes owned by five different teams, tested in
-isolation, registered without editing a shared function. That's Q2 and Q4
-made concrete, not asserted.
-
-## Layering a second pattern: Decorator for cross-cutting concerns
-
-Once payments are behind an interface, a second, genuinely independent
-need shows up: every processor should retry on transient failure and log
-its outcome — but not every processor needs the same combination (the
-crypto gateway shouldn't auto-retry a failed charge; card and ACH should).
-This is Decorator's actual problem — **combinable** behaviors applied to
-some subset of implementations of the same interface — not "wrapping
-something once because wrapping sounds robust":
-
-```ts
-// --- Decorator: retry and logging as independently combinable wrappers ---
-
-class RetryingPaymentStrategy implements PaymentStrategy {
-  constructor(
-    private readonly inner: PaymentStrategy,
-    private readonly maxAttempts = 3,
-  ) {}
-
-  async charge(
-    amountCents: number,
-    customerId: string,
-  ): Promise<PaymentResult> {
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
-      try {
-        return await this.inner.charge(amountCents, customerId);
-      } catch (err) {
-        lastError = err;
-      }
-    }
-    throw lastError;
-  }
-}
-
-class LoggingPaymentStrategy implements PaymentStrategy {
-  constructor(private readonly inner: PaymentStrategy) {}
-
-  async charge(
-    amountCents: number,
-    customerId: string,
-  ): Promise<PaymentResult> {
-    const result = await this.inner.charge(amountCents, customerId);
-    console.log(
-      `payment: ${customerId} charged ${amountCents}c -> ${result.transactionId}`,
-    );
-    return result;
-  }
-}
-
-// Card and ACH get retry + logging; crypto gets logging only —
-// each combination assembled from the same two decorators, no new
-// class per combination:
-registry.register(
-  "credit_card",
-  new LoggingPaymentStrategy(
-    new RetryingPaymentStrategy(new CreditCardStrategy()),
-  ),
-);
-registry.register(
-  "crypto",
-  new LoggingPaymentStrategy(new CryptoGatewayStrategy()),
-);
+```mermaid
+flowchart LR
+    C["checkout: processPayment(method, ...)"] --> R{"registry lookup by name"}
+    R --> A["CardStrategy"]
+    R --> B["BankTransferStrategy"]
+    R --> D["CryptoStrategy"]
+    R --> E["... added by another team"]
 ```
 
-Run the same checklist against this Decorator use before trusting it: ≥2
-real, independently-combinable behaviors (retry, logging) — yes; they vary
-per processor, decided by each processor's own risk profile — yes; a
-single `if (shouldRetry) { ... }` flag sprinkled through every strategy's
-`charge()` was the direct alternative, and it was already duplicated five
-times before this — yes; the decorator buys composing behaviors without a
-new class per combination (`Retrying`, `Logging`, `RetryingLogging` as three
-separate classes would be the alternative) — yes. All four hold, same as
-Strategy did above — Decorator earns its place here for the same structural
-reason Strategy did. Note that "independently combinable" doesn't require
-every processor to actually use every decorator — a processor that only
-ever needs retry, never logging, is still exactly what combinability means
-in practice. What would undermine the choice instead is every processor
-ending up wrapped in the same fixed stack in the same order, every time —
-at that point the independent combination this pattern is for has stopped
-being true.
+The difference from the shipping version is not the code shape. It is that each
+variant has its own owner, schedule and test, so Q2 and Q4 are facts here, not
+hopes.
 
-## Trade-offs, edge cases, and failure modes
+## Decorator: when are layered behaviors earned?
 
-| Failure mode                                                    | What it looks like                                                                                                                                                                      | How to catch it                                                                                                                  |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| **Adopted correctly, outlived its reason**                      | The payment system drops to 2 processors after a consolidation; Strategy's registry/interface ceremony now serves 2 stable cases, same as Scenario 1                                    | Re-run L2's checklist periodically on long-lived code, not just at adoption — a "yes" from a year ago can silently become a "no" |
-| **Interface designed for imagined future variants**             | A `ShippingStrategy` interface built for "region" before any second region existed, "just in case"                                                                                      | Q1 fails honestly: 1 real variant isn't ≥2; wait for the second real case before generalizing                                    |
-| **Decorator stack order becomes load-bearing but undocumented** | `Logging(Retrying(x))` behaves differently from `Retrying(Logging(x))` (logging sees retried attempts or doesn't) and nobody wrote down which is intended                               | Comment the intended order at the composition site, the way the payment example does implicitly by always logging outermost      |
-| **Registry hides "what actually runs" from a debugger**         | Stepping through `processPayment("credit_card", ...)` requires knowing the registry was populated somewhere else, in a different file, possibly at a different time (module load order) | Keep registration co-located and eagerly run (as in the example above), not scattered behind lazy conditional registration       |
-| **Pattern used to avoid a hard conversation about ownership**   | A team wraps unrelated logic in a decorator/strategy specifically so they don't have to touch a file another team owns, rather than because the behavior is genuinely independent       | Ask Q2 honestly — "independently owned" is different from "avoiding a shared file for political reasons"                         |
+Once payments sit behind one interface, a second need appears: some processors
+should retry on transient failure and all should log, but the crypto gateway
+must not auto-retry a failed charge. Decorator's problem is exactly this:
+combinable behaviors applied to some implementations of one interface, without
+a class per combination.
 
-The first row is the one worth sitting with: **the checklist is a snapshot,
-not a one-time license.** Strategy was correctly earned for payment
-processing at 5 processors. If Widgetly later sunsets three of them and
-settles permanently on 2, the same code — unchanged — has quietly become
-the over-applied case from Scenario 1, and nobody's review comment will
-say so unless someone re-runs the checklist against the code as it now
-stands, not as it stood when the pattern was adopted.
+| Processor     | Retry | Log | Wrapping (inside to outside) |
+| ------------- | ----- | --- | ---------------------------- |
+| Card          | Yes   | Yes | Card, then Retry, then Log   |
+| Bank transfer | Yes   | Yes | Bank, then Retry, then Log   |
+| Crypto        | No    | Yes | Crypto, then Log             |
 
-<Checkpoint question="Widgetly's payment system consolidates from 5 processors down to 2, permanently, with no plans to add more. Using the checklist, what's the honest verdict now, and what would 'undoing' the pattern actually look like in practice?">
+Without Decorator the alternatives are a class per combination (three classes
+for two behaviors, and the count doubles per added behavior) or a `shouldRetry`
+flag copied into every processor. Decorator is earned here because the
+behaviors genuinely combine in different mixes. It would not be earned if every
+processor ended up in the same fixed stack: the independent combination the
+pattern exists for would have stopped being true.
 
-The honest verdict is the same as Scenario 1's: with 2 stable, non-growing
-variants and no runtime-swap or independent-team requirement left, Q1
-technically still passes (2 ≥ 2) but Q2 and Q3 no longer do — there's no
-independent variation left to isolate, and the registry/interface ceremony
-isn't buying anything a lookup table wouldn't. "Undoing" it in practice
-almost never means literally deleting the interface the day this becomes
-true — that's a real migration with its own cost (every call site, every
-test) that has to be weighed against how long the team expects to stay at
-2 processors. The realistic move is usually smaller: stop pretending new
-processors are coming, and the next time this code needs a substantial
-change anyway, collapse it to the direct version as part of that work
-rather than as a special "pattern removal" project on its own.
+Order matters, and it is a classic undocumented decision:
+
+```mermaid
+flowchart TB
+    subgraph one["Log outside Retry"]
+        L1["Log"] --> R1["Retry (3 attempts)"] --> P1["Processor"]
+    end
+    subgraph two["Retry outside Log"]
+        R2["Retry (3 attempts)"] --> L2["Log"] --> P2["Processor"]
+    end
+```
+
+With Log outside, one log line describes the whole charge, however many retries
+happened. With Retry outside, each attempt is logged separately (up to 3 lines
+for one charge). Neither is wrong; an unwritten choice is.
+
+<Checkpoint question="If Log wraps Retry, and a charge fails twice then succeeds, how many log entries describe the charge, and what can you no longer see?">
+
+One entry, for the final outcome. You can no longer see from the logs that two
+attempts failed first, which is exactly the signal an on-call engineer wants
+when a processor is flaky. Whether that is the right trade depends on what the
+logs are for, which is why the intended order should be written down at the
+place where the wrappers are assembled.
 
 </Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="earned-in-practice"
+/>
+
+## Failure modes: when does a correct pattern become a wrong one?
+
+| Failure mode                                   | What it looks like                                                                 | How to catch it                                                    |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Adopted correctly, outlived its reason         | Payments drop to 2 stable processors; the registry now serves two fixed cases      | Re-run the four questions on long-lived code, not only at adoption |
+| Interface built for imagined variants          | A shipping interface created "just in case" before a second region exists          | Q1 fails honestly: wait for the second real case                   |
+| Decorator order is load-bearing, undocumented  | Log-outside and Retry-outside behave differently and nobody wrote which is meant   | State the intended order where wrappers are composed               |
+| Registration hides what actually runs          | Stepping through a charge requires knowing the registry was filled in another file | Keep registration in one visible place, run eagerly                |
+| Pattern used to avoid a file another team owns | A wrapper added to dodge a shared file, not because behavior is independent        | Ask Q2 honestly: independent ownership versus avoidance            |
+
+The first row is the one to dwell on: the test is a snapshot, not a license. If
+Widgetly later consolidates to 2 permanent processors, the unchanged code has
+quietly become the over-applied case from the shipping calculator, and nobody's
+review comment will say so unless someone re-asks the questions of the code as
+it stands now.
+
+<Checkpoint question="Payments consolidate permanently from 5 processors to 2. What is the honest verdict now, and is deleting the interface the right immediate move?">
+
+The verdict matches the shipping calculator's: Q1 still technically passes
+(2 is at least 2) but Q2 and Q3 no longer do, because no independent variation
+is left to isolate. Deleting the interface at once is a migration with its own
+cost (every call site and test), weighed against how long the team expects to
+stay at 2. The usual realistic move is smaller: stop pretending new processors
+are coming, and collapse to the direct version the next time this code needs a
+substantial change anyway.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="outlive-and-order"
+/>
 
 ## Extend it yourself
 
-The worked examples above cover 2 scenarios and 2 patterns (Strategy,
-Decorator) — not the whole territory. Before moving on, work through this
-one on your own: **Widgetly's checkout page also needs to notify three
-unrelated systems whenever an order completes** — send a confirmation
-email, update a fraud-scoring service, and push an event to an analytics
-pipeline — and today all three calls are hardcoded, in order, inside
-`completeOrder()`. Run L2's four questions against this yourself: do the
-three listeners vary independently of each other and of `completeOrder()`
-(different teams own email, fraud, and analytics)? Is a hardcoded
-three-call sequence already causing a real cost (e.g. does adding a fourth
-listener next quarter mean editing `completeOrder()` again, by whichever
-team happens to own that PR)? Which pattern from L2's catalog table fits a
-"notify a changing set of independent listeners without the source knowing
-who they are" problem, and what would the interface look like? Then ask
-the harder question the checklist doesn't answer by itself: what would make
-this the _wrong_ call instead — for instance, if all three listeners must
-run synchronously, in a specific order, and a failure in any one of them
-must roll back the entire order? Does that change which pattern fits, or
-whether a pattern fits at all?
+This case covered two scenarios and two patterns, not the whole territory.
+Try a third on your own. Widgetly's checkout must notify three unrelated
+systems whenever an order completes: a confirmation email, a fraud-scoring
+service and an analytics feed. All three calls are hardcoded, in order, inside
+`completeOrder()`, and three different teams own them.
+
+- Run the four questions. Which pass today, and what would make Q3 pass next
+  quarter?
+- Which pattern in L2's table fits "notify a changing set of listeners the
+  source does not know"? Sketch its interface.
+- What would make that the wrong call: say all three must run in a fixed order,
+  and a failure in any of them must roll back the whole order. Does that change
+  which pattern fits, or whether any pattern fits?
