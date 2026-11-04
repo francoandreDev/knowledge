@@ -1,326 +1,182 @@
 ---
-title: "L3 — How does a staff engineer make a design decision that will outlive their own tenure on the project? (long-term design judgment, designing for whoever inherits it)"
+title: "L3 — How do you make a design decision that will outlive your time on the project? (long-term design judgment, designing for whoever inherits it)"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Renata's actual decision, in full">
+export const unit = {
+  track: "software-design",
+  unitSlug: "long-term-design-judgment",
+};
+
+<Scenario label="Eight months after Renata left">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
       <div class="flex items-center gap-1.5">
-        <span>🎯</span> <strong>System</strong> — Northlane's entitlement
-        check: does workspace X get feature Y?
+        <span>🎯</span> <strong>System</strong> — Northlane's check: may workspace X use feature Y?
       </div>
       <div class="flex items-center gap-1.5">
-        <span>⚙️</span> <strong>Option A</strong> — a rule engine
-        interpreting a custom boolean-expression DSL from JSON config.
+        <span>⚙️</span> <strong>Option A</strong> — rules as strings in a custom mini-language, kept in config.
       </div>
       <div class="flex items-center gap-1.5">
-        <span>🧾</span> <strong>Option B</strong> — an ordered array of
-        named <code>EntitlementRule</code> objects, plain TypeScript.
+        <span>🧾</span> <strong>Option B</strong> — an ordered list of named rule functions.
       </div>
       <div class="flex items-center gap-1.5">
-        <span>🚪</span> <strong>Door type</strong> — A is one-way once
-        others write config in its syntax; B stays two-way.
+        <span>🚪</span> <strong>Door type</strong> — A becomes one-way once others write rules in its syntax; B stays two-way.
+      </div>
+    </div>
+    <div class="not-prose mt-3 flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300">
+      <div>
+        <div class="flex justify-between"><span>Cost to reverse A at 8 dependents (assumed)</span><span>28 days</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 100%"></div></div>
+      </div>
+      <div>
+        <div class="flex justify-between"><span>Cost of building B up front (assumed)</span><span>6 days</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-emerald-500 animate-fill-bar" style="--target-width: 21%"></div></div>
       </div>
     </div>
   </Fragment>
 
-**This level builds Renata's decision all the way down: both designs as
-real, runnable TypeScript, the ADR she actually writes to make the "why"
-survive her, and the places this kind of judgment call can go wrong in
-either direction.**
+Picture the person who inherited Renata's work, standing in front of a rules
+file full of strings in a grammar nobody documented. The strings work. Eight
+other services now store rules written in them. **Was this avoidable, and what
+would Renata have needed to leave behind so the inheritor could decide calmly?**
+
+This level follows the decision from the choice itself to the record she
+writes, then to the places the judgment goes wrong.
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Both interfaces built out in real TypeScript",
-    "A full worked ADR as a durable artifact",
-    "Where 'prefer legible' can be taken too far, and a one-way door that hid as two-way",
+    "The cost slope over eight months",
+    "A decision record written for a stranger",
+    "Where the judgment fails in both directions",
   ]}
 />
 
-## Option A: the rule engine with its own DSL
+## What does the slope look like when you follow one decision through time?
 
-Renata's first version is genuinely well-built. Config lives in the
-database, edited through an internal admin tool, no deploy required to
-change entitlement logic:
+**What does Option A cost on the day it ships, and what does it cost once the
+organisation has used it?** Using the unit's assumed numbers (4 days to remove
+the interpreter, 3 days of migration per dependent, 6 days to have built the
+plain version instead):
 
-```ts
-// entitlements/engine.ts — Option A: DSL-driven rule engine
-type Token =
-  | { kind: "ident"; value: string }
-  | { kind: "string"; value: string }
-  | { kind: "op"; value: "AND" | "OR" | "NOT" | "(" | ")" | ">=" | "==" };
+| Month | Services storing rules in A's syntax | Cost to reverse A | Cost of B built on day one |
+| ----- | ------------------------------------ | ----------------- | -------------------------- |
+| 0     | 0                                    | 4 days            | 6 days                     |
+| 2     | 2                                    | 10 days           | 6 days                     |
+| 5     | 5                                    | 19 days           | 6 days                     |
+| 8     | 8                                    | 28 days           | 6 days                     |
 
-interface EvalContext {
-  tier: "free" | "pro" | "enterprise";
-  addons: string[];
-  legacyBundles: string[];
-}
-
-// A minimal recursive-descent parser + evaluator for expressions like:
-//   tier >= "pro" AND (addon("analytics") OR legacy("v1-bundle"))
-function tokenize(src: string): Token[] {
-  const tokens: Token[] = [];
-  const re = /\s*(AND|OR|NOT|>=|==|\(|\)|"[^"]*"|[a-zA-Z_][a-zA-Z0-9_]*)\s*/g;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(src))) {
-    const text = match[1];
-    if (["AND", "OR", "NOT", "(", ")", ">=", "=="].includes(text)) {
-      tokens.push({ kind: "op", value: text as Token["value"] & string });
-    } else if (text.startsWith('"')) {
-      tokens.push({ kind: "string", value: text.slice(1, -1) });
-    } else {
-      tokens.push({ kind: "ident", value: text });
-    }
-  }
-  return tokens;
-}
-
-// ...parse() and evaluate() continue for another ~140 lines: operator
-// precedence, function-call syntax for addon()/legacy(), tier-ordering
-// comparisons, and error recovery for malformed config strings.
-
-export function evaluateEntitlement(expr: string, ctx: EvalContext): boolean {
-  const tokens = tokenize(expr);
-  const ast = parse(tokens); // defined further down in the real module
-  return evaluate(ast, ctx);
-}
+```mermaid
+flowchart LR
+    M0["Month 0<br/>ship A<br/>reverse = 4 days"] --> M2["Month 2<br/>2 dependents<br/>reverse = 10 days"]
+    M2 --> M5["Month 5<br/>5 dependents<br/>reverse = 19 days"]
+    M5 --> M8["Month 8<br/>8 dependents<br/>reverse = 28 days"]
+    M8 --> Q{"Reverse now?"}
+    Q -- "28 days of migration" --> C1["Costly, but the bill only grows"]
+    Q -- "keep A, document it" --> C2["Pay in reader time, every change"]
 ```
 
-```json
-// stored in the database, edited via an internal admin UI
-{
-  "rule": "pro-tier-analytics",
-  "expr": "tier >= \"pro\" AND (addon(\"analytics\") OR legacy(\"v1-bundle\"))"
-}
-```
+Only the first row favours Option A, and only in the sense that undoing it is
+cheap. Every later row says the same thing: the cheapest moment to decide
+was the first one, when Renata was present. That is the leverage of treating
+the decision as a one-way door early.
 
-It works. It's genuinely fast to extend without a deploy. And it is,
-right now, understood in full by exactly one person on the team.
+<Checkpoint question="At month 5, a teammate says 'we have not paid anything yet, so it is still cheap'. What is wrong with that reading?">
 
-## Option B: plain, named rule objects
-
-The second version trades the interpreter for more code, and trades "no
-deploy needed" for "every reader already knows how to read this":
-
-```ts
-// entitlements/rules.ts — Option B: explicit rule objects, no DSL
-interface EntitlementContext {
-  plan: { tier: "free" | "pro" | "enterprise" };
-  addons: string[];
-  legacyBundles: string[];
-}
-
-interface EntitlementRule {
-  name: string;
-  applies: (ctx: EntitlementContext) => boolean;
-}
-
-const TIER_RANK: Record<EntitlementContext["plan"]["tier"], number> = {
-  free: 0,
-  pro: 1,
-  enterprise: 2,
-};
-
-export const entitlementRules: EntitlementRule[] = [
-  {
-    name: "pro-tier-analytics",
-    applies: (ctx) =>
-      TIER_RANK[ctx.plan.tier] >= TIER_RANK.pro &&
-      (ctx.addons.includes("analytics") ||
-        ctx.legacyBundles.includes("v1-bundle")),
-  },
-  {
-    name: "enterprise-sso",
-    applies: (ctx) => TIER_RANK[ctx.plan.tier] >= TIER_RANK.enterprise,
-  },
-];
-
-export function hasEntitlement(name: string, ctx: EntitlementContext): boolean {
-  const rule = entitlementRules.find((r) => r.name === name);
-  if (!rule) {
-    throw new Error(`Unknown entitlement rule: "${name}"`);
-  }
-  return rule.applies(ctx);
-}
-```
-
-```ts
-// entitlements/rules.test.ts
-import { describe, it, expect } from "vitest";
-import { hasEntitlement } from "./rules";
-
-describe("pro-tier-analytics", () => {
-  it("grants access on pro tier with the analytics add-on", () => {
-    const ctx = {
-      plan: { tier: "pro" as const },
-      addons: ["analytics"],
-      legacyBundles: [],
-    };
-    expect(hasEntitlement("pro-tier-analytics", ctx)).toBe(true);
-  });
-
-  it("grants access via the grandfathered v1 bundle, no add-on needed", () => {
-    const ctx = {
-      plan: { tier: "pro" as const },
-      addons: [],
-      legacyBundles: ["v1-bundle"],
-    };
-    expect(hasEntitlement("pro-tier-analytics", ctx)).toBe(true);
-  });
-
-  it("denies access on the free tier even with the add-on flag set", () => {
-    const ctx = {
-      plan: { tier: "free" as const },
-      addons: ["analytics"],
-      legacyBundles: [],
-    };
-    expect(hasEntitlement("pro-tier-analytics", ctx)).toBe(false);
-  });
-});
-```
-
-Adding `enterprise-sso` cost 4 lines and zero new concepts. A new engineer
-reading `rules.ts` top to bottom, with no other context, can correctly
-predict what every rule does — that's the entire test for legibility, and
-it's the property Option A cannot offer without first teaching its reader
-a grammar that exists nowhere else.
-
-<Checkpoint question="Option B still has a real weakness Option A doesn't: adding a rule requires a deploy, and Northlane's sales team sometimes needs a same-day entitlement exception for a deal closing that afternoon. Does this weakness change which design Renata should pick?">
-
-Not by itself — it changes what she should build _in addition to_ Option
-B, not which base design to pick. The same-day-exception need is real, but
-it's narrower than "we need arbitrary boolean logic in config": it's
-closer to "we need a small, explicit allowlist of workspace-level
-overrides that doesn't require redeploying the whole rules file." That can
-be solved with a tiny, legible mechanism of its own (a per-workspace
-overrides table checked before the rule list) rather than reaching for a
-general-purpose DSL to solve a specific, bounded problem. Reintroducing a
-whole interpreter to solve one narrow operational need is exactly the kind
-of overpowered-for-the-actual-requirement move L2's first Checkpoint
-warned about.
+The cost has not been paid, but it has been incurred. Each rule written in the
+syntax added to the bill for removing it, and 19 days is more than three times
+the 6 days the plain version would have taken. Reversal cost is a property of
+what depends on the decision, not of whether anyone has felt pain yet.
 
 </Checkpoint>
 
-## The ADR: writing down the why before it's needed
+## What does Renata write down so the inheritor can decide?
 
-Renata picks Option B. Before merging it, she writes the ADR — not for
-review theater, but because she knows she won't be reachable in two years
-when someone rediscovers the DSL idea and wonders why it wasn't done that
-way from the start.
+Renata chooses Option B and writes a decision record before merging. She writes
+it not as review theatre but because she knows nobody will be able to ask her.
 
 ```markdown
-# ADR-014: Entitlement checks as explicit TypeScript rules, not a config DSL
+# ADR-014: Entitlement checks as named rule functions, not a config language
 
-## Status
+Status: Accepted
 
-Accepted — 2026-03-14
+Context: Rules depend on plan tier, purchased add-ons and a fixed set of
+grandfathered contracts. They change a few times a quarter, driven by product
+decisions. The team is six people and none has maintained an interpreter.
 
-## Context
+Decision: An ordered list of named rule functions, one per rule. A new rule is
+a new list entry and a deploy.
 
-Northlane needs to gate features by plan tier, purchased add-ons, and a
-fixed set of grandfathered contract exceptions. Entitlement logic changes
-a few times a quarter, driven by product/sales decisions, not by
-individual customer requests. The team is 6 engineers; nobody besides the
-author has prior experience building or maintaining an interpreter.
+Rejected: A config-driven mini-language (prototyped and working).
 
-## Decision
+- Readers must learn a grammar that exists nowhere else.
+- Once any stored rule uses its syntax, the syntax is a contract; reversing
+  means migrating every stored rule.
+- Current need (a few changes per quarter) does not require config-time edits.
 
-Entitlement rules are implemented as an ordered array of plain TypeScript
-objects (`EntitlementRule[]` in `entitlements/rules.ts`), each with a
-`name` and an `applies(ctx)` predicate function. Adding a rule means
-adding an array entry and a deploy.
+Rejected: A third-party rules library. Same learning cost, plus a dependency.
 
-## Rejected alternatives
-
-**A config-driven rule engine with a custom boolean-expression DSL.**
-Prototyped and working (see `entitlements/engine.ts.bak` in this PR's
-history for the prototype). Rejected because:
-
-- It requires every future maintainer to first learn a grammar that
-  exists nowhere outside this codebase, with no IDE support and
-  hand-rolled parse errors instead of compiler errors.
-- Once any config string is written in the DSL's syntax, that syntax
-  becomes a de facto contract — reversing this decision later would mean
-  migrating every stored config string, not just deleting a file. This is
-  a one-way door, not the two-way door it appears to be.
-- The actual, current requirement (a few rule changes per quarter) does
-  not need config-time flexibility; it needs a change that's easy to
-  review and test, which a deploy-time array already is.
-
-**A third-party rules engine (e.g. `json-rules-engine`).** Considered
-briefly. Rejected for the same core reason as the custom DSL — it still
-requires learning a rule-authoring format that isn't plain TypeScript —
-plus it adds a dependency for a problem six engineers can solve directly
-in about 40 lines.
-
-## Consequences
-
-- Adding or changing an entitlement rule requires a code review and a
-  deploy. This is accepted as the right cost given the actual change
-  frequency (a few times a quarter, not same-day).
-- Same-day sales exceptions are handled by a separate, narrower
-  `workspaceOverrides` table (see ADR-015), not by this mechanism —
-  deliberately kept as a second, smaller decision instead of folding into
-  this one.
-- If entitlement logic later needs genuine config-time flexibility (e.g.
-  A/B testing entitlement rules per workspace), that is a new decision to
-  revisit explicitly, informed by this document — not a silent drift back
-  toward a DSL.
+Consequences: Rule changes need review and a deploy. Same-day sales exceptions
+are handled by a separate, narrower overrides table (ADR-015). If per-workspace
+rules are ever needed, that is a new decision to make deliberately, not a
+silent drift back toward a language.
 ```
 
-This ADR does the one thing the code by itself cannot: it tells a future
-engineer _why the obvious clever option was already considered and turned
-down_, so they don't have to reconstruct that reasoning from scratch — or
-worse, redo the mistake Renata already avoided.
+The record does what the code cannot: it tells a future reader that the
+obvious clever option was already considered and turned down, and on what
+grounds. It also draws a boundary. The overrides line answers "why doesn't this
+handle same-day exceptions?" before anyone asks it.
 
-<Checkpoint question="The ADR's 'Consequences' section commits to something specific: same-day exceptions go through a separate table, not this mechanism. Why does that belong in an ADR about the rules array, instead of waiting to write it once ADR-015 actually exists?">
+<Checkpoint question="Why does the 'Consequences' section mention the separate overrides table, rather than leaving it for a later record?">
 
-Because it closes a gap the next reader would otherwise have to guess
-about. Without that line, someone hitting the same-day-exception need in
-six months might reasonably assume the rules array was _supposed_ to
-handle it and either force a bad fit into `EntitlementRule` or reopen the
-DSL question Renata already resolved. Naming the boundary explicitly — "this
-decision covers X, a related but different need Y is handled elsewhere" —
-is part of writing down the why: it pre-empts not just "why didn't you do
-the clever thing" but also "why doesn't this handle case Y," which is just
-as likely to be asked by someone with none of Renata's context.
+Because it closes a gap the next reader would otherwise have to guess at.
+Without that line, someone facing a same-day exception might assume the rule
+list was meant to handle it and force a bad fit, or reopen the mini-language
+question that was already resolved. Naming what this decision does not cover
+pre-empts both "why not the clever thing?" and "why doesn't it handle case Y?".
 
 </Checkpoint>
 
-## Where this judgment can go wrong
+## Where does this judgment go wrong?
 
-| Failure mode                                    | What it looks like                                                                                                                                                                                                                              | Guard                                                                                                                                                                                                       |
-| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Over-applying "legible over clever"             | Rejecting a genuinely necessary abstraction (e.g. a real plugin system for a genuinely open-ended set of rule authors) because it's "too clever," and building something worse: a 2,000-line if/else block nobody can hold in their head either | Legibility is about _matching_ complexity to the real problem, not minimizing complexity unconditionally — a design that's simple but wrong for the actual requirement isn't legible, it's just under-built |
-| A one-way door disguised as two-way             | Treating a public config format, wire format, or stored-data shape as "just an implementation detail, we can always change it later"                                                                                                            | Ask what already depends on the _format_, not just the _code_ — data written by others, once written, is a dependent even if no code calls into your module directly                                        |
-| ADR written and never read                      | The document exists but isn't linked from the code, isn't discoverable, and gets stale as the system evolves past it                                                                                                                            | Link the ADR from the module's top comment; treat a superseded ADR as superseded explicitly (a new ADR that says "supersedes ADR-014"), not silently ignored                                                |
-| Designing for a future reader who never appears | Adding speculative flexibility "for whoever inherits this," when in practice nobody who inherits it ever needed that flexibility, and now everyone pays its complexity cost forever                                                             | The same signal L2 used for reversibility applies here — build the general version when a _second concrete case_ actually shows up, not preemptively for an imagined one                                    |
+**If "prefer legible" is the rule, can it be over-applied?** Yes, in both
+directions.
+
+| Failure mode                           | What it looks like                                                                  | Guard                                                                                  |
+| -------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Over-applying legibility               | Refusing a necessary abstraction and building a giant if/else block nobody can hold | Match complexity to the real problem; simple but wrong for the need is not legible     |
+| A one-way door disguised as two-way    | Treating a stored format or public syntax as "just an implementation detail"        | Ask what already depends on the format, not only on the code                           |
+| A record nobody reads                  | The decision record exists but is not linked from the code and goes stale           | Link it from the module; mark superseded records explicitly with a new one             |
+| Designing for a reader who never comes | Adding flexibility "for the inheritor" that nobody ever needs                       | Build the general version when a second concrete case appears, not for an imagined one |
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="judgment-limits"
+/>
 
 ## Extend it yourself
 
-Renata's decision was for a 6-engineer team with a few rule changes per
-quarter. Two changes to sit with:
+This worked example is one case, not the whole territory. Renata's team was six
+people with a few rule changes per quarter. Two changes to sit with:
 
-**What if the audience were much larger** — say Northlane grows to 40
-engineers across 6 teams, all of whom touch entitlement rules? Does
-Option B's "just add an array entry" still hold up at that scale, or does
-the review/deploy cost per change start to look more like Option A's
-config-time flexibility, for different reasons than same-day urgency?
+**What if the audience were much larger?** Suppose Northlane grows to 40
+engineers across six teams who all touch these rules. Does "add a list entry and
+deploy" still hold up, or does review and deploy cost start to look like the
+case for config-time flexibility, for reasons other than same-day urgency?
 
-**What if the news were worse** — the DSL prototype had already shipped to
-production for three months, with three other services already writing
-config strings against it, before anyone raised this ADR. Does the right
-decision change? What does "prefer legible" mean once a one-way door has
-already been walked through — is reversing it still the right call, or
-does the ADR's job change from _choosing_ the design to _documenting the
-cost of migrating off it_?
+**What if the news were worse?** Suppose the mini-language had already shipped
+for eight months with eight services depending on it before anyone wrote this
+record. Does the right decision change? Is reversing still the goal, or does the
+record's job shift from choosing a design to documenting what migrating off it
+would cost?
 
-There's no single correct answer to either — the point is that this
-worked example is one case of the judgment, not the whole territory it
-applies to.
+There is no single correct answer to either. The point is that you have practised
+the reasoning on one case, and it applies wherever someone else will inherit
+your work.

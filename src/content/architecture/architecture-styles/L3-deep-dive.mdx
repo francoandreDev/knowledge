@@ -5,14 +5,20 @@ title: "L3 — One pricing service, structured four ways"
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="The scenario">
+export const unit = {
+  track: "architecture",
+  unitSlug: "architecture-styles",
+};
+
+<Scenario label="The loyalty partner stops answering. Which of your four designs is still taking orders?">
   <Fragment slot="facts">
     <p class="not-prose mb-1 text-xs font-semibold tracking-wide text-slate-400 uppercase">Requirement</p>
     <div class="not-prose flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>💵</span> priceOrder(order) → total after discounts</div>
-      <div class="flex items-center gap-1.5"><span>🎯</span> Notify loyalty partner after every priced order</div>
-      <div class="flex items-center gap-1.5"><span>🐢</span> Loyalty partner API is slow, occasionally down</div>
+      <div class="flex items-center gap-1.5"><span>💵</span> priceOrder(order) returns the total after discounts</div>
+      <div class="flex items-center gap-1.5"><span>🎯</span> Tell the loyalty partner after every priced order</div>
+      <div class="flex items-center gap-1.5"><span>🐢</span> The partner's API is slow and sometimes down</div>
     </div>
 
     <p class="not-prose mt-3 mb-1 text-xs font-semibold tracking-wide text-slate-400 uppercase">Constraint</p>
@@ -23,342 +29,198 @@ import Checkpoint from "../../../components/Checkpoint.astro";
   </Fragment>
 
 You need `priceOrder(order)`: apply the customer's tier discount, apply any
-active promotion, return the total, and notify a loyalty-points partner —
-whose API is occasionally slow or down — that an order was priced.
-Checkout must never fail because the loyalty partner is having a bad day.
+active promotion, return the total, and tell a loyalty-points partner that an
+order was priced. The partner's API is occasionally slow or down, and checkout
+must never fail because of it. You could build this in any of the four shapes
+from L2. **Which of them already satisfy the constraint, and which only look
+as if they do?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "The same feature built four architectural ways",
-    "What each version's code actually looks like",
+    "Where the loyalty call lives in each version",
     "Which versions violate the checkout constraint",
+    "Delivery, duplicates and the distributed monolith",
   ]}
 />
 
-Same requirement, same discount math, built four times below. Watch what
-changes in the code itself — not just the diagram — and, more importantly,
-watch what happens to each version the moment the loyalty API goes down.
+## Which versions put the loyalty call on checkout's critical path?
 
-If JavaScript is not familiar yet, read each snippet as pseudocode:
-
-| Syntax      | Meaning while reading this page                      |
-| ----------- | ---------------------------------------------------- |
-| `function`  | a named action the program can run                   |
-| `{ ... }`   | a group of related values, like an order or customer |
-| `return`    | the value sent back to whoever called the function   |
-| `require()` | this file depends on code from another file          |
-| callback    | a function saved to run later when an event arrives  |
-| `catch`     | what happens if an attempted network call fails      |
-
-The code is here to make the architecture visible. You do not need to memorize
-the syntax to follow the comparison: look for where the loyalty call lives,
-whether checkout waits for it, and which file or service owns each decision.
-
-## Version 1: layered
-
-The straightforward version — a controller calls a service, the service
-calls a repository and a loyalty client directly.
-
-```js
-// pricingService.js — layered: service imports and calls infra directly
-const db = require("./db");
-const loyaltyClient = require("./loyaltyClient"); // HTTP client, real network call
-
-function priceOrder(order) {
-  const customer = db.getCustomer(order.customerId);
-  const discountRate = tierDiscount(customer.tier);
-  const promo = db.getActivePromotion(order.date);
-  const total = applyDiscounts(order.subtotal, discountRate, promo);
-
-  // Bug hiding in plain sight: this call is synchronous and unguarded.
-  loyaltyClient.notify(order.customerId, total);
-
-  db.saveOrder(order.id, total);
-  return total;
-}
-
-function tierDiscount(tier) {
-  return { gold: 0.15, silver: 0.08, bronze: 0 }[tier] ?? 0;
-}
-
-function applyDiscounts(subtotal, tierRate, promo) {
-  const afterTier = subtotal * (1 - tierRate);
-  return promo ? afterTier * (1 - promo.rate) : afterTier;
-}
-
-module.exports = { priceOrder, tierDiscount, applyDiscounts };
-```
-
-**What breaks:** `loyaltyClient.notify()` is a real network call sitting
-between two lines that have nothing to do with loyalty. If it throws or
-hangs, `priceOrder` never returns — checkout is down because a partner
-integration is down, which directly violates the constraint above. Nothing
-in the _shape_ of this code stops that; it has to be caught by discipline
-(a try/catch, a timeout) added after the fact, not by the structure itself.
-
-<Checkpoint question="If loyaltyClient.notify() in Version 1 takes 30 seconds to time out instead of failing instantly, what happens to priceOrder() — and therefore to checkout — during those 30 seconds?">
-
-`priceOrder()` doesn't return until the call resolves, so it blocks for the
-full 30 seconds — checkout hangs, waiting on a partner integration that has
-nothing to do with pricing. Nothing in the code's _shape_ prevents this; only
-adding a timeout or moving the call out of the synchronous path would.
-
-</Checkpoint>
-
-## Version 2: hexagonal / clean
-
-The domain rule (`priceOrder`) is pulled out so it knows nothing about a
-database, an HTTP client, or a loyalty partner — those become **ports**
-(interfaces) that adapters implement.
-
-```js
-// domain/pricing.js — pure domain code, zero infrastructure imports
-function priceOrder(order, customer, promo) {
-  const discountRate = tierDiscount(customer.tier);
-  const total = applyDiscounts(order.subtotal, discountRate, promo);
-  return { total, priced: true };
-}
-
-function tierDiscount(tier) {
-  return { gold: 0.15, silver: 0.08, bronze: 0 }[tier] ?? 0;
-}
-
-function applyDiscounts(subtotal, tierRate, promo) {
-  const afterTier = subtotal * (1 - tierRate);
-  return promo ? afterTier * (1 - promo.rate) : afterTier;
-}
-
-module.exports = { priceOrder, tierDiscount, applyDiscounts };
-```
-
-```js
-// ports.js — interfaces the domain depends on, defined BY the domain
-// (adapters implement these; the domain never imports an adapter)
-class OrderRepoPort {
-  saveOrder(_orderId, _total) {
-    throw new Error("not implemented");
-  }
-}
-class LoyaltyNotifierPort {
-  notify(_customerId, _total) {
-    throw new Error("not implemented");
-  }
-}
-module.exports = { OrderRepoPort, LoyaltyNotifierPort };
-```
-
-```js
-// adapters/loyaltyHttpAdapter.js — implements the port, owns the network call
-const { LoyaltyNotifierPort } = require("../ports");
-
-class LoyaltyHttpAdapter extends LoyaltyNotifierPort {
-  notify(customerId, total) {
-    // A timeout AND a swallow-on-failure live here, in the adapter —
-    // not scattered into the domain rule, which never sees this decision.
-    return fetch("https://loyalty.example/notify", {
-      method: "POST",
-      body: JSON.stringify({ customerId, total }),
-      signal: AbortSignal.timeout(300),
-    }).catch(() => {
-      /* logged, never rethrown — the domain doesn't need to know */
-    });
-  }
-}
-module.exports = { LoyaltyHttpAdapter };
-```
-
-```js
-// application/checkoutUseCase.js — wires domain + adapters together
-const { priceOrder } = require("../domain/pricing");
-
-function makeCheckoutUseCase(orderRepo, loyaltyNotifier) {
-  return function checkout(order, customer, promo) {
-    const { total } = priceOrder(order, customer, promo);
-    orderRepo.saveOrder(order.id, total); // port, not a concrete DB
-    loyaltyNotifier.notify(order.customerId, total); // port, not a concrete HTTP call
-    return total;
-  };
-}
-module.exports = { makeCheckoutUseCase };
-```
-
-**What this buys:** `priceOrder` can be unit-tested with plain objects,
-no database, no network, no mocking framework — it's a pure function.
-**What it costs:** four files instead of one for the same feature, and a
-new engineer has to learn "ports point in, adapters point out" before the
-structure makes sense. Note this version _still_ has the same synchronous
-loyalty call the layered version did — hexagonal fixes _where_ the decision
-about failure handling lives (the adapter, in one place), not _whether_ a
-slow partner can still add latency to checkout. That's a separate problem,
-solved by the next version.
-
-In plain language: hexagonal architecture makes the core rule easier to test
-and protect, but it does not automatically make slow work asynchronous. The
-shape isolates the loyalty decision; it does not remove the waiting unless
-the use case chooses not to wait.
-
-## Version 3: event-driven
-
-Instead of calling the loyalty partner from inside checkout, `priceOrder`
-publishes an event and returns immediately. A separate handler — which can
-retry, queue, or fail independently — reacts later.
-
-```js
-// pricingService.js — publishes an event, never calls loyalty directly
-const bus = require("./eventBus");
-const { priceOrder: computeTotal } = require("./domain/pricing");
-
-function priceOrder(order, customer, promo) {
-  const { total } = computeTotal(order, customer, promo);
-  bus.publish("OrderPriced", {
-    orderId: order.id,
-    customerId: order.customerId,
-    total,
-  });
-  return total; // returns without waiting on anything downstream
-}
-module.exports = { priceOrder };
-```
-
-```js
-// handlers/loyaltyHandler.js — subscribes, runs independently of checkout
-const bus = require("../eventBus");
-
-bus.subscribe("OrderPriced", async (event) => {
-  try {
-    await notifyLoyaltyPartner(event.customerId, event.total);
-  } catch (err) {
-    bus.publish("OrderPriced.retry", event); // requeue, not checkout's problem
-  }
-});
-```
-
-**What breaks now:** nothing in checkout, by construction — the loyalty
-call physically cannot block `priceOrder` because it isn't in that call
-stack anymore. **What you traded for that:** if `loyaltyHandler` crashes
-before its retry logic runs, there's no stack trace connecting "order
-priced" to "points never awarded" — you have to reconstruct that from two
-separate logs (the publish, and the handler's own log) instead of one.
-That's the cost of coupling-in-time instead of coupling-in-code: it moves,
-it doesn't disappear.
-
-Event-driven also means the customer-visible truth may arrive in two steps:
-checkout can complete now, while points appear later. That is eventual
-consistency. It is acceptable only when the product can tolerate "correct
-soon" instead of "correct immediately."
-
-<Checkpoint question="Version 4 pulls loyaltyHandler out of the same process and into its own service. Does that change whether checkout blocks when the loyalty partner is down, compared to Version 3?">
-
-No — Version 3 already made that call non-blocking by publishing an event
-and returning immediately; Version 4 is the same shape at the deployment
-level, not a different failure-handling mechanism. What changes is who can
-deploy it, on what schedule, and the operational cost of running a second
-service — not whether checkout is protected from a slow loyalty partner.
-
-</Checkpoint>
-
-## Version 4: microservices — the same split, at the deployment level
-
-Pulling `loyaltyHandler` out of the same process and into its own
-service is a _further_ step past event-driven, not a different mechanism —
-the event contract barely changes, but the deploy unit, data ownership, and
-failure blast radius all do.
-
-```yaml
-# docker-compose.yml (excerpt) — two independently deployable services
-services:
-  pricing-service:
-    build: ./pricing
-    environment:
-      EVENT_BUS_URL: amqp://bus:5672
-    # owns its own order/pricing data — no other service reads it directly
-
-  loyalty-service:
-    build: ./loyalty
-    environment:
-      EVENT_BUS_URL: amqp://bus:5672
-    # owns its own points ledger — pricing-service never queries it directly
-```
+**What matters when the partner stalls: how much code a version has, or where
+the waiting happens?** Where the waiting happens. Follow the one call that
+could stall in each version.
 
 ```mermaid
 flowchart LR
-    subgraph PricingDeploy["pricing-service (own repo, own pipeline)"]
-        PS["priceOrder()"] -->|publish OrderPriced| Bus[["Shared event bus"]]
+    subgraph V1["1. Layered"]
+        direction LR
+        A1["priceOrder"] -->|"waits"| B1["loyalty client"]
     end
-    subgraph LoyaltyDeploy["loyalty-service (own repo, own pipeline, own DB)"]
-        Bus --> LH["award points"]
+    subgraph V2["2. Hexagonal"]
+        direction LR
+        A2["priceOrder (domain)"] --> P2(("port")) -->|"waits"| B2["loyalty adapter"]
+    end
+    subgraph V3["3. Event-driven"]
+        direction LR
+        A3["priceOrder"] -->|"publish, return"| BUS3[["bus"]]
+        BUS3 -.later.-> B3["loyalty handler"]
+    end
+    subgraph V4["4. Microservices"]
+        direction LR
+        A4["pricing service"] -->|"publish, return"| BUS4[["bus"]]
+        BUS4 -.later.-> B4["loyalty service"]
     end
 ```
 
-The code inside each service looks almost identical to Version 3's handler
-and publisher — the _shape_ of the message-passing didn't change. What
-changed is that `pricing-service` and `loyalty-service` can now be deployed
-by different people, on different schedules, without either one blocking
-the other's release — at the cost of two CI pipelines, two on-call
-rotations, and a network hop (the event bus itself) that is now a piece of
-production infrastructure someone has to run and monitor.
+The whole difference between Versions 1 and 3 fits in two lines. The rest of
+each file is plumbing around them:
 
-`docker-compose`, `AMQP`, CI pipelines, and on-call rotations are operational
-costs, not style decorations. They mean someone must build, deploy, monitor,
-debug, and wake up for each running service and for the message system between
-them.
+```js
+// Version 1: checkout waits for the partner before it can return
+loyaltyClient.notify(order.customerId, total);
+return total;
 
-## Comparing all four against the actual requirement
+// Version 3: checkout announces the fact and returns
+bus.publish("OrderPriced", {
+  orderId: order.id,
+  customerId: order.customerId,
+  total,
+});
+return total;
+```
 
-| Version       | Blocks checkout if loyalty is down?  | Files/services to maintain | New failure mode introduced                           |
-| ------------- | ------------------------------------ | -------------------------- | ----------------------------------------------------- |
-| Layered       | **Yes** — violates the constraint    | 1 file                     | Synchronous coupling to a partner's uptime            |
-| Hexagonal     | **Yes** — same call, better isolated | 4 files                    | Same as layered, just easier to test in isolation     |
-| Event-driven  | No                                   | 1 process, 2 modules       | Debugging spans an event log, not one call stack      |
-| Microservices | No                                   | 2 services, 2 pipelines    | Event-driven's failure mode, plus deploy/ops overhead |
+Version 2 moves the call behind a port. That puts the failure-handling decision
+(a timeout, swallowing errors) in one adapter instead of scattered through the
+rules, and it lets `priceOrder` be tested with plain objects and no database.
+It does not make the call asynchronous. Unless the use case chooses not to
+wait, a slow partner still adds its delay to checkout.
 
-The requirement ("checkout must never fail because loyalty is down") is
-what actually rules two of the four out — not a general preference for one
-style. Layered and hexagonal both fail it as written above; the fix for
-either one is the same fix (make the loyalty call async, or route it
-through the same event-bus idea Version 3 uses) — which is really Version
-3's change grafted onto either shape, a reminder that these styles combine
-rather than being mutually exclusive.
+Assume, for illustration only, that the partner takes 30 seconds to time out:
 
-## Edge cases and failure modes worth naming directly
+```mermaid
+sequenceDiagram
+    participant C as Customer
+    participant P as priceOrder
+    participant L as Loyalty partner
+    Note over C,L: Version 1 or 2 (synchronous call)
+    C->>P: checkout
+    P->>L: notify
+    Note over L: stalls for 30 s (assumed)
+    L-->>P: timeout
+    P-->>C: total, 30 s late
+    Note over C,L: Version 3 or 4 (publish and return)
+    C->>P: checkout
+    P-->>C: total, immediately
+    P--)L: OrderPriced, delivered whenever the partner recovers
+```
 
-- **Hexagonal without discipline degrades into layered.** Nothing stops an
-  adapter from being imported directly into a domain file except code
-  review and (ideally) a lint rule enforcing import direction — the
-  pseudocode check from L2 is the kind of rule to actually add, not just
-  describe.
-- **Event-driven without idempotency duplicates work.** If the event bus
-  delivers `OrderPriced` twice (most at-least-once buses will, eventually),
-  `loyaltyHandler` needs to recognize "I've already awarded points for this
-  orderId" — the event contract has to include enough information for the
-  consumer to dedupe, or points get double-awarded.
-- **At-least-once delivery** means the bus prefers "better deliver a duplicate
-  than lose the event." **Idempotency** means a consumer can safely receive the
-  same event twice and still perform the side effect once, usually by checking
-  an identifier like `orderId`.
-- **Microservices without a real seam creates a distributed monolith** —
-  two services that must be deployed together to avoid breaking each
-  other have all of microservices' operational cost and none of its
-  independence benefit.
+| Version       | Blocks checkout if loyalty is down? | Moving parts to run     | New failure mode introduced                          |
+| ------------- | ----------------------------------- | ----------------------- | ---------------------------------------------------- |
+| Layered       | **Yes**, violates the constraint    | 1 app                   | Synchronous coupling to a partner's uptime           |
+| Hexagonal     | **Yes**, same call, better isolated | 1 app, more files       | Same as layered, just easier to test in isolation    |
+| Event-driven  | No                                  | 1 app, a bus            | Debugging spans an event log, not one call stack     |
+| Microservices | No                                  | 2 services, 2 pipelines | Event-driven's failure mode plus deployment overhead |
+
+The requirement, not a general preference, rules out two of the four. And the
+fix for Versions 1 and 2 is Version 3's idea grafted on, a reminder that these
+styles combine rather than compete.
+
+<Checkpoint question="Version 4 moves the loyalty handler into its own service. Does that change whether checkout blocks when the partner is down, compared with Version 3?">
+
+No. Version 3 already took the call off checkout's path by publishing and
+returning, and Version 4 is the same message flow at the deployment level.
+What changes is who can deploy it, on what schedule, and the cost of running a
+second service, not whether checkout is protected from a slow partner.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="requirement-decides"
+/>
+
+## What can go wrong once the call is off the critical path?
+
+**If the bus can deliver an event more than once, what happens to a customer's
+points?** Most buses promise at-least-once delivery: they prefer a duplicate to
+a lost event. The consumer then has to make a repeat harmless, which is called
+idempotency. The simplest way is to remember which order ids were already
+handled. Assume, for illustration, an order worth 40 and one point per unit:
+
+| Delivery  | Event            | Handler without a check | Handler that remembers `orderId` |
+| --------- | ---------------- | ----------------------- | -------------------------------- |
+| 1st       | `OrderPriced` #7 | awards 40 (total 40)    | awards 40 (total 40)             |
+| 2nd (dup) | `OrderPriced` #7 | awards 40 (total 80)    | sees #7 already handled, skips   |
+
+The event must therefore carry enough to dedupe, such as the order id. Two
+costs travel with this style: the customer may see the order complete before
+the points appear (eventual consistency), and a failure leaves no single stack
+trace linking "order priced" to "points never awarded". Those two facts are
+reconstructed from separate logs.
+
+<Checkpoint question="A consumer receives the same OrderPriced event twice and awards points both times. Is the bug in the bus, the producer, or the consumer?">
+
+The consumer. At-least-once delivery is the bus's documented behavior, and the
+producer published correctly. Handling a repeat safely is the consumer's job,
+which is why the event has to carry an identifier it can check.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="delivery-and-idempotency"
+/>
+
+## When does a split stop helping?
+
+**Two services exist. What would show that the split gave the cost of
+microservices without the benefit?** If the two must always be deployed
+together, or one cannot run without a chatty conversation with the other, the
+team has built a distributed monolith: every operational cost of services and
+none of the independence.
+
+| Symptom                                           | What it says about the seam                               |
+| ------------------------------------------------- | --------------------------------------------------------- |
+| Every change to A needs a same-day change to B    | The boundary cuts through one concept                     |
+| A cannot answer a request without calling B       | A runs on B's uptime, as if it were still a function call |
+| One engineer owns both and releases both together | No second owner exists to be independent of               |
+| A and B release on separate days without incident | The seam is real                                          |
+
+The same pressure applies inside one app: hexagonal without enforced import
+direction decays into layered, and a folder called `domain/` proves nothing
+without the check from L2.
+
+<Checkpoint question="Two services must always be deployed together or the system breaks. What did the team build, and what did it get for its operational cost?">
+
+A distributed monolith. It pays for two pipelines, two sets of monitoring and a
+network hop, and receives none of the deployment independence that was the
+reason to split, because the two halves still move as one.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="distributed-monolith"
+/>
 
 ## Beyond this example
 
-The pricing/loyalty split is one seam, in one direction — a few questions
-to test whether the reasoning actually transfers, not just this specific
-pair of services:
+The pricing and loyalty pair is one case, not the whole territory. It is one
+seam, in one direction, with one kind of partner. Questions that test whether
+the reasoning transfers:
 
-- What changes if the requirement flips — if loyalty points **must** be
-  correct the instant checkout completes (say, a "redeem points during this
-  same checkout" feature)? Which version from above stops being viable, and
-  does the layered version suddenly look better instead of worse?
-- If a fifth engineer joins and starts working exclusively on loyalty
-  logic, at what point (if any) does splitting `loyaltyHandler` into its
-  own microservice start paying for itself — and what would you want to
-  measure to know, rather than guess?
-- The event-driven version still shares one thing across pricing and
-  loyalty: the event's shape (`{ orderId, customerId, total }`). If loyalty
-  needs a field pricing doesn't have yet, who owns changing that contract,
-  and what does "who owns it" tell you about whether this seam was drawn in
-  the right place to begin with?
+- What changes if loyalty points **must** be correct the instant checkout
+  completes, for example a "redeem points during this same checkout" feature?
+  Which version stops being viable, and does the layered version suddenly look
+  better instead of worse?
+- If a fifth engineer starts working only on loyalty logic, at what point (if
+  any) does a separate loyalty service pay for itself, and what would you want
+  to measure to know rather than guess?
+- The event's shape (`orderId`, `customerId`, `total`) is the one thing pricing
+  and loyalty still share. If loyalty needs a field pricing lacks, who owns
+  changing that contract, and what does your answer say about whether the seam
+  was drawn in the right place?

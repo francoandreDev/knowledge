@@ -3761,3 +3761,11 @@ Migrated to the three-tier model: `classic-design-patterns` (6 topics, 69 items,
 Checks: typecheck 0 errors, 273 pages built, 26 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (6/9/5/9), no Mermaid errors, Mark as done enabled.
 
 Total migrated: 193 of 246. Next: `evolutionary-design`, `long-term-design-judgment` (closes software-design), plus `architecture/architecture-styles` and `domain-driven-design`.
+
+## 2026-11-04 — software-design closed + architecture batch 1
+
+Migrated to the three-tier model: `software-design/evolutionary-design` (6 topics, 67 items, code topic `rule-pipeline`; worked-example arithmetic checked in Node, a confusing fee-waiver rule dropped), `software-design/long-term-design-judgment` (5 topics, 60 items, all quiz; "staff engineer" wording and a real-company attribution removed; invented cost chart replaced with the demo's formula 4 + 3 × dependents), `architecture/architecture-styles` (9 topics, 108 items, all quiz; long server/compose/YAML blocks replaced by diagrams and tables), `architecture/domain-driven-design` (7 topics, 77 items, all quiz; the self-contradicting $95 + $10 hook against a $100 limit replaced by a consistent two-clerk example).
+
+Checks: typecheck 0 errors, 273 pages built, 7 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (6/5/9/7), no Mermaid errors, Mark as done enabled.
+
+`software-design/` is complete: 13 of 13. Total migrated: 197 of 246. Next: architecture batch 2 (`hexagonal-clean-architecture`, `event-driven-architecture`, `build-vs-buy`, `adr-governance`).

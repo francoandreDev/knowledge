@@ -4,27 +4,30 @@ title: "L2 — Four shapes for the same problem, and the forces that pick one"
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named four styles and the forces behind each one. Here's the same
-checkout feature drawn all four ways, so the difference between "layered"
-and "hexagonal" — or "event-driven" and "microservices" — stops being a
-definition and starts being something you can see fail differently.
+export const unit = {
+  track: "architecture",
+  unitSlug: "architecture-styles",
+};
+
+L1 named four styles and the pressures behind them. Here the same checkout
+feature (price an order, apply discounts, notify a loyalty partner) is drawn
+all four ways, so the difference between "layered" and "hexagonal", or
+"event-driven" and "microservices", is something you can see fail differently.
 
 <LevelIntro
   items={[
-    "The same feature diagrammed four ways",
-    "What actually varies between the styles",
-    "The one question that dominates the decision",
+    "The same feature drawn four ways",
+    "What really separates look-alike styles",
+    "The one question that dominates the choice",
   ]}
 />
 
-## The same feature, drawn four ways
+## If the loyalty partner is down for ten minutes, which shape breaks checkout?
 
-Take the checkout service from L1: price an order, apply discounts, and
-notify a loyalty-points partner. Before looking at the diagrams below — if
-the loyalty partner's system goes down for ten minutes, which of the four
-shapes below would you guess breaks checkout entirely, and which keeps
-pricing orders regardless?
+**Before reading the diagrams: which shapes would keep pricing orders, and
+which would stall?** Each box below is one running piece of the feature.
 
 ```mermaid
 flowchart LR
@@ -62,38 +65,31 @@ flowchart LR
 flowchart LR
     subgraph Micro["Microservices"]
         direction TB
-        PS["Pricing service\n(own deploy, own DB)"] -->|HTTP/event| LS["Loyalty service\n(own deploy, own DB)"]
+        PS["Pricing service\n(own deploy, own DB)"] -->|HTTP or event| LS["Loyalty service\n(own deploy, own DB)"]
     end
 ```
 
-In the layered diagram, the pricing service calls the loyalty client
-_directly_ — if that call is synchronous and the loyalty partner is down,
-`priceOrder()` doesn't return, and checkout is broken by a dependency that
-has nothing to do with pricing. In the event-driven diagram, pricing
-publishes `OrderPriced` and returns immediately; the loyalty handler picks
-the event up whenever it can. Same feature, opposite failure behavior —
-that's not a coincidence, it's what each shape is _for_.
+In the layered drawing, pricing calls the loyalty client directly. If that call
+waits for the partner and the partner is down, `priceOrder()` does not return
+and checkout is broken by something unrelated to pricing. In the event-driven
+drawing, pricing publishes `OrderPriced` and returns; the loyalty handler picks
+the event up whenever it can. Same feature, opposite failure behavior. That is
+not a coincidence; it is what each shape is for.
 
-## What actually varies between the four
+## Layered and hexagonal both live in one app, so what separates them?
 
-Before the table: hexagonal and layered both keep the code in one
-deployable unit — so what's the actual difference between them, if it's not
-"one has more services"?
+**On a whiteboard they look almost the same. What is actually different?**
+Not the folder listing. It is the direction an import is allowed to point. An
+import means one file depends on another file's code, and a dependency is a
+kind of power line: if the domain imports a database adapter, the domain now
+knows database details.
 
-| Style             | Unit of deployment             | Where the domain rules live                           | Coupling axis it optimizes             | Coupling axis it accepts                             |
-| ----------------- | ------------------------------ | ----------------------------------------------------- | -------------------------------------- | ---------------------------------------------------- |
-| Layered           | One app                        | Spread across layers, easy to leak into any of them   | Simplicity of the call graph           | Framework/DB details can leak into business logic    |
-| Hexagonal / clean | One app                        | Isolated in the center, behind ports                  | Domain independent of infrastructure   | More files, more indirection, a learning curve       |
-| Event-driven      | One app or many                | Wherever handlers live; logic is spread across events | Coupling _in time_ (producer/consumer) | Eventual consistency, harder-to-trace bugs           |
-| Microservices     | Many, independently deployable | Split per service, each service owns its own rules    | Team/deploy independence               | Network calls, partial failure, operational overhead |
-
-The row that trips people up most is "layered vs. hexagonal" — they look
-almost the same on a whiteboard. The difference isn't visible in a folder
-listing; it's in which direction an import statement is allowed to point.
-Layered code _usually_ lets a lower layer import from a higher one by
-accident (nothing stops it); hexagonal code makes that a structural
-impossibility, because the domain layer never imports an adapter — adapters
-import the domain's port interfaces, never the reverse.
+| Style             | Unit of deployment             | Where the domain rules live                         | What it optimizes                         | What it accepts                                    |
+| ----------------- | ------------------------------ | --------------------------------------------------- | ----------------------------------------- | -------------------------------------------------- |
+| Layered           | One app                        | Spread across layers, easy to leak into any of them | Simple call graph                         | Framework and DB details can leak into the rules   |
+| Hexagonal / clean | One app                        | Isolated in the center, behind ports                | Domain independent of infrastructure      | More files, more indirection, a learning curve     |
+| Event-driven      | One app or many                | Wherever the handlers live                          | Coupling in time between sender and taker | Eventual consistency, harder-to-trace bugs         |
+| Microservices     | Many, independently deployable | Split per service; each owns its rules              | Team and deploy independence              | Network calls, partial failure, operational weight |
 
 ```mermaid
 flowchart LR
@@ -109,43 +105,35 @@ flowchart LR
     end
 ```
 
-**The dependency rule, restated as pseudocode** — this is the actual test
-you can run over a codebase, not just eyeball on a diagram:
+The check you can run over a real codebase is a small table, not a feeling:
 
-```
-function isHexagonal(module):
-  if module is domain:
-    return not module.imports.any(isFrameworkOrAdapter)
-  if module is adapter:
-    return module.imports.contains(domainPortInterface)
-  return true  # anything else is free to import what it needs
-```
+| File kind       | Allowed to import            | Violation if it imports              |
+| --------------- | ---------------------------- | ------------------------------------ |
+| Domain          | Other domain code only       | A framework, a DB client, an adapter |
+| Adapter         | The domain's port interfaces | The domain importing it back         |
+| Everything else | Whatever it needs            | No rule applies                      |
 
-If a linter rule like this would fail on your "domain" folder today, the
-codebase isn't hexagonal no matter what the folder is named — the label
-means nothing without the enforced direction.
-
-If "import" is new: importing is one file depending on another file's code.
-The direction matters because a dependency is a kind of power line. If the
-domain imports the database adapter, the domain now knows database details. If
-the adapter imports the domain's port, the outside tool must adapt to the
-domain instead.
+If that check would fail on your `domain/` folder today, the codebase is not
+hexagonal no matter what the folder is called.
 
 <Checkpoint question="A codebase has a folder named domain/, but that folder imports a concrete database client directly. Is this codebase hexagonal?">
 
-No. The folder name doesn't matter — what matters is the enforced import
-direction. Since the domain imports an adapter (even one wrapped in a
-`domain/` folder), the dependency arrow points the wrong way, and the
-`isHexagonal` check above would fail it. "Hexagonal" describes a structural
-rule, not a naming convention.
+No. The folder name does not matter; the enforced import direction does. The
+domain imports an infrastructure piece, so the arrow points the wrong way and
+the table's check fails it. "Hexagonal" describes a structural rule, not a
+naming convention.
 
 </Checkpoint>
 
-## Event-driven: what does "loose coupling" actually buy, and cost?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="layered-vs-hexagonal"
+/>
 
-Two services that communicate through events never call each other by
-name — so what's the trade a team is actually making when they choose that
-over a direct call?
+## What does event-driven's "loose coupling" buy, and what does it cost?
+
+**If two parts never call each other by name, what trade did the team make?**
 
 ```mermaid
 sequenceDiagram
@@ -153,24 +141,28 @@ sequenceDiagram
     participant Bus as Event bus
     participant Loyalty
     Pricing->>Bus: publish OrderPriced(orderId, total)
-    Note over Pricing: returns immediately, doesn't wait
+    Note over Pricing: returns immediately, does not wait
     Bus-->>Loyalty: deliver OrderPriced (later, maybe retried)
     Loyalty->>Loyalty: award points
 ```
 
-The trade is explicit in the diagram: `Pricing` never learns whether
-`Loyalty` succeeded, retried, or is three minutes behind. That's the whole
-point — the producer's correctness no longer depends on the consumer's
-uptime — but it means "did the customer get their points?" is no longer a
-question a single stack trace can answer. Debugging shifts from "read the
-call stack" to "read the event log and reconstruct the timeline," which is
-a materially different skill and tooling investment.
+`Pricing` never learns whether `Loyalty` succeeded, retried, or is three
+minutes behind. That is the point: the sender's correctness no longer depends
+on the receiver's uptime. The price is that "did the customer get their
+points?" is no longer answered by one call stack. Debugging moves from reading
+a call stack to reading an event log and rebuilding the timeline, which is a
+different skill and a real tooling investment.
 
-## Microservices: the boundary is the whole decision
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="event-coupling"
+/>
 
-Splitting a monolith into two services is easy to draw and hard to get
-right — what's the one property a good service boundary has that a bad one
-doesn't?
+## Where does a service boundary go, and how many teams justify one?
+
+**Splitting a monolith into two services is easy to draw. What property does a
+good boundary have that a bad one lacks?**
 
 ```mermaid
 flowchart TB
@@ -182,65 +174,63 @@ flowchart TB
     end
 ```
 
-A good boundary is drawn where the _conversation between two parts is
-already naturally rare and coarse_ — pricing tells loyalty "an order was
-priced," once, and moves on. A bad boundary is drawn through a concept two
-parts both need constantly (like "what tier is this customer" or "is this
-order valid") — splitting that apart doesn't remove the coupling, it just
-turns free function calls into network calls that carry the exact same
-coupling, plus latency and a new failure mode. Conway's Law is the blunt
-version of this: your services will tend to mirror your team's
-communication structure whether you plan it or not — so if pricing and
-loyalty are the same two people, splitting them into two services buys
-you two deploy pipelines to babysit and very little independence, because
-the person making the change is the same person who'd have to coordinate
-across both anyway.
+A good boundary sits where the conversation between two parts is already rare
+and coarse: pricing tells loyalty "an order was priced," once, and moves on. A
+bad boundary cuts through a concept both parts need constantly. Splitting it
+does not remove the coupling; it turns free function calls into network calls
+carrying the same coupling, plus latency and a new way to fail.
 
-Conway's Law in human terms: if two groups rarely talk clearly, the systems
-they build will often communicate awkwardly too. A service boundary works best
-when it matches a real ownership boundary and a naturally small conversation,
-not just a folder someone wanted to rename into a service.
+Conway's Law is the blunt version: a system tends to mirror the communication
+structure of the people who build it. If pricing and loyalty are the same two
+people who talk daily, two services buy two deploy pipelines and almost no
+independence.
+
+Team count is also what makes splitting pay at all. In one shared codebase every
+pair of people may need to coordinate, which is `n × (n - 1) / 2` pairs. Grouping
+people into teams of about four and counting only team-to-team pairs gives a
+much smaller number. This is a counting illustration under that assumption, not
+a measured meeting cost.
+
+| Engineers | Person-to-person pairs, one codebase | Teams of about 4 | Team-to-team pairs |
+| --------- | ------------------------------------ | ---------------- | ------------------ |
+| 3         | 3                                    | 1                | 0                  |
+| 6         | 15                                   | 2                | 1                  |
+| 12        | 66                                   | 3                | 3                  |
+| 20        | 190                                  | 5                | 10                 |
+| 40        | 780                                  | 10               | 45                 |
 
 <Checkpoint question="Pricing and loyalty are built and owned by the same two engineers, who talk constantly. Does splitting them into two microservices buy this team independence?">
 
-Barely any. Independence comes from decoupling deploy schedules across
-different owners — here the "boundary" runs through a team that already
-coordinates every day, so splitting it just adds two deploy pipelines and a
-network hop without removing any real coordination cost.
+Barely any. Independence comes from decoupling the deploy schedules of
+different owners. Here the boundary runs through a pair that already
+coordinates every day, so the split adds two pipelines and a network hop
+without removing any real coordination cost.
 
 </Checkpoint>
 
-## The decision procedure
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="boundary-and-teams"
+/>
 
-Given the four questions from L1, one of them tends to dominate the other
-three in practice — which one, and why might that be the one worth asking
-first, before "which style sounds most rigorous"?
+## Which question comes first?
+
+**Of the four questions, which one should be asked before "which style sounds
+most rigorous"?** Team count, because it changes the cost of being wrong by an
+order of magnitude: a bad layer boundary is a refactor inside one repository; a
+bad service boundary is a multi-team, multi-deploy migration.
 
 ```mermaid
 flowchart TD
-    Q1["How many independent teams\nwill touch this?"] -->|"1 team"| Skip["Skip microservices —\nnothing to decouple yet"]
+    Q1["How many independent teams\nwill touch this?"] -->|"1 team"| Skip["Skip microservices:\nnothing to decouple yet"]
     Q1 -->|"2+ teams, different deploy cadences"| Q2["Is the boundary a rare,\ncoarse conversation?"]
     Q2 -->|Yes| MS["Microservices along that seam"]
-    Q2 -->|No — chatty, shared concept| Stay["Stay one deployable unit;\nsplit the module, not the service"]
+    Q2 -->|No: chatty, shared concept| Stay["Stay one deployable unit;\nsplit the module, not the service"]
     Skip --> Q3["Does the domain need to be\nisolated from infra for testability?"]
     Q3 -->|Yes| Hexagonal["Hexagonal / clean, one app"]
     Q3 -->|No| Layered["Plain layered, one app"]
 ```
 
-Team count dominates because it's the one axis that changes the _cost of
-being wrong_ by an order of magnitude: a bad layer boundary is a refactor
-inside one repo; a bad service boundary is a multi-team, multi-deploy
-migration. That's why "how many teams" is question two in L1's list, not an
-afterthought — everything downstream of it (whether event-driven fits,
-whether the boundary is coarse enough) only matters once there's a real
-reason to consider splitting the deployment unit at all.
-
-This is the same procedure L3 applies to one concrete service, structured
-four different ways, with the actual code and config each shape produces —
-not a different process per style, the same four questions applied to
-different answers.
-
-The "Try it" demo below counts possible coordination pairs with
-`n × (n - 1) / 2`. It is not a law of nature or a prediction of exact meeting
-time; it is a visualization of why person-to-person coordination gets crowded
-fast as a single shared codebase grows.
+The "Try it" demo below plots exactly the table above: drag the team size and
+watch the two lines diverge.
