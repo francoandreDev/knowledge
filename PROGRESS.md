@@ -3729,3 +3729,11 @@ Migrated to the three-tier model: `bdd` (3 topics, 36 items, all quiz), `test-do
 Checks: typecheck 0 errors, 273 pages built, 17 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (3/5/8/6), no Mermaid errors, Mark as done enabled.
 
 Total migrated: 177 of 246. Next: testing-quality batch 3 (`property-based-testing`, `contract-testing`, `fault-injection`, `test-suite-architecture`), then `quality-culture`.
+
+## 2026-11-04 — testing-quality batch 3 (4 units)
+
+Migrated to the three-tier model: `property-based-testing` (7 topics, 84 items, code topic `write-the-property`), `contract-testing` (6 topics, 72 items, code topic `verify-contract-code`), `fault-injection` (5 topics, 60 items, all quiz), `test-suite-architecture` (6 topics, 71 items, code topic `quarantine-code`). test-suite-architecture's old L3 claimed shared-limiter tests pass serially (they don't) and implied in-memory state is shared across worker processes; both corrected.
+
+Checks: typecheck 0 errors, 273 pages built, 35 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (7/6/5/6), no Mermaid errors, Mark as done enabled.
+
+Total migrated: 181 of 246. Next: `testing-quality/quality-culture` (last of the track) plus software-design batch 1 (`cost-design`, `single-responsibility`, `naming`). `software-design/long-term-design-judgment` roadmap title has "staff engineer" to fix.

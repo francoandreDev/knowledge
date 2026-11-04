@@ -1,276 +1,187 @@
 ---
-title: "L3 — fetchPricing: a naive call, a fault-injection test that catches the hang, and the timeout+fallback fix"
+title: "L3 — fetchPricing: a naive call, a test that reproduces the hang safely, and the timeout and fallback fix"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Reproducing L1's outage, on purpose, before it ships">
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "fault-injection",
+};
+
+<Scenario label="Staging the kitchen's silence without freezing the test run">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🧩</span> <strong>Under test</strong> — <code>fetchPricing(productId)</code>, called by checkout</div>
-      <div class="flex items-center gap-1.5"><span>🕳️</span> <strong>The bug</strong> — no timeout; a hung dependency hangs the caller forever</div>
-      <div class="flex items-center gap-1.5"><span>🧪</span> <strong>The test</strong> — injects a promise that never resolves, with its own guard so the suite itself doesn't hang</div>
-      <div class="flex items-center gap-1.5"><span>🔧</span> <strong>The fix</strong> — timeout + fallback to last-known price</div>
+      <div class="flex items-center gap-1.5"><span>🧩</span> <strong>Under test</strong> — <code>fetchPricing</code>, the one place checkout asks a pricing service for a live price</div>
+      <div class="flex items-center gap-1.5"><span>🕳️</span> <strong>The bug</strong> — no time limit, so a silent dependency freezes the caller</div>
+      <div class="flex items-center gap-1.5"><span>🛡️</span> <strong>The test needs its own guard</strong> — otherwise a failing test also freezes</div>
+      <div class="flex items-center gap-1.5"><span>🔧</span> <strong>The fix</strong> — a timeout plus a fallback to the last known price</div>
     </div>
   </Fragment>
 
-L1's outage happened because nobody ever tested what `fetchPricing`
-does when the pricing API doesn't respond. This level builds that
-exact function, writes a test that deliberately makes its dependency
-hang, watches it correctly fail (the bug is real, not hypothetical),
-then fixes it and watches the same test pass. **If a test can force a
-dependency to hang on demand, what stops that test itself from hanging
-the whole suite forever too?** That question turns out to have a real
-answer, and it's part of the fix.
+In L1 the waiter kept standing at the kitchen window because no rule said
+when to stop. The checkout service has the same flaw in one function. This
+level reproduces that hang on purpose, watches the test catch it, fixes it,
+and re-runs the identical test. **If a test can make a dependency hang on
+demand, what stops that test from hanging the whole test run?** The answer
+is part of the design.
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "The naive fetchPricing, and why it hangs forever under one specific fault",
-    "A fault-injection test that reproduces the hang without hanging the suite",
-    "The timeout+fallback fix, its trade-offs, and where fault injection stops helping",
+    "Why the naive fetchPricing hangs, and the test that proves it",
+    "The timeout and fallback fix, and the guard rule",
+    "Trade-offs: timeout size, stale prices, and where this stops helping",
   ]}
 />
 
-## The function as originally written
+## What exactly is wrong with the naive version?
 
-`fetchPricing` is the only place checkout asks the pricing service for
-a live price. It's simple, it's covered by happy-path tests, and it
-shipped:
+`fetchPricing` asks a pricing service for a product's price, throws if the
+answer carries a failure status, and returns the price otherwise. It is
+covered by happy-path tests and it handles one failure mode correctly: an
+error status. **Which row of L2's failure table does it do nothing about?**
+The hang. Nothing in the function limits how long it will wait, so it waits
+exactly as long as the dependency takes to settle, including forever. No line
+is wrong; no line bounds the wait either.
 
-```js
-// pricing-client.js
+## How do you reproduce a hang without hanging the suite?
 
-// pricingService is the injection seam: production code passes the
-// real HTTP client, tests pass something else -- same seam
-// test-doubles uses, pointed at a different goal here.
-async function fetchPricing(productId, pricingService) {
-  const response = await pricingService.getPrice(productId);
-  if (!response.ok) {
-    throw new Error(`pricing service error: ${response.status}`);
-  }
-  return response.body.price;
-}
+The fake pricing service gets a mode where the call returns something that
+never settles, a promise left pending. The test then runs `fetchPricing`
+against it, with a **guard of its own** that gives up on the call after a
+fixed wait and reports a clear failure.
 
-module.exports = { fetchPricing };
+```mermaid
+sequenceDiagram
+    participant T as Test
+    participant G as Test guard timer
+    participant F as fetchPricing
+    participant D as Silent pricing fake
+    T->>G: start guard (300 ms)
+    T->>F: call with the silent fake
+    F->>D: ask for price
+    Note over D: never answers
+    G-->>T: guard fires at 300 ms
+    T->>T: report "fetchPricing never returned"
 ```
 
-This looks reasonable, and it even handles one fault type correctly —
-an error status throws, which is exactly what L2's table calls for.
-**What fault type from L2's table does this function do nothing
-about?** The timeout/hang row: there's no time limit anywhere in this
-function. `await pricingService.getPrice(productId)` will wait exactly
-as long as `getPrice` takes to settle — including forever, if it never
-settles at all. That's precisely what took the checkout service down
-in L1's Scenario: no line of this code is wrong, but no line of it
-bounds how long it's willing to wait either.
+Against the naive function, the guard is what ends the test, because the
+function has no limit of its own. That report is the bug, made visible in
+under a second instead of twenty minutes into a real outage.
 
-## A fault-injection test that reproduces the hang
+<Checkpoint question="Why does the test need its own timeout when the whole point is checking whether fetchPricing has one?">
 
-To test this, the fake `pricingService` needs a mode where
-`getPrice` deliberately never resolves — a `Promise` that's created
-and just... left pending:
-
-```js
-// pricing-client.fault.test.js
-
-function makeHangingPricingService() {
-  return {
-    getPrice() {
-      // deliberately never resolves or rejects -- simulates a
-      // dependency that accepted the connection and then went silent
-      return new Promise(() => {});
-    },
-  };
-}
-
-// a race against a hanging promise -- this is the test's own guard,
-// separate from anything fetchPricing does, so a bug in the function
-// under test can't hang the whole suite
-function withTestTimeout(promise, ms, onTimeoutMessage) {
-  let timer;
-  const timeoutPromise = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(onTimeoutMessage)), ms);
-  });
-  return Promise.race([promise, timeoutPromise]).finally(() =>
-    clearTimeout(timer),
-  );
-}
-
-async function testFetchPricingHangsOnDeadDependency() {
-  const { fetchPricing } = require("./pricing-client");
-  const hangingService = makeHangingPricingService();
-
-  let outcome;
-  try {
-    // fetchPricing is given 200ms to prove it can bound its own wait;
-    // the *test's* 300ms guard is just there to fail fast with a
-    // useful message instead of hanging the CI job indefinitely
-    await withTestTimeout(
-      fetchPricing("sku-1", hangingService),
-      300,
-      "fetchPricing never returned -- test guard tripped",
-    );
-    outcome = "resolved";
-  } catch (err) {
-    outcome = err.message;
-  }
-  return outcome;
-}
-
-module.exports = { testFetchPricingHangsOnDeadDependency };
-```
-
-Running `testFetchPricingHangsOnDeadDependency()` against the original
-`fetchPricing` returns `"fetchPricing never returned -- test guard
-tripped"` — the test's own 300ms guard is what stops the suite,
-because `fetchPricing` itself has no such limit. **That result is the
-bug, made visible on purpose, in a test that takes under a second to
-run** — instead of in production, twenty minutes into a real outage.
-
-<Checkpoint question="Why does the fault-injection test need its own timeout guard (withTestTimeout), when the whole point is testing whether fetchPricing has a timeout?">
-
-Because until the fix ships, `fetchPricing` doesn't have one — that's
-exactly the bug this test exists to catch. If the test just did `await
-fetchPricing(hangingService, id)` with no guard of its own, a hanging
-`fetchPricing` would hang the test itself, which would hang the whole
-test run, which is the one thing a test suite can never be allowed to
-do (a CI job that never finishes is worse than one that fails fast).
-The test's guard and the function's own timeout are two different
-concerns: the test's guard exists so a _failing_ test still reports a
-clear failure quickly; the function's timeout (once added) is the
-actual fix being verified.
+Because until the fix ships, `fetchPricing` has none, and that is exactly
+the bug. Without a guard of its own, a hanging function would hang the test,
+which would hang the whole run; a suite that never finishes is worse than
+one that fails fast. The two limits do different jobs: the test's guard makes
+a failing test report quickly, and the function's timeout is the fix being
+verified.
 
 </Checkpoint>
 
-## The fix: timeout plus fallback
+## What does the fix look like?
 
-The fix needs two things: a hard limit on how long to wait, and a
-sensible thing to do when that limit is hit — not just throwing a
-different error, since silently failing checkout entirely over a
-pricing hiccup is its own kind of bad outcome.
+The fix needs two things: a hard limit on waiting, and a sensible reaction
+when the limit is hit. Throwing a different error would swap one outage for
+another.
 
 ```js
-// pricing-client.js (fixed)
-
+// timeout: whichever settles first wins
 function withTimeout(promise, ms) {
   let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error("pricing service timeout")), ms);
+  const limit = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("pricing timeout")), ms);
   });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  return Promise.race([promise, limit]).finally(() => clearTimeout(timer));
 }
-
-async function fetchPricing(pricingService, productId, cache) {
-  try {
-    const response = await withTimeout(pricingService.getPrice(productId), 500);
-    if (!response.ok) {
-      throw new Error(`pricing service error: ${response.status}`);
-    }
-    cache.set(productId, response.body.price);
-    return { price: response.body.price, stale: false };
-  } catch (err) {
-    const lastKnown = cache.get(productId);
-    if (lastKnown !== undefined) {
-      return { price: lastKnown, stale: true };
-    }
-    // no cached price to fall back to -- this is the one case where
-    // a clear error to the caller is the right graceful outcome,
-    // per L2's table, rather than guessing at a price
-    throw new Error(`pricing unavailable for ${productId}: ${err.message}`);
-  }
-}
-
-module.exports = { fetchPricing };
 ```
 
-Two behaviors changed, both from L2's "graceful" branch: a **timeout**
-bounds the wait to 500ms no matter what the dependency does, and a
-**fallback** to the last cached price keeps checkout working (with a
-`stale: true` flag the caller can show to the user) instead of failing
-the whole checkout over a single slow pricing lookup. Only when there's
-truly nothing to fall back to does it surface a clear error — still
-graceful, just the last resort in the branch, not the default.
+Around that, `fetchPricing` does the following on each call:
 
-Re-running the same fault-injection test against this version: the
-hanging dependency now causes `fetchPricing` to reject with `"pricing
-service timeout"` after 500ms — well inside the test's own 300ms...
-wait, that guard needs raising too, since the real timeout is now
-500ms:
+| Outcome of the call                   | What it returns                            |
+| ------------------------------------- | ------------------------------------------ |
+| Answers in time with a success status | The price, flagged fresh, and remembers it |
+| Answers in time with a failure status | Falls to the same path as a timeout        |
+| Times out at 500 ms                   | The last remembered price, flagged stale   |
+| Times out and nothing was remembered  | A clear "pricing unavailable" error        |
 
-```js
-await withTestTimeout(
-  fetchPricing(hangingService, "sku-1", cache),
-  700, // must exceed fetchPricing's own 500ms timeout
-  "fetchPricing never returned -- test guard tripped",
-);
-```
+Those are the graceful branches from L2: a bounded wait, a fallback, and a
+clear failure only as the last resort.
 
-With that adjustment, the test now resolves in ~500ms with either a
-`stale: true` cached price (if `cache` has one) or a clear `pricing
-unavailable` error (if it doesn't) — never a hang. The fault-injection
-test didn't just catch the bug; re-running the identical test against
-the fix is what proves the fix actually works, the same before/after
-pattern `contract-testing`'s L3 used for its own bug.
+The same test, re-run against the fix, now needs its guard to be longer
+than the function's own 500 ms limit; with a 300 ms guard it would fire
+first and blame the function for a hang that the function was about to
+handle. With a 700 ms guard, the call resolves at about 500 ms with either a
+stale price or the clear error, and never a hang. The identical test failing
+before and passing after is what proves the fix works.
 
-<Checkpoint question="The fixed fetchPricing falls back to a cached price when the pricing service times out. Is returning a stale, possibly-wrong price always the right graceful behavior?">
+<Checkpoint question="The fixed function returns a cached price when the pricing service times out. Is a stale price always the right graceful reaction?">
 
-Not always — it depends on what's actually at stake. For a product
-listing page, a slightly stale price is a reasonable trade for staying
-up. For the final price shown at the moment of payment, charging
-someone based on a stale price could be worse than a clear "try again"
-error, if the real price has since changed significantly. This is a
-judgment call the fault-injection test can't make for you — it can
-only verify that whichever behavior you chose is what actually
-happens under failure. Deciding _which_ graceful behavior (retry,
-fallback, clear error) fits a given call site is a product/reliability
-trade-off, not a testing one.
+No. For a product listing page, a slightly old price is a fair trade for
+staying up. For the amount charged at the moment of payment, a stale price
+could be worse than a clear "try again", if the real price has moved. The
+test cannot make that choice. It can only verify that whichever behavior was
+chosen is the one that happens under failure; choosing between retry,
+fallback and clear error is a product and reliability decision.
 
 </Checkpoint>
 
-## Trade-offs: what fault injection costs, and what it can't do
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="hang-test-and-fix"
+/>
 
-**Fault injection tests are slower and more complex to write than
-happy-path tests** — the hanging-promise fake, the test's own timeout
-guard, and the need to keep that guard's threshold above whatever the
-real timeout under test is (as just shown) are all extra moving parts
-a simple `expect(result).toBe(x)` test doesn't need. That complexity
-is the cost of testing a scenario that has no natural, deterministic
-trigger otherwise.
+## What do the trade-offs cost?
 
-**You can't inject every possible fault.** The space of "everything
-that could go wrong with a dependency" is unbounded — different error
-codes, different malformed payloads, failures at different points
-mid-response, faults on the _second_ call but not the first, and so
-on. Prioritizing which faults are worth a test comes down to the same
-likelihood-times-impact thinking used to prioritize any risk: a
-pricing API timing out under load is both common (real networks are
-slow sometimes) and high-impact (it took down checkout) — that's an
-easy yes. A one-in-a-billion malformed byte sequence from a dependency
-that's never once sent one in production is a much weaker use of test-
-writing time, even though it's technically possible.
+**How long should the timeout be?** Too short and a slow-but-working service
+gets treated as dead, so users see stale prices for no reason. Too long and a
+truly hung service holds each connection open longer, which is L1's pile-up
+again, only capped. The unit's slider models this with assumed, illustrative
+numbers: a 250 ms typical slow-end response, and 8% of calls spiking to
+1,200 ms. Under those assumptions the 500 ms timeout treats about 5.9% of
+calls as failed unnecessarily, falling to 0% at 1,200 ms or more.
 
-**Relationship to production chaos engineering**, per L2: this whole
-level tested one specific, already-suspected failure mode (the
-pricing API hanging) before the fix ever shipped. Chaos engineering
-takes the opposite starting point — inject real faults into a live
-production system (kill an instance, add real latency to a real
-network path) specifically to find failure modes nobody thought to
-write a test for. They're sequential, not competing: fault-injection
-tests like this one close known gaps before deploy; chaos engineering
-in production is how a team discovers the _next_ gap to go write a
-fault-injection test for.
+| Timeout  | Unnecessary fallbacks in the demo's model |
+| -------- | ----------------------------------------- |
+| 250 ms   | 8.0% of calls                             |
+| 500 ms   | about 5.9% of calls                       |
+| 1,200 ms | 0% of calls                               |
 
-**Two directions to extend this yourself.** First: what changes if,
-instead of hanging, the pricing service responds instantly with `{
-ok: true, status: 200, body: { price: "not-a-number" } }` — a
-malformed 200, not a timeout? Does the fixed `fetchPricing` above
-handle that case correctly, or does it need an explicit shape check
-before trusting `response.body.price`? Second: checkout in a fuller
-version of this system calls both `fetchPricing` and a separate
-`fetchInventory` before completing an order — what should happen if
-the pricing call succeeds but the inventory call hangs, and does the
-answer change if it's the other way around?
+These figures come from the demo's assumptions, not from measurements of any
+real service.
+
+**How many faults deserve a test?** The set of things that can go wrong with
+a dependency is unbounded: other status codes, other bad bodies, a failure on
+the second call but not the first. Rank them the usual way, by how likely
+and how costly. A hang under load is both common and the cause of the L1
+outage, an easy yes; a one-in-a-billion byte pattern that the dependency has
+never sent is a weak use of time. The second demo shows the shape: with the
+assumed numbers there, the first few fault types tested cover most of the
+modeled incident types and later ones add little.
+
+**Fault injection is slower to write.** The silent fake, the guard, and the
+rule that the guard must outlast the function's own limit are extra moving
+parts a happy-path test never needs. That is the price of testing a scenario
+with no natural trigger.
+
+**Chaos engineering picks up where this stops.** This level tested one
+suspected failure before it shipped. Chaos engineering injects real faults
+into a live system to find failures nobody thought to write a test for, and
+the findings become the next fault-injection tests. They are sequential, not
+rivals.
+
+## This is a case, not the whole territory
+
+Try extending the worked example yourself. What changes if the pricing
+service answers instantly with a success status but a price that is not a
+number? Does the fixed function handle that, or does it need a shape check
+before trusting the body? And if checkout also calls an inventory service,
+what should happen when pricing succeeds but inventory hangs, and does the
+answer change if it is the other way round?

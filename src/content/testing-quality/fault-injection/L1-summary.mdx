@@ -4,107 +4,133 @@ title: "L1 — How do I test a system's behavior under failure, not just the hap
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="100% coverage, all green, down within an hour">
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "fault-injection",
+};
+
+<Scenario label="The waiter who waits at the kitchen window forever">
   <Fragment slot="facts">
-    <div class="not-prose grid grid-cols-2 gap-3 text-sm text-slate-700 dark:text-slate-300">
-      <div class="rounded-lg border border-emerald-300 bg-emerald-50 p-3 dark:border-emerald-700 dark:bg-emerald-950">
-        <div class="mb-1 font-semibold">Tests covered</div>
-        <ul class="ml-4 list-disc space-y-0.5">
-          <li>Happy path checkout</li>
-          <li>Validation errors (bad card, empty cart)</li>
-          <li>Business logic (discounts, tax)</li>
-        </ul>
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🍽️</span> <strong>The setup</strong> — 4 waiters, each hands an order to the kitchen and waits for the dish</div>
+      <div class="flex items-center gap-1.5"><span>🔇</span> <strong>The fault</strong> — the kitchen never answers one order (no "no", no "ready")</div>
+      <div class="flex items-center gap-1.5"><span>🧍</span> <strong>The rule nobody wrote</strong> — "stop waiting after some time"</div>
+      <div class="flex items-center gap-1.5"><span>🚫</span> <strong>Result</strong> — every waiter ends up stuck at the window; no table is served</div>
+    </div>
+    <div class="not-prose mt-3 flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300">
+      <div>
+        <div class="flex justify-between"><span>Waiters stuck after 4 silent orders</span><span>4 of 4</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 100%"></div></div>
       </div>
-      <div class="rounded-lg border border-rose-300 bg-rose-50 p-3 dark:border-rose-700 dark:bg-rose-950">
-        <div class="mb-1 font-semibold">Tests never covered</div>
-        <ul class="ml-4 list-disc space-y-0.5">
-          <li>Pricing API times out</li>
-          <li>Pricing API returns 500</li>
-          <li>Connection refused</li>
-          <li>Slow, not-quite-hung response</li>
-        </ul>
-      </div>
-      <div class="col-span-2 flex items-center gap-1.5"><span>🐛</span> <strong>The outage</strong> — came from the right-hand column, the one nobody ever wrote a test for</div>
     </div>
   </Fragment>
 
-A checkout service ships with 100% test coverage: every happy path,
-every validation error, every discount and tax rule, all green. Three
-weeks later, the third-party pricing API it calls has a bad afternoon
-and stops responding — not an error, just silence. The checkout
-service's code has no timeout anywhere in its network call, so every
-request to it just... waits. Forever.
+A restaurant has four waiters. Each hands an order through the kitchen
+window and waits for the dish. On a normal night every order comes back and
+the team is praised for how smoothly it runs. One night the kitchen gets
+four orders and answers none of them. Not a refusal, not a delay note, just
+silence. Each waiter keeps standing at the window, because nobody ever told
+them when to stop waiting.
 
-Within twenty minutes, every connection in the checkout service's pool
-is stuck waiting on a pricing API that will never answer. New checkout
-requests can't get a connection at all. The whole service is down —
-not because any line of business logic was wrong, but because nobody
-ever wrote a test for what happens when a dependency doesn't respond.
+Within minutes every waiter is stuck, and the dining room is empty-handed
+even though nothing is wrong with the menu, the prices or the waiters'
+manners. **How could the restaurant have found this out on a quiet
+afternoon, before a full night put it in front of customers?** By staging
+the silence on purpose: asking the kitchen to ignore a practice order and
+watching what the waiter does.
 
-**How does a test suite reach 100% coverage and still miss the exact
-scenario that takes the service down?**
-
-Because "coverage" measures which lines of code ran during tests — and
-every line in the checkout service ran, including the network call
-itself. What never ran was the pricing API failing. Coverage tools
-have no concept of "did you test what happens when this call hangs" —
-that's not a line of code, it's a scenario nobody deliberately
-constructed.
+A software service that calls a third-party API is that waiter. Ordinary
+tests only ever stage the kitchen answering.
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "What fault injection is, and what it's for",
-    "The failure modes a dependency can actually produce",
-    "What 'graceful' vs. 'broken' looks like under failure",
+    "What fault injection is, and what it is for",
+    "The five ways a dependency can fail",
+    "What graceful and broken look like under failure",
   ]}
 />
 
-## The shape of the problem
+## Why does a fully tested service still fall over?
 
-- Most test suites are built around **success**: call the function,
-  assert on the result. Even "error case" tests usually mean
-  _validation_ errors — bad input the code itself rejects on purpose.
-  They almost never mean "the network call this code depends on
-  failed."
-- **Fault injection** is deliberately forcing a dependency to fail in
-  a controlled test — timeout, error response, connection refused,
-  slow response — instead of only ever testing what happens when it
-  succeeds. It answers a question coverage numbers can't: not "did
-  this line run," but "does the system survive when a call it depends
-  on doesn't behave."
-- A system that's never been tested against a failing dependency isn't
-  proven safe against one — it's just untested against the one
-  scenario most likely to actually happen in production, since real
-  networks and real third parties fail constantly, quietly, and
-  without asking permission.
-- This isn't the same problem `test-doubles` solves. A test double
-  (mock/stub/fake) exists to isolate a test from a slow or
-  unpredictable real dependency, usually by making it behave
-  predictably and successfully. Fault injection reuses that same
-  seam — the point where a real dependency gets swapped for something
-  controllable — but points it at a different goal: making the
-  dependency fail on purpose, to see what the caller does about it.
+**The restaurant's training covered ordering, billing and allergies. Why did
+none of it help?** Because every one of those drills assumed the kitchen
+replies. A service with every line covered by tests is in the same position:
+line coverage says which lines ran, not which situations were staged.
+
+```mermaid
+flowchart LR
+    A[Test suite] --> B{Dependency behaves?}
+    B -->|Always answers| C[Happy path and validation errors: covered]
+    B -->|Hangs, errors, drops, lies| D[Failure handling: never executed]
+    D --> E[First run happens in production]
+```
+
+**Fault injection** is deliberately making a dependency fail inside a
+controlled test, then checking what the caller does about it. It reuses the
+same seam as the test doubles in `test-doubles` (the swap point where a
+real dependency is replaced) but points it at a different question. A double
+for isolation answers "does my code work when the dependency is fine?" A
+fault double answers "does my code survive when the dependency is not?"
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="fault-injection-purpose"
+/>
+
+## Which failures are worth staging?
+
+A dependency fails in more than one way, and each way runs different code
+in the caller:
+
+| Failure mode              | What the dependency does                | What the caller needs                     |
+| ------------------------- | --------------------------------------- | ----------------------------------------- |
+| Hang                      | Accepts the call, never answers         | A time limit on waiting                   |
+| Error response            | Answers with a failure status           | A check of the status before using it     |
+| Connection refused        | Is down or unreachable                  | Handling of a failure before any status   |
+| Slow response             | Answers, but long after a sensible wait | A choice about when slow counts as failed |
+| Partial or malformed body | Answers "success" with unusable data    | A check of the data's shape               |
+
+A caller that handles every row except the first still hangs on the first.
+Each row is its own bug waiting to happen, which is why one injected fault
+does not stand in for the others.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="fault-types"
+/>
+
+## What does a passing result look like?
+
+A test injects the fault and then asserts one of two families of outcome:
+
+| Graceful (contained)                             | Broken (spreads or hides)                    |
+| ------------------------------------------------ | -------------------------------------------- |
+| Retry with spaced attempts, then stop            | Hang while holding a connection              |
+| Fall back to a cached or default value           | Crash the whole process                      |
+| Stop calling for a while after repeated failures | Return wrong data as if it had succeeded     |
+| Return a clear, typed error to its own caller    | Let one failure drag down unrelated requests |
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="graceful-vs-broken"
+/>
 
 ## Key terms
 
-- **Fault injection** — deliberately forcing a dependency to fail
-  (timeout, error, malformed response, slow response) in a controlled
-  test, to verify how the system under test handles it.
-- **Failure mode** — the specific way a dependency fails: hangs with
-  no response, returns an error status, drops the connection, returns
-  a partial or malformed body, or responds correctly but very slowly.
-- **Graceful degradation** — the system noticing a dependency failed
-  and doing something sensible about it: retrying, falling back to a
-  cached or default value, opening a circuit breaker, or returning a
-  clear error to its own caller — instead of hanging, crashing, or
-  corrupting data.
-- **Timeout** — a hard limit on how long a call is allowed to wait for
-  a response before the caller gives up and treats it as failed,
-  covered in depth in L3.
-- **Chaos engineering** — the production-scale cousin of fault
-  injection: deliberately breaking things in a live system to surface
-  failure modes nobody predicted, rather than verifying known ones in
-  a test — the distinction is covered in L3.
+- **Fault injection**: deliberately forcing a dependency to fail in a
+  controlled test, to verify how the caller handles it.
+- **Failure mode**: the specific way a dependency fails (hang, error status,
+  refused connection, slow answer, malformed body).
+- **Graceful degradation**: noticing the failure and responding in a bounded,
+  visible way instead of hanging, crashing or corrupting data.
+- **Timeout**: a hard limit on how long a call may wait before it is treated
+  as failed.
+- **Chaos engineering**: the production-scale cousin that breaks live systems
+  to discover failures nobody predicted (see L3).

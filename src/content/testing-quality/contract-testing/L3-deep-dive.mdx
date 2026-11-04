@@ -1,10 +1,16 @@
 ---
-title: "L3 — OrderService: a consumer test, a generated contract, and a provider that fails it"
+title: "L3 — OrderService: a recorded contract, a provider that fails it, and the limits"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "contract-testing",
+};
 
 <Scenario label="Same rename, this time caught before it ships">
   <Fragment slot="facts">
@@ -18,11 +24,8 @@ import Checkpoint from "../../../components/Checkpoint.astro";
 
 L1's Scenario showed the field rename reaching production because
 nothing connected the frontend's mock to the real API. This level
-builds that connection for real: a consumer test that generates an
-actual contract file, and a provider verification test that replays it
-against real handler code. **If the same `total` → `totalAmount` rename
-happened here, at what point would it get caught — and by whose test
-suite?**
+builds that connection for real. **If the same rename happened here, at
+what point would it get caught — and by whose test suite?**
 
 By the provider's own CI, the moment someone tries to ship the rename
 — not by a user noticing a broken order total in production. That's
@@ -32,210 +35,42 @@ the difference this level makes concrete.
 
 <LevelIntro
   items={[
-    "A consumer test that generates a real contract file",
-    "A provider verification test that fails, then a fix that passes",
-    "What contract testing still can't catch, and the broker/versioning problem",
+    "A recorded contract replayed against a provider that fails it",
+    "What contract testing still can't catch",
+    "The broker, can-i-deploy, and detection time",
   ]}
 />
 
-## The consumer: a fetch wrapper and its contract test
+## What does the recorded contract say, and what does the provider return?
 
-`getOrder(id)` is the only place the frontend talks to the order
-service. This is the function whose behavior the contract needs to
-pin down:
+**Take the contract the consumer's test recorded, and the provider as it
+stands today. Where exactly do they disagree?** The consumer's test ran
+against a mock and recorded one interaction. The provider's handler was
+written independently:
 
-```js
-// order-client.js
-async function getOrder(baseUrl, id) {
-  const res = await fetch(`${baseUrl}/orders/${id}`);
-  if (!res.ok) {
-    throw new Error(`order fetch failed: ${res.status}`);
-  }
-  return res.json();
-}
+| Field           | Contract expects (from the consumer's test) | Provider returns today    | Match? |
+| --------------- | ------------------------------------------- | ------------------------- | ------ |
+| `status`        | HTTP 200                                    | HTTP 200                  | yes    |
+| `id`            | `"123"`                                     | `"123"`                   | yes    |
+| `totalAmount`   | `4999`                                      | absent (it sends `total`) | **no** |
+| `status` (body) | `"paid"`                                    | `"paid"`                  | yes    |
 
-module.exports = { getOrder };
+```mermaid
+flowchart LR
+    C["Contract file\nexpects totalAmount: 4999"] --> V["Provider verification\nreplays GET /orders/123"]
+    V --> H["Real handler\nreturns total: 4999"]
+    H --> D{"Every expected field\npresent and equal?"}
+    D -->|"no: totalAmount missing"| F["CI fails before deploy"]
+    D -->|"yes"| OK["Provider cleared for this consumer"]
+    style F fill:#fecaca,stroke:#b91c1c,color:#450a0a
+    style OK fill:#bbf7d0,stroke:#15803d,color:#052e16
 ```
 
-The consumer test doesn't call the real order service — it runs a tiny
-mock HTTP server that only knows how to answer the exact interactions
-being recorded, then writes those interactions out as a contract file:
-
-```js
-// order-client.contract.test.js
-const http = require("http");
-const fs = require("fs");
-const { getOrder } = require("./order-client");
-
-const interactions = [];
-
-function startMockProvider(expectedPath, responseBody) {
-  return http.createServer((req, res) => {
-    interactions.push({
-      description: `a request for ${expectedPath}`,
-      request: { method: "GET", path: expectedPath },
-      response: { status: 200, body: responseBody },
-    });
-    if (req.url === expectedPath) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(responseBody));
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-}
-
-async function runConsumerContractTest() {
-  const expectedOrder = { id: "123", totalAmount: 4999, status: "paid" };
-  const server = startMockProvider("/orders/123", expectedOrder);
-  await new Promise((resolve) => server.listen(0, resolve));
-  const port = server.address().port;
-
-  const order = await getOrder(`http://localhost:${port}`, "123");
-
-  // this is the actual assertion the consumer cares about --
-  // it's what makes it into the contract as the "expected" shape
-  if (
-    order.id !== "123" ||
-    order.totalAmount !== 4999 ||
-    order.status !== "paid"
-  ) {
-    throw new Error("consumer assertion failed against mock provider");
-  }
-
-  server.close();
-
-  const contract = {
-    consumer: "order-summary-frontend",
-    provider: "order-service",
-    interactions,
-  };
-  fs.writeFileSync(
-    "order-service.contract.json",
-    JSON.stringify(contract, null, 2),
-  );
-  return contract;
-}
-
-module.exports = { runConsumerContractTest };
-```
-
-Running `runConsumerContractTest()` produces `order-service.contract.json`:
-
-```json
-{
-  "consumer": "order-summary-frontend",
-  "provider": "order-service",
-  "interactions": [
-    {
-      "description": "a request for /orders/123",
-      "request": { "method": "GET", "path": "/orders/123" },
-      "response": {
-        "status": 200,
-        "body": { "id": "123", "totalAmount": 4999, "status": "paid" }
-      }
-    }
-  ]
-}
-```
-
-This file is the artifact both teams now share — checked into the
-repo, or published to a broker (more on that below). Notice what it
-does _not_ contain: nothing about how the order is stored, computed,
-or persisted on the provider's side. It only records the one thing the
-consumer actually depends on — request in, response shape out.
-
-## The provider: a real handler, and a verification test that fails
-
-The provider's own implementation, written independently of the
-contract:
-
-```js
-// order-service.js
-const orders = {
-  123: { id: "123", total: 4999, status: "paid" }, // <- field is `total`, not `totalAmount`
-};
-
-function handleGetOrder(id) {
-  const order = orders[id];
-  if (!order) return { status: 404, body: null };
-  return { status: 200, body: order };
-}
-
-module.exports = { handleGetOrder };
-```
-
-The provider verification test doesn't know or care how the consumer's
-code works — it only replays every interaction recorded in the
-contract against this real handler, and checks the real response
-matches what the contract expects:
-
-```js
-// order-service.verify.test.js
-const fs = require("fs");
-const { handleGetOrder } = require("./order-service");
-
-function deepEqual(a, b) {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
-function verifyContract(contractPath) {
-  const contract = JSON.parse(fs.readFileSync(contractPath, "utf8"));
-  const failures = [];
-
-  for (const interaction of contract.interactions) {
-    const id = interaction.request.path.split("/").pop();
-    const actual = handleGetOrder(id);
-
-    if (actual.status !== interaction.response.status) {
-      failures.push(
-        `${interaction.description}: expected status ${interaction.response.status}, got ${actual.status}`,
-      );
-      continue;
-    }
-    if (!deepEqual(actual.body, interaction.response.body)) {
-      failures.push(
-        `${interaction.description}: response body did not match contract\n` +
-          `  expected: ${JSON.stringify(interaction.response.body)}\n` +
-          `  actual:   ${JSON.stringify(actual.body)}`,
-      );
-    }
-  }
-
-  return { passed: failures.length === 0, failures };
-}
-
-module.exports = { verifyContract };
-```
-
-Running `verifyContract("order-service.contract.json")` against the
-provider above **fails**:
-
-```text
-passed: false
-failures: [
-  "a request for /orders/123: response body did not match contract
-    expected: {\"id\":\"123\",\"totalAmount\":4999,\"status\":\"paid\"}
-    actual:   {\"id\":\"123\",\"total\":4999,\"status\":\"paid\"}"
-]
-```
-
-This is the exact mismatch from L1's Scenario — but instead of reaching
-production, it fails a test in the provider's own CI pipeline, before
-the code ships. The fix is a one-line change to the provider's data
-shape:
-
-```js
-const orders = {
-  123: { id: "123", totalAmount: 4999, status: "paid" }, // fixed
-};
-```
-
-Re-running `verifyContract(...)` now returns `{ passed: true, failures: [] }`
-— the provider has proven, independently and without ever running the
-consumer's code, that it satisfies every interaction the consumer
-actually depends on.
+The verification run reports one failed interaction, "a request for
+/orders/123", with the expected and actual bodies side by side. The fix
+is a one-line change to the provider's data shape (send `totalAmount`),
+after which the same replay passes. The provider proved this without
+ever running the consumer's code.
 
 <Checkpoint question="The provider verification test never imports or runs any of the frontend's JavaScript. How is it still able to catch a bug that only shows up in the frontend's rendered page?">
 
@@ -249,11 +84,49 @@ provider verify correctness for a consumer it never has to execute.
 
 </Checkpoint>
 
+## Where is the comparison itself the point?
+
+**What rule should "matches the contract" follow — identical bodies, or
+something looser?** This is the one place where reading code earns its
+keep, because the rule is the whole design. The check is a _subset_
+match: every field the contract lists must be present and equal, but
+extra fields the provider adds are fine, since no consumer asked about
+them.
+
+```js
+function verifyContract(interactions, getActual) {
+  const failures = [];
+  for (const it of interactions) {
+    const actual = getActual(it.request);
+    const expectedBody = it.response.body ?? {};
+    const actualBody = actual.body ?? {};
+    const statusOk = actual.status === it.response.status;
+    const bodyOk = Object.entries(expectedBody).every(
+      ([key, value]) => actualBody[key] === value,
+    );
+    if (!statusOk || !bodyOk) failures.push(it.description);
+  }
+  return { passed: failures.length === 0, failures };
+}
+```
+
+An exact-equality check would fail the day a provider safely adds a
+`currency` field, punishing exactly the change consumer-driven contracts
+are meant to allow. A subset check lets additions through and still
+catches renames, removals, and changed values.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="verify-contract-code"
+/>
+
 ## What this still doesn't catch
 
-Contract testing is not a replacement for every end-to-end test — it
-replaces specifically the ones whose only job was "does the response
-shape still match." A few things stay entirely out of scope:
+**If the contract replays green, is the system safe?** No. Contract
+testing replaces specifically the end-to-end tests whose only job was
+"does the response shape still match." A few things stay entirely out
+of scope:
 
 | Failure mode                                                      | Why contract testing misses it                                                                                                                                                                                         |
 | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -268,6 +141,22 @@ common, and it's strictly worse than having no contract at all — a
 stale, unverified contract file sitting in a repo gives false
 confidence ("we have contract tests") while catching nothing, and the
 team that would have been more careful without it now isn't.
+
+<Checkpoint question="A team publishes a contract file for every consumer but never adds the replay step to the provider's pipeline. A provider engineer renames a field. What happens, and what does the team believe beforehand?">
+
+Nothing fails, so the rename ships and breaks the consumer exactly as it
+would have with no contract at all. The harmful part is the belief: the
+team thinks a safety net exists because contract files exist. The
+artifact only records the agreement; the replay on every build is what
+enforces it.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="what-it-misses"
+/>
 
 ## The broker problem: which provider version satisfies which consumer?
 
@@ -320,14 +209,41 @@ alone.
 
 </Checkpoint>
 
-**Two directions to extend this yourself.** First: with three
-consumers of the same provider instead of one, does the provider's
-verification suite need three separate test files, or can it replay
-all three contracts through the same `verifyContract` function shown
-above — and what would have to change about that function to report
-_which_ consumer's contract failed, not just that something did?
-Second: every interaction shown here was a 200 happy path — what would
-a contract interaction for an error response look like (say, `GET
-/orders/999` for an order that doesn't exist, expecting a 404), and
-does `verifyContract` already handle that case correctly, or does it
-need a change?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="broker-can-i-deploy"
+/>
+
+## How long can a breaking change hide?
+
+**If verification only runs on a schedule, how long can a bad change sit
+undetected?** In the worst case a change lands just after a run, so it
+waits one full interval: the time to catch it is 1 divided by the runs
+per day. The demo below lets you drag the frequency.
+
+| Verification runs per day | Worst-case wait until caught |
+| ------------------------- | ---------------------------- |
+| 0.5 (every other day)     | 2 days                       |
+| 1                         | 24 hours                     |
+| 4                         | 6 hours                      |
+| 12                        | 2 hours                      |
+
+Running verification on every provider build pushes that wait toward
+zero, which is why the verification step belongs in the build pipeline
+rather than on a timer.
+
+## Extending the worked example
+
+This unit's example is a case, not the whole territory: one consumer, one
+rename, one happy-path interaction. Three ways to push on it yourself.
+
+- With three consumers of the same provider instead of one, what would
+  have to change about `verifyContract` to report _which_ consumer's
+  contract failed, not just that something did?
+- Every interaction shown was a 200 happy path. What would an interaction
+  for a missing order look like (a 404 with no body), and does the
+  subset comparison above already handle it correctly?
+- What if the news were worse: the provider team deletes a field that no
+  current contract mentions, and a consumer team starts reading that field
+  next week. Which step of the process, and whose job, catches it?

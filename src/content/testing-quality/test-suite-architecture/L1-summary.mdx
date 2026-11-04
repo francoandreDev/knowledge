@@ -1,9 +1,15 @@
 ---
-title: "L1 — How do I keep a test suite fast and trustworthy as the codebase grows? (test suite architecture, parallelization, quarantine strategy)"
+title: "L1 — Why a test suite gets slow and untrusted, and the two fixes"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "test-suite-architecture",
+};
 
 <Scenario label="4 minutes a year ago. 38 minutes today. Nobody decided that.">
   <Fragment slot="facts">
@@ -24,92 +30,91 @@ import LevelIntro from "../../../components/LevelIntro.astro";
     </div>
   </Fragment>
 
-A year ago, this team's test suite ran in 4 minutes — every test, in
-one process, one after another. Nobody rewrote it since. Nobody made a
-decision to slow it down. They just kept adding tests, the way any
-growing codebase does, and each new test added its own few seconds to
-one long serial line. Today the same suite, run the same way, takes 38
-minutes.
+Picture a smoke alarm that beeps falsely every week. Within a month,
+nobody gets up when it beeps, and the night it is real, it gets the same
+shrug.
 
-Engineers stopped running it locally months ago — 38 minutes is longer
-than most people will wait before switching to something else, so
-"just push it and wait for CI" became the norm. CI itself has gotten
-flaky along the way too: a handful of tests fail intermittently, for
-reasons nobody's tracked down, and the fastest way to get a green
-build is to click "rerun." That became routine. **One of those
-"rerun and it passed" failures happened twelve times over three weeks
-before anyone noticed it only ever failed on requests that raced
-against a specific background job — a real, reproducible bug, hiding
-in plain sight behind a habit of not looking.**
+A team's test suite went the same way. A year ago it ran in 4 minutes,
+every test in one process, one after another. Nobody rewrote it. Tests
+were simply added, each one reasonable, until the same suite took 38
+minutes. Engineers stopped running it locally, and a few tests started
+failing at random, so the fastest route to a green build became the
+"rerun" button. One of those reruns hid a real race bug: it failed 12
+times over three weeks, and each time someone clicked rerun and moved on.
 
-**Nothing about the suite's individual tests got worse. So why did the
-whole thing stop being trustworthy?**
-
-The suite didn't get less correct — it got slower and noisier, and
-both of those erode trust in ways that have nothing to do with whether
-any single test is well-written. A slow suite gets skipped. A noisy
-suite gets rerun instead of read. Once "rerun and hope" is the default
-response to red, a genuine failure looks exactly like a false one —
-and gets treated the same way.
+**No individual test got worse. So why did the whole suite stop being
+trustworthy?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Why suite runtime grows even when nothing is individually slower",
-    "Parallelization/sharding as the fix for runtime, and what it requires",
-    "Quarantine as the fix for chronic flakiness, and why it isn't a graveyard",
+    "Why runtime grows with nobody deciding",
+    "Sharding as the fix for slowness",
+    "Quarantine as the fix for noise",
   ]}
 />
 
-## The shape of the problem
+## Why does a suite get slower when every test is fine?
 
-- A test suite's runtime is a **function of test count times average
-  test time**, run serially. Every new test — each one reasonable on
-  its own — adds to that total. Nobody has to make a bad decision for
-  a suite to go from 4 minutes to 38; it happens by simple addition,
-  one merged PR at a time, unless something actively counteracts it.
-- The fix for runtime isn't "write faster tests" alone (though that
-  helps) — it's **running tests in parallel**, splitting the suite
-  across multiple workers or machines so wall-clock time stops
-  scaling with test count. That only works if tests don't interfere
-  with each other when run at the same time, which is a real
-  constraint on how tests are written, not just how they're run.
-- The fix for chronic flakiness isn't "keep rerunning until it's
-  green" — covered in depth in `flaky-tests` — it's **quarantine**:
-  pulling a confirmed-flaky test out of the suite that blocks merges,
-  so it stops corroding trust in everything else, while tracking it so
-  it doesn't just quietly disappear forever.
-- Both problems — slow and untrustworthy — point at the same failure
-  mode if left unaddressed: once ignoring red (or waiting it out) is
-  the normal move, the suite stops functioning as a safety signal at
-  all. Fewer, faster, trusted tests beat a large suite nobody actually
-  looks at.
+A serial suite's wall-clock time is the sum of every test's time. Take an
+illustrative average of 1.9 seconds per test (an assumption, chosen to
+fit the numbers above):
+
+| When       | Runtime | Tests implied at 1.9 s each |
+| ---------- | ------- | --------------------------- |
+| A year ago | 4 min   | about 126                   |
+| Today      | 38 min  | 1,200                       |
+
+Nothing here is a bad decision. Each merged pull request adds a few
+seconds, and the total climbs by simple addition. The damage is not the
+minutes themselves, it is what people do about them.
+
+```mermaid
+flowchart LR
+    A["Suite is slow<br/>or noisy"] --> B["Engineers skip it<br/>or click rerun"]
+    B --> C["Red builds stop<br/>being investigated"]
+    C --> D["A real failure looks<br/>like a false one"]
+    D --> E["Real bugs slip through,<br/>trust drops further"]
+    E --> A
+```
+
+A slow suite gets skipped. A noisy suite gets rerun instead of read. Both
+end at the same place: the suite no longer works as a safety signal,
+however correct its tests are.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="growth-trust"
+/>
+
+## What are the two fixes?
+
+| Symptom                          | Fix                                                                          | What it protects |
+| -------------------------------- | ---------------------------------------------------------------------------- | ---------------- |
+| Runtime grows with test count    | **Sharding**: split the suite into slices run concurrently                   | Speed            |
+| Chronic flaky tests, rerun habit | **Quarantine**: move a confirmed-flaky test to a tracked, non-blocking track | Signal           |
+
+Sharding only works if tests do not interfere with each other when they
+run at the same time. That is a constraint on how tests are written, not
+only on how they are run. Quarantine only works if every quarantined test
+has an owner, a reason, and a revisit-by date. Without those, it is a
+shelf where tests go to be forgotten.
 
 ## Key terms
 
-- **Parallelization / sharding** — splitting a test suite across
-  multiple workers or machines so they run concurrently instead of one
-  after another, keeping wall-clock time roughly flat as the number of
-  tests grows.
-- **Test isolation** — the property that a test's outcome doesn't
-  depend on what other tests ran, in what order, or at the same time —
-  the precondition parallelization needs to be safe, covered further
-  in `flaky-tests`.
-- **Quarantine** — moving a confirmed-flaky test out of the suite that
-  blocks merges/deploys into a separate, non-blocking track, so it
-  stops causing false red builds while a real fix is pending.
-- **Trust erosion** — the dynamic where a slow or noisy suite trains
-  engineers to stop investigating red builds ("just rerun it"),
-  which then also hides real failures behind the same reflex.
+- **Sharding**: splitting a suite into disjoint slices that run at the
+  same time, then merging their results into one verdict.
+- **Test isolation**: a test's outcome does not depend on which other
+  tests ran, in what order, or at the same time.
+- **Quarantine**: pulling a confirmed-flaky test out of the merge-blocking
+  suite into a visible, non-blocking track while a real fix is pending.
+- **Trust erosion**: the slide from "investigate red" to "rerun red".
 
 ## What this unit covers
 
-L2 builds the model: how sharding keeps runtime flat, the specific
-ways tests break when run in parallel (shared mutable state, hardcoded
-ports, overlapping database rows, global caches), and the quarantine
-workflow with an owner and a deadline attached. L3 works a full
-example — a small suite with a real shared-state bug that only
-surfaces under parallel execution, the isolated fix, a quarantine
-tagging mechanism routing a known-flaky test into a non-blocking CI
-job, and the trade-offs of both techniques at scale.
+L2 builds the model: how sharding flattens runtime and where it stops
+helping, the ways tests break when run concurrently, and the quarantine
+lifecycle. L3 works one full example, a shared counter that fails only
+when tests overlap, then the isolated fix and a small quarantine check.

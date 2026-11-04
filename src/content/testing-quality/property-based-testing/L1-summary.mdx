@@ -4,6 +4,12 @@ title: "L1 — How do I test properties instead of examples? (property-based tes
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "property-based-testing",
+};
 
 <Scenario label="6 passing examples, 1 real bug nobody picked as an input">
   <Fragment slot="facts">
@@ -24,15 +30,14 @@ import LevelIntro from "../../../components/LevelIntro.astro";
           <div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 100%"></div>
         </div>
       </div>
-      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>The bug</strong> — encoding an empty array returned a string that decoded back to <code>undefined</code>, not <code>[]</code></div>
+      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>The bug</strong> — encoding an empty array returned text that decoded back to <code>undefined</code>, not <code>[]</code></div>
       <div class="flex items-center gap-1.5"><span>✅</span> <strong>The 6 examples</strong> — none of them happened to include an empty array</div>
     </div>
   </Fragment>
 
-A small library ships `encode(value)` / `decode(string)` functions for
-saving app state to `localStorage`. Six unit tests cover it: a number, a
-string, a nested object, a boolean, `null`, and an array of three items.
-All six pass. The team ships it.
+A small helper pair, `encode(value)` and `decode(text)`, saves app state to
+`localStorage`. Six tests cover it: a number, a string, a nested object, a
+boolean, `null`, and an array of three items. All six pass, so the team ships.
 
 | Test input                 | `decode(encode(x))` equals `x`? |
 | -------------------------- | ------------------------------- |
@@ -43,74 +48,102 @@ All six pass. The team ships it.
 | `null`                     | ✅                              |
 | `[1, 2, 3]`                | ✅                              |
 
-A week later, someone adds one more check: instead of picking examples by
-hand, generate 500 random values — arrays, objects, numbers, nested
-combinations — and check the same rule for every single one:
-`decode(encode(x))` should always equal `x`. **It fails on attempt 340: an
-empty array (`[]`) round-trips to `undefined`.**
+A week later someone stops picking inputs by hand. They generate 500 random
+values (arrays, objects, numbers, nested mixes) and check one rule on every
+one: `decode(encode(x))` must equal `x`. **It fails on attempt 340. An empty
+array round-trips to `undefined`.**
 
-**All six hand-picked examples passed. Why did it take a machine
-generating random junk to find a bug a careful reviewer should have
-caught?**
+**Six careful examples passed. Why did it take random junk to find a bug a
+reviewer could have caught?**
 
-Because none of the six people who wrote those examples happened to
-think of the empty array. Each example test checks one input the author
-already imagined. Nobody imagined this one — not because it's obscure,
-but because "the input list" a human writes by hand is always short, and
-an empty array doesn't feel like it needs its own line.
+Because each example only checks an input its author already imagined, and
+nobody imagined this one. It is not obscure; a hand-written list is simply
+short, and an empty array does not feel like it deserves its own line.
 
 </Scenario>
 
-The six examples weren't wrong — they just never happened to touch the
-one input where the bug actually lived. That's not a fluke; it's a
-structural limit of picking test inputs by hand.
+The six tests were not wrong. They never touched the one input where the bug
+lived, and that is a structural limit of choosing inputs by hand.
 
 <LevelIntro
   items={[
-    "The difference between an example and a property",
-    "Why generated random inputs find bugs hand-picked ones miss",
-    "What 'shrinking' does once a failure is found",
+    "An example versus a property",
+    "Why generated inputs find what hand-picked ones miss",
+    "What shrinking does after a failure",
   ]}
 />
 
-## The shape of the problem
+## Who chooses the input: you, or a machine?
 
-- **Example-based testing** (every unit covered so far in this track —
-  `case-automated-testing`, `assertions-matter`, `tdd-basics`, `bdd`)
-  picks specific inputs and specific expected outputs by hand: "given
-  `42`, expect `42`." Each test is only as good as the inputs someone
-  thought to write.
-- **Property-based testing** flips the question. Instead of "given this
-  input, expect this output," you state a rule that should hold for
-  _every_ valid input — a **property** — and a tool generates hundreds of
-  inputs automatically to try to break it.
-- Here, the property is simple to say and easy to miss testing by hand:
-  **"for any value `x`, `decode(encode(x))` equals `x`."** No human has
-  to imagine every shape `x` could take — the generator's job is to try
-  as many shapes as it can, including the ones nobody thought to write.
-- When a generated input breaks the property, the tool doesn't just hand
-  you the raw failing case (which might be a deeply nested, 40-item
-  random object) — it **shrinks** it down to the smallest input that
-  still fails, so the bug report reads "fails on `[]`," not "fails on
-  this unreadable blob."
-- This isn't a replacement for `mutation-testing` (which checks whether
-  your _existing_ tests would catch a known kind of bug) or for example
-  tests generally — it's a different way of _generating_ the test inputs
-  in the first place, useful anywhere a real invariant exists to check.
+**Both kinds of test run the same code. What actually differs?**
+
+```mermaid
+flowchart LR
+    subgraph EX["Example test"]
+        direction LR
+        E1["You pick: 42"] --> E2["Run once"] --> E3["Expect 42"]
+    end
+    subgraph PR["Property test"]
+        direction LR
+        P1["You state a rule:\ndecode(encode(x)) equals x"] --> P2["Machine generates\nmany x values"] --> P3["Check the rule\nfor each x"]
+    end
+```
+
+|                  | Example test                            | Property test                               |
+| ---------------- | --------------------------------------- | ------------------------------------------- |
+| What you write   | One input and its expected output       | A rule that must hold for every valid input |
+| Who picks inputs | You, in advance                         | A generator, at run time                    |
+| Runs per test    | 1                                       | Hundreds by default (500 in the Scenario)   |
+| Weakness         | Only as good as the inputs you imagined | Needs a rule you can state truthfully       |
+
+A **property** is that rule. Here it is `decode(encode(x))` equals `x` for any
+`x`: a **round-trip property** (do something, undo it, get the original back).
+The **generator** is the part that produces the `x` values.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="example-vs-property"
+/>
+
+## What happens when the rule breaks?
+
+**A generator hands the property a 40-key random object and it fails. Is
+"it failed on this blob" a useful bug report?**
+
+Not really. When a generated input breaks the rule it is a **counterexample**
+(to **falsify** a property is to find one). The tool then **shrinks** it: it
+keeps trying smaller, simpler versions of the failing input and keeps any that
+still fail, until nothing smaller fails.
+
+```mermaid
+flowchart LR
+    A["Raw counterexample:\na large random value"] --> B["Try simpler versions"]
+    B --> C{"Still fails?"}
+    C -- "yes" --> B
+    C -- "no smaller version fails" --> D["Report the minimal\ncounterexample: []"]
+```
+
+That is why the Scenario's report reads "fails on `[]`" instead of an
+unreadable blob.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="shrinking-basics"
+/>
 
 ## Key terms
 
-- **Property** — a rule that should hold true for an entire class of
-  inputs, not just one ("encoding then decoding returns the original
-  value"), as opposed to an example's single input → single output.
-- **Generator** — code that produces random (and edge-case-biased) test
-  inputs of a given type — numbers, strings, arrays, custom objects.
-- **Falsify** — to find an input for which the property does not hold;
-  the generator's whole job is trying to falsify the property.
-- **Counterexample** — a specific input that broke the property.
-- **Shrinking** — automatically simplifying a failing input down to the
-  smallest, simplest version that still reproduces the failure.
-- **Round-trip property** — a property of the form "doing A then undoing
-  A returns the original value" (encode/decode, serialize/parse,
-  compress/decompress) — one of the most common and easiest property
-  patterns to write, covered in depth in L2.
+- **Property** — a rule that holds for a whole class of inputs, not one.
+- **Generator** — produces test inputs of a given type, biased toward edge cases.
+- **Counterexample** — an input that breaks the property.
+- **Shrinking** — reducing a failing input to the smallest one that still fails.
+- **Round-trip property** — "do A, undo A, get the original" (encode/decode,
+  serialize/parse, compress/decompress).
+
+This does not replace example tests or `mutation-testing`. Example tests are
+still the right tool when no clean rule exists; mutation testing asks whether
+your _existing_ tests would catch a bug; property testing changes where the
+inputs come from. An interactive demo on this page lets you drag the number of
+generated cases and watch the chance of hitting a rare bug rise.

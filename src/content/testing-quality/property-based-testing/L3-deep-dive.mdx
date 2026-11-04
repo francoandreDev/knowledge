@@ -1,57 +1,59 @@
 ---
-title: "L3 — mergeIntervals: a hand-rolled generator, a real bug, and a shrink to the minimal case"
+title: "L3 — mergeIntervals: a real bug, a property, and a shrink to the minimal case"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="3 passing examples, one contained interval nobody wrote">
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "property-based-testing",
+};
+
+<Scenario label="4 passing examples, one contained interval nobody wrote">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>📦</span> <strong>Code</strong> — <code>mergeIntervals</code>: takes a list of <code>{"{start, end}"}</code> ranges, merges the overlapping ones</div>
-      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Suite</strong> — 3 examples, all pass, all "increasing-end" overlaps</div>
-      <div class="flex items-center gap-1.5"><span>🕳️</span> <strong>Missing case</strong> — an interval fully <em>contained</em> inside another, e.g. <code>[2,3]</code> inside <code>[1,10]</code></div>
-      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>The bug</strong> — merging sets the merged end to the new interval's end instead of the larger of the two</div>
+      <div class="flex items-center gap-1.5"><span>📦</span> <strong>Code</strong> — <code>mergeIntervals</code>: merges overlapping ranges like 1–3 and 2–6 into 1–6</div>
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>Suite</strong> — 4 examples, all pass, all with "walking forward" ends</div>
+      <div class="flex items-center gap-1.5"><span>🕳️</span> <strong>Missing case</strong> — a range fully <em>inside</em> another, like 2–3 inside 1–10</div>
+      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>The bug</strong> — the merged end is set to the new range's end, not the larger of the two</div>
     </div>
   </Fragment>
 
-`mergeIntervals` takes overlapping ranges like `[1,3]`, `[2,6]`, `[8,10]`
-and merges the overlapping ones into `[1,6]`, `[8,10]`. Three example
-tests cover it — no overlap, two overlapping, three overlapping — and
-all three pass. **Before reading on: every one of those three examples
-has intervals whose `end` values increase as you scan left to right. Is
-that true of every possible input this function could ever receive?**
+`mergeIntervals` turns overlapping ranges like 1–3, 2–6 and 8–10 into 1–6 and
+8–10. Four example tests cover it and all four pass. **Every one of those
+examples has ends that increase as you scan left to right. Is that true of
+every list the function could ever receive?**
 
-No — and that gap is exactly where this level is headed.
+No, and that gap is where this level is headed.
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "A real invariant worth checking, and the bug three examples missed",
-    "A hand-rolled generator and shrinker, built from scratch",
-    "When a property doesn't exist, and how a generator gets tuned",
+    "A true invariant and the bug four examples missed",
+    "A shrink trace from four ranges down to two",
+    "When no property exists or the generator misleads",
   ]}
 />
 
-## The function and its example suite
+## What does the function do, and why did four examples pass?
+
+The merge loop is short enough that reading it is the point:
 
 ```js
-// intervals.js
 function mergeIntervals(intervals) {
   if (intervals.length === 0) return [];
-  const sorted = [...intervals]
+  const sorted = intervals
     .map((iv) => ({ ...iv }))
     .sort((a, b) => a.start - b.start);
-
   const merged = [sorted[0]];
-  for (let i = 1; i < sorted.length; i++) {
+  for (const curr of sorted.slice(1)) {
     const last = merged[merged.length - 1];
-    const curr = sorted[i];
     if (curr.start <= last.end) {
-      // merge: extend the current range to cover curr too
-      last.end = curr.end; // <- the bug lives here
+      last.end = curr.end; // bug: should keep the larger end
     } else {
       merged.push(curr);
     }
@@ -60,335 +62,128 @@ function mergeIntervals(intervals) {
 }
 ```
 
-```js
-// intervals.test.js
-test("no overlap: both intervals stay separate", () => {
-  expect(
-    mergeIntervals([
-      { start: 1, end: 2 },
-      { start: 5, end: 6 },
-    ]),
-  ).toEqual([
-    { start: 1, end: 2 },
-    { start: 5, end: 6 },
-  ]);
-});
+| Example input                          | Output                   | Right?       |
+| -------------------------------------- | ------------------------ | ------------ |
+| 1–2 and 5–6 (no overlap)               | 1–2 and 5–6              | ✅           |
+| 1–4 and 3–6                            | 1–6                      | ✅           |
+| 1–3, 2–5 and 4–8                       | 1–8                      | ✅           |
+| 1–3, 2–6 and 8–10                      | 1–6 and 8–10             | ✅           |
+| **1–10 and 2–3 (second inside first)** | **1–3 (should be 1–10)** | ❌ not tried |
 
-test("two overlapping intervals merge into one", () => {
-  expect(
-    mergeIntervals([
-      { start: 1, end: 4 },
-      { start: 3, end: 6 },
-    ]),
-  ).toEqual([{ start: 1, end: 6 }]);
-});
+In the first four, each new range ends later than the last, so "take the new
+end" happens to equal "take the larger end." Only a contained range separates
+the two.
 
-test("three overlapping intervals merge into one", () => {
-  expect(
-    mergeIntervals([
-      { start: 1, end: 3 },
-      { start: 2, end: 5 },
-      { start: 4, end: 8 },
-    ]),
-  ).toEqual([{ start: 1, end: 8 }]);
-});
-```
+## What should always be true, whatever the input?
 
-All three pass. Notice the pattern: in every example, each interval's
-`end` is larger than the previous one's — the ranges "walk forward."
-Nobody wrote an example where a later interval is fully **contained**
-inside an earlier, wider one.
+**Instead of adding a fifth example, what is the rule the function promises?**
 
-## The property: what should always be true, for any input?
+| Invariant           | Meaning for the output                                              |
+| ------------------- | ------------------------------------------------------------------- |
+| Sorted              | Ranges appear in increasing order of start                          |
+| Non-overlapping     | No two ranges share a point (touching at a point counts as sharing) |
+| Coverage-preserving | The integer points covered by the output equal those of the input   |
 
-Instead of picking more examples, state the actual invariant the
-function is supposed to guarantee, no matter what list it's given:
+The third is the strong one: it says merging gained nothing and lost nothing.
+A property test checks all three on every generated list.
 
-1. **Sorted** — the output intervals are in increasing order of `start`.
-2. **Non-overlapping** — no two output intervals share a point.
-3. **Coverage-preserving** — the set of integer points covered by the
-   output is exactly the same set covered by the input (nothing gained,
-   nothing lost by merging).
+<Checkpoint question="Coverage is checked by listing every integer point in each range. Would that work if the ends could be decimals like 1.5?">
 
-```js
-function integerPointsCovered(intervals) {
-  const points = new Set();
-  for (const { start, end } of intervals) {
-    for (let i = start; i <= end; i++) points.add(i);
-  }
-  return points;
-}
-
-function setsEqual(a, b) {
-  if (a.size !== b.size) return false;
-  for (const x of a) if (!b.has(x)) return false;
-  return true;
-}
-
-function isSortedAndNonOverlapping(intervals) {
-  for (let i = 1; i < intervals.length; i++) {
-    if (intervals[i].start <= intervals[i - 1].end) return false;
-  }
-  return true;
-}
-
-function mergeIntervalsProperty(intervals) {
-  const output = mergeIntervals(intervals);
-  return (
-    isSortedAndNonOverlapping(output) &&
-    setsEqual(integerPointsCovered(output), integerPointsCovered(intervals))
-  );
-}
-```
-
-<Checkpoint question="Property (3), coverage-preserving, is checked here by materializing every integer point into a Set. Would this exact technique work if intervals could have decimal bounds like 1.5?">
-
-No — the technique relies on ranges being small enough to enumerate
-every integer inside them, which only works because these intervals are
-bounded, integer-valued ranges in the example. A decimal-bounded interval
-has infinitely many points between any two bounds, so there's nothing to
-enumerate. A property test for that version would need a different
-coverage check — e.g. "for N randomly sampled real-numbered probe
-points, a point covered by the input is covered by the output and vice
-versa" — trading exactness for a check that's still strong evidence
-without literal enumeration.
+No. It works because the ranges are bounded and integer-valued, so each range
+has finitely many points. Between 1.5 and 2.5 there are infinitely many
+points, so there is nothing to list. A decimal version needs a different
+check, such as sampling many probe points and comparing whether input and
+output cover each one. That is weaker evidence than exact enumeration but
+still strong, and it shows a property sometimes has to be redesigned when the
+data type changes.
 
 </Checkpoint>
 
-## A hand-rolled generator
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="write-the-property"
+/>
 
-No library is required to get the core idea — a generator is just a
-function that returns a random valid input, built with plain `Math.random()`:
+## How does the machine find the bug, and what does shrinking leave?
 
-```js
-function randomInt(min, max) {
-  return min + Math.floor(Math.random() * (max - min + 1));
-}
+**A generator hands the property random lists. Why would it hit a contained
+range far more often than a person writing examples?**
 
-function genInterval() {
-  const start = randomInt(0, 20);
-  const end = start + randomInt(0, 8); // guarantees start <= end
-  return { start, end };
-}
+A generator for this function is deliberately narrow: starts between 0 and 20,
+range lengths between 0 and 8, one to six ranges per list. In a small space, ranges
+overlap and nest constantly. If it picked ends up to a million, nearly every
+range would miss every other one and the merge logic would hardly run.
 
-function genIntervalList() {
-  const count = randomInt(1, 6);
-  return Array.from({ length: count }, genInterval);
-}
+It soon produces a failing list. The run below was executed against the buggy
+function above:
+
+```mermaid
+flowchart TD
+    A["Raw failure, 4 ranges\n3-17, 6-8, 12-14, 1-2\noutput loses points 9-11 and 15-17"] -->|"remove a range\nthat is not needed"| B["3 ranges\n3-17, 12-14, 1-2"]
+    B -->|"remove another"| C["2 ranges\n3-17, 12-14"]
+    C -->|"tighten bounds\nby 1, 15 times"| D["Minimal counterexample\n12-13 and 12-12"]
+    D --> E["Cause is visible:\n12-12 is inside 12-13,\nend overwritten 13 to 12"]
 ```
 
-`genInterval` is deliberately biased toward short ranges and a small
-coordinate space (0–20) precisely so that overlaps — including one
-interval fully containing another — happen often, not rarely. A
-generator that instead picked `start` and `end` from 0 to a million
-would technically be "more random," but nearly every generated interval
-would miss every other one, wasting run after run on inputs that never
-exercise the merge logic at all.
+Whole-range removals come first because they simplify the most. After the
+list is down to two ranges, tightening bounds one unit at a time walks it to
+the smallest pair that still fails: 12–13 with 12–12. Two ranges, one inside
+the other, and the output loses point 13. That is the bug in the smallest
+words possible.
 
-## Running the property, and finding the bug
+<Checkpoint question="Why does a shrinker try removing a whole range before tightening a bound by one unit?">
 
-```js
-function runProperty(numRuns = 500) {
-  for (let i = 0; i < numRuns; i++) {
-    const input = genIntervalList();
-    if (!mergeIntervalsProperty(input)) {
-      return { failed: true, input };
-    }
-  }
-  return { failed: false };
-}
-```
-
-Running this against the buggy `mergeIntervals` above fails well before
-500 runs — a typical failing input looks like:
-
-```js
-[
-  { start: 3, end: 17 },
-  { start: 6, end: 8 },
-  { start: 12, end: 14 },
-  { start: 1, end: 2 },
-];
-```
-
-That's a real failure, but a hard one to read at a glance — four
-intervals, no obvious pattern. Debugging directly from this would mean
-tracing through the merge loop by hand on all four.
-
-## Shrinking it by hand
-
-A minimal shrinker tries removing one interval at a time (and,
-separately, tightening one interval's bounds by one unit) and re-checks
-whether the property still fails on the smaller input — if it does, that
-becomes the new candidate to shrink further:
-
-```js
-function shrink(input) {
-  let current = input;
-  let didShrink = true;
-
-  while (didShrink) {
-    didShrink = false;
-
-    // try removing one interval at a time
-    for (let i = 0; i < current.length; i++) {
-      const smaller = current.filter((_, idx) => idx !== i);
-      if (smaller.length > 0 && !mergeIntervalsProperty(smaller)) {
-        current = smaller;
-        didShrink = true;
-        break;
-      }
-    }
-    if (didShrink) continue;
-
-    // try tightening each interval's start/end by 1
-    for (let i = 0; i < current.length; i++) {
-      const { start, end } = current[i];
-      const candidates = [];
-      if (end - 1 >= start) candidates.push({ start, end: end - 1 });
-      if (start + 1 <= end) candidates.push({ start: start + 1, end });
-      for (const replacement of candidates) {
-        const smaller = current.map((iv, idx) =>
-          idx === i ? replacement : iv,
-        );
-        if (!mergeIntervalsProperty(smaller)) {
-          current = smaller;
-          didShrink = true;
-          break;
-        }
-      }
-      if (didShrink) break;
-    }
-  }
-  return current;
-}
-```
-
-Run on the four-interval failure above, `shrink()` converges to:
-
-```js
-[
-  { start: 12, end: 13 },
-  { start: 12, end: 12 },
-];
-```
-
-**Two intervals, one fully contained inside the other.** This is the
-minimal counterexample, and it points straight at the bug: when
-`{start:12,end:12}` merges into `{start:12,end:13}`, the buggy line sets
-`last.end = curr.end` — overwriting `13` with `12` — instead of taking
-whichever end is larger. Point `13` silently disappears from the output.
-
-<Checkpoint question="Why does removing intervals get tried before tightening bounds, in this shrinker?">
-
-Because removing a whole interval is a bigger simplification than
-tightening one interval's bounds by a single unit, so trying it first
-tends to reach a small counterexample in fewer steps — the shrinker
-always prefers the biggest available simplification that still
-reproduces the failure. This is also why the loop keeps looping instead
-of stopping after one pass: after a removal succeeds, the resulting
-smaller list might now allow a bounds-tightening it couldn't before, so
-the two strategies alternate until neither one can shrink further.
+Removing a range is a much bigger simplification, so trying it first reaches a
+small input in fewer steps. The loop also repeats: once a removal succeeds,
+the smaller list may allow a bound to tighten that could not before, so the
+two moves alternate until neither makes the failing input smaller.
 
 </Checkpoint>
 
-## The fix, and confirming it
-
-```js
-if (curr.start <= last.end) {
-  last.end = Math.max(last.end, curr.end); // fixed
-} else {
-  merged.push(curr);
-}
-```
-
-Re-running `runProperty(500)` against the fixed version passes all 500
-generated inputs, including regenerating the exact minimal counterexample
-`[{12,13},{12,12}]` directly as a regression example:
-
-```js
-test("a contained interval doesn't shrink the merged range", () => {
-  expect(
-    mergeIntervals([
-      { start: 12, end: 13 },
-      { start: 12, end: 12 },
-    ]),
-  ).toEqual([{ start: 12, end: 13 }]);
-});
-```
-
-That last line is the real payoff of shrinking: the minimal
-counterexample it produced is small and specific enough to become a
-permanent, readable example test — turning a one-off random find into
-documentation of exactly the case a future reviewer might otherwise
+The fix is one line, `last.end = Math.max(last.end, curr.end)`. The minimal
+counterexample then becomes a permanent, readable example test, so one
+random find turns into documentation of the case a reviewer would otherwise
 miss again.
 
-## What this looks like with a real library
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="contained-interval"
+/>
 
-Everything above was hand-rolled to show the mechanism with nothing to
-install. A real property-testing library like
-[fast-check](https://fast-check.dev/) (JavaScript/TypeScript) provides
-the same three pieces — generator, runner, shrinker — as a tested,
-production-grade implementation instead of a teaching version:
+## Where does property testing stop helping?
 
-```js
-import fc from "fast-check";
+**If this is so effective, why not replace every example test with a
+property?**
 
-const intervalArb = fc
-  .tuple(fc.integer({ min: 0, max: 20 }), fc.integer({ min: 0, max: 8 }))
-  .map(([start, offset]) => ({ start, end: start + offset }));
+| Situation                          | What goes wrong                                                                                    | What to do                                                     |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| No clean rule exists               | `formatCurrency(4210)` returning `"$42.10"` has no rule simpler than the implementation itself     | Keep example tests                                             |
+| Generator too narrow               | Bugs outside its reach never appear; four forward-walking examples were a narrow generator by hand | Widen it, add the empty and boundary shapes                    |
+| Generator too broad                | Many runs are wasted on inputs a real caller could never send, like start after end                | Add a precondition filter (`fc.pre` in the fast-check library) |
+| A failure that appears once in 500 | Looks like a flaky test                                                                            | Record the random seed so the exact input replays              |
 
-fc.assert(
-  fc.property(
-    fc.array(intervalArb, { minLength: 1, maxLength: 6 }),
-    (intervals) => {
-      const output = mergeIntervals(intervals);
-      return (
-        isSortedAndNonOverlapping(output) &&
-        setsEqual(integerPointsCovered(output), integerPointsCovered(intervals))
-      );
-    },
-  ),
-);
-```
+<Checkpoint question="If the generator never produced a range whose start equals its end, which bugs could this test never find?">
 
-`fc.array`/`fc.integer`/`fc.tuple` are real generator combinators
-(**arbitraries**, in fast-check's terminology); `fc.property` pairs a
-generator with the check function; `fc.assert` runs it (100 cases by
-default) and, on failure, shrinks automatically and reports the minimal
-counterexample — mechanically the same loop this level built by hand,
-just faster and more thoroughly tested.
-
-## When a property doesn't exist — or the generator is wrong
-
-Property-based testing isn't free, and it isn't universal:
-
-| Trade-off / failure mode                     | What it costs                                                                                                                                                                                                                                                 |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Properties are harder to write than examples | You have to identify a **true invariant**, not just record one input/output pair — for some functions (e.g. `formatCurrency(4210)` → `"$42.10"`) there's no clean property simpler than the implementation itself, and example tests are still the right tool |
-| A generator that's too narrow                | Misses real bugs the way L1's six hand-picked examples did — if `genInterval` only ever produced non-overlapping ranges, the contained-interval bug above would never surface                                                                                 |
-| A generator that's too broad                 | Wastes runs on invalid inputs (e.g. `start > end`) that a real caller could never produce, needing a precondition filter (fast-check's `fc.pre(condition)`, which discards and re-generates when the condition is false) to keep every run meaningful         |
-| Flaky-looking failures from true randomness  | A failure that only shows up 1 run in 500 can look like `flaky-tests`' non-determinism — the fix is the same discipline: a fixed random seed on failure, so the exact failing input reproduces deterministically instead of only "sometimes"                  |
-
-<Checkpoint question="If genInterval were changed to always generate start < end (never start === end), what kind of bug would this whole exercise become unable to find?">
-
-Any bug specific to zero-length intervals (`start === end`) — a
-single-point range like `{start: 5, end: 5}`. If the generator can never
-produce that shape, no number of runs will ever try it, and shrinking
-can't discover a case the generator was never capable of producing in
-the first place. This is the same lesson as a too-narrow generator in
-the trade-off table above: a property test's coverage is bounded by what
-its generator can actually produce, not by how many times it runs.
+Any bug specific to single-point ranges such as 5–5. Shrinking cannot discover
+a shape the generator is unable to produce, and more runs do not help. A
+property test's reach is bounded by what the generator can produce, not by how
+many times it runs.
 
 </Checkpoint>
 
-**Two directions to extend this yourself:** what would the coverage
-property need to check differently if `mergeIntervals` were also
-supposed to accept and correctly merge intervals given in _descending_
-order (largest `start` first) instead of assuming ascending input? And
-for a completely different kind of function — say, a shopping-cart
-`applyDiscount(cart, code)` with no obvious round-trip or idempotence —
-what's a real invariant worth checking (hint: total price after a
-discount should never exceed the price before one), and where in the
-generator would a precondition filter be needed to keep every generated
-cart valid?
+The mergeIntervals case is one worked example, not the whole territory.
+**Extend it yourself.** What would the coverage check need if the function
+also had to accept ranges in descending order? And for a shopping cart
+`applyDiscount(cart, code)` with no round trip or idempotence, what invariant
+is worth checking (hint: the total after a discount should never exceed the
+total before), and where would a precondition filter be needed to keep every
+generated cart valid? Then drag the shrink-iterations slider to see how
+quickly a failing input collapses toward its floor.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="generator-tradeoffs"
+/>
