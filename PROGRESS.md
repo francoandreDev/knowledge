@@ -3769,3 +3769,11 @@ Migrated to the three-tier model: `software-design/evolutionary-design` (6 topic
 Checks: typecheck 0 errors, 273 pages built, 7 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (6/5/9/7), no Mermaid errors, Mark as done enabled.
 
 `software-design/` is complete: 13 of 13. Total migrated: 197 of 246. Next: architecture batch 2 (`hexagonal-clean-architecture`, `event-driven-architecture`, `build-vs-buy`, `adr-governance`).
+
+## 2026-11-04 — architecture batch 2 (4 units)
+
+Migrated to the three-tier model, all quiz topics and no code topics: `hexagonal-clean-architecture` (9 topics, 108 items; opens with a lamp-plug analogy, JSX-brace risk in an old facts slot removed), `event-driven-architecture` (8 topics, 88 items; invented "~97% of polls find nothing" figure replaced with 86,400 polls/day and 21,599 empty polls, and an Orders/Shipping inconsistency fixed), `build-vs-buy` (7 topics, 84 items; real vendor names removed from content and from the demo label, inconsistent $2.24M/$380k totals replaced by $2,050,000 build vs $396,000/yr fee), `adr-governance` (11 topics, 132 items; backlog figures match the demo defaults).
+
+Checks: typecheck 0 errors, 273 pages built, every DomainCheck topic passes live (9/8/7/11), no Mermaid errors, Mark as done enabled.
+
+Total migrated: 201 of 246. Next: architecture batch 3 (`tech-radar`, `platform-engineering`, `multi-tenant-architecture`, `reference-architectures`).

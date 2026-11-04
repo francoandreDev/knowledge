@@ -4,133 +4,128 @@ title: "L1 — How do services react to what happened without polling each other
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="The problem">
+export const unit = {
+  track: "architecture",
+  unitSlug: "event-driven-architecture",
+};
+
+<Scenario label="You ordered a parcel. How often should you check whether it shipped?">
   <Fragment slot="facts">
     <div class="not-prose">
       <div class="mb-1 flex items-baseline justify-between">
         <span class="text-lg font-bold text-slate-800 dark:text-slate-100">86,400</span>
-        <span class="text-xs text-slate-400">polls/day, per consumer</span>
+        <span class="text-xs text-slate-400">checks per day at one per second</span>
       </div>
       <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-        <div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 97%"></div>
+        <div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 100%"></div>
       </div>
-      <p class="mt-1 text-xs text-slate-400">~97% of those polls find nothing new</p>
+      <p class="mt-1 text-xs text-slate-400">for an order that ships once, at some unknown moment</p>
     </div>
 
     <div class="not-prose mt-3 flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>📦</span> Orders service polls Inventory every 1s for "is this order shipped yet?"</div>
-      <div class="flex items-center gap-1.5"><span>⏱️</span> Worst-case delay: up to 1 full poll interval, every time</div>
-      <div class="flex items-center gap-1.5"><span>💸</span> Load scales with (services × poll rate), not with actual shipments</div>
-    </div>
-
-    <p class="not-prose mt-3 mb-1 text-xs font-semibold tracking-wide text-slate-400 uppercase">The three patterns</p>
-    <div class="not-prose flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>📣</span> Pub/sub — publisher and subscriber decoupled by a broker</div>
-      <div class="flex items-center gap-1.5"><span>📜</span> Event sourcing — state is a replay of an append-only log</div>
-      <div class="flex items-center gap-1.5"><span>🔀</span> CQRS — writes and reads split into separate models</div>
+      <div class="flex items-center gap-1.5"><span>🔁</span> Polling: the asker pays for every answer, even "no change"</div>
+      <div class="flex items-center gap-1.5"><span>⏱️</span> The reaction is late by up to one full interval</div>
+      <div class="flex items-center gap-1.5"><span>📣</span> Events: the thing that changed announces it once</div>
     </div>
 
   </Fragment>
 
-An e-commerce platform has an `Orders` service and a `Shipping` service. When
-`Shipping` finally marks a package as dispatched, `Orders` needs to know —
-so it can email the customer and unlock the "Track package" button.
+You ordered a parcel and you want to know the moment it ships. One option:
+refresh the tracking page every second, all day. Another: the shop sends
+you one message when it ships.
 
-The team's first fix: every second, `Orders` asks `Shipping`, _"is order
-#4471 shipped yet?"_ Multiply that by every order in flight, every service
-that cares about shipping status, and every second of the day.
-
-| What the team wanted            | What polling actually gives them                                   |
-| ------------------------------- | ------------------------------------------------------------------ |
-| Near-instant reaction to events | A reaction delayed by up to one full poll interval, every time     |
-| Low load                        | Load that scales with (services × poll rate), not with real events |
-| Simple code                     | A cron-like loop hammering an API that says "no" 97% of the time   |
-
-**Before reading on: if polling every second still isn't fast enough, why not just poll every 100ms — what actually breaks first, cost or correctness?**
+Now make it a system. An `Orders` service wants to know when `Shipping`
+dispatches order 4471, so it can email the customer. The first fix is a
+loop: every second, `Orders` asks `Shipping` _"is 4471 shipped yet?"_ That
+is 86,400 requests per day for that one order, and if it ships six hours
+in, the first 21,599 checks find nothing (the demo below lets you
+move both numbers). **Faster polling cuts the delay but multiplies the cost;
+slower polling cuts the cost but multiplies the delay. Is there a way out
+of that trade?**
 
 </Scenario>
 
-Polling makes the questioner pay for the answer whether or not anything
-changed. The fix is to flip who initiates: instead of the consumer asking
-_"did anything happen?"_ on a timer, the producer announces _"this
-happened"_ once, the moment it's true — and anyone who cares can react.
+Yes: flip who starts the conversation. The thing that changed announces it
+once, and everyone who cares reacts.
 
 <LevelIntro
   items={[
-    "Why polling doesn't scale with more consumers",
-    "Pub/sub, event sourcing, and CQRS, in one paragraph each",
-    "Vocabulary: producer, consumer, broker, topic/queue",
+    "Why polling pays for answers nobody needed",
+    "Pub/sub, event sourcing, and CQRS in one line each",
+    "Vocabulary: producer, consumer, broker, topic",
   ]}
 />
-
-If this is your first backend architecture topic, keep these translations
-nearby:
-
-| Term        | Plain version                                                                                   |
-| ----------- | ----------------------------------------------------------------------------------------------- |
-| Service     | A program or team-owned component responsible for one job                                       |
-| Event       | A notice about something that already happened, named in past tense                             |
-| Producer    | The service that publishes the notice                                                           |
-| Consumer    | A service that reacts to the notice                                                             |
-| Broker      | The middleman that stores and delivers notices so producer and consumers do not know each other |
-| Topic/queue | A mailbox or line of messages waiting for the right consumer                                    |
-| Async       | The producer can finish now; consumers may process shortly afterward                            |
-
-For slower foundations, `web/http-request-response-basics` explains API
-requests and webhooks, while `applied-math/queueing-theory-basics`
-explains backlog, processing rate, and why a queue can lag behind.
-
-- **Event-driven architecture (EDA)**: services communicate by publishing
-  facts about the past (`OrderShipped`, `PaymentFailed`) instead of one
-  service calling another directly or polling it. A producer doesn't know
-  or care who's listening.
-- **Pub/sub** is the delivery mechanism: producers publish events to a
-  broker (a queue or topic); consumers subscribe to the topics they care
-  about. The broker — not the producer — tracks who needs the message and
-  redelivers it if a consumer is down.
-- **Event sourcing** is a specific way to store state: instead of
-  overwriting a row (`status: shipped`), you append every state-changing
-  event to an immutable log (`OrderPlaced`, `PaymentReceived`,
-  `OrderShipped`) and derive current state by replaying it. The log _is_
-  the source of truth; the "current row" is just a cached projection of it.
-- **CQRS** (Command Query Responsibility Segregation) splits the model
-  that handles writes (commands) from the model that serves reads
-  (queries) — often paired with event sourcing, since the write side
-  appends events and one or more read-side projections rebuild
-  query-friendly views from those events asynchronously.
-- These three are related but separable: you can do pub/sub without event
-  sourcing (most message-queue systems), event sourcing without CQRS (one
-  model, rebuilt from the log), or CQRS without event sourcing (two
-  databases kept in sync some other way). This unit covers all three
-  because they solve overlapping instances of the same root problem —
-  reacting to change without polling — but you adopt them independently
-  based on which problem you actually have.
-- What you gain: producers and consumers don't need to know about each
-  other, consumers can be added later without touching the producer, and
-  a burst of events can queue up instead of getting dropped.
-- What you give up: **eventual consistency** (a consumer's view lags the
-  producer's by however long delivery + processing takes), and a much
-  harder debugging story — a request's effects are now spread across
-  whichever services happened to react to its events, not a single call
-  stack.
 
 ```mermaid
 flowchart LR
     subgraph Polling
-        C1["Orders"] -- "any update? (x86,400/day)" --> S1["Shipping"]
+        C1["Orders"] -- "any update? (every second)" --> S1["Shipping"]
         S1 -- "no / no / no / yes" --> C1
     end
-    subgraph "Event-driven"
-        S2["Shipping"] -- "publish OrderShipped (once)" --> B["Broker / topic"]
+    subgraph Events
+        S2["Shipping"] -- "OrderShipped (once)" --> B["Broker"]
         B --> C2["Orders"]
         B --> C3["Notifications"]
         B --> C4["Analytics"]
     end
 ```
 
-| #   | Question                                             | What it decides                                     |
-| --- | ---------------------------------------------------- | --------------------------------------------------- |
-| 1   | Who initiates — the asker or the thing that changed? | Polling vs. event-driven                            |
-| 2   | Is current state enough, or do you need the history? | A row you overwrite vs. an event-sourced log        |
-| 3   | Do reads and writes have different shapes/load?      | One shared model vs. CQRS's split read/write models |
+## Why does polling stop scaling?
+
+Cost under polling grows with `consumers x checks per second`, not with how
+many shipments actually happened. Under events it grows with shipments.
+
+| Model          | Who starts it | Requests while nothing happens | Delay before reacting                        |
+| -------------- | ------------- | ------------------------------ | -------------------------------------------- |
+| Polling        | The consumer  | One per interval, per consumer | Up to one interval                           |
+| Event-driven   | The producer  | None                           | Delivery plus processing time                |
+| Direct webhook | The producer  | None                           | Short, but producer must know every consumer |
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="polling-cost"
+/>
+
+## What are the three patterns, and which problem does each solve?
+
+Three related ideas share one root problem, reacting to change without
+asking constantly. You adopt each on its own, depending on which problem you
+actually have.
+
+- **Event-driven architecture and pub/sub**: services publish facts about the
+  past (`OrderShipped`) to a broker. Consumers subscribe to what they care
+  about. The producer does not know who is listening.
+- **Event sourcing**: store state as an append-only log of events and derive
+  today's state by replaying it. The log is the source of truth.
+- **CQRS** (Command Query Responsibility Segregation): use one model for
+  writes and a separate, query-shaped model for reads.
+
+```mermaid
+flowchart TB
+    Q1{"Who should initiate?"} -->|"the thing that changed"| P["Pub/sub"]
+    Q2{"Do you need the history, not just the latest value?"} -->|"yes"| ES["Event sourcing"]
+    Q3{"Do reads and writes need different shapes?"} -->|"yes"| CQ["CQRS"]
+```
+
+| Term        | Plain version                                                 |
+| ----------- | ------------------------------------------------------------- |
+| Event       | A notice that something already happened, named in past tense |
+| Producer    | The service that publishes the notice                         |
+| Consumer    | A service that reacts to it                                   |
+| Broker      | The middleman that stores and delivers notices                |
+| Topic/queue | A mailbox of messages waiting for the right consumer          |
+
+What you gain: producers and consumers need not know each other, and bursts
+queue up instead of being dropped. What you give up: **eventual
+consistency** (a consumer's view lags by delivery plus processing time) and
+harder debugging, because one request's effects spread across several
+services.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="pattern-roles"
+/>

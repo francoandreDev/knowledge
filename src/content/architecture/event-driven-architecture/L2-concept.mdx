@@ -5,87 +5,93 @@ title: "L2 — How do services react to what happened without polling each other
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="A new wrinkle">
+export const unit = {
+  track: "architecture",
+  unitSlug: "event-driven-architecture",
+};
+
+<Scenario label="Three services now want to know about one shipment">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>📣</span> Notifications and Analytics both need OrderShipped too</div>
-      <div class="flex items-center gap-1.5"><span>🔌</span> Direct calls: Shipping must know every caller's address</div>
-      <div class="flex items-center gap-1.5"><span>🧩</span> A broker: Shipping publishes once, knows nothing about who's listening</div>
+      <div class="flex items-center gap-1.5"><span>📬</span> Orders, Notifications, and Analytics all need OrderShipped</div>
+      <div class="flex items-center gap-1.5"><span>🔌</span> Direct calls: Shipping keeps a list of every caller's address</div>
+      <div class="flex items-center gap-1.5"><span>🐌</span> One slow caller delays Shipping's own work</div>
+      <div class="flex items-center gap-1.5"><span>🧩</span> Broker: Shipping publishes once and knows nobody</div>
     </div>
   </Fragment>
 
-Say the team drops polling and has `Shipping` call `Orders` directly the
-moment a package ships — an HTTP `POST` to `Orders`' webhook. That fixes the
-delay. Then `Notifications` also needs to know, to send the "it's on the
-way!" email. Then `Analytics` needs it too, for the shipping-time dashboard.
+Say the team drops polling and has `Shipping` call `Orders` the moment a
+package ships. The delay is fixed. Then `Notifications` needs the news for
+the "it's on the way" email, and `Analytics` needs it for a dashboard.
 
-**Does `Shipping` now maintain a hardcoded list of every service that
-might ever care about a shipment, and call all of them, synchronously, in
-the request path that also has to update the database and lock the
-warehouse slot?**
+**Does `Shipping` now keep a list of every service that might care, and
+call all of them one by one, inside the same request that also updates its
+database?**
 
 </Scenario>
 
-That's the shape of the actual problem: point-to-point calls make the
-producer responsible for knowing every consumer, and a slow or down
-consumer now blocks (or fails) the producer's own work. Pub/sub removes
-both problems by putting a broker in between.
+Point-to-point calls make the producer responsible for knowing every
+consumer, and a slow or down consumer blocks the producer's own work. A
+broker in the middle removes both problems.
 
 <LevelIntro
   items={[
-    "Pub/sub: decoupling producer from consumers via a broker",
+    "Pub/sub: a broker between producer and consumers",
     "Event sourcing: state as a replay of an append-only log",
-    "CQRS: splitting the write model from the read model",
+    "CQRS: a write model apart from the read model",
   ]}
 />
 
-## Pub/sub: decoupling who says something from who hears it
+## How does a broker let Shipping stay ignorant of its listeners?
 
-**How does adding a broker let `Shipping` stay ignorant of who's listening,
-while still guaranteeing `Notifications` doesn't miss the event if it's
-mid-deploy when the package ships?**
+The question to answer: if `Notifications` is mid-deploy when the package
+ships, how does it still get the news, without `Shipping` waiting for it?
 
 ```mermaid
 flowchart LR
-    S["Shipping service"] -- "publish: OrderShipped" --> T["Topic: order.shipped"]
-    T -- deliver --> O["Orders (subscriber)"]
-    T -- deliver --> N["Notifications (subscriber)"]
-    T -- deliver --> A["Analytics (subscriber)"]
-    T -.->|"buffered until consumed"| Q[("queue per subscriber")]
+    S["Shipping"] -- "publish OrderShipped" --> T["Topic: order.shipped"]
+    T --> QO[("Orders queue")]
+    T --> QN[("Notifications queue")]
+    T --> QA[("Analytics queue")]
+    QO --> O["Orders"]
+    QN --> N["Notifications"]
+    QA --> A["Analytics"]
 ```
 
-- `Shipping` publishes one message to a **topic** — it has zero knowledge
-  of `Orders`, `Notifications`, or `Analytics`. Adding a fourth consumer
-  tomorrow requires no change to `Shipping` at all.
-- The broker holds a **queue per subscriber** (or per consumer group). If
-  `Notifications` is down for five minutes, its messages wait in its queue
-  — they aren't lost, and `Shipping` never notices the outage.
-  `Shipping`'s own request finishes the instant the broker accepts the
-  publish, not when every subscriber has processed it.
-- This is the trade for **eventual consistency**: `Analytics`' dashboard
-  is accurate a few hundred milliseconds to a few seconds after the
-  shipment, not instantly. For a "was this order shipped" webhook, that's
-  fine. For "does this account have enough balance right now," it usually
-  isn't — pick this pattern based on whether the consumer can tolerate a
-  lag, not by default.
+- `Shipping` publishes one message to a **topic**. Adding a fourth consumer
+  needs no change to `Shipping`.
+- The broker holds a **queue per subscriber**. If `Notifications` is down for
+  five minutes, its messages wait. Nothing is lost, and `Shipping` never
+  notices.
+- `Shipping`'s request finishes when the broker accepts the publish, not
+  when every subscriber has processed it. The price is **eventual
+  consistency**: consumers are accurate shortly after, not instantly. That is
+  fine for "send an email", and wrong for "does this account have enough
+  balance right now".
 
-<Checkpoint question="Shipping publishes OrderShipped and its own HTTP request returns immediately, before Notifications or Analytics have processed anything. Is that a bug, or the design working as intended?">
+<Checkpoint question="Shipping publishes OrderShipped and its own request returns before Notifications or Analytics have processed anything. Bug, or design working as intended?">
 
-Working as intended. The broker accepting the publish is the point at which `Shipping`'s job is done — it never waits on any subscriber, which is exactly what lets a slow or down `Notifications` avoid blocking `Shipping`'s own request. The cost is that every subscriber's view lags by however long delivery and processing take (eventual consistency), which is why this pattern is a poor fit whenever a caller needs to act on a value that must already reflect the write — that's the same trade CQRS's read models make below.
+Working as intended. The broker accepting the publish is where `Shipping`'s
+job ends, which is exactly what stops a slow `Notifications` from blocking
+it. The cost is that every subscriber lags by delivery and processing time,
+so the pattern fits consumers that tolerate a short lag and misfits any
+caller that must see its own write immediately.
 
 </Checkpoint>
 
-## Event sourcing: state as a replay, not a row
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="broker-decoupling"
+/>
 
-`Shipping`'s database currently has one row per order:
-`{ id: 4471, status: "shipped" }`. A support agent asks: _"when exactly
-did this order move from packed to shipped, and was there a failed
-delivery attempt in between?"_ The row can't answer that — it only holds
-the latest status, and every earlier value was overwritten.
+## What if state were never overwritten, only appended to?
 
-**What if, instead of overwriting the row on every change, you never
-overwrote anything — you only ever appended?**
+A support agent asks: _"when did this order go from packed to shipped, and
+was there a failed delivery in between?"_ A row with `status: shipped` cannot
+say, because every earlier value was overwritten.
 
 ```mermaid
 flowchart LR
@@ -93,97 +99,80 @@ flowchart LR
     E2 --> E3["OrderPacked"]
     E3 --> E4["DeliveryAttempted (failed)"]
     E4 --> E5["OrderShipped"]
-    E1 & E2 & E3 & E4 & E5 -.->|replay in order| ST["Current state:\nstatus = shipped,\n1 failed attempt"]
+    E5 -.->|"replay in order"| ST["status = shipped, 1 failed attempt"]
 ```
 
-- The **event log is append-only** — every state change is recorded as a
-  fact that happened, and facts don't get edited after the fact (if a
-  correction is needed, you append a new compensating event, e.g.
-  `ShippingAddressCorrected`, rather than mutating history).
-- **Current state is a derived value**, computed by folding every event
-  for that order, in order, into an accumulator — the same operation as
-  `reduce()` over a list. Two systems that replay the same log always
-  arrive at the same state, which is what makes this trustworthy as a
-  source of truth rather than just an audit log bolted onto a real
-  database.
-- This buys you the support agent's question for free — the full history
-  is the data model, not an afterthought logged separately — plus the
-  ability to rebuild a brand-new read model later by replaying events
-  that already happened, which matters a lot once CQRS enters the
-  picture below.
-- It costs you: replaying a long history from scratch is slow (fixed with
-  periodic **snapshots** — a cached state at event #10,000 so you only
-  replay from there forward), and every event's shape is now a long-term
-  contract — changing what `OrderShipped` looks like means either
-  supporting the old shape forever or migrating history, not just
-  editing a column.
+- The log is **append-only**. A correction is a new event
+  (`ShippingAddressCorrected`), never an edit of an old one.
+- Current state is **derived**: start from nothing and apply one event at a
+  time, in order. Two systems replaying the same log reach the same state.
+- Costs: replaying a long history is slow, so a **snapshot** stores the state
+  at event number N and replay resumes from N+1. And every event's shape
+  becomes a long-term contract, since the log is permanent.
 
-Before the programming word `reduce()` matters, the idea is just
-"start with an empty summary, then apply one line of history at a time":
+| History line             | Summary after reading it                |
+| ------------------------ | --------------------------------------- |
+| `OrderPlaced`            | Order exists, status `placed`           |
+| `PaymentReceived`        | Same order, now paid                    |
+| `DeliveryAttempted` fail | Same order, one failed attempt          |
+| `OrderShipped`           | Shipped, failed-attempt count preserved |
 
-| History line               | Summary after reading that line                           |
-| -------------------------- | --------------------------------------------------------- |
-| `OrderPlaced`              | Order exists, status is `placed`                          |
-| `PaymentReceived`          | Same order, now paid                                      |
-| `DeliveryAttempted` failed | Same order, one failed delivery attempt                   |
-| `OrderShipped`             | Same order, shipped, failed-attempt count still preserved |
+<Checkpoint question="Two services replay the same log independently with no communication. Do they necessarily end with the same state?">
 
-The code word for this repeated updating is a fold/reduce; the human
-idea is just reconstructing today's truth from yesterday's diary.
-
-<Checkpoint question="Two different services both replay the exact same OrderPlaced → PaymentReceived → OrderShipped log, independently, with no communication between them. Do they necessarily end up with the same current state?">
-
-Yes — as long as both apply the same folding rules to the same events in the same order, they arrive at the same result, the same way two people adding up the same column of numbers get the same total. This determinism is what makes the log trustworthy as the actual source of truth rather than just a log file next to the "real" database, and it's exactly the property CQRS below relies on: a read-model projector is nothing more than a second, independent fold over the same events, shaped for a different question than the write side asks.
+Yes, as long as both apply the same rules to the same events in the same
+order, the way two people adding the same column of numbers get the same
+total. That determinism is why the log can be the source of truth, and it is
+the property CQRS relies on next: a projector is just a second replay shaped
+for a different question.
 
 </Checkpoint>
 
-## CQRS: splitting the model that writes from the model that reads
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="event-log-replay"
+/>
 
-Once `Shipping`'s state is an event log, a new problem shows up:
-answering _"how many orders shipped last week, grouped by region"_ means
-replaying and re-folding potentially millions of events on every query —
-nobody wants that at request time.
+## Must the model that accepts writes also answer reads?
 
-**Does the thing that accepts new events (a write) have to be the same
-thing that answers questions about existing state (a read)?**
+With state stored as events, "how many orders shipped last week, per
+carrier" would mean replaying millions of events per query. Nobody wants that
+at request time.
 
 ```mermaid
 flowchart TB
-    Cmd["Command: ShipOrder"] --> WM["Write model\n(appends events to the log)"]
-    WM -- "OrderShipped event" --> Proj["Projector"]
-    Proj --> RM1["Read model:\norders-by-status table"]
-    Proj --> RM2["Read model:\nregional-shipping-dashboard"]
-    Q["Query: shipments by region"] --> RM2
+    Cmd["Command: ShipOrder"] --> WM["Write model: validates, appends event"]
+    WM -- "OrderShipped" --> Proj["Projector"]
+    Proj --> RM1["Read model: orders by status"]
+    Proj --> RM2["Read model: shipments per carrier"]
+    Q["Query: shipments per carrier"] --> RM2
 ```
 
-- The **write side** accepts commands (`ShipOrder`), validates them
-  against business rules, and appends the resulting event to the log. It
-  has no idea what dashboards exist.
-- A **projector** subscribes to the event stream (this is the same
-  pub/sub mechanism from above — CQRS's read/write split and
-  event-sourcing's log are two different concerns that compose through
-  it) and incrementally updates one or more **read models**: plain,
-  denormalized tables shaped exactly for the query that needs them —
-  one for "orders by status," a completely different shape for "regional
-  shipping dashboard."
-- Queries hit the read model directly — no folding events at request
-  time, no shared schema fighting between "what's fast to write" and
-  "what's fast to read."
-- The cost is the same eventual-consistency trade as pub/sub, now visible
-  to the reader specifically: a query issued 50ms after a `ShipOrder`
-  command might not reflect it yet, because the projector hasn't caught
-  up. Systems that need the read to reflect a write it just made
-  (submit-then-immediately-redisplay UIs) either read from the write side
-  for that one case or show the reader their own pending state
-  optimistically while the projection catches up.
+- The **write side** takes commands, checks business rules, and records the
+  result. It knows no dashboards.
+- A **projector** consumes the events (the same pub/sub mechanism) and keeps
+  one or more **read models** current: plain tables shaped for one query.
+- Queries read the table directly, with no replay.
+- The cost is visible to readers: a query 50 ms after a command may not show
+  it yet. Interfaces that must show the user's own write either read from
+  the write side for that case or display the pending change optimistically.
 
-CQRS does not require event sourcing. A simpler system might write to one
-normal `orders` table, then copy only the fields a dashboard needs into a
-separate `orders_by_region` table. That is still "write model" versus
-"read model"; event sourcing is only one way to feed the read side.
+How stale can the read side get? It is a queue problem: lag is roughly
+`events waiting / events processed per second`. With 200 waiting and 500
+processed per second, about 0.4 s. With 5,000 waiting and 10 per second,
+500 s. The second demo lets you drag both.
 
-| Pattern        | Problem it solves                                    | What it costs                                                             |
-| -------------- | ---------------------------------------------------- | ------------------------------------------------------------------------- |
-| Pub/sub        | Producer shouldn't know or block on every consumer   | Eventual consistency; ordering across topics isn't guaranteed             |
-| Event sourcing | Current state loses the history that produced it     | Replay cost (mitigated by snapshots); event shape is a long-term contract |
-| CQRS           | One model can't be optimal for both writes and reads | Read models lag writes; more moving parts to keep in sync                 |
+CQRS does not require event sourcing: a normal `orders` table copied into an
+`orders_by_carrier` table is still a write model and a read model.
+
+| Pattern        | Problem it solves                             | What it costs                                      |
+| -------------- | --------------------------------------------- | -------------------------------------------------- |
+| Pub/sub        | Producer should not know or wait on consumers | Eventual consistency                               |
+| Event sourcing | Current state loses the history behind it     | Replay cost, events as a permanent contract        |
+| CQRS           | One model cannot suit both writes and reads   | Read models lag writes, more parts to keep in sync |
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="cqrs-read-model"
+/>

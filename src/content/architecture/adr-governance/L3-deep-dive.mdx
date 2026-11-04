@@ -1,244 +1,155 @@
 ---
-title: "L3 — Building the checks: a boundary fitness function and an ADR-staleness scanner"
+title: "L3 — Two checks, a backlog, and the ways governance itself fails"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-This deep dive uses **plain TypeScript/Node**, since both checks below are
-the kind of small script that runs directly in CI with no framework —
-the ideas transfer to any language that can read files and match
-strings; nothing here depends on TypeScript's type system specifically.
+export const unit = { track: "architecture", unitSlug: "adr-governance" };
 
 <Scenario label="Two different decays, two different checks">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🧱</span> Decay #1: code quietly violates a decision that's still current</div>
-      <div class="flex items-center gap-1.5"><span>🧟</span> Decay #2: a decision's status still says "accepted" but nobody's confirmed that in years</div>
-      <div class="flex items-center gap-1.5"><span>🤖</span> Neither decay is visible from a code review alone — both need a script, not a memory</div>
+      <div class="flex items-center gap-1.5"><span>🧱</span> Decay 1: code violates a decision still in force</div>
+      <div class="flex items-center gap-1.5"><span>🧟</span> Decay 2: status says accepted, nobody has confirmed it in years</div>
+      <div class="flex items-center gap-1.5"><span>🤖</span> Neither shows up in a code review, both need a script</div>
     </div>
   </Fragment>
 
-L1 and L2 named two failure modes: code drifting away from an
-`accepted` decision, and the decision's own status field going stale
-without anyone noticing. **Can the same kind of check catch both, or are
-these genuinely different problems needing genuinely different
-tooling?**
+Think of a building with two separate problems: a wall someone knocked a hole in, and a fire extinguisher whose inspection tag expired two years ago. One is a physical fact you can inspect; the other is a date on a record. Nobody would expect one checklist item to catch both.
+
+ADR governance has the same split. **Can one kind of check catch both a codebase drifting from an `accepted` decision and a decision whose own status went stale, or are these different problems?**
 
 </Scenario>
 
-Genuinely different — one scans source code for a forbidden dependency
-shape, the other scans the ADR records themselves for an overdue date.
-Both are small, real, CI-runnable scripts; neither needs a framework.
+Different problems. One scans source code for a forbidden dependency shape, the other scans the ADR records for an overdue date. Both are small, mechanical, and run in CI. Neither needs more than a list of facts as input, which is why this level uses tables instead of code.
 
 <LevelIntro
   items={[
-    "A boundary fitness function that scans real import statements",
-    "An ADR-staleness scanner that flags overdue reviews",
-    "Where these checks fail, and when governance is overkill",
+    "A boundary check over import lists",
+    "A staleness scan over ADR records",
+    "Backlog arithmetic and failure modes",
   ]}
 />
 
-## Fitness function #1: enforcing a boundary rule from an ADR
+## What exactly does a boundary check compare?
 
-ADR-042 says, in prose: "the checkout module must never call the ledger
-module synchronously — only through the published `LedgerEvent` contract."
-A fitness function turns that sentence into a rule a script can check
-mechanically, on every PR, without anyone re-reading the ADR:
+ADR-042 says in prose: "checkout must never call ledger synchronously, only through the published event contract." To make that mechanical, you reduce it to a rule with three parts and one input.
 
-```typescript
-// fitness-functions/boundary-rule.ts
-//
-// A "module" here is just a top-level source folder. A rule says:
-// "files under `from` may not import anything under `to`, except
-// through an explicitly allowed path (the published event contract)."
-export interface BoundaryRule {
-  adrId: string;
-  from: string; // e.g. "checkout"
-  to: string; // e.g. "ledger"
-  allowedPaths: string[]; // e.g. ["ledger/events"] — the published seam
-}
+| Rule part     | Value for ADR-042 |
+| ------------- | ----------------- |
+| `from` folder | `checkout`        |
+| `to` folder   | `ledger`          |
+| Allowed seam  | `ledger/events`   |
 
-export interface SourceFile {
-  path: string; // e.g. "checkout/place-order.ts"
-  imports: string[]; // e.g. ["ledger/client", "checkout/cart"]
-}
+The input is a list of source files, each with the list of things it imports (a real setup extracts that list with a dependency-analysis tool; that step is separate from the rule itself). The check flags any import from a `checkout/` file that points into `ledger` and is not under the allowed seam:
 
-export interface Violation {
-  adrId: string;
-  file: string;
-  forbiddenImport: string;
-}
-
-export function checkBoundaryRule(
-  rule: BoundaryRule,
-  files: SourceFile[],
-): Violation[] {
-  const violations: Violation[] = [];
-  for (const file of files) {
-    if (!file.path.startsWith(`${rule.from}/`)) continue;
-    for (const imp of file.imports) {
-      const crossesBoundary = imp.startsWith(`${rule.to}/`) || imp === rule.to;
-      if (!crossesBoundary) continue;
-      const isAllowed = rule.allowedPaths.some(
-        (allowed) => imp === allowed || imp.startsWith(`${allowed}/`),
-      );
-      if (!isAllowed) {
-        violations.push({
-          adrId: rule.adrId,
-          file: file.path,
-          forbiddenImport: imp,
-        });
-      }
-    }
-  }
-  return violations;
-}
+```mermaid
+flowchart TD
+    A["An import inside a checkout file"] --> B{"Does it point into ledger?"}
+    B -->|"No"| OK["Ignore"]
+    B -->|"Yes"| C{"Is it under ledger/events?"}
+    C -->|"Yes"| OK2["Allowed seam"]
+    C -->|"No"| V["Violation: cite ADR-042"]
 ```
 
-```typescript
-// example run
-const rule: BoundaryRule = {
-  adrId: "ADR-042",
-  from: "checkout",
-  to: "ledger",
-  allowedPaths: ["ledger/events"],
-};
+| File                      | Import          | Result                                   |
+| ------------------------- | --------------- | ---------------------------------------- |
+| `checkout/place-order.ts` | `ledger/client` | Violation, a direct call into the ledger |
+| `checkout/place-order.ts` | `checkout/cart` | Ignored, stays inside checkout           |
+| `checkout/refund.ts`      | `ledger/events` | Allowed, goes through the seam           |
+| `payments/report.ts`      | `ledger/client` | Ignored, the rule only covers checkout   |
 
-const files: SourceFile[] = [
-  {
-    path: "checkout/place-order.ts",
-    imports: ["ledger/client", "checkout/cart"],
-  },
-  { path: "checkout/refund.ts", imports: ["ledger/events"] },
-];
+<Checkpoint question="A checkout file imports 'ledger-events-legacy', which is neither 'ledger' nor anything under 'ledger/'. Does the rule flag it, and is that right?">
 
-checkBoundaryRule(rule, files);
-// => [{ adrId: "ADR-042", file: "checkout/place-order.ts", forbiddenImport: "ledger/client" }]
-// refund.ts is clean: it only imports through the allowed "ledger/events" seam.
-```
-
-The check doesn't parse TypeScript's AST here — it works over an
-already-extracted `imports` list per file (a real setup would produce
-that list with something like `ts-morph` or `madge`; that extraction
-step is a solved, separate problem from the boundary logic itself,
-which is what this function actually teaches). Wiring `checkBoundaryRule`
-into CI is one line: run it, and if the returned array is non-empty,
-fail the build and print each violation with a link back to `ADR-042`.
-
-<Checkpoint question="A file at checkout/place-order.ts imports 'ledger-events-legacy' — not 'ledger/events' or anything under 'ledger/'. Does checkBoundaryRule flag it, and is that the correct call?">
-
-No, it isn't flagged — `crossesBoundary` only matches an import that
-equals `"ledger"` or starts with `"ledger/"`, and `"ledger-events-legacy"`
-matches neither (no slash after `ledger`). Whether that's correct
-depends on what actually lives at that path: if it's really part of the
-ledger module under a confusing name, the rule has a real gap worth
-fixing; if it's an unrelated module that happens to share a word, the
-rule is behaving exactly as intended. This is the general trade-off with
-any fitness function built on naming conventions rather than a real
-module system: it's only as accurate as the assumption that module
-boundaries line up cleanly with folder names.
+It is not flagged, because the rule only treats an import as crossing the boundary when it equals `ledger` or starts with `ledger/`. Whether that is correct depends on what lives there: if it is really part of the ledger under a confusing name, the rule has a gap worth fixing; if it is an unrelated module sharing a word, the rule behaves as intended. Any check built on folder names is only as accurate as the assumption that module boundaries match folder names.
 
 </Checkpoint>
 
-## Fitness function #2: catching a status field that's gone stale
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="boundary-rule"
+/>
 
-The boundary check above assumes ADR-042's status is trustworthy —
-still `accepted`, still current. Nothing checks _that_ assumption except
-a human remembering to look. The second fitness function replaces that
-memory with a scan over the ADR records themselves:
+## What does a staleness scan look at?
 
-```typescript
-// fitness-functions/staleness-scanner.ts
-export interface AdrRecord {
-  id: string;
-  status: "proposed" | "accepted" | "superseded" | "deprecated";
-  reviewBy: string; // ISO date — when this ADR is next due for reconfirmation
-}
+The boundary check trusts that ADR-042 is still current. Nothing verifies that except a person remembering to look. The second check reads the ADR records. Each record needs only three facts: an id, a status, and a `reviewBy` date for its next reconfirmation. The rule: skip anything that is not `accepted`, flag anything whose date is before today's, and sort the worst first.
 
-export interface StaleAdr {
-  id: string;
-  reviewBy: string;
-  daysOverdue: number;
-}
+| ADR     | Status       | Review by  | As of 2026-08-29 | Flagged?         |
+| ------- | ------------ | ---------- | ---------------- | ---------------- |
+| ADR-042 | `accepted`   | 2026-01-01 | 240 days overdue | Yes              |
+| ADR-089 | `superseded` | 2025-06-01 | Not applicable   | No, not in force |
+| ADR-101 | `accepted`   | 2026-09-01 | Not due yet      | No               |
 
-export function findOverdueAdrs(
-  adrs: AdrRecord[],
-  asOfIso: string,
-): StaleAdr[] {
-  const asOf = new Date(asOfIso).getTime();
-  const overdue: StaleAdr[] = [];
-  for (const adr of adrs) {
-    if (adr.status !== "accepted") continue; // only "in force" ADRs can go stale
-    const dueAt = new Date(adr.reviewBy).getTime();
-    if (dueAt < asOf) {
-      const daysOverdue = Math.floor((asOf - dueAt) / (1000 * 60 * 60 * 24));
-      overdue.push({ id: adr.id, reviewBy: adr.reviewBy, daysOverdue });
-    }
-  }
-  return overdue.sort((a, b) => b.daysOverdue - a.daysOverdue);
-}
-```
+The 240 is real arithmetic: January 1 to August 29 is 31 + 28 + 31 + 30 + 31 + 30 + 31 days to reach August 1, plus 28 more. Only `accepted` ADRs can go stale, because staleness means "still claims to govern the code, but nobody has confirmed it recently." A superseded ADR has nothing left to reconfirm. Run weekly, a scan like this produces the "17 accepted, overdue for review" number from L1 without anyone auditing 118 documents by hand.
 
-```typescript
-// example run
-findOverdueAdrs(
-  [
-    { id: "ADR-042", status: "accepted", reviewBy: "2026-01-01" },
-    { id: "ADR-089", status: "superseded", reviewBy: "2025-06-01" }, // excluded: not accepted
-    { id: "ADR-101", status: "accepted", reviewBy: "2026-09-01" },
-  ],
-  "2026-08-29",
-);
-// => [{ id: "ADR-042", reviewBy: "2026-01-01", daysOverdue: 240 }]
-// ADR-089 is skipped: a superseded ADR being "overdue for review" is
-// meaningless — it's not in force, so it has nothing left to reconfirm.
-```
+<Checkpoint question="An ADR is 'proposed' and its reviewBy date is in the past. Does the staleness scan flag it?">
 
-`status !== "accepted"` being the first check is deliberate, not
-incidental — this is why the state machine from L2 matters here: only
-an `accepted` ADR can meaningfully "go stale," because staleness means
-"still claims to govern the codebase, but nobody's recently confirmed
-that's true." Run on a schedule (weekly, in CI or a cron job), this
-produces exactly the "17 accepted, overdue for review" number from L1's
-scenario — a number a person would otherwise only discover by manually
-auditing 118 documents.
-
-<Checkpoint question="ADR-042 has status 'accepted' and a reviewBy date in the future. A separate, unrelated ADR has status 'proposed' and a reviewBy date in the past. Does findOverdueAdrs flag the second one?">
-
-No — the function's first check, `if (adr.status !== "accepted") continue`,
-skips it before the date comparison ever runs. A `proposed` ADR with a
-past `reviewBy` date isn't "stale" in the sense this scanner cares about;
-it's simply an ADR that was never ratified, which is a different problem
-(and a different signal — probably "this proposal stalled," not "this
-decision needs reconfirming") than an accepted decision nobody's
-revisited.
+No, the status filter removes it before any date is compared. A proposal with a past date was never ratified, which is a different problem with a different signal ("this proposal stalled"), not "this decision needs reconfirming." Mixing the two would bury real stale decisions in a list of abandoned drafts.
 
 </Checkpoint>
 
-## Where governance itself needs governance: trade-offs and failure modes
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="staleness-scan"
+/>
 
-| Situation                                                                        | Worth the machinery?                                                                                                         |
-| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Dozens+ of ADRs, multiple teams, decisions genuinely enforced by code boundaries | Yes — this is exactly the scale where memory-based enforcement fails silently                                                |
-| A five-person team, a handful of ADRs, everyone reads every one                  | Usually not yet — a review board and CI fitness functions cost setup and upkeep that a small, high-context team doesn't need |
-| A single team's internal convention with no cross-team blast radius              | Lightweight review is enough; a scheduled board is overkill                                                                  |
+## When does a review board's backlog grow without bound?
 
-**Failure modes that show up in practice, not just in theory:**
+**If the board is busy, is the backlog a staffing problem or an arithmetic one?** Take the unit's demo numbers (an assumption for illustration): about 8 new ADRs arrive per month and the board reviews about 5.
 
-- **The rubber-stamp board.** A review board that never says no isn't governance — it's a delay with no filtering. If the acceptance rate is effectively 100%, the board isn't adding judgment, it's adding latency; either the bar for what reaches the board is wrong, or the board has stopped actually reading proposals.
-- **Zombie ADRs.** Status says `accepted`, the system it describes was rewritten eighteen months ago, and nobody updated the record — exactly what `findOverdueAdrs` exists to surface, but only if something actually runs it on a schedule and someone acts on the output. A staleness scanner nobody reads is the same failure as not having one.
-- **Fitness functions that drift from the ADR they enforce.** `checkBoundaryRule`'s `allowedPaths` needs to change if ADR-042 is later amended to permit a second event type — a fitness function that isn't updated alongside the decision it encodes will eventually block something the org actually wants, or (worse, silently) stop catching something it doesn't.
-- **Governance applied uniformly regardless of blast radius.** Running every naming-convention ADR through the same heavyweight board as a "replace the primary datastore" decision is how boards become the bottleneck teams route around entirely — informally, off the record, which reintroduces the exact silent-violation problem this unit opened with.
+| Arrivals per month | Reviews per month | Net change per month | Backlog after 12 months |
+| ------------------ | ----------------- | -------------------- | ----------------------- |
+| 8                  | 5                 | +3                   | 36                      |
+| 8                  | 8                 | 0                    | 0 (no growth)           |
+| 5                  | 8                 | -3                   | 0 (cleared)             |
 
-**Extend it yourself:** `checkBoundaryRule` currently checks one
-directional rule (`checkout` must not import `ledger`) sourced from one
-ADR. What would the check need to look like for an ADR that establishes
-a _layered_ rule instead — "the `domain` layer may import nothing from
-`infra`, and `infra` may import nothing from `web`" — across three or
-more layers instead of two named modules? And separately: what changes
-about `findOverdueAdrs` if an org wants "high blast-radius" ADRs (the
-ones L2's cadence table calls expensive-to-reverse) reviewed every 90
-days, while low-stakes ones only need reconfirming annually — is that a
-change to the function's logic, or to the data each `AdrRecord` carries?
+```mermaid
+xychart-beta
+    title "Unreviewed ADRs when arrivals are 8 and reviews are 5 per month"
+    x-axis "Months from now" [3, 6, 9, 12, 15, 18, 21, 24]
+    y-axis "Backlog" 0 --> 75
+    line [9, 18, 27, 36, 45, 54, 63, 72]
+```
+
+The line is straight: three extra decisions each month, forever. The lesson is not the raw numbers but the sign of the gap. Once throughput exceeds arrivals, an existing backlog shrinks instead. This is also why tiering by blast radius works: it removes small decisions from the slow queue rather than hiring the board bigger. Drag the sliders in the demo above to see where the line bends.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="backlog-math"
+/>
+
+## Where does governance itself fail?
+
+| Situation                                                            | Worth the machinery?                                         |
+| -------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Dozens of ADRs, several teams, decisions enforced by code boundaries | Yes, memory-based enforcement fails silently at this scale   |
+| A five-person team with a handful of ADRs everyone has read          | Usually not yet, setup and upkeep cost more than they return |
+| One team's internal convention with no cross-team blast radius       | Lightweight review is enough, a scheduled board is overkill  |
+
+Failure modes that show up in practice:
+
+- **The rubber-stamp board.** A board that never says no is adding latency, not judgment. Either the bar for reaching it is wrong or it has stopped reading.
+- **Fitness functions that drift from their ADR.** If ADR-042 is amended to permit a second event type and the check's allowed seam is not updated, the check eventually blocks something the org wants or, worse, silently stops catching something it should.
+- **Uniform governance regardless of blast radius.** Sending naming conventions through the same heavy board as a datastore replacement makes the board the bottleneck teams route around, informally, which recreates the silent violations this unit opened with.
+
+<Checkpoint question="Why can an unmaintained fitness function be worse than having none?">
+
+A check that fails builds for a rule the org has since changed teaches people to bypass checks, while a check that no longer covers the real rule gives false assurance that the decision is enforced. With no check, everyone at least knows enforcement is by memory. A check is only as trustworthy as the process that keeps it in step with the ADR it cites.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="governance-failure-modes"
+/>
+
+## This is a case, not the whole territory
+
+Everything above is one rule, one date check and one arrival rate. **What would change if the rule were layered, such as "domain may import nothing from infra, and infra nothing from web," across three or more layers instead of two named folders? What if high blast-radius ADRs had to be reconfirmed every 90 days while low-stakes ones only yearly: is that a change to the scan's logic, or to the data each record carries? And what if the review board's capacity doubled but arrivals also doubled?** Rework the tables for your own version and compare which parts moved and which stayed.
