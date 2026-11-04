@@ -5,222 +5,169 @@ title: "L3 — Building a password-strength checker through real red-green-refac
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Four cycles, one refactor, one design decision made early">
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "tdd-basics",
+};
+
+<Scenario label="Four cycles, one refactor. What did the very first assertion already decide?">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
       <div class="flex items-center gap-1.5"><span>1️⃣</span> <strong>Cycle 1</strong> — empty password</div>
       <div class="flex items-center gap-1.5"><span>2️⃣</span> <strong>Cycle 2</strong> — too short</div>
-      <div class="flex items-center gap-1.5"><span>3️⃣</span> <strong>Cycles 3–4</strong> — missing uppercase, missing a number</div>
-      <div class="flex items-center gap-1.5"><span>🧹</span> <strong>Refactor</strong> — consolidate into a rule list, tests unchanged</div>
+      <div class="flex items-center gap-1.5"><span>3️⃣</span> <strong>Cycle 3</strong> — no uppercase letter</div>
+      <div class="flex items-center gap-1.5"><span>4️⃣</span> <strong>Cycle 4</strong> — no number</div>
+      <div class="flex items-center gap-1.5"><span>🧹</span> <strong>Refactor</strong> — three checks into one rule list</div>
+    </div>
+    <div class="not-prose mt-3 flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300">
+      <div>
+        <div class="flex justify-between"><span>Rules in the finished checker</span><span>3 of 3</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-emerald-500 animate-fill-bar" style="--target-width: 100%"></div></div>
+      </div>
     </div>
   </Fragment>
 
-**Before reading further, predict: after the very first test is
-written — before any implementation exists — what does that one line
-already reveal about the shape `describePasswordStrength`'s return
-value has to take?**
+Back on the track: you have painted the line, and now you run it in four short
+sprints. The checker is called `describePasswordStrength`. **Before any code
+exists, the first assertion is written as `expect(describePasswordStrength("")).toEqual(...)`.
+What does that single line already tell you about what the function returns?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Four red-green-refactor cycles on one real function",
-    "A refactor that changes structure, not behavior",
-    "Extending the loop to a requirement that doesn't fit the existing shape",
+    "Four cycles on one small function",
+    "A refactor the tests can vouch for",
+    "A requirement that breaks the first shape",
   ]}
 />
 
-## Cycle 1: red
+## What does each cycle add, and what does it decide?
 
-```js
-// describePasswordStrength.test.mjs
-expect(describePasswordStrength("")).toEqual({
-  score: 0,
-  feedback: ["Password is required"],
-});
+**If each cycle adds one assertion and the least code to satisfy it, what does
+the whole build look like?** Here is the full sequence. The result is always
+`{ score, feedback }`: `score` counts rules passed, `feedback` lists messages
+for rules failed.
+
+| Cycle | Assertion added (input → expected)                      | Least code that passes       | Design decision it forced                     |
+| ----- | ------------------------------------------------------- | ---------------------------- | --------------------------------------------- |
+| 1     | `""` → score 0, `["Password is required"]`              | early return for empty input | Result is an object, not a boolean or a print |
+| 2     | `"short"` → score 0, `["Add more characters (min 8)"]`  | one length check             | `score` counts passes, `feedback` lists fails |
+| 3     | `"longenough"` → score 1, `["Add an uppercase letter"]` | one uppercase check          | Rules accumulate; order of messages matters   |
+| 4     | `"Longenough1"` → score 3, `[]`, plus a number rule     | one number check             | A fully good password has empty feedback      |
+
+```mermaid
+flowchart LR
+    C1["Cycle 1\nempty"] --> C2["Cycle 2\nlength"]
+    C2 --> C3["Cycle 3\nuppercase"]
+    C3 --> C4["Cycle 4\nnumber"]
+    C4 --> RF["Refactor\nrule list"]
+    RF -.->|"all 4 tests still pass"| C4
 ```
 
-This fails immediately — `describePasswordStrength` doesn't exist yet.
-But notice what already got decided, before any code was written: the
-function returns an **object with `score` and `feedback`**, not a
-boolean, not a thrown error, not a printed message. That decision came
-directly from writing an assertion that needed something to compare
-against.
+One honest wrinkle: when cycles 3 and 4 add rules, the earlier `"short"` and
+`"longenough"` expectations must grow, because those inputs now also fail the
+new rules. After cycle 4, `"short"` expects score 0 with three messages, and
+`"longenough"` expects score 1 with `["Add an uppercase letter", "Add a number"]`.
+Updating them is a deliberate change to the spec, made in the open, not a test
+quietly edited to go green. Running the finished function in Node gives exactly
+those results.
 
-## Cycle 1: green
+<Checkpoint question="A fifth rule, 'no spaces', is added directly to the function with no failing test written first. What is true of that branch and not of the other four?">
 
-```js
-function describePasswordStrength(password) {
-  if (!password) {
-    return { score: 0, feedback: ["Password is required"] };
-  }
-  return { score: 0, feedback: [] }; // not yet correct for non-empty input — no test demands more yet
-}
-```
-
-The minimum code to pass exactly the one test that exists. The second
-`return` is a deliberate placeholder — nothing yet requires it to be
-correct for a non-empty password, so it isn't.
-
-## Cycle 2: red, then green
-
-```js
-expect(describePasswordStrength("short")).toEqual({
-  score: 0,
-  feedback: ["Add more characters (min 8)"],
-});
-```
-
-```js
-function describePasswordStrength(password) {
-  if (!password) {
-    return { score: 0, feedback: ["Password is required"] };
-  }
-  const feedback = [];
-  let score = 0;
-  if (password.length >= 8) score++;
-  else feedback.push("Add more characters (min 8)");
-  return { score, feedback };
-}
-```
-
-## Cycles 3 and 4: red, then green
-
-```js
-expect(describePasswordStrength("longenough")).toEqual({
-  score: 1,
-  feedback: ["Add an uppercase letter", "Add a number"],
-});
-expect(describePasswordStrength("Longenough1")).toEqual({
-  score: 3,
-  feedback: [],
-});
-```
-
-```js
-function describePasswordStrength(password) {
-  if (!password) {
-    return { score: 0, feedback: ["Password is required"] };
-  }
-  const feedback = [];
-  let score = 0;
-  if (password.length >= 8) score++;
-  else feedback.push("Add more characters (min 8)");
-  if (/[A-Z]/.test(password)) score++;
-  else feedback.push("Add an uppercase letter");
-  if (/[0-9]/.test(password)) score++;
-  else feedback.push("Add a number");
-  return { score, feedback };
-}
-
-console.log(describePasswordStrength(""));
-// { score: 0, feedback: [ 'Password is required' ] }
-console.log(describePasswordStrength("short"));
-// { score: 0, feedback: [ 'Add more characters (min 8)', 'Add an uppercase letter', 'Add a number' ] }
-console.log(describePasswordStrength("longenough"));
-// { score: 1, feedback: [ 'Add an uppercase letter', 'Add a number' ] }
-console.log(describePasswordStrength("Longenough1"));
-// { score: 3, feedback: [] }
-```
-
-All four tests pass. Every branch in this function exists because a
-specific test demanded it — there's no rule in here that isn't traced
-back to an assertion.
-
-<Checkpoint question="Every branch in describePasswordStrength above traces back to a specific assertion that demanded it. If a fifth rule (say, 'reject passwords containing spaces') were added directly to the function without writing a failing test for it first, what would be true about that new branch that isn't true of the other four?">
-
-It would be untested, unproven code — the one branch in the function
-with no assertion behind it. Every other branch exists because a
-specific red test demanded exactly that behavior; this one would just
-be a guess about what the function should do, indistinguishable from
-the rest of the code by reading it, but with nothing verifying it
-actually works, that it's spelled correctly, or that it doesn't
-conflict with an existing rule. The next refactor would have no
-safety net for that branch specifically, even though the surrounding
-four are fully guarded.
+It is the only branch nothing demanded. Each of the other four exists because a
+specific red test required exactly that behavior. The new one is a guess,
+indistinguishable by reading from the rest, with nothing checking that it
+works, that it does not clash with an existing rule, or that a later refactor
+leaves it alone.
 
 </Checkpoint>
 
-## Refactor: consolidating into a rule list
+## What does the refactor change, and what proves it changed nothing?
 
-The three `if`/`else` checks repeat the same shape three times. With
-all four tests green, it's safe to restructure:
+**The three checks repeat the same shape. With four green tests, how do you
+tidy them safely?** Replace the three `if/else` blocks with one list of rules and
+one loop over it. This is the one place a code block earns its space, because
+the structure is the point.
 
 ```js
-const passwordRules = [
+const rules = [
   { check: (p) => p.length >= 8, message: "Add more characters (min 8)" },
   { check: (p) => /[A-Z]/.test(p), message: "Add an uppercase letter" },
   { check: (p) => /[0-9]/.test(p), message: "Add a number" },
 ];
-
-function describePasswordStrength(password) {
-  if (!password) {
-    return { score: 0, feedback: ["Password is required"] };
-  }
-  const feedback = [];
-  let score = 0;
-  for (const rule of passwordRules) {
-    if (rule.check(password)) score++;
-    else feedback.push(rule.message);
-  }
-  return { score, feedback };
-}
 ```
 
-Running all four tests again against this version produces byte-for-byte
-identical output to before — the refactor changed structure, not
-behavior, and the existing tests are exactly what makes that claim
-verifiable rather than just hoped for.
+Running the four tests against the new version gives identical results to the
+old one. That claim is checkable only because the tests are specific. If the
+uppercase and number rules were accidentally swapped in the list, `"longenough"`
+would produce `["Add a number", "Add an uppercase letter"]`, the array
+comparison in `toEqual` is order-sensitive, and the cycle-4 test would go red
+immediately.
 
-<Checkpoint question="Suppose the refactor above had accidentally swapped the order of the uppercase-letter check and the number check inside passwordRules. Would the existing four tests still catch that mistake, given that feedback is compared with toEqual against an array?">
+<Checkpoint question="Would a test that only checked feedback.length for 'longenough' catch that swap?">
 
-Yes. `toEqual` on an array compares elements in order, not just as a
-set, and the feedback array's order depends on the order rules run in.
-Swapping the two checks would produce `feedback` arrays with the
-uppercase and number messages in the opposite order from what the
-existing assertions expect, so at least one of the four tests would
-fail immediately. This is exactly the "refactor changed structure, not
-behavior" claim being made verifiable rather than hoped for — the
-tests are specific enough to notice a change most people would call a
-minor, harmless reordering.
+No. Both orderings have two messages, so a length-only assertion stays green
+while the user sees the advice in a different order. The refactor's safety is
+bounded by how specifically the tests pin the behavior. A looser assertion would
+have let a harmless-looking reorder, or a real mistake of the same kind, pass
+unnoticed.
 
 </Checkpoint>
 
-## What the code-first version would likely have looked like
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="password-checker-code"
+/>
 
-**Compare this to the opening scenario's other engineer, who started
-with implementation and used `console.warn` to report problems.** That
-version might work identically from a terminal — but nothing about it
-can be asserted against directly; a test would have to capture console
-output, parse it, and infer pass/fail from text that was designed for a
-human to read, not a test to compare. The test-first version's
-`{ score, feedback }` return value wasn't chosen for elegance — it was
-the direct, immediate consequence of needing something an `expect(...)`
-call could compare against, decided in cycle 1 before any
-implementation existed to bias the choice.
+## What if the next requirement does not fit the shape the first cycle chose?
 
-## Extend it: what changes if the next requirement is genuinely different, not just another rule?
+**Every rule so far was independent: a check and a message. What if the next
+requirement is "reject common passwords outright, whatever the score"?** The
+loop does not change. Write the failing test first, for example
+`"password123"` → score 0, `["This password is too common"]`. Run the rule list
+over it as it stands and the result is score 2 (length and number pass, uppercase
+fails), so the new test fails for a real reason. The least code that passes is a
+common-password check that runs before the rules and returns early.
 
-**Everything above assumed every new requirement was another
-independent rule, slotting cleanly into `passwordRules`. What if the
-next requirement were "reject the 100 most common passwords outright,
-regardless of score" — a check that doesn't fit the check/message
-shape at all?** The red-green-refactor loop doesn't change: write the
-failing test for that specific behavior first (`expect(describePasswordStrength("password123")).toEqual({ score: 0, feedback: ["This password is too common"] })`),
-then write the minimum code to pass it — which might mean the common-password
-check runs _before_ the rule loop, short-circuiting it entirely, since
-a common password shouldn't earn partial credit for happening to be 8
-characters long. The loop doesn't dictate that design decision; it just
-guarantees a concrete, specific test exists to validate whichever
-design gets chosen.
+| Design option                      | `"password123"` result                     | Passes the new test? |
+| ---------------------------------- | ------------------------------------------ | -------------------- |
+| Rule list only (before the change) | score 2, `["Add an uppercase letter"]`     | No (red)             |
+| Early return before the rule list  | score 0, `["This password is too common"]` | Yes (green)          |
+
+The test did not choose between "early return" and "a special rule", it only
+guaranteed that whichever you pick is checked. That is the honest limit of the
+method: TDD supplies the pressure and the safety net, and the design remains
+your call.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="new-requirement"
+/>
+
+## This is a case, not the whole territory
+
+The password checker is one small, pure function. Try bending the example
+yourself:
+
+- What changes if the checker had to call a service to look up common passwords?
+  Which part would you test first, and what would the assertion look like?
+- What changes if the audience were a banking app that must show every complaint
+  at once versus a sign-up form that shows only the first?
+- What changes if the news were worse: the first test you write turns out to be
+  impossible to satisfy without printing? What does that tell you about the
+  interface?
 
 ## Failure modes
 
-| Failure mode                                                   | What it gets wrong                                                                                  |
-| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Writing the test after the implementation, then calling it TDD | Skips the design pressure entirely — the interface is already fixed by the time the test is written |
-| Writing more code in green than the current test requires      | Adds untested behavior that no assertion actually demands or verifies                               |
-| Skipping refactor once tests pass                              | Leaves duplication or awkward structure in place with no forcing function to clean it up later      |
-| Writing a vague or tautological assertion just to reach green  | A test that can't meaningfully fail provides none of red's actual guarantee                         |
-| Assuming TDD alone guarantees good design                      | The design pressure only helps if an awkward interface, once noticed, actually gets changed         |
+| Failure mode                                         | What it gets wrong                                                        |
+| ---------------------------------------------------- | ------------------------------------------------------------------------- |
+| Writing the test after the code and calling it TDD   | Skips the design pressure: the interface is fixed before the test exists  |
+| Writing more in green than the current test requires | Adds behavior that no assertion demands or verifies                       |
+| Skipping refactor once tests pass                    | Leaves duplication with no forcing function to remove it                  |
+| Writing a vague assertion just to reach green        | A test that cannot meaningfully fail gives none of red's guarantee        |
+| Assuming TDD alone guarantees good design            | The pressure only helps if an awkward interface, once noticed, is changed |

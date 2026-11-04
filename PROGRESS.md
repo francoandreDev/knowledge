@@ -3713,3 +3713,11 @@ Migrated the last 4 `applied-math/` units via 4 parallel content-only subagents.
 Length bias (quiz items), correct strictly longest / strictly shortest: `capacity-planning-math` 25% / 17%, `unit-economics` 17% / 12%, `expected-value` 17% / 15%, `quantitative-modeling-design-decisions` 24% / 7% (faint opposite tell).
 
 `applied-math/` is complete: 15 of 15. Total migrated: 169 of 246. Next track in ROADMAP order: `testing-quality` (13 units; `quality-culture` has a roadmap title with "staff engineer" to fix).
+
+## 2026-11-04 — testing-quality batch 1 (4 units)
+
+Migrated to the three-tier exercise model and rule-9 diagrams-first content: `case-automated-testing` (5 topics, 55 items, code topic `suite-as-memory`), `test-pyramid` (6 topics, 71 items, code topic `suite-math`), `assertions-matter` (6 topics, 72 items, code topic `test-input-code`), `tdd-basics` (7 topics, 84 items, code topic `password-checker-code`; no `interactives.json` yet — rule-5c gap).
+
+Checks: typecheck 0 errors, 273 pages built, 46 code items with 0 failing sandbox assertions, every DomainCheck topic passes live, no Mermaid/KaTeX errors, Mark as done enabled. Also removed "staff engineer" from the `quality-culture` roadmap title and teaser.
+
+Total migrated: 173 of 246. Next: testing-quality batch 2 (`bdd`, `test-doubles`, `flaky-tests`, `mutation-testing`).

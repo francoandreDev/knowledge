@@ -943,7 +943,7 @@ export const UNIT_TEASERS: Record<string, UnitTeaser> = {
   "testing-quality/quality-culture": {
     myth: "Quality is QA's job, not engineering's.",
     reality:
-      "A staff engineer treats testing strategy as an architectural decision — quality culture means the whole team owns it, not a separate team downstream.",
+      "Testing strategy is an architectural decision — a quality culture means the whole team owns it, not a separate team downstream.",
   },
 
   // software-design/

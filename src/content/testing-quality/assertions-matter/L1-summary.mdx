@@ -4,67 +4,94 @@ title: "L1 — How do I write a test that actually catches bugs, not just exerci
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="100% green, and a real bug shipped anyway">
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "assertions-matter",
+};
+
+<Scenario label="Every smoke alarm passed its check, and one had no battery">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>💰</span> <strong>The spec</strong> — orders of $100 or more get a 10% discount</div>
-      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>The bug</strong> — code checks <code>subtotal &gt; 100</code> instead of <code>&gt;= 100</code>, so a $100 order gets no discount</div>
-      <div class="flex items-center gap-1.5"><span>✅</span> <strong>The existing test</strong> — <code>expect(typeof total).toBe('number')</code> — passes on both the buggy and the correct code</div>
+      <div class="flex items-center gap-1.5"><span>🔔</span> <strong>The alarm</strong> — screwed to the ceiling, wired to a small green light</div>
+      <div class="flex items-center gap-1.5"><span>🪫</span> <strong>The gap</strong> — the battery compartment is empty</div>
+      <div class="flex items-center gap-1.5"><span>✅</span> <strong>The check</strong> — "is it mounted on the ceiling?" Yes, so it passes</div>
     </div>
   </Fragment>
 
-The test suite is green. Every test passes. A customer places a $100
-order and doesn't get the discount they were promised — the code checks
-`subtotal > 100` instead of `subtotal >= 100`, a one-character bug. **The
-test file has a test for this exact function. Why didn't it catch a bug
-this simple?**
+Each spring, someone walks through a building and checks every smoke alarm
+by looking up and confirming it is mounted on the ceiling. All of them pass.
+One has no battery inside. **The check ran on every alarm and never failed.
+So why did it tell nobody that this alarm cannot sound?**
 
-The test checks `typeof calculateOrderTotal(100) === 'number'`. That
-assertion is true whether the discount was applied correctly, applied
-incorrectly, or not applied at all — it only confirms the function
-returns _a number_, never _which_ number. The test exercised the code.
-It never actually checked the thing that mattered.
+Because "mounted on the ceiling" is true of a working alarm and a dead one
+alike. The check touched the alarm. It never asked the question that matters:
+would it make a noise if there were smoke?
 
 </Scenario>
 
-- **A test passing tells you the code ran without crashing — it doesn't
-  tell you the code did the right thing, unless the assertion itself
-  checks for the right thing specifically.** These are different claims,
-  and a weak assertion only proves the first one.
-- **A tautological test is one that's mathematically guaranteed to pass
-  regardless of whether the code is correct** — checking that a result
-  "is a number," "is defined," or "doesn't throw" when the actual bug
-  risk is about _which_ number, _which_ value, _which_ behavior.
-- **The sharpest test for whether an assertion is doing real work: would
-  it fail if the implementation had a plausible bug?** If a one-character
-  change to the real code (like `>` instead of `>=`) wouldn't make any
-  existing test fail, none of those tests were actually testing that
-  behavior — they were exercising the code path without checking its
-  output.
-- **This isn't about writing more tests — the original codebase already
-  had a test for this function.** It's about whether each test's
-  assertion is precise enough to distinguish correct behavior from the
-  specific incorrect behaviors that are actually likely to occur, especially
-  right at boundary values like exactly $100.
-- The practical skill this unit builds: **before trusting a passing test,
-  asking what specific bug it would have caught** — and if the honest
-  answer is "none, it would pass either way," treating that as a test
-  that needs a sharper assertion, not a real safety net.
-
 <LevelIntro
   items={[
+    "Why a passing test can prove nothing",
     "What a tautological assertion is",
-    "The 'would this catch a plausible bug' test",
-    "Weak vs. strong assertions on the same function",
+    "The question that sorts weak from strong",
   ]}
 />
 
-## Two tests, same function, different guarantees
+## Does the same trap exist in code?
 
-|                                | Weak assertion                         | Strong assertion                                            |
-| ------------------------------ | -------------------------------------- | ----------------------------------------------------------- |
-| What it checks                 | `typeof result === 'number'`           | `calculateOrderTotal(100) === 90`                           |
-| Passes on the buggy version?   | Yes                                    | No                                                          |
-| Passes on the correct version? | Yes                                    | Yes                                                         |
-| What passing actually proves   | The function ran and returned a number | The discount boundary is handled correctly, at exactly $100 |
+**If a test can pass without checking the thing that matters, what does that
+look like in a real function?** Here is a small spec and a one-character bug:
+
+| Piece         | Detail                                                                                             |
+| ------------- | -------------------------------------------------------------------------------------------------- |
+| The spec      | An order of $100 or more gets 10% off, so a $100 order costs $90                                   |
+| The bug       | The code checks `subtotal > 100` instead of `subtotal >= 100`, so a $100 order costs $100          |
+| The old test  | Asserts that the result for a $100 order "is a number"                                             |
+| What happened | The old test passes on the buggy code, because `100` is a number, and passes on the fixed `90` too |
+
+The same $100 order goes through both versions, and the weak and strong tests
+disagree about what they can see:
+
+```mermaid
+flowchart LR
+    I["Input: a $100 order"] --> B["Buggy code\nreturns 100"]
+    I --> F["Fixed code\nreturns 90"]
+    B --> W1["Weak test: is it a number?\nPASS"]
+    F --> W2["Weak test: is it a number?\nPASS"]
+    B --> S1["Strong test: does it equal 90?\nFAIL"]
+    F --> S2["Strong test: does it equal 90?\nPASS"]
+```
+
+Only the strong test treats the buggy version and the fixed version
+differently. The weak test gives the same answer for both, so its green tick
+carries no information about the discount.
+
+## What separates a weak assertion from a strong one?
+
+**What question can you ask of any assertion before trusting it?** Ask: _if
+the code had a plausible bug, would this assertion fail?_ If the honest answer
+is "no, it would pass either way," the assertion is a **tautological** one: it
+is guaranteed to pass whether or not the code is right.
+
+| Assertion on the result of a $100 order | Fails on the buggy code? | What passing actually proves            |
+| --------------------------------------- | ------------------------ | --------------------------------------- |
+| "It is a number"                        | No                       | The function ran and returned a number  |
+| "It is not empty"                       | No                       | The function returned something         |
+| "It does not throw"                     | No                       | The function did not crash              |
+| "It equals 90"                          | Yes                      | The discount is applied at exactly $100 |
+
+- **A passing test only proves what its assertion checks.** "Ran without
+  crashing" and "gave the right answer" are different claims.
+- **More tests are not the cure.** The codebase in the story already had a
+  test for this function. The cure is an assertion precise enough to tell the
+  correct behaviour from the specific wrong behaviours that are likely.
+- **The habit to build:** before trusting a green test, name the bug it would
+  have caught. If you cannot, it needs a sharper assertion.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="weak-vs-strong"
+/>

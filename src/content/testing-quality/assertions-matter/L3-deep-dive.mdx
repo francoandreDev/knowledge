@@ -1,168 +1,169 @@
 ---
-title: "L3 — Reproducing the discount bug, and a function that checks whether a test catches it"
+title: "L3 — Two thresholds, four planted bugs, and which inputs catch them"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="Same input, two implementations, one boundary">
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "assertions-matter",
+};
+
+<Scenario label="One test at $100, and a second rule nobody tested">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>💰</span> <strong>Spec</strong> — orders of $100 or more get a 10% discount</div>
-      <div class="flex items-center gap-1.5"><span>🐛</span> <strong>Bug</strong> — <code>subtotal &gt; 100</code> instead of <code>subtotal &gt;= 100</code></div>
+      <div class="flex items-center gap-1.5"><span>💰</span> <strong>Discount</strong> — subtotal 100 or more takes 10% off</div>
+      <div class="flex items-center gap-1.5"><span>🚚</span> <strong>Shipping</strong> — subtotal 50 or more ships free, otherwise 7.50</div>
+      <div class="flex items-center gap-1.5"><span>🧪</span> <strong>The suite</strong> — exact-value checks at 49 and 100 only</div>
+    </div>
+    <div class="not-prose mt-3 flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300">
+      <div>
+        <div class="flex justify-between"><span>Thresholds with an exact-boundary test</span><span>1 of 2</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-emerald-500 animate-fill-bar" style="--target-width: 50%"></div></div>
+      </div>
     </div>
   </Fragment>
 
-**Before reading the code, predict: is there any dollar amount where the
-buggy and fixed implementations return the exact same result?**
+The order function now has two separate rules, and the suite only tests the
+exact edge of one of them. **Before reading on, predict: if someone changes
+the free-shipping check from "50 or more" to "more than 50", does this suite
+notice?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Weak vs. strong assertions on the same bug",
-    "A function that tests whether an input catches a bug",
-    "Independent boundaries, independently tested",
+    "Which inputs catch which planted bug",
+    "Why one boundary never covers another",
+    "A reusable test for any input and bug",
   ]}
 />
 
-## The buggy and fixed implementations
+## Which planted bug does each input catch?
+
+**How do you answer the prediction without guessing?** Run the mutation check
+from L2, once per bug, over a handful of inputs. The correct function, with
+both rules:
 
 ```js
-// BUGGY: off-by-one at the discount boundary
-function calculateOrderTotalBuggy(subtotal) {
-  const DISCOUNT_THRESHOLD = 100;
-  if (subtotal > DISCOUNT_THRESHOLD) {
-    return subtotal * 0.9;
-  }
-  return subtotal;
-}
-
-// FIXED: correct boundary, matching the actual spec ("$100 or more")
-function calculateOrderTotal(subtotal) {
-  const DISCOUNT_THRESHOLD = 100;
-  if (subtotal >= DISCOUNT_THRESHOLD) {
-    return subtotal * 0.9;
-  }
-  return subtotal;
+function orderTotal(subtotal) {
+  const afterDiscount = subtotal >= 100 ? subtotal * 0.9 : subtotal;
+  const shipping = subtotal >= 50 ? 0 : 7.5;
+  return afterDiscount + shipping;
 }
 ```
 
-```js
-calculateOrderTotalBuggy(100); // 100 — WRONG, spec says $100 qualifies
-calculateOrderTotal(100); // 90  — correct
+Correct results are 56.5 at 49, 50 at 50, 99 at 99, 90 at 100 and 135 at 150.
+Four plausible bugs get planted one at a time, and the table marks every
+input that returns a different answer from the correct function (computed by
+running all four mutants):
+
+| Planted bug                            | 49  | 50  | 99  | 100 | 150 |
+| -------------------------------------- | --- | --- | --- | --- | --- |
+| Discount check becomes "more than 100" | -   | -   | -   | YES | -   |
+| Shipping check becomes "more than 50"  | -   | YES | -   | -   | -   |
+| Shipping fee becomes 9 instead of 7.5  | YES | -   | -   | -   | -   |
+| Discount rate becomes 20% not 10%      | -   | -   | -   | YES | YES |
+
+Each row has a different set of catching inputs, so no single test input is
+the best. The suite from the story (49 and 100) catches rows 1, 3 and 4 and
+**misses row 2**: the only input that exposes the shipping edge is exactly 50.
+The answer to the prediction is no.
+
+```mermaid
+flowchart TD
+    A["A plausible bug in one rule"] --> B["Which input makes buggy and\ncorrect code return different answers?"]
+    B --> C{"Is that input in the suite\nwith an exact-value assertion?"}
+    C -- "Yes" --> D["Caught"]
+    C -- "No" --> E["Survives: add that input"]
+    B --> F["Edge bugs: the answer is\nexactly the threshold"]
+    B --> G["Value bugs: any input past\nthe rule's edge works"]
 ```
 
-## The weak assertion that let it ship
+Notice what the table says about the two kinds of bug. A **value** bug (the
+fee, the rate) shows up on any input where that rule applies, so it is
+easy to catch. An **edge** bug (`>` for `>=`) shows up on one input only, the
+threshold itself.
 
-```js
-// The ORIGINAL test — tautological for this bug
-function weakAssertionPasses(fn) {
-  const result = fn(100);
-  return typeof result === "number" && result > 0;
-}
+<Checkpoint question="The suite tests 49 and 100 with exact assertions and passes. A teammate says the order function's thresholds are verified. What is the strongest objection?">
 
-weakAssertionPasses(calculateOrderTotalBuggy); // true
-weakAssertionPasses(calculateOrderTotal); // true
-```
-
-Both implementations pass. The assertion never asked "is the discount
-actually applied at exactly $100" — it asked "is the result a positive
-number," a question both the buggy and correct code answer identically.
-
-<Checkpoint question="weakAssertionPasses checks typeof result === 'number' && result > 0. Both the buggy and fixed implementations pass that check at subtotal 100. Does that mean the assertion is wrong to write, or wrong for this particular bug?">
-
-It's wrong for this particular bug, not wrong in general — an assertion
-that the result is a positive number is a perfectly reasonable sanity
-check for some bugs (a function that accidentally returns `NaN` or a
-negative value, for instance). The problem is that it's the _only_
-assertion, and the discount-boundary bug never touches "is it a positive
-number" — both `100` and `90` satisfy that condition, so the assertion is
-blind to the exact defect this test suite exists to catch. A weak
-assertion isn't useless; it's just no substitute for one that targets the
-specific risk in the code it's testing.
+Only one of the two thresholds has an exact-boundary test. The input 100
+exercises the discount edge, and the input 49 sits below the shipping edge
+rather than on it. Because the two rules are separate conditions, a pass at one
+edge carries no information about the other: the shipping check can be wrong in
+the same one-character way and still leave every existing test green. Each
+independent threshold needs its own input at the threshold value.
 
 </Checkpoint>
 
-## The strong assertion that would have caught it
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="second-boundary"
+/>
+
+## How do you encode "does this input catch that bug" as a reusable test?
+
+**Could the comparison you did by hand for 20 cells be one small function?**
+Yes, because the whole idea is a single comparison:
 
 ```js
-function strongAssertionPasses(fn) {
-  return fn(100) === 90;
-}
-
-strongAssertionPasses(calculateOrderTotalBuggy); // false — catches the bug
-strongAssertionPasses(calculateOrderTotal); // true  — correct code passes
+// true when the input separates the correct version from the buggy one
+const catches = (correctFn, buggyFn, input) =>
+  correctFn(input) !== buggyFn(input);
 ```
 
-## A function that checks whether a given input catches a given bug
+Calling it on the discount bug gives `catches(correct, buggy, 100)` as true and
+`catches(correct, buggy, 150)` as false. Looped over every planted bug and
+every candidate input, it produces the table above, and any bug whose whole
+row is empty tells you which test to write next. This is writing the check
+rather than reading it, and it is the only place in this unit where code is
+the clearest vehicle, so the exercises for this level ask you to write a few
+such helpers.
 
-```js
-// Encodes the mutation-testing idea directly: does testInput distinguish
-// the correct implementation from the buggy one?
-function testCatchesBug(goodFn, buggyFn, testInput) {
-  return goodFn(testInput) !== buggyFn(testInput);
-}
+<Checkpoint question="A bug survives your whole suite: the helper reports no input catches it. Before adding a test, what should you double-check about the bug itself?">
 
-testCatchesBug(calculateOrderTotal, calculateOrderTotalBuggy, 100); // true  — boundary value catches it
-testCatchesBug(calculateOrderTotal, calculateOrderTotalBuggy, 150); // false — same result either way
-testCatchesBug(calculateOrderTotal, calculateOrderTotalBuggy, 50); // false — below threshold, same result
-```
-
-Only **100** — the exact boundary — distinguishes the two implementations.
-150 and 50 are both "reasonable-looking test values" that would make a
-test suite feel thorough while never actually exercising the one input
-where the bug lives.
-
-<Checkpoint question="testCatchesBug(calculateOrderTotal, calculateOrderTotalBuggy, 100) returns true, proving 100 is a good test input for the discount boundary. If the function also had a second, unrelated threshold somewhere else in its logic, would that same result tell you anything about whether the second threshold is correct?">
-
-No. `testCatchesBug` only tells you that the specific input you passed
-distinguishes the two implementations for the specific code path that
-input exercises — it says nothing about any other boundary the function
-might contain. Passing `100` proves the discount boundary is tested; it
-proves nothing about a second, independent threshold, because that other
-threshold has its own boundary value and its own off-by-one risk that
-`100` never touches. Each independent boundary needs its own dedicated
-boundary-value test, not a single passing check assumed to cover the
-whole function.
+Check that it really changes behaviour. A mutation that cannot alter any
+output, such as renaming a local variable or reordering two independent
+statements, will survive every suite on earth, and adding a test for it is
+wasted effort. If the bug does change some output, find the input where the
+two versions differ, which is usually the threshold or another edge, and write
+the exact-value test there.
 
 </Checkpoint>
 
-## Extend the incident: what if there's a second boundary?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="test-input-code"
+/>
 
-**The fix above assumed one threshold. What changes if the same order
-also has a separate free-shipping threshold at a different dollar
-amount?**
+## Extend the case: what changes if the facts change?
 
-```js
-function calculateOrderTotalWithShipping(subtotal) {
-  const DISCOUNT_THRESHOLD = 100;
-  const FREE_SHIPPING_THRESHOLD = 50;
-  const total = subtotal >= DISCOUNT_THRESHOLD ? subtotal * 0.9 : subtotal;
-  const shipping = subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : 7.5;
-  return total + shipping;
-}
+This is one worked example, a case, not the whole territory. Try bending it
+before moving on:
 
-calculateOrderTotalWithShipping(49); // 56.5 — below both thresholds, full shipping
-calculateOrderTotalWithShipping(50); // 50   — free shipping, no discount yet
-calculateOrderTotalWithShipping(100); // 90   — discount applied, free shipping
-```
-
-Two independent boundaries means two independent places a `>` vs. `>=`
-bug could hide, and a test suite covering only the discount boundary
-(100) would still miss a shipping-boundary bug at 50. **The generalizable
-habit**: for every conditional with a threshold, the boundary value
-itself is a required test input, not an optional one — and each
-independent threshold needs its own boundary check, since passing one
-doesn't imply the other is correct.
+- **What if a third rule appears,** say an extra 5% off at 200? Which new
+  input does the suite need, and does anything about 49 or 100 change?
+- **What if two rules interact,** so the shipping threshold depends on the
+  discounted price instead of the raw subtotal? Which inputs now sit on the
+  edge, and does the table's "any input past the edge" shortcut still hold?
+- **What if the values are not whole dollars,** such as 99.99 and 100.00? How
+  would the one-cent neighbours change which inputs you pick?
+- **What if the spec lived in a different domain** (an age range, a retry
+  limit, a password length)? The procedure is identical: list the plausible
+  bugs, find the input that separates each from the correct code, and check it
+  is in the suite with an exact assertion.
 
 ## Failure modes
 
-| Failure mode                                                                                           | What it gets wrong                                                                              |
-| ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
-| Asserting on type or truthiness (`typeof result === 'number'`) when the risk is about a specific value | Passes identically whether the code is correct or subtly wrong                                  |
-| Testing only values comfortably inside a range, never the boundary itself                              | Off-by-one bugs live exactly at boundaries and go untested                                      |
-| Assuming a passing test means the behavior is verified                                                 | A test only verifies what its specific assertion checks, nothing more                           |
-| Testing one boundary and assuming other independent boundaries are also covered                        | Each threshold needs its own boundary check; one passing doesn't imply another does             |
-| Asserting on internal implementation details instead of observable output                              | Breaks on harmless refactors, a false signal in the opposite direction from a tautological test |
+| Failure mode                                                            | What it gets wrong                                                       |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Asserting on type or truthiness when the risk is a specific value       | Passes identically whether the code is right or subtly wrong             |
+| Testing only values well inside a range                                 | Off-by-one bugs live on the boundary and go untested                     |
+| A strong assertion paired with an input that cannot tell versions apart | The test is exact but blind: both versions give the same answer          |
+| Verifying one boundary and assuming the rest are covered                | Every independent threshold has its own edge and its own off-by-one risk |
+| Asserting on internal calls instead of returned output                  | Breaks on harmless refactors, a false alarm instead of a false all-clear |

@@ -2,124 +2,133 @@
 title: "L2 — Why manual verification coverage decays as a codebase grows"
 ---
 
-import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="The regression nobody thought to check">
-  <Fragment slot="facts">
-    <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>✍️</span> Change touched: <strong>1 shared function</strong> (pricing.mjs)</div>
-      <div class="flex items-center gap-1.5"><span>👀</span> Manually re-checked: <strong>1 caller</strong> (checkout — the one the developer knew about)</div>
-      <div class="flex items-center gap-1.5"><span>🕳️</span> Not re-checked: <strong>the refund tool</strong> — a caller the developer didn't know existed</div>
-    </div>
-    <div class="not-prose mt-3 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs dark:border-amber-800 dark:bg-amber-950">
-      Nobody skipped a step on purpose. The gap is structural: you can only
-      manually re-check what you know to look at.
-    </div>
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "case-automated-testing",
+};
 
-  </Fragment>
-
-The developer who "fixed" the pricing function did check something — they
-just couldn't check a caller they didn't know existed. **If manual
-checking isn't lazy or careless here, what exactly is it missing, and
-why does that gap get worse as a codebase grows rather than better?**
-
-</Scenario>
+L1 showed that a manual check is a snapshot and that a check which runs itself
+can be asked again for free. L2 asks two follow-up questions. Why does a
+careful person still miss the broken thing, and why does re-checking by hand
+get harder every month even if nobody gets lazier?
 
 <LevelIntro
   items={[
-    "Why manual re-check cost stays flat while the affected surface grows",
-    "Tracing a regression through 'indirectly affected' callers",
-    "Where in the timeline a test actually catches a bug, vs. where a human does",
+    "Why careful people still miss indirect breakage",
+    "How manual re-check cost grows with the codebase",
+    "The upfront cost against compounding savings",
   ]}
 />
 
-## The shape of the problem: a fixed check against a growing surface
+## Why does a careful person still miss the broken thing?
+
+**The developer checked checkout thoroughly. What exactly could they not
+check?** Not a lack of effort: the refund tool. They did not know it used the
+function they changed. One shared function can serve many features, and the
+developer can only re-check the ones they know about.
 
 ```mermaid
-flowchart LR
-    Manual["Manual check:\nre-verify by hand"] --> Cost{"Cost per re-check\nstays roughly constant"}
-    Cost --> Decision{"Actually re-check\nevery change, everywhere?"}
-    Decision -- "Codebase is small" --> Yes["Feasible — mostly done"]
-    Decision -- "Codebase grows" --> No["Infeasible — only the changed\narea gets checked, rest is 'probably fine'"]
+flowchart TD
+    F["Shared pricing function<br/>(the thing that changed)"]
+    F --> C["Checkout<br/>known to the developer"]
+    F --> R["Refund tool<br/>unknown to the developer"]
+    F --> S["Nightly report<br/>unknown to the developer"]
+    C --> Cok["Re-checked by hand: passes"]
+    R --> Rno["Not re-checked: breaks silently"]
+    S --> Sno["Not re-checked: breaks silently"]
 ```
 
-The failure isn't that anyone decides to stop caring about quality — it's that the _cost_ of manually re-verifying everything stays roughly constant per check while the _number of things that could have been affected_ by any given change grows with the codebase. At some size, exhaustive manual re-verification before every change becomes physically impossible within any reasonable time budget, and "probably fine, didn't touch that file" quietly becomes the actual practice, whether or not anyone said so out loud.
+| What limits the check         | Manual re-check                     | Automated suite                      |
+| ----------------------------- | ----------------------------------- | ------------------------------------ |
+| Which places get re-checked   | Those the person knows depend on it | Every check that was ever written    |
+| Effect of being extra careful | Better checks of the known places   | Not needed to reach the unknown ones |
+| Where the blind spot lives    | In the person's picture of the code | Only in behaviors nobody wrote down  |
 
-## A concrete regression, traced
+<Checkpoint question="If the developer had been twice as careful, would the refund tool have been re-checked? Why or why not?">
 
-**Given the scenario above — one shared function, two callers, one checked — what does the actual decision the shipping process makes look like?**
-
-```python
-def ship_change(change, codebase):
-    directly_tested = manually_check(change.touched_files)
-    # Nobody manually re-checks files the developer didn't think to touch —
-    # there's no way to know in advance which of the untouched files
-    # actually depend on the behavior that changed.
-
-    indirectly_affected = find_dependents(change, codebase)  # often invisible to the developer
-    if not automated_tests_exist_for(indirectly_affected):
-        return "shipped — indirectly_affected untested, breakage discovered later, if at all"
-    else:
-        return run(automated_tests_for(indirectly_affected))  # catches it now, cheaply
-```
-
-The `indirectly_affected` set is exactly the part manual testing structurally can't cover reliably: it requires the developer to correctly predict every place their change's effects propagate to, in a codebase they may not fully hold in their head — an automated test suite doesn't need that prediction, because it just re-runs every check that already exists, regardless of whether anyone remembered this particular file was affected.
-
-<Checkpoint question="In the pseudocode above, why does 'automated_tests_exist_for(indirectly_affected)' matter more than whether the developer is diligent? If the developer had been extremely careful and thorough, would that have changed the outcome?">
-
-No — the pseudocode's branch depends on whether a test already exists for
-the indirectly affected code, not on how careful the developer was.
-Diligence only helps with `directly_tested`, the files the developer
-actually knew to touch; it can't extend to files they had no way of
-knowing depended on the change, because "knowing" isn't the bottleneck —
-visibility is. This is the core reason automated tests aren't just "manual
-checking, but done more carefully": they cover a dependency graph a human
-can't see, not one a human forgot to look at.
+No. Care improves how well the known places are checked; it cannot add places
+the person does not know exist. The limit is visibility, not effort. A saved
+check for the refund behavior does not depend on anyone remembering the refund
+tool at the moment of the change, because it simply runs along with every other
+saved check.
 
 </Checkpoint>
 
-## Three properties, compared directly
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="hidden-callers"
+/>
 
-| Property      | Manual check                                                             | Automated test                                                                    |
-| ------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| Repeatability | Depends on a human remembering every step, every time, correctly         | Runs the exact same steps every time, unaffected by fatigue or memory             |
-| Speed         | Minutes to hours per full pass, so it's reserved for "important" moments | Often seconds for a full suite — cheap enough to run on every single change       |
-| Specificity   | "Something's broken" (found by a user or QA) points vaguely at symptoms  | A failing test names the exact assertion and file, pointing at the cause directly |
+## When does checking by hand stop being possible?
 
-The speed property is the one with compounding effects: something that costs seconds gets run constantly (before every commit, on every PR); something that costs an hour gets run rarely (before a release, if at all) — and the gap between "constantly" and "rarely" is exactly the window where regressions accumulate silently.
+**If every change should trigger a full re-check, what does that cost as the
+product gets more flows?** Use two stated assumptions: one hand re-check of one
+flow takes 3 minutes, and the team ships 4 changes a day. These are example
+numbers, not measurements.
 
-## Where the same bug actually got caught, and what it cost
-
-**In the scenario, the regression was eventually found by a support ticket — 9 days after shipping. What would it have cost to catch it at each earlier point instead?**
+| Flows in the product | One full manual re-check | Four changes a day |
+| -------------------- | ------------------------ | ------------------ |
+| 10                   | 30 minutes               | 120 minutes        |
+| 20                   | 60 minutes               | 240 minutes        |
+| 40                   | 120 minutes              | 480 minutes        |
 
 ```mermaid
-pie showData
-    title "Where the regression could have been caught"
-    "Automated test, before shipping" : 60
-    "Code review, if the reviewer knew about the refund tool" : 15
-    "Manual re-check, if someone thought to check refunds" : 5
-    "Support ticket, 9 days after shipping" : 20
+xychart-beta
+    title "Minutes for one full manual re-check (3 minutes per flow, assumed)"
+    x-axis "Flows in the product" ["10", "20", "40", "80"]
+    y-axis "Minutes" 0 --> 260
+    bar [30, 60, 120, 240]
 ```
 
-The slices aren't about probability of occurring — they're about how much of the total "catching this" opportunity each stage actually represents. An automated test written once, the moment the dependency was discovered, would have covered this exact case on every future change to `pricing.mjs`, forever — none of the other three stages offer that.
+At 40 flows and 4 changes a day, full re-checking would take 8 hours of one
+person's day, so in practice the team re-checks only "what I touched." That
+quiet shift is how the garage light gets missed: nobody decided to stop
+checking, the cost simply outgrew the time.
 
-<Checkpoint question="The pie chart gives the automated-test slice 60% and the support-ticket slice 20%. If a team decided to skip writing the test but instead promised to 'review more carefully,' which slice would that effort actually add to, and would it recover the 60%?">
+## Is writing the test worth the time it takes?
 
-It would add effort to the code-review slice (15%), not recreate the
-automated-test slice. Code review depends on a specific human reviewer
-happening to know the refund tool exists and depends on this behavior —
-exactly the kind of tacit knowledge that doesn't scale as a codebase and
-its number of reviewers grow. A test doesn't need anyone to remember
-anything at review time; it re-asserts the dependency automatically, on
-every change, forever. More careful reviewing can shrink the support-ticket
-slice a little, but it can't substitute for the automated-test slice,
-because the two catch the bug through fundamentally different mechanisms —
-one relies on a person's memory, the other doesn't rely on memory at all.
+**Writing a check costs something now. When does that pay back?** Assume
+writing one automated check takes 15 minutes once, and each manual re-check of
+the same behavior takes 3 minutes. Treat the automated run as close to free.
+
+| Changes so far | Manual total | Automated total |
+| -------------- | ------------ | --------------- |
+| 1              | 3 minutes    | 15 minutes      |
+| 5              | 15 minutes   | 15 minutes      |
+| 10             | 30 minutes   | 15 minutes      |
+| 50             | 150 minutes  | 15 minutes      |
+
+```mermaid
+xychart-beta
+    title "Cumulative minutes spent (15 to write once, 3 per manual re-check, assumed)"
+    x-axis "Changes so far" ["0", "2", "4", "5", "6", "8", "10"]
+    y-axis "Minutes" 0 --> 32
+    line [0, 6, 12, 15, 18, 24, 30]
+    line [15, 15, 15, 15, 15, 15, 15]
+```
+
+The lines cross at 5 changes (15 ÷ 3). Before that the manual route is cheaper,
+after that the written check wins and the gap keeps widening. The trade only
+loses for code that will be touched once and then never again, which is rare
+in a system under active development.
+
+<Checkpoint question="Why does the crossing point matter more than the exact 15 and 3?">
+
+Because it turns an argument about feeling into a question about frequency.
+Whatever the real numbers are, a one-time cost and a repeating cost always
+cross; the only question is how soon. Code that is changed often crosses
+quickly, so the one-time cost is easy to justify, and code that will never be
+touched again may never cross.
 
 </Checkpoint>
 
-## The cost/benefit that makes this worth the upfront time
-
-Writing a test costs real time once. Not writing one costs nothing today, but costs (rediscovering the bug, debugging it, fixing it, re-verifying the fix, and every future regression of the same bug going undetected until someone re-checks manually) every subsequent time the code path is touched — the trade only loses if the code is genuinely touched once and never again, which is the exception in real, actively-developed systems, not the rule.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="compounding-cost"
+/>

@@ -1,128 +1,140 @@
 ---
-title: "L2 — The mutation test, boundary values, and testing behavior over implementation"
+title: "L2 — The mutation check, boundary inputs, and testing behaviour over implementation"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 showed one weak assertion that let a real bug ship, and the "would
-this fail on a plausible bug" question that exposes it. L2 turns that
-question into a repeatable check, shows exactly why the boundary value
-is what exposed it, and works out how far "assert on the exact output"
-should generalize.
+export const unit = {
+  track: "testing-quality",
+  unitSlug: "assertions-matter",
+};
+
+L1 gave one question for sorting weak assertions from strong ones: would it
+fail if the code had a plausible bug? L2 turns that question into a repeatable
+check, shows why the input you choose matters as much as the assertion, and
+works out how far "assert on the exact output" should go.
 
 <LevelIntro
   items={[
-    "The mutation thought experiment",
-    "Why boundary values expose weak assertions",
-    "Behavior-focused vs. implementation-coupled assertions",
+    "The mutation check, done by hand",
+    "Why the input must be able to tell versions apart",
+    "Behaviour versus implementation details",
   ]}
 />
 
-## The mutation thought experiment
+## How do you check a test is doing work, instead of eyeballing it?
 
-**Is there a concrete way to check whether a test is actually doing work,
-rather than just eyeballing whether the assertion "looks thorough"?**
+**Is there a concrete procedure for "would it fail on a plausible bug", or is
+it just a feeling?** There is one. Plant the bug yourself and see whether
+anything notices:
 
 ```mermaid
 flowchart TD
-    A["Take the working code"] --> B["Deliberately introduce one\nplausible bug (a 'mutation')"]
-    B --> C["Run the existing test suite\nagainst the mutated code"]
+    A["Start from the working code"] --> B["Plant one small, plausible bug\n(a 'mutation')"]
+    B --> C["Run the existing tests\nagainst the mutated code"]
     C --> D{"Does any test fail?"}
-    D -- "No test fails" --> E["The tests covering this code\nare tautological for this bug"]
-    D -- "A test fails" --> F["That test is doing real work —\nit distinguishes correct from incorrect"]
+    D -- "None fail" --> E["The mutation survived:\nno test checks that behaviour"]
+    D -- "At least one fails" --> F["The mutation was caught:\nthat test separates right from wrong"]
+    E --> G["Add or sharpen a test,\nthen plant the bug again"]
 ```
 
-This is the actual mechanism behind "mutation testing" as a practice, and
-it's useful even done by hand: pick a small, realistic bug (flip a
-comparison operator, off-by-one an index, swap a `&&` for `||`), apply it
-to otherwise-correct code, and check whether any test notices. If nothing
-fails, the tests were exercising that code path without verifying its
-actual behavior.
+Do it by hand: flip a comparison, shift an index by one, swap `&&` for `||`,
+change a constant. If every test still passes, those tests ran the code
+without verifying its behaviour. A tool that automates this is called
+mutation testing, but the idea is the same with one edit and one test run.
 
-## Boundary values are where weak assertions get exposed
+Two cautions keep the check honest. A change that cannot alter behaviour,
+such as renaming a local variable, is not a useful mutation, because nothing
+could notice it. And "every line was executed by a test" is not the same as
+"every line was checked": the weak test in L1 executed the discount line and
+still missed the bug.
 
-**Why did the $100-exactly case expose the bug when a $150 order
-wouldn't have?**
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="mutation-check"
+/>
 
-```text
-subtotal = 150:
-  Buggy (subtotal > 100):  150 > 100 → true  → 150 * 0.9 = 135
-  Fixed (subtotal >= 100): 150 >= 100 → true → 150 * 0.9 = 135
-  SAME RESULT — this input can't distinguish buggy from fixed
+## Why did the $100 order expose the bug when a $150 order would not?
 
-subtotal = 100:
-  Buggy (subtotal > 100):  100 > 100 → false → 100 (no discount)
-  Fixed (subtotal >= 100): 100 >= 100 → true  → 90 (discount applied)
-  DIFFERENT RESULTS — only this input catches the bug
-```
+**If the assertion is strong, is the test done?** Not yet, because a test is
+an input plus an assertion, and the input has to be one the two versions
+disagree on. Run the same two implementations on two inputs:
 
-A test suite that only exercises values comfortably inside a range (like
-150, far from the boundary) can look thorough — different amounts, all
-passing — while never actually testing the boundary condition where an
-off-by-one bug lives. The specific values chosen for a test matter as
-much as the assertion itself; a test with a strong assertion but the
-wrong input still won't catch the bug.
+| Subtotal | Buggy (`> 100`) returns | Fixed (`>= 100`) returns | Can this input tell them apart? |
+| -------- | ----------------------- | ------------------------ | ------------------------------- |
+| 150      | 135                     | 135                      | No, same answer                 |
+| 100      | 100                     | 90                       | Yes, different answers          |
 
-<Checkpoint question="A test suite for calculateOrderTotal runs the function against subtotals of 25, 75, and 200, all with strong exact-value assertions like toBe(25), toBe(75), and toBe(180). Does this suite catch the greater-than-vs-greater-than-or-equal-to bug at the $100 threshold?">
+Off-by-one bugs live at the **boundary**, the exact value where the rule
+changes. A suite that tries 25, 75 and 200 can look thorough, with many
+different amounts all passing, and still never visit the one value where the
+two versions disagree.
 
-No. Every one of those assertions is strong (it checks an exact expected
-value, not just a type), but none of the three inputs sits at the
-boundary itself, so the buggy and fixed implementations return identical
-results for all three — 25 stays 25, 75 stays 75, and 200 becomes 180
-under both versions. A strong assertion only catches a bug if it's also
-paired with an input that can actually distinguish the buggy behavior
-from the correct one, and here none of the chosen inputs do that. The
-suite would look thorough — three different amounts, all passing — while
-never touching the one value, exactly 100, where the two implementations
-disagree.
+<Checkpoint question="A suite runs the order function on subtotals 25, 75 and 200, each with an exact-value assertion (25, 75 and 180). Does it catch the greater-than versus greater-than-or-equal bug at the $100 threshold?">
+
+No. Every assertion is strong, because each checks an exact value, but none of
+the three inputs sits on the boundary. The buggy and fixed versions return
+identical results for all three: 25 stays 25, 75 stays 75, and 200 becomes 180
+under both. A strong assertion only catches a bug when it is paired with an
+input that separates the buggy behaviour from the correct one. This suite
+looks thorough and never touches the single value, exactly 100, where the two
+versions disagree.
 
 </Checkpoint>
 
-## Testing behavior, not implementation details
+Each independent threshold has its own boundary, so each needs its own
+exact-boundary input. The demo on this level lets you add thresholds and see
+the minimum grow by one per threshold: passing a check at one boundary says
+nothing about another.
 
-**If a strong assertion checks an exact expected value, does that mean
-tests should check every internal detail of how a function works?** Not
-quite — there's a difference between asserting on the function's actual
-_output_ for a given input (a behavior, stable across refactors) and
-asserting on _how_ it computed that output internally (an implementation
-detail, likely to change). `expect(calculateOrderTotal(100)).toBe(90)`
-tests behavior — it stays valid no matter how the function is
-internally restructured, as long as the output is still correct. A test
-that instead checked "the function calls a helper named `applyDiscount`
-internally" would break on a harmless refactor that changed nothing about
-correctness, which is its own kind of false signal — just in the
-opposite direction from a tautological test.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="boundary-inputs"
+/>
 
-| Kind of assertion        | Example                                    | Breaks on harmless refactor? | Catches the boundary bug? |
-| ------------------------ | ------------------------------------------ | ---------------------------- | ------------------------- |
-| Tautological             | `typeof result === 'number'`               | No                           | No                        |
-| Implementation-coupled   | Checks internal function calls, not output | Yes                          | Maybe, incidentally       |
-| Behavior-focused, strong | `calculateOrderTotal(100) === 90`          | No                           | Yes                       |
+## Should a strong test check how the function works inside?
 
-<Checkpoint question="A refactor renames the internal helper applyDiscount to computeDiscountedTotal and inlines it, without changing any input/output behavior of calculateOrderTotal. Would a behavior-focused test suite (like the one built around toBe(90) at the boundary) need any changes because of this refactor?">
+**If exact output is good, are exact internals even better?** No. There are
+two things a test can pin down: what the function _returns_ for an input (its
+behaviour, which should stay true through any rewrite) and _how_ it gets
+there (an implementation detail, free to change). A test that insists a
+helper named `applyDiscount` was called breaks the day someone inlines that
+helper, even though no customer sees any difference.
 
-No. A behavior-focused assertion checks what `calculateOrderTotal`
-returns for a given input, not how it gets there internally, so renaming
-or inlining a helper function that the outside world never sees doesn't
-touch anything the test actually asserts on. That's the whole point of
-testing behavior over implementation: the test keeps passing through
-refactors that genuinely don't change correctness, and it would only
-start failing if the refactor accidentally changed what the function
-returns — which is exactly the signal worth having, as opposed to a
-test that fails on the rename itself and forces an update for no real
-reason.
+| Kind of assertion      | Example                                 | Breaks on a harmless refactor? | Catches the boundary bug? |
+| ---------------------- | --------------------------------------- | ------------------------------ | ------------------------- |
+| Tautological           | "the result is a number"                | No                             | No                        |
+| Implementation-coupled | "the helper `applyDiscount` was called" | Yes                            | Only by accident          |
+| Behaviour, strong      | "a $100 order returns 90"               | No                             | Yes                       |
+
+The tautological test and the coupled test fail in opposite directions. The
+first passes when it should fail. The second fails when it should pass. Both
+make the red and green signal less trustworthy.
+
+<Checkpoint question="A refactor renames the internal helper applyDiscount and inlines it, without changing what the order function returns for any input. Does a behaviour-focused suite need changes?">
+
+No. A behaviour-focused assertion looks only at what the function returns for
+a given input, so renaming or inlining a helper that callers never see does
+not touch anything the test asserts on. That is the payoff of testing
+behaviour: the test stays green through refactors that do not change
+correctness, and turns red only if a refactor accidentally changes what comes
+back, which is exactly the signal worth having.
 
 </Checkpoint>
 
-## The generalizable lesson
+**Does that mean you must never assert on a general property?** No. If a
+function's real contract is general, such as "returns some valid, unique ID",
+there is no single exact value to assert on, and a property that matches the
+contract is the strong assertion. The skill is not "always compare to an exact
+value". It is to ask which plausible bug the test must catch, then pick the
+assertion and the input that would fail if that bug were present.
 
-**Is the fix "always assert on exact values, never on general properties
-like type or truthiness"?** Not universally — a general-property
-assertion is sometimes genuinely the correct one, if the function's
-actual contract is general (a function documented to "return some valid
-ID" has no single correct exact value to assert on). The generalizable
-skill is asking **what specific, plausible bug this test needs to catch**,
-then writing the assertion and choosing the input that would actually
-fail if that bug were present — not defaulting to whichever assertion is
-easiest to write.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="behaviour-vs-implementation"
+/>
