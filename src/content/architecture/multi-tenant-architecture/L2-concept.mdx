@@ -4,148 +4,161 @@ title: "L2 — Multi-tenant architecture concept"
 
 import Checkpoint from "../../../components/Checkpoint.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named the two incidents — a data leak and a noisy neighbor — and the three
-isolation models that trade cost against isolation strength. L2 goes one
-level deeper: what actually has to happen, mechanically, for a request to
-stay inside its tenant's boundary, and where each model puts the enforcement
-point.
+export const unit = {
+  track: "architecture",
+  unitSlug: "multi-tenant-architecture",
+};
+
+L1 named two leaks, data and load, and three models that trade cost against
+isolation strength. L2 asks what has to happen mechanically for a request to
+stay inside its tenant's walls, and where each model puts the lock.
 
 <LevelIntro
   items={[
-    "How tenant context flows from request to query",
-    "The shared-schema pattern and row-level security",
-    "Why data isolation and load isolation are separate problems",
+    "Tenant context from request to query",
+    "Convention versus enforced boundary",
+    "Why load isolation is a separate mechanism",
   ]}
 />
 
-## How does tenant identity get from a request to a query?
+## Where is the tenant decided, and who is allowed to decide it?
+
+**Picture the building's front desk.** A visitor says "I'm here for apartment
+9." Does the desk take their word for it, or check a keycard? Software has the
+same choice at the front door of every request.
 
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant GW as Gateway / middleware
-    participant H as Request handler
+    participant GW as Gateway
+    participant H as Handler
     participant DB as Database
 
-    C->>GW: Request + JWT (claims include tenant_id)
-    GW->>GW: Verify token, extract tenant_id
-    GW->>H: Request, tenant_id attached to context
-    H->>DB: Query, scoped by tenant_id
-    Note over DB: Every row read/written carries or is filtered by tenant_id
-    DB-->>H: Only this tenant's rows
+    C->>GW: Request + signed token (carries tenant ID)
+    GW->>GW: Verify signature, extract tenant ID
+    GW->>H: Request with tenant ID attached as context
+    H->>DB: Query scoped to that tenant
+    DB-->>H: Only that tenant's rows
     H-->>C: Response
 ```
 
-Tenant identity has to be resolved exactly once, as early as possible in the
-request lifecycle, and then carried forward as **context** — not
-re-derived or re-trusted at every layer. If the gateway verifies the JWT and
-extracts `tenant_id`, every downstream layer (handler, service, query) should
-receive that already-trusted value rather than reading it again from
-something a client could tamper with, such as a request body field.
+The tenant is resolved **once**, as early as possible, from something the
+client cannot forge (a verified token, a routing rule). From there it travels
+as **context**. Downstream layers receive the already-trusted value instead of
+re-reading it from a request body or a header a client can set.
 
-## The shared-schema pattern: one table, a `tenant_id` column, and something that enforces it
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="tenant-context"
+/>
 
-The **pool** model (L1) puts every tenant's rows in the same tables. The
-isolation guarantee then rests entirely on one fact: does every single query
-against that table filter by `tenant_id`? In a codebase with dozens of query
-sites, "always remember the filter" is exactly the kind of promise that
-breaks under time pressure — which is precisely what happened in L1's
-Incident 1.
+## Is "always remember the filter" a boundary?
 
-Two ways to make that promise structural instead of a matter of discipline:
+**In the shared-table (pool) model, one fact carries the whole guarantee: every
+query filters by tenant.** With dozens of query sites, that is a promise, and
+promises break under deadline pressure. That is how the data leak in L1
+happened. There are two ways to turn the promise into structure:
 
-```
-# Option A — enforce it at the query layer (application-side)
-def find_orders(tenant_id, filters):
-    return db.query("orders")
-             .where(tenant_id=tenant_id)   # always present, never optional
-             .where(**filters)
-             .all()
-```
+| Approach                   | Where the guarantee lives                   | What breaks it                                  |
+| -------------------------- | ------------------------------------------- | ----------------------------------------------- |
+| Convention (code review)   | In every developer's memory, on every query | One forgotten filter, one tired reviewer        |
+| Query layer with no bypass | In an API that offers no unscoped read      | A new code path that talks to the table raw     |
+| Database row-level policy  | In the database, checked on every query     | A connection that never sets the session tenant |
+
+The database option looks like this. Reading it is the point, because the
+policy is what replaces the habit:
 
 ```sql
--- Option B — enforce it at the database layer (row-level security)
--- Postgres example: the database itself refuses to return rows
--- outside the current session's tenant, even if a query forgets to filter.
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY tenant_isolation ON orders
     USING (tenant_id = current_setting('app.current_tenant')::uuid);
 ```
 
-Option A depends on every developer, in every query, remembering the filter.
-Option B moves the guarantee into the database itself: even a query that
-forgets `WHERE tenant_id = ...` gets rows filtered by the database's own
-policy, because the connection's session variable (`app.current_tenant`) is
-what the policy checks — not the query text. This is the difference between
-a convention and an enforced boundary, the same distinction L1 drew between
-"the model" and "what actually enforces it."
+Even a query that forgets its `WHERE` clause gets filtered, because the policy
+checks the connection's session value, not the query text. Both structural
+options share one idea: the unsafe thing becomes hard or impossible to write,
+instead of merely discouraged.
 
-<Checkpoint question="A junior engineer argues Option A is enough, since code review will always catch a missing tenant_id filter. What's the actual risk with relying on review alone?">
+<Checkpoint question="A teammate argues code review will always catch a missing tenant filter, so no structural guard is needed. What is the actual risk?">
 
-Review catches what a reviewer thinks to look for, on every single query
-site, forever — including six months from now when someone adds a new query
-under deadline pressure and the reviewer is tired, distracted, or new to the
-codebase. Row-level security (Option B) doesn't depend on anyone remembering
-anything on any given day; it moves the guarantee into a place that gets
-checked automatically, on every query, by the database itself. Review is
-still valuable, but as a second line of defense — not the only one standing
-between "forgot a filter" and a cross-tenant leak.
+Review catches what a reviewer thinks to look for, on every query site,
+forever. Six months from now someone adds a query under deadline pressure and
+the reviewer is tired or new to the code. A structural guard is checked
+automatically on every query, on every day. Review is still useful, but as a
+second line of defense and not the only one between a forgotten filter and a
+cross-tenant leak.
 
 </Checkpoint>
 
-## Isolation models compared
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="data-boundary"
+/>
 
-| Model  | Enforcement point                          | Blast radius of a bug          | Cost per tenant | Onboarding a new tenant |
-| ------ | ------------------------------------------ | ------------------------------ | --------------- | ----------------------- |
-| Silo   | Infrastructure — separate DB/deployment    | One tenant                     | Highest         | Slowest (new stack)     |
-| Bridge | Schema/shard boundary within shared infra  | One schema's tenants           | Medium          | Medium (new schema)     |
-| Pool   | Application code and/or row-level security | Every tenant sharing the table | Lowest          | Fastest (a new row)     |
+## How do the models compare once enforcement is in place?
+
+| Model  | Where the lock sits                        | Blast radius of a bug          | Cost per tenant | New tenant takes |
+| ------ | ------------------------------------------ | ------------------------------ | --------------- | ---------------- |
+| Silo   | Infrastructure: separate database or stack | One tenant                     | Highest         | A new stack      |
+| Bridge | Schema or shard boundary on shared servers | The tenants in that schema     | Medium          | A new schema     |
+| Pool   | Application code and or row-level policy   | Every tenant sharing the table | Lowest          | A new row        |
+
+**Why does the cost column slope the way it does?** Shared infrastructure
+splits across everyone on it, while dedicated infrastructure does not shrink.
+A simple model makes this concrete. These figures are **assumptions for
+illustration, not measurements**: $3,000 per month of shared infrastructure,
+and $120 per month of dedicated infrastructure for each fully siloed tenant.
+
+| Tenants | Fully pooled | Mostly pooled (30% silo) | Fully siloed |
+| ------- | ------------ | ------------------------ | ------------ |
+| 10      | $300         | $246                     | $120         |
+| 50      | $60          | $78                      | $120         |
+| 100     | $30          | $57                      | $120         |
+| 500     | $6           | $40.20                   | $120         |
+
+Pooling gets cheaper per tenant as tenants arrive. The dedicated part never
+does, so any silo share puts a floor under the cost. The slider on this
+unit's page lets you move both inputs and watch that floor appear.
+
+## Why doesn't fixing the data leak fix the noisy neighbor?
+
+**Imagine the mail wall now has perfect locks.** Can apartment 7 still hog the
+elevator? Yes. Locks govern _which mail you can open_, not _how long you hold
+the elevator_.
 
 ```mermaid
-xychart-beta
-    title "Relative cost per tenant vs. tenant count served per server"
-    x-axis ["Silo", "Bridge", "Pool"]
-    y-axis "Relative infra cost per tenant" 0 --> 10
-    bar [9, 5, 2]
+flowchart LR
+    Q[Tenant query] --> V{Visibility check}
+    V -->|row-level policy| R[Only own rows returned]
+    Q --> U{Consumption check}
+    U -->|nothing here yet| X[CPU, connections, I/O all shared]
 ```
 
-The pattern across the row: moving from silo toward pool trades isolation
-strength for cost efficiency and onboarding speed. Neither incident in L1
-required switching models — Incident 1 needed enforcement moved from
-convention to the database; Incident 2 needed a completely different
-mechanism, covered next.
+Row-level policy decides what a query may see. It says nothing about how much
+CPU, how many connections, or how much I/O that query may consume. A tenant can
+be perfectly isolated from everyone's data and still run a query heavy enough
+to starve the shared connection pool.
 
-## Why doesn't fixing the data leak also fix the noisy neighbor?
+<Checkpoint question="A pooled database enforces row-level security perfectly. Does that guarantee the noisy-neighbor incident cannot happen?">
 
-Because they're different resources being contended for. Row-level security
-governs **which rows a query is allowed to see** — it says nothing about
-**how much of the database's CPU, connections, or I/O bandwidth** that query
-is allowed to consume. A tenant can be perfectly isolated from seeing anyone
-else's data and still run a query so expensive it starves the shared
-connection pool for every other tenant.
-
-<Checkpoint question="A pooled database enforces row-level security perfectly — every tenant only ever sees their own rows. Does that guarantee the noisy-neighbor incident from L1 can't happen?">
-
-No. Row-level security is purely about visibility of data, not about
-consumption of shared capacity. A tenant running an expensive nightly export
-still opens real connections, still burns real CPU and I/O on the shared
-database — none of which row-level security limits in any way. Preventing
-that requires a separate mechanism that caps how much of the shared resource
-any one tenant can use, independent of whether their queries are correctly
-scoped.
+No. Row-level security is purely about visibility, not about consumption of
+shared capacity. A tenant's nightly export still opens real connections and
+burns real CPU and I/O, and nothing in the visibility policy limits that. It
+takes a separate mechanism that caps how much of the shared resource any one
+tenant can use, independent of whether their queries are correctly scoped.
 
 </Checkpoint>
 
-That separate mechanism — a per-tenant limit on shared resource use — is
-what L3 builds: a rate limiter that caps one tenant's request rate before it
-can starve the rest.
+That separate mechanism, a per-tenant limit, is the subject of L3.
 
-- Tenant identity should be resolved once, early, from a trusted source, and
-  carried as context — not re-derived at every layer.
-- The shared-schema pattern's isolation guarantee is only as strong as its
-  weakest enforcement point; row-level security moves that guarantee from
-  "every developer remembered" to "the database enforces it."
-- Data isolation and load isolation are separate problems requiring separate
-  mechanisms — solving one does not solve the other.
+- Resolve tenant identity once, early, from a source the client cannot forge,
+  and carry it as context.
+- A boundary is something the system enforces, not something developers
+  remember. Prefer designs where the unscoped path does not exist.
+- Data isolation and load isolation are different problems with different
+  mechanisms. Solving one does not solve the other.

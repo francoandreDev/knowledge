@@ -4,131 +4,143 @@ title: "L1 — Multi-tenant architecture summary"
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="The problem">
+export const unit = {
+  track: "architecture",
+  unitSlug: "multi-tenant-architecture",
+};
+
+<Scenario label="One apartment building, two complaints">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🔓</span> <strong>Incident 1 — data leak</strong> — a query missing `WHERE tenant_id = ?` returned Company A's invoices inside Company B's dashboard</div>
-      <div class="flex items-center gap-1.5"><span>🐢</span> <strong>Incident 2 — noisy neighbor</strong> — one tenant's overnight batch export saturated the shared database, and every other tenant's dashboard timed out</div>
+      <div class="flex items-center gap-1.5"><span>🏢</span> <strong>The building</strong> — 12 apartments, one shared mail wall, one shared elevator</div>
+      <div class="flex items-center gap-1.5"><span>📬</span> <strong>Complaint 1</strong> — apartment 4 opened a letter addressed to apartment 9</div>
+      <div class="flex items-center gap-1.5"><span>🛗</span> <strong>Complaint 2</strong> — apartment 7 moved furniture all day and nobody else could use the elevator</div>
     </div>
     <div class="not-prose mt-3 grid grid-cols-2 gap-2 text-xs">
       <div class="rounded border border-rose-300 bg-rose-50 p-1.5 dark:border-rose-800 dark:bg-rose-950">
-        <p class="font-semibold text-rose-600 dark:text-rose-400">Leaked data</p>
-        one tenant sees another tenant's rows
+        <p class="font-semibold text-rose-600 dark:text-rose-400">What leaked</p>
+        someone else's belongings
       </div>
       <div class="rounded border border-amber-300 bg-amber-50 p-1.5 dark:border-amber-800 dark:bg-amber-950">
-        <p class="font-semibold text-amber-700 dark:text-amber-400">Leaked performance</p>
-        one tenant's load slows down everyone else
+        <p class="font-semibold text-amber-700 dark:text-amber-400">What was hogged</p>
+        a shared resource
       </div>
     </div>
-
   </Fragment>
 
-Two SaaS incidents, same root cause: the system was built to serve many
-customers ("tenants") out of one codebase and one set of infrastructure, but
-nothing actually enforced a boundary between them. Incident 1 leaked
-_confidentiality_ — the wrong customer's data appeared on screen. Incident 2
-leaked _capacity_ — no data crossed the line, but one tenant's behavior
-degraded every other tenant's experience anyway.
+Twelve households share one building. The mail wall has no locks, and the
+elevator has no rules. Nothing was stolen, nothing was broken, and for months
+everything seemed fine. Then two different things went wrong. **Are these one
+problem or two? And what would the building need so neither could happen at
+all, rather than just rarely?**
 
-| Incident       | What crossed the boundary | What was missing                          |
-| -------------- | ------------------------- | ----------------------------------------- |
-| Data leak      | Rows                      | A query-time tenant filter                |
-| Noisy neighbor | Nothing — just latency    | A per-tenant limit on shared resource use |
-
-**Both incidents happened in a system that "worked" for months. What has to be true architecturally so neither one is even possible, instead of just unlikely?**
+They are two problems. The letter is about _who can see what_. The elevator is
+about _who can use how much_. Fixing the mail wall does nothing for the
+elevator.
 
 </Scenario>
 
-Multi-tenant architecture is the set of decisions that answer that question:
-how much of the stack is shared across customers, and where exactly the
-boundary between them is drawn and enforced.
+Software that serves many customers from one system has exactly this shape. The
+customers are called **tenants**, and the building is your application and its
+database. Multi-tenant architecture is the set of decisions about how much is
+shared, and where the walls go.
 
 <LevelIntro
   items={[
+    "Two kinds of leak: data and load",
     "Three isolation models: silo, pool, bridge",
-    "How a request gets tagged with its tenant",
-    "Where isolation breaks: data vs. load",
+    "How a request proves whose it is",
   ]}
 />
 
-## What is a tenant?
+## What are the two ways tenants can leak into each other?
 
-A **tenant** is one customer (or customer organization) whose data and usage
-must stay separate from every other tenant's, even though they all run on the
-same application. A single-tenant system has one deployment per customer —
-multi-tenant means many customers share infrastructure, and the software
-itself is what keeps them apart.
+**If a tenant never sees another tenant's data, is the system isolated?** Not
+necessarily. The same two failures from the building show up in software:
 
-- **Isolation** — the guarantee that one tenant cannot read, write, or
-  otherwise be affected by another tenant's data or load.
-- **Tenant identity** — some value (an ID, a subdomain, a claim in a token)
-  that tells the system, for every single request, _whose_ request this is.
-- **Blast radius** — how much damage a bug, an outage, or a misbehaving
-  tenant can do. A smaller blast radius means fewer tenants are affected when
-  something goes wrong.
-- **Noisy neighbor** — a tenant whose usage pattern (traffic spike, huge
-  export, expensive query) degrades shared infrastructure for everyone else
-  on it.
+| Incident       | What crossed the boundary | What was missing                          |
+| -------------- | ------------------------- | ----------------------------------------- |
+| Data leak      | Rows                      | A tenant filter on every query            |
+| Noisy neighbor | Nothing, only latency     | A per-tenant limit on shared resource use |
 
-## Three isolation models at a glance
+In the data leak, a query missing `WHERE tenant_id = ?` showed Company A's
+invoices to Company B. In the noisy-neighbor case, one tenant's overnight
+export saturated the shared database and every other tenant's dashboard timed
+out. No data crossed the line, but everyone still felt it.
+
+- **Tenant** — one customer organization whose data and usage must stay apart
+  from every other customer's.
+- **Isolation** — the guarantee that one tenant cannot read, write, or slow
+  another tenant.
+- **Blast radius** — how many tenants a bug or a misbehaving tenant can hurt.
+- **Noisy neighbor** — a tenant whose usage degrades shared infrastructure for
+  the others.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="two-leaks"
+/>
+
+## How much should tenants share?
+
+**The building could give every household its own building. Why doesn't it?**
+Because separate buildings cost far more per household. Software faces the same
+trade, with three common answers:
 
 ```mermaid
 flowchart LR
-    subgraph Silo["Silo — one stack per tenant"]
+    subgraph Silo["Silo: one stack per tenant"]
         S1[(Tenant A DB)]
         S2[(Tenant B DB)]
     end
-    subgraph Bridge["Bridge — shared infra, isolated schema"]
-        B1[(Shared server\nschema: tenant_a)]
-        B2[(Shared server\nschema: tenant_b)]
+    subgraph Bridge["Bridge: shared server, separate schema"]
+        B1[(Server\nschema tenant_a)]
+        B2[(Server\nschema tenant_b)]
     end
-    subgraph Pool["Pool — fully shared"]
+    subgraph Pool["Pool: everything shared"]
         P1[(One DB\ntenant_id column)]
     end
 ```
 
-| Model      | What's shared                          | What's separate                      | Typical fit                                         |
-| ---------- | -------------------------------------- | ------------------------------------ | --------------------------------------------------- |
-| **Silo**   | Nothing (or only the codebase/deploy)  | Database, sometimes whole deployment | Regulated or very large tenants                     |
-| **Pool**   | Everything — app, DB, tables           | Only a `tenant_id` column per row    | Many small tenants, low cost per one                |
-| **Bridge** | App and DB server, not the schema/rows | A schema (or shard) per tenant       | Middle ground — isolation without one DB per tenant |
+| Model      | What is shared                | What is separate                  | Typical fit                           |
+| ---------- | ----------------------------- | --------------------------------- | ------------------------------------- |
+| **Silo**   | Nothing, or only the codebase | Database, sometimes a deployment  | Regulated or very large tenants       |
+| **Bridge** | App and database server       | One schema (or shard) per tenant  | Middle ground                         |
+| **Pool**   | App, database, and tables     | Only a `tenant_id` column per row | Many small tenants at the lowest cost |
 
-```mermaid
-xychart-beta
-    title "Isolation strength vs. shared infrastructure"
-    x-axis ["Pool", "Bridge", "Silo"]
-    y-axis "Relative isolation strength (0-10)" 0 --> 10
-    bar [3, 7, 10]
-```
+Neither incident above came from choosing the wrong model. Pool is often the
+right call. The failure was that the model's own duty, scoping every query and
+limiting every tenant's use, was a habit and not a mechanism.
 
-Neither incident's system is unusual for choosing pool — pooling is often the
-right call for cost and operational simplicity. What's missing in both
-incidents isn't "the wrong model," it's that the model's own responsibility
-(scoping every query, limiting every tenant's resource use) was never
-actually enforced in code.
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="isolation-models"
+/>
 
-## How does a request know which tenant it belongs to?
+## How does a request prove whose it is?
 
-Every request has to carry tenant identity somehow, before any query or
-resource limit can even be applied:
+Before any query can be scoped or any limit applied, the system has to know the
+tenant. The identity can travel in several places:
 
-| Signal      | Example                      | Where it's read                            |
-| ----------- | ---------------------------- | ------------------------------------------ |
-| Subdomain   | `acme.example.com`           | Reverse proxy / router                     |
-| Path prefix | `/t/acme/api/orders`         | Router                                     |
-| Header      | `X-Tenant-Id: acme`          | API gateway or middleware                  |
-| JWT claim   | `{"tenant_id": "acme", ...}` | Auth middleware, after verifying the token |
+| Signal      | Example             | Read by                         |
+| ----------- | ------------------- | ------------------------------- |
+| Subdomain   | `acme.example.test` | Reverse proxy or router         |
+| Path prefix | `/t/acme/orders`    | Router                          |
+| Header      | `X-Tenant-Id: acme` | Gateway or middleware           |
+| Token claim | a `tenant_id` field | Auth middleware after verifying |
 
-Whichever signal is used, it has to be resolved into a trusted tenant ID
-**before** any data access happens — a signal a client can freely set (like a
-header nobody validates) is not identity, it's a suggestion.
+Whichever signal is used, it must become a trusted tenant ID before any data
+access. A header that any client can set freely is not identity, it is a
+suggestion.
 
-- Isolation has two independent dimensions: **data** (who can see which
-  rows) and **load** (whose usage affects whose latency). A system can get
-  one right and still fail the other, as both incidents above show.
-- The three isolation models — silo, pool, bridge — trade cost and
-  operational simplicity against isolation strength; there's no
-  universally "correct" one, only a fit for a given tenant mix.
-- Tenant identity has to be resolved from a trusted source (a verified
-  token, a routing rule) before it's used to scope anything.
+- Isolation has two independent dimensions: **data** (who sees which rows) and
+  **load** (whose usage affects whose speed). A system can get one right and
+  fail the other.
+- Silo, bridge, and pool trade cost and simplicity against isolation strength.
+  There is no universally right one, only a fit for the tenant mix.
+- Tenant identity must come from a trusted source, resolved before it scopes
+  anything.

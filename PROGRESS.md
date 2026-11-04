@@ -3777,3 +3777,11 @@ Migrated to the three-tier model, all quiz topics and no code topics: `hexagonal
 Checks: typecheck 0 errors, 273 pages built, every DomainCheck topic passes live (9/8/7/11), no Mermaid errors, Mark as done enabled.
 
 Total migrated: 201 of 246. Next: architecture batch 3 (`tech-radar`, `platform-engineering`, `multi-tenant-architecture`, `reference-architectures`).
+
+## 2026-11-04 — architecture batch 3 (4 units)
+
+Migrated to the three-tier model, all quiz and no code topics: `tech-radar` (5 topics, 60 items; invented staleness percentages replaced by the demo's formula 8.8/26.4/52.8/100), `platform-engineering` (6 topics, 72 items; invented pie chart of the team's week removed), `multi-tenant-architecture` (6 topics, 72 items; invented isolation/cost bars replaced by a cost table from the demo formula; demo description updated to drop the removed `TenantRateLimiter` name), `reference-architectures` (6 topics, 69 items; invented hours chart replaced by a table from the demo formula, "for over a decade" claim removed).
+
+Checks: typecheck 0 errors, 273 pages built, every DomainCheck topic passes live (5/6/6/6), no Mermaid errors, Mark as done enabled. Also removed "staff/principal engineer" from the `technical-strategy-roadmapping` roadmap title.
+
+Total migrated: 205 of 246. Next: architecture batch 4 (`architecture-for-compliance`, `cost-aware-architecture`, `architecture-review`, `technical-strategy-roadmapping`), which closes the track.
