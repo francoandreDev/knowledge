@@ -3745,3 +3745,11 @@ Migrated to the three-tier model: `testing-quality/quality-culture` (5 topics, 6
 Checks: typecheck 0 errors, 273 pages built, 11 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (5/5/6/6), no Mermaid errors, Mark as done enabled.
 
 `testing-quality/` is complete: 13 of 13. Total migrated: 185 of 246. Next: software-design batch 2 (`dry`, `solid-principles`, `oop-design-trade-offs`, `immutability`).
+
+## 2026-11-04 — software-design batch 2 (4 units)
+
+Migrated to the three-tier model: `dry` (7 topics, 84 items, all quiz; L3 cap snippet `Math.min(rate ?? 1, 0.5)` was semantically wrong and is now described as a multiplier floor), `solid-principles` (6 topics, 72 items, all quiz; real vendor names replaced with fictional ones), `oop-design-trade-offs` (5 topics, 60 items, code topic `compose-behaviors`; n+n vs n×n chart computed from the formula), `immutability` (7 topics, 79 items, code topic `immutable-array-update`; copy-cost figures checked against the demo model).
+
+Checks: typecheck 0 errors, 273 pages built, 19 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (7/6/5/7), no Mermaid errors, Mark as done enabled.
+
+Total migrated: 189 of 246. Next: software-design batch 3 (`classic-design-patterns`, `refactoring-technique`, `technical-debt-deliberate-trade-off`, `api-design`), then `evolutionary-design`, `long-term-design-judgment`.

@@ -2,81 +2,92 @@
 title: "L3 — Rewriting the Battle Mage problem: inheritance first, then composition"
 ---
 
+import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L2 established, with diagrams and a growth chart, why a single
-inheritance tree structurally can't absorb a second independent axis
-of variation, and why composition's cost stays additive where
-inheritance-per-combination's multiplies. L3 makes that concrete:
-the actual Battle Mage code, written both ways, so the failure and
-the fix are both real and runnable, not just diagrams.
+export const unit = {
+  track: "software-design",
+  unitSlug: "oop-design-trade-offs",
+};
+
+<Scenario label="Design adds a third trait. Which design absorbs it?">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>🚶</span> <strong>Movement</strong> — walk, fly, swim (3)</div>
+      <div class="flex items-center gap-1.5"><span>⚔️</span> <strong>Attack</strong> — melee, ranged, magic (3)</div>
+      <div class="flex items-center gap-1.5"><span>🛡️</span> <strong>Defense (new)</strong> — block, dodge, parry (3)</div>
+    </div>
+    <div class="not-prose mt-3 flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300">
+      <div>
+        <div class="flex justify-between"><span>Composition: parts to write</span><span>9</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-emerald-500 animate-fill-bar" style="--target-width: 33%"></div></div>
+      </div>
+      <div>
+        <div class="flex justify-between"><span>One subclass per combination</span><span>27</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 100%"></div></div>
+      </div>
+    </div>
+  </Fragment>
+
+The game from L1 now has 3 movement styles and 3 attack styles, and design
+asks for 3 defense styles on top. **Before writing any code, which design
+survives this request with the least rework, and by how much?**
+
+The numbers in the panel are the whole argument in miniature. The rest of this
+level shows where the tree breaks, what the rewrite looks like, and what it
+does and does not prove.
+
+</Scenario>
 
 <LevelIntro
   items={[
-    "The inheritance version, and exactly where it breaks",
+    "Where the inheritance version breaks",
     "The composition rewrite, behaviors as data",
-    "Confirming L2's cost gap with real counts",
+    "What the rewrite proves and what it does not",
   ]}
 />
 
-## The inheritance version, and exactly where it breaks
+## Where exactly does the inheritance version break?
 
-```js
-class Character {
-  constructor(name) {
-    this.name = name;
-  }
-}
+**What does the tree look like at the moment the Battle Mage request lands?**
+Two sibling classes, each with one hardcoded `attack()`, and nowhere to put a
+class that needs both:
 
-class Warrior extends Character {
-  attack() {
-    return `${this.name} swings a sword for 10 damage`;
-  }
-}
-
-class Mage extends Character {
-  attack() {
-    return `${this.name} casts a fireball for 15 damage`;
-  }
-}
-
-const kade = new Warrior("Kade");
-const zara = new Mage("Zara");
-console.log(kade.attack());
-console.log(zara.attack());
+```mermaid
+flowchart TD
+    C[Character] --> W["Warrior: attack() = sword"]
+    C --> M["Mage: attack() = fireball"]
+    W --> X["BattleMage extends Warrior<br/>copies Mage's fireball code"]
+    M -.->|"second copy of the spell rule"| X
 ```
 
-This works cleanly for exactly two character types with exactly one
-attack style each. The moment "Battle Mage" (melee AND magic) is
-requested, there's no clean way to write `class BattleMage extends
-???` — JavaScript classes support only one `extends` clause. The
-usual patches — copy-pasting `Mage`'s attack logic into a
-`Warrior`-derived class, or vice versa — duplicate code and create two
-sources of truth for what should be one spell-casting behavior.
+Extending `Warrior` and pasting in `Mage`'s spell code leaves two sources of
+truth for one spell. When fireball damage changes, one copy gets missed. The
+usual next move is `FlyingBattleMage`, `SwimmingBattleMage`, and so on, which is
+the combinatorial explosion from L2 growing branch by branch.
 
-## The composition version: behaviors as data, not inheritance
+<Checkpoint question="Why does adding FlyingBattleMage, SwimmingBattleMage, and similar subclasses not fix the Battle Mage problem?">
+
+Because the problem is structural, not a shortage of classes. Movement and
+attack are two independent axes, and a tree can only represent one. Each new
+subclass is another pairing of the two axes, so every future movement or attack
+style multiplies the class count again. The deeper tree postpones the pain and
+raises the price of every later change.
+
+</Checkpoint>
+
+## What does the composition rewrite look like?
+
+**If behaviors are the parts, what does the character class need?** Only a place
+to hold them. This is the one place code beats a diagram, because the point is
+what the constructor accepts:
 
 ```js
-function walk() {
-  return "walks across the ground";
-}
-function fly() {
-  return "flies through the air";
-}
-function swim() {
-  return "swims through the water";
-}
-
-function meleeAttack() {
-  return "swings a sword for 10 damage";
-}
-function rangedAttack() {
-  return "fires an arrow for 7 damage";
-}
-function magicAttack() {
-  return "casts a fireball for 15 damage";
-}
+const walk = () => "walks across the ground";
+const meleeAttack = () => "swings a sword for 10 damage";
+const magicAttack = () => "casts a fireball for 15 damage";
 
 class GameCharacter {
   constructor(name, moveBehaviors, attackBehaviors) {
@@ -84,126 +95,79 @@ class GameCharacter {
     this.moveBehaviors = moveBehaviors;
     this.attackBehaviors = attackBehaviors;
   }
-  move() {
-    return this.moveBehaviors.map((b) => `${this.name} ${b()}`);
-  }
   attack() {
     return this.attackBehaviors.map((b) => `${this.name} ${b()}`);
   }
 }
+
+new GameCharacter("Rin", [walk], [meleeAttack, magicAttack]).attack();
+// ["Rin swings a sword for 10 damage", "Rin casts a fireball for 15 damage"]
 ```
 
-`GameCharacter` no longer hardcodes what movement or attack looks
-like — it holds a _list_ of behaviors for each, injected at
-construction time. Nothing about this class needed to change to
-support a character with more than one attack style.
+`GameCharacter` never says what attacking looks like. It iterates whatever list
+it was handed, so a Battle Mage is a longer array at the call site, with zero
+new classes.
 
-## Building the Battle Mage — no new class required
+<Checkpoint question="The Battle Mage needed no new class, just an array with two functions. What about GameCharacter made that possible, which Warrior and Mage lacked?">
 
-```js
-const battleMage = new GameCharacter("Rin", [walk], [meleeAttack, magicAttack]);
-console.log(battleMage.attack());
-// [ "Rin swings a sword for 10 damage", "Rin casts a fireball for 15 damage" ]
-```
-
-Verified: `battleMage.attack()` returns _both_ attacks — the exact
-requirement that broke the inheritance version, solved by passing an
-array with two behaviors instead of one, with zero new classes
-written. The original two character types still work unchanged:
-
-```js
-const kade = new GameCharacter("Kade", [walk], [meleeAttack]);
-const zara = new GameCharacter("Zara", [fly], [magicAttack]);
-console.log(kade.attack());
-// [ "Kade swings a sword for 10 damage" ]
-console.log(zara.attack());
-// [ "Zara casts a fireball for 15 damage" ]
-```
-
-<Checkpoint question="The Battle Mage needed no new class — just an array with two functions instead of one. What specifically about GameCharacter's design made that possible, that Warrior/Mage's design didn't have?">
-
-`GameCharacter` stores attack behavior as data passed into the
-constructor (`attackBehaviors`, an array of functions) rather than as
-a method baked into a specific subclass. Because `attack()` just
-iterates whatever list it was handed, giving a character two attack
-behaviors instead of one is a call-site change — a longer array — not
-a design change. `Warrior` and `Mage`, by contrast, hardcoded a single
-`attack()` implementation directly into each subclass's method body;
-there was no data structure to extend, only a method to override, and
-a method can't "override into two behaviors at once." That's the
-concrete difference between inheriting a single hardcoded behavior and
-composing a list of interchangeable ones.
+Attack behavior is **data passed in**, not a method baked into a subclass.
+`attack()` iterates a list, so two behaviors instead of one is a call-site
+change. `Warrior` and `Mage` hardcoded one `attack()` body each: there was a
+method to override, but no list to extend, and a method cannot "override into
+two behaviors at once."
 
 </Checkpoint>
 
-## Confirming the combinatorial-cost gap from L2 with real counts
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="composition-in-practice"
+/>
 
-```js
-const moveBehaviors = [walk, fly, swim];
-const attackBehaviors = [meleeAttack, rangedAttack, magicAttack];
+## How do you write the character from the parts?
 
-console.log(
-  "composition — components needed:",
-  moveBehaviors.length + attackBehaviors.length,
-);
-// 6
-console.log(
-  "inheritance-per-combo — subclasses needed:",
-  moveBehaviors.length * attackBehaviors.length,
-);
-// 9
+**If you were handed only the idea, could you build it?** The next exercise
+section asks you to write the small function that turns lists of parts into a
+character. It is the one place where writing the code is the understanding.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="compose-behaviors"
+/>
+
+## What does this rewrite prove, and what does it not?
+
+**Does it mean the original `Character` base class was a mistake?** Not
+necessarily. If the game only ever needed one attack style per character, the
+tree would have been simpler and perfectly fine. What the rewrite proves is
+narrower: once a second independent axis appears, composition absorbs it
+without new classes while single inheritance cannot.
+
+```mermaid
+flowchart TD
+    Q["A new requirement arrives"] --> A{"Does it add a second\nindependent trait?"}
+    A -->|"no, one stable axis"| I["Keep the small tree"]
+    A -->|"yes, traits combine freely"| C["Move that axis to composition"]
+    C --> D{"Is a tree already\nmultiplying subclasses?"}
+    D -->|"yes"| R["Refactor the axes into parts now"]
+    D -->|"no"| S["Introduce the parts before the tree grows"]
 ```
 
-Verified: at 3 movement styles and 3 attack styles, composition needs
-6 components total; a design that modeled every combination as its
-own subclass (`FlyingMage`, `SwimmingWarrior`, `WalkingMage`, and so
-on) would need 9 — and as L2's chart showed, that gap widens
-multiplicatively as more styles get added, while composition's cost
-stays additive.
+| Failure mode                                           | What it gets wrong                                                      |
+| ------------------------------------------------------ | ----------------------------------------------------------------------- |
+| Composing every class, even single-axis ones           | Adds indirection to a problem with no second axis                       |
+| Patching a broken tree with a deeper tree              | Treats a structural limit as if more branches would help                |
+| Believing composition means sharing no code            | `GameCharacter` is still one shared class; only the variation moved out |
+| Not noticing a second axis until the tree has exploded | Battle Mage was the signal; noticing earlier avoids the rewrite         |
+| Treating strategy as the only form of composition      | Holding another object and delegating to it is composition too          |
 
-<Checkpoint question="L2's chart showed composition and inheritance-per-combo costs NOT tied at 1 style each (2 vs. 1, inheritance cheaper) but tied by 2x2 (4 vs. 4). The code above confirms 6 vs. 9 at 3x3. Does that mean composition is only worth it once a game reaches 3 or more styles per axis?">
+## This is a case, not the whole territory
 
-No — the crossover in absolute count isn't the right thing to track,
-because the two numbers measure different things. Even at 1x1 or 2x2,
-where inheritance-per-combo's raw class count is close to or lower
-than composition's, composition already wins on maintainability: a
-new movement style is always exactly one new function under
-composition, while under inheritance-per-combo every existing attack
-style needs a brand-new paired subclass the moment one more movement
-style is added — the _rate of new work per future change_ is what
-diverges early, even before the total count visibly does. The 3x3
-numbers make the gap impossible to miss, but the structural advantage
-(additive vs. multiplicative growth) is already true at the very first
-new style added past one axis.
-
-</Checkpoint>
-
-## What this rewrite does and doesn't prove
-
-**Does this mean the `Character` base class from the inheritance
-version was a mistake to write in the first place?** Not necessarily
-— if the game genuinely only ever needed exactly one attack style per
-character, the inheritance version would have been simpler and
-perfectly fine. What the rewrite proves is narrower: **once a second
-independent axis of variation (attack style combining with itself, or
-movement combining with attack) shows up, composition absorbs it
-without new classes, while single inheritance structurally cannot.**
-The lesson isn't "composition is always better" — it's "match the
-tool to whether there's one axis or more than one."
-
-**Try extending it yourself:** suppose a third axis shows up —
-characters can also have a defense style (`block`, `dodge`, `parry`)
-that combines independently with both movement and attack. Using the
-composition version's constructor shape, what would the `GameCharacter`
-class need to add to support this, and would the inheritance version
-have been able to add it at all without a fourth explosion of subclasses?
-
-## Failure modes
-
-| Failure mode                                                                            | What it gets wrong                                                                                                                                                                            |
-| --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Choosing composition for every class, even single-axis ones                             | The account example from L2 doesn't need this indirection — composition solves a specific problem (multiple independent axes), not a general one                                              |
-| Patching a broken inheritance hierarchy with a deeper hierarchy                         | Adding `BattleMageWarrior`, `FlyingBattleMage`, and so on treats a structural problem as if more branches would fix it — the tree shape itself is the constraint                              |
-| Assuming composition means giving up all shared behavior                                | `GameCharacter` still has one shared class — composition changes how variation is modeled, not whether any code is shared at all                                                              |
-| Not noticing a second axis of variation until it's already caused a hierarchy explosion | The Battle Mage request was the signal that "attack style" wasn't the only axis — catching this earlier (during initial design) avoids the costly rewrite entirely                            |
-| Treating the strategy pattern as the only form composition can take                     | Injected behavior functions are one common shape; composition also covers things like a class holding a reference to another object it delegates work to, without any shared interface at all |
+The game is one example of a pattern, and the numbers (3 and 3, then a third
+axis) were chosen to be countable. **Try extending it yourself:** the defense
+axis arrives. What does `GameCharacter` need to add, and could the tree version
+have absorbed it without a third round of subclasses? Then change the
+situation: what if two of the axes are not independent, for example a
+character that can only parry while walking? Which part of the clean `n + m`
+count survives, and what would you now have to decide in code?

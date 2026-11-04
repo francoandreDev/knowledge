@@ -4,125 +4,146 @@ title: "L2 — What depending on an abstraction actually changes"
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named the fix in one sentence — depend on an abstraction, not a
-concrete implementation — without yet showing what that changes
-structurally. L2 works through exactly what moves, where the other four
-SOLID principles fit around this one, and where applying it stops paying
-for itself.
+export const unit = {
+  track: "software-design",
+  unitSlug: "solid-principles",
+};
+
+L1 named the fix in one sentence: depend on an abstraction, not a concrete
+class. L2 shows what that moves structurally, which of the five principles
+actually matches which kind of failure, and where adding an abstraction stops
+paying for itself.
 
 <LevelIntro
   items={[
-    "The five SOLID principles, one line each",
-    "What 'depend on an abstraction' changes structurally",
-    "When dependency inversion isn't worth adding",
+    "Matching each SOLID principle to its failure",
+    "What 'depend on an abstraction' moves",
+    "When an abstraction is not worth adding",
   ]}
 />
 
-## The five principles, briefly
+## Which principle matches which failure?
 
-**Does fixing the ripple problem require mastering all five SOLID
-principles at once?** No — the five principles address different
-failure modes, and the scenario from L1 is specifically a dependency
-inversion problem. Briefly, for context:
+**Does fixing the 12-file ripple require mastering all five principles at
+once?** No. They answer different questions, and picking the wrong one for a
+failure sends you refactoring in the wrong direction.
 
-| Letter | Principle             | One-line idea                                                               |
-| ------ | --------------------- | --------------------------------------------------------------------------- |
-| S      | Single responsibility | A class should have one reason to change, not several unrelated ones        |
-| O      | Open/closed           | Code should be extendable with new behavior without editing existing code   |
-| L      | Liskov substitution   | A subtype should be usable anywhere its parent type is expected, safely     |
-| I      | Interface segregation | Don't force something to depend on methods it doesn't actually use          |
-| D      | Dependency inversion  | Depend on an abstraction, not a concrete implementation — this unit's focus |
+| Symptom you can observe                                           | Principle that names it |
+| ----------------------------------------------------------------- | ----------------------- |
+| One class has to change for several unrelated reasons             | Single responsibility   |
+| Adding a new variant means editing code that already works        | Open/closed             |
+| A stand-in compiles fine but callers behave wrongly with it       | Liskov substitution     |
+| A class or test double must stub methods nobody calls             | Interface segregation   |
+| Business logic names a concrete vendor class directly, many times | Dependency inversion    |
 
-Single responsibility and open/closed each have their own dedicated
-unit elsewhere in this track (`single-responsibility` and
-`evolutionary-design`). Liskov substitution and interface segregation
-don't get a unit of their own, but they're not left at one line each —
-L3 works through a real violation-and-fix for both, using the same
-`OrderService`/`EmailClient` scenario this unit builds throughout.
+Single responsibility and open/closed have their own units in this track
+(`single-responsibility` and `evolutionary-design`). Liskov and interface
+segregation get a worked violation each in L3.
 
-<Checkpoint question="Each of the 12 classes from L1's scenario had exactly one reason to change on its own (a change to how it processes an order), yet the fix wasn't a single-responsibility fix. Why does this specific ripple point at dependency inversion rather than single responsibility?">
+<Checkpoint question="Each of the 12 classes had exactly one job on its own (processing an order), yet the fix was not a single-responsibility fix. Why does this ripple point at dependency inversion instead?">
 
-Single responsibility is about a class doing too many unrelated jobs
-internally — that's not what went wrong here. Each of the 12 classes had
-one clear job; the problem was that the job included deciding which
-concrete vendor class to construct, and that decision was duplicated
-identically in all 12 places. The failure mode is about _what a class
-depends on and where that dependency gets decided_, not about how many
-responsibilities live inside any single class — which is exactly the
-distinction dependency inversion addresses and single responsibility
-doesn't.
+Single responsibility is about one class doing several unrelated jobs inside
+itself, and that is not what went wrong. Each of the 12 classes had one clear
+job. The problem was where one decision (which vendor to build) was made: the
+same decision, copied into all 12 places. The failure is about _what a class
+depends on and where that dependency gets decided_, which is the question
+dependency inversion answers and single responsibility does not.
 
 </Checkpoint>
 
-## What "depend on an abstraction" means structurally
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="solid-failure-modes"
+/>
 
-**In the L1 scenario, what specifically was each of those 12 classes
-doing wrong?** Each one directly named `SendgridEmailClient` and
-constructed it internally — the high-level business logic (place an
-order, notify a user) was directly wired to one specific, low-level
-vendor detail.
+## What does "depend on an abstraction" move?
+
+**In the L1 scenario, what exactly was each class doing wrong?** It named
+`AcmeMailClient` and built it internally, so high-level business logic was
+wired straight to one low-level vendor detail. Think of a lamp with its cord
+soldered into the wall versus a lamp with a plug: the plug is the abstraction,
+and any socket-compatible supply can be connected from outside.
 
 ```mermaid
 flowchart TD
-    subgraph "Before: direct dependency"
-    A1["OrderService"] --> B1["SendgridEmailClient\n(concrete)"]
+    subgraph before["Before: arrow points at a vendor"]
+    A1["OrderService"] --> B1["AcmeMailClient (concrete)"]
     end
-    subgraph "After: dependency inversion"
-    A2["OrderService"] --> C["EmailClient\n(abstraction)"]
-    D1["SendgridEmailClient"] -.implements.-> C
-    D2["PostmarkEmailClient"] -.implements.-> C
-    D3["FakeEmailClient (for tests)"] -.implements.-> C
+    subgraph after["After: arrow points at an abstraction"]
+    A2["OrderService"] --> C["EmailClient (abstraction)"]
+    D1["AcmeMailClient"] -.implements.-> C
+    D2["BoltMailClient"] -.implements.-> C
+    D3["FakeEmailClient (tests)"] -.implements.-> C
     end
 ```
 
-In the "before" version, `OrderService` can only ever work with one
-specific vendor's client — the dependency arrow points straight at a
-concrete class. In the "after" version, `OrderService` depends only on
-the shape of "something that can send a message" — the abstraction —
-and any class that satisfies that shape can be handed in from outside.
+The "inversion" in the name is about the arrows. The vendor classes used to be
+things the business logic pointed _at_. Now they point at the abstraction the
+business logic defined, so the dependency arrow between them has flipped.
 
-## Depending on a concrete class vs. depending on an abstraction
+| Question                             | Depends on a concrete class                   | Depends on an abstraction                        |
+| ------------------------------------ | --------------------------------------------- | ------------------------------------------------ |
+| Who picks the implementation?        | The class itself, hardcoded inside            | Whoever builds the class, from outside           |
+| Adding a new implementation          | Edit every class that builds the old one      | Write the new class; existing classes stay as is |
+| Testing without the real service     | Needs the real dependency or fragile patching | Hand in a fake that satisfies the same contract  |
+| Where does the vendor decision live? | Scattered across every place a class is built | One place, where the object graph is assembled   |
 
-|                                  | Depending on a concrete class                              | Depending on an abstraction                                            |
-| -------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Who decides which implementation | The class itself, hardcoded internally                     | Whoever constructs the class, from outside                             |
-| Adding a new implementation      | Requires editing every class that constructs the old one   | Requires zero changes to existing classes — just construct the new one |
-| Testing                          | Requires the real dependency, or fragile internal patching | Trivial — inject a fake or mock that satisfies the same abstraction    |
-| Where the vendor decision lives  | Scattered across every place the class is constructed      | One place: wherever the object graph gets assembled                    |
+That one place is the **composition root**: the decision did not disappear, it
+was concentrated.
 
-## Why this isn't "add an interface to everything"
+<Checkpoint question="After the change, OrderService receives an email client through its constructor. A third provider is written tomorrow. Which files must change for OrderService to start using it?">
 
-**Does DIP mean every class should always depend on an interface, even
-for things that will never have a second implementation?** No — DIP is
-about places where the concrete choice is genuinely likely to vary
-(which vendor, which storage backend, which notification channel) or
-where testability specifically requires substituting a fake. Applying
-it everywhere, including to things with no real reason to vary, adds
-indirection without buying anything back — the other SOLID principles,
-particularly interface segregation, exist partly to guard against
-over-applying this one.
-
-<Checkpoint question="A class computes sales tax using a fixed, well-known formula that has never changed and has no second implementation anywhere in the codebase. Should it depend on a TaxCalculator abstraction 'just in case,' per DIP?">
-
-Not on the strength of DIP alone. DIP earns its cost where a concrete
-choice is genuinely likely to vary or where a test genuinely needs to
-substitute a fake — neither applies to a fixed formula with no second
-implementation in sight. Adding an interface here buys indirection
-(an extra file, an extra layer to read through) without buying back
-anything: there's no vendor to swap, no variant to inject. If the
-formula later needs to vary — a second tax jurisdiction, say — that's
-the point to introduce the abstraction, not before there's a concrete
-reason for it to exist.
+Only the composition root, where the new provider is chosen and passed in.
+`OrderService` never mentions a vendor name, so nothing in its source needs to
+know the new class exists. This is the structural change from the diagram made
+concrete: the arrow points at the abstraction, and the choice of implementation
+was moved out to the one place that assembles the program.
 
 </Checkpoint>
 
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="dip-structure"
+/>
+
+## Is an abstraction always worth adding?
+
+**Does DIP mean every class should depend on an interface, even when only one
+implementation will ever exist?** No. An abstraction costs an extra file and an
+extra layer to read through. It earns that cost only when something real pays
+it back:
+
+| Situation                                                     | Worth an abstraction? | Why                                              |
+| ------------------------------------------------------------- | --------------------- | ------------------------------------------------ |
+| Vendor or backend that could realistically be swapped         | Yes                   | The ripple risk from L1 is real                  |
+| A test needs to avoid a slow or flaky real call               | Yes                   | A fake can be injected                           |
+| A fixed formula with one implementation and no reason to vary | No                    | Indirection with nothing to buy back             |
+| A second variant is imagined but not required by anything     | Not yet               | Add it when the second variant actually shows up |
+
+<Checkpoint question="A class computes sales tax with a fixed formula that has never changed and has no second implementation. Should it depend on a TaxCalculator abstraction 'just in case'?">
+
+Not on the strength of DIP alone. DIP pays off where a concrete choice is
+likely to vary or a test genuinely needs a substitute, and neither applies
+here. The abstraction would add a file and a layer without removing any real
+risk. If a second tax jurisdiction appears later, that is the moment to
+introduce the abstraction, with a concrete reason for its shape.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="dip-when-worth-it"
+/>
+
 ## The generalizable lesson
 
-**Is this only about email providers?** No — the same shape recurs
-anywhere a piece of business logic directly constructs a specific
-low-level implementation of something that could reasonably change:
-which payment processor, which database driver, which logging
-destination, which third-party API. The diagnostic question is always
-the same: if this concrete choice changed, how many unrelated places
-in the codebase would need to know about it?
+**Is this only about email?** No. The same shape recurs wherever business logic
+builds a specific low-level thing that could change: payment processor,
+database driver, log destination, third-party API. The diagnostic question is
+always the same: if this concrete choice changed, how many unrelated places
+would need to know?

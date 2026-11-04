@@ -1,78 +1,106 @@
 ---
-title: "L1 — What does functional programming actually buy me? (immutability, pure functions, managing side effects)"
+title: "L1 — Why did a preview change the real total?"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="The user clicked “preview discount,” decided not to apply it, and checked out anyway getting 10% off.">
+export const unit = { track: "software-design", unitSlug: "immutability" };
+
+<Scenario label="A shopper clicked “preview discount”, changed their mind, and still paid the discounted price.">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🛒</span> <strong>Real cart total</strong> — $50, no discount applied</div>
-      <div class="flex items-center gap-1.5"><span>👀</span> <strong>User action</strong> — clicks "preview SAVE10" to see the discounted total</div>
-      <div class="flex items-center gap-1.5"><span>❌</span> <strong>What actually happened</strong> — the preview function mutated the same cart object checkout uses — the discount stuck, whether the user wanted it or not</div>
+      <div class="flex items-center gap-1.5"><span>🛒</span> <strong>Real cart</strong> — total $50, no discount</div>
+      <div class="flex items-center gap-1.5"><span>👀</span> <strong>Preview button</strong> — runs the promo function to show a total</div>
+      <div class="flex items-center gap-1.5"><span>💳</span> <strong>Checkout</strong> — reads the same cart later</div>
+      <div class="flex items-center gap-1.5"><span>❓</span> <strong>Surprise</strong> — checkout sees $45</div>
+    </div>
+    <div class="not-prose mt-3 rounded border border-rose-300 bg-rose-50 p-1.5 text-xs dark:border-rose-800 dark:bg-rose-950">
+      <p class="font-semibold text-rose-600 dark:text-rose-400">One cart, two readers</p>
+      the preview edited the only copy that exists
     </div>
   </Fragment>
 
-A checkout page has an `applyPromoCode(cart, code)` function. One
-button calls it to show a live "preview" of the discounted total; a
-separate step calls the same function again at actual checkout. A
-user tries `SAVE10` just to see the preview, decides against it, and
-checks out — but the total still reflects the discount. **The preview
-button and checkout never shared any code path that should have
-carried the discount forward. So how did clicking "preview" change
-what checkout actually charged?**
+Picture two people sharing one paper shopping list. One of them crosses
+out milk "just to see how short the list gets", then puts the pen down.
+The other person walks into the shop with a list that no longer says
+milk. Nobody did anything unreasonable, yet the list changed under
+someone who never touched it.
+
+A checkout page has the same shape. A function `applyPromoCode(cart, code)`
+powers a "preview" button and is also used at checkout. A shopper types
+a code, looks at the preview, backs out, and is charged $45 instead of
+$50. **The preview and the checkout never exchanged a message, so how
+did one change the other?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Mutation vs. returning a new object",
-    "Aliasing and why shared references bite",
+    "Mutation versus a new object",
+    "Aliasing and shared references",
     "Pure functions and side effects",
   ]}
 />
 
-## The shape of the problem
+## Why did the preview reach checkout?
 
-- `applyPromoCode(cart, code)` didn't return a new, discounted cart —
-  it reached into the _same_ cart object the preview button and
-  checkout both hold a reference to, and changed it in place. Once
-  the preview function ran, there was no longer a version of the cart
-  without the discount to go back to.
-- This is a **mutation** bug, not a logic bug — the discount math
-  itself was correct. The problem is that two different parts of the
-  code assumed they had their own independent copy of the data, when
-  they actually shared one mutable object.
-- **Immutability** means treating data as unchangeable once created —
-  instead of modifying an object in place, a function that needs to
-  "change" something returns a brand-new object with the change
-  applied, leaving the original untouched. This is the core idea
-  functional programming actually buys you: not a new syntax, but a
-  guarantee that calling a function can't quietly corrupt data
-  something else still depends on.
+The discount math was right. The mistake was where the answer went:
+the function wrote `$45` into the cart object it was handed, and the
+preview and checkout both held that very object.
+
+| Shared paper list                        | The cart                                    |
+| ---------------------------------------- | ------------------------------------------- |
+| One sheet, two people                    | One object, two parts of the program        |
+| Crossing out an item changes it for both | Changing `total` changes it for both        |
+| A photocopy lets you scribble freely     | A new object lets the preview change freely |
+
+```mermaid
+flowchart LR
+    P["Preview button"] --> C["One cart object<br/>total: 50"]
+    K["Checkout step"] --> C
+    C -->|"promo function edits it"| D["Same object<br/>total: 45"]
+```
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="shared-reference"
+/>
+
+## What does the fix look like?
+
+Instead of editing the cart it was given, the function builds a second
+cart that carries the discount and returns it. The preview shows the
+second cart. The real one stays at $50 until some step decides to use
+the new one.
+
+| Style               | What happens to the original cart | Who sees the change                  |
+| ------------------- | --------------------------------- | ------------------------------------ |
+| Mutating            | Edited in place                   | Everyone holding it                  |
+| Returning a new one | Left exactly as it was            | Only the caller that kept the result |
+
+This habit is called **immutability**: once a piece of data exists,
+it is not edited; a "change" produces a new value.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="new-object-fix"
+/>
 
 ## Key terms
 
-- **Mutation** — modifying an existing object or array in place,
-  rather than creating a new one with the change applied.
-- **Aliasing** — two different variables (or two different parts of a
-  program) holding a reference to the _same_ underlying object, so a
-  change made through one is visible through the other.
-- **Pure function** — a function whose output depends only on its
-  inputs, and which produces no observable side effects (no mutation,
-  no I/O, no reliance on external state) — the same input always
-  produces the same output.
-- **Side effect** — anything a function does besides computing and
-  returning a value: mutating shared state, writing to a database,
-  making a network call, logging.
+- **Mutation**: changing an existing object or array in place.
+- **Aliasing**: two names pointing at the same object, so a change through one is visible through the other.
+- **Pure function**: the output depends only on the inputs, and nothing outside is changed.
+- **Side effect**: anything a function does besides returning a value (editing shared data, saving, sending, logging).
 
-## What this unit covers
+## What the later levels cover
 
-L2 works through why aliasing turns an innocent-looking function call
-into action-at-a-distance, contrasts mutating and pure versions of
-the same function, and introduces the "functional core, imperative
-shell" pattern for isolating the side effects a real program can't
-avoid. L3 walks the promo-code bug through a full fix, and covers what
-immutability costs (not just what it buys) so the trade-off is
-honest, not one-sided.
+L2 shows how aliasing turns a local edit into a distant surprise, what
+purity requires beyond "no `var`", and how a real program keeps its
+unavoidable side effects in one thin layer. L3 works the cart fix end
+to end, shows where a copy is only one level deep, and puts a number on
+what copying costs.

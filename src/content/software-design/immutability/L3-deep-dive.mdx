@@ -1,169 +1,170 @@
 ---
-title: "L3 — Fixing the promo-code bug, and what immutability actually costs"
+title: "L3 — The cart fix end to end, and what copying costs"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L2 established the shape of the fix in the abstract — return a new object
-instead of mutating the shared one, and keep side effects isolated. L3 walks
-that fix through in real code against the actual promo-code bug, then covers
-what immutability costs so the trade-off isn't one-sided.
+export const unit = { track: "software-design", unitSlug: "immutability" };
+
+L2 gave the model: new box instead of editing the shared one, and keep saving
+in a thin shell. L3 runs that model against the real cart, finds the place
+where a copy is only one level deep, and measures what copying costs when the
+list grows.
 
 <LevelIntro
   items={[
-    "The mutating bug in real code",
-    "The pure fix, end to end",
-    "What immutability costs at scale",
+    "The pure fix and its shallow edge",
+    "Updating one item without editing the list",
+    "What a full copy costs as lists grow",
   ]}
 />
 
-## The bug, in real code
+## The bug and the fix, side by side
 
-**Here's the function behind the Scenario. What exactly makes it
-unsafe to call for "just a preview"?**
+**What exactly makes the original function unsafe to call for a preview?**
+It assigns into a parameter, and a parameter is the caller's object, not a
+private one.
 
 ```js
 function applyPromoCodeMutating(cart, code) {
-  if (code === "SAVE10") {
-    cart.discountPercent = 10;
-    cart.total = cart.total * 0.9;
-  }
+  if (code === "SAVE10") cart.total = cart.total * 0.9; // edits the caller's cart
   return cart;
-}
-```
-
-```js
-const realCart = { items: ["book"], total: 50, discountPercent: 0 };
-
-const previewMutating = applyPromoCodeMutating(realCart, "SAVE10");
-// realCart.total is now 45 — permanently, whether or not
-// the user goes on to actually apply the code
-```
-
-The function takes `cart` as a parameter, but never makes a copy of
-it — every property assignment (`cart.discountPercent = ...`,
-`cart.total = ...`) writes directly onto the object the caller
-passed in. There is no "preview" here at all; there's only one cart,
-and this function permanently changed it the moment it ran.
-
-## The fix: return a new cart instead of mutating the one you were given
-
-**What has to change to make a genuine, non-committal preview
-possible?**
-
-```js
-function round2(n) {
-  return Math.round(n * 100) / 100;
 }
 
 function applyPromoCodePure(cart, code) {
-  if (code === "SAVE10") {
-    return { ...cart, discountPercent: 10, total: round2(cart.total * 0.9) };
-  }
+  if (code === "SAVE10") return { ...cart, total: cart.total * 0.9 };
   return { ...cart };
 }
 ```
 
-```js
-const realCart2 = { items: ["book"], total: 50, discountPercent: 0 };
+With a cart whose total is 50, both compute 45 (`50 * 0.9` is exactly 45 in
+JavaScript, checked). The difference is only where 45 lands: in the shared
+cart, or in a new one the preview alone holds.
 
-const previewPure = applyPromoCodePure(realCart2, "SAVE10");
-// previewPure.total === 45
-// realCart2.total is still 50 — completely untouched
+| Call                           | Returned cart total | Original cart total afterwards |
+| ------------------------------ | ------------------- | ------------------------------ |
+| `applyPromoCodeMutating(cart)` | 45                  | 45                             |
+| `applyPromoCodePure(cart)`     | 45                  | 50                             |
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="new-object-fix"
+/>
+
+## Where is the spread only one level deep?
+
+**A cart has `items`, an array of line items. Does the spread copy them?**
+It copies the cart's own properties, and for `items` that property holds an
+arrow to an array. The copy gets the same arrow.
+
+```mermaid
+flowchart LR
+    O["original cart<br/>total: 50"] --> I["items array"]
+    N["spread copy<br/>total: 45"] --> I
+    I --> L1["line item: book"]
+    I --> L2["line item: pen"]
 ```
 
-`{ ...cart, discountPercent: 10, total: ... }` builds a brand-new
-object: every property of `cart` is copied over, then the two changed
-properties overwrite their copies. `cart` itself is never assigned
-to. The preview button can now call this as many times as it wants —
-with any code, real or mistyped — and the actual cart used at
-checkout is unaffected until something explicitly decides to replace
-it with the new version.
+The `total` copied by value, so the two carts can disagree about it. The
+`items` arrow was copied as an arrow, so editing `copy.items[0].price`
+edits the original's line item too.
 
-<Checkpoint question="cart.items is an array of line-item objects, e.g. [{ name: 'book', price: 12 }]. applyPromoCodePure's `{ ...cart, ... }` spread only copies cart's top-level properties. If code elsewhere takes the object applyPromoCodePure returns and does `result.items[0].price = 0`, is the original realCart2.items[0].price affected?">
+| Field in the cart | Copied by spread as | Edit through the copy reaches the original? |
+| ----------------- | ------------------- | ------------------------------------------- |
+| `total` (number)  | a value             | No                                          |
+| `items` (array)   | the same arrow      | Yes                                         |
+| each line item    | the same arrow      | Yes                                         |
 
-Yes. The spread `{ ...cart }` copies `cart` one level deep — it creates a
-new object with its own `total` and `discountPercent`, but the `items`
-property on that new object is still the exact same array reference `cart`
-holds, and each element in that array is still the same nested object
-too. Mutating `result.items[0].price` reaches through that shared
-reference and changes the identical object `realCart2.items[0]` points
-at. This is exactly the "assuming spread deep-copies nested objects"
-failure mode in the table below — the fix above is genuinely safe for
-`total` and `discountPercent` because those are primitive values copied by
-value, but it would need a nested spread (or a deep-clone) to make
-`items` equally safe.
+<Checkpoint question="A preview function returns a spread copy of the cart, and some code then sets the first line item's price to 0 on that copy. Is the real cart's first price still intact?">
+
+No. The spread copied the arrow to the items array, and the array still
+points at the same line-item objects, so the assignment lands on the real
+cart's item. Safe for `total`, unsafe for anything nested, until the nested
+part is also rebuilt.
 
 </Checkpoint>
 
-## Isolating the one real side effect: saving the order
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="shallow-copy"
+/>
 
-**Once the discount math is pure, where does actually saving the
-order to a database fit in?** In a thin function that does nothing
-_but_ the side effect — it takes an already-computed value and stores
-it, without also being responsible for calculating that value:
+## How do you change one item without editing the list?
 
-```js
-function computeOrderSummary(cart) {
-  const subtotal = cart.items.reduce(
-    (sum, item) => sum + item.price * item.qty,
-    0,
-  );
-  const tax = round2(subtotal * 0.08);
-  return { subtotal: round2(subtotal), tax, total: round2(subtotal + tax) };
-}
+**If every level of a path needs a new box, which boxes do?** Only the ones
+on the path to the change: the cart, the items array, and the one line item.
 
-function saveOrderSummary(db, orderId, summary) {
-  db.set(orderId, summary); // the one deliberate side effect
-  return summary;
-}
+```mermaid
+flowchart LR
+    NC["new cart"] --> NI["new items array"]
+    NI --> NL["new line item<br/>done: true"]
+    NI --> SK["same pen item<br/>shared, not copied"]
+    OC["old cart"] --> OI["old items array"]
+    OI --> OL["old line item<br/>done: false"]
+    OI --> SK
 ```
 
-`computeOrderSummary` is pure — calling it twice with the same cart
-gives the identical result both times, and it can be unit-tested with
-zero setup. `saveOrderSummary` is impure on purpose, and it's the
-_only_ place in this flow that touches the database — if the save
-logic needs to change (a different database, added retry logic),
-nothing about the discount or total math has to be touched, because
-they were never entangled in the first place.
+The rebuilt array shares every untouched line item with the old one. In code
+that is a `map` that returns the same object for non-matches and a changed
+copy for the match. Writing that function yourself is the exercise below,
+because the shape of "copy the path, share the rest" is easiest to feel by
+typing it.
 
-## What generalizes and what doesn't
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="immutable-array-update"
+/>
 
-The core lesson — a function that mutates a shared reference can
-silently affect every other holder of that reference, and separating
-pure calculation from isolated side effects avoids both that bug and
-a whole class of "why did this change when I didn't touch it" bugs —
-generalizes to any shared mutable state: a global config object, a
-cached API response reused across requests, a UI component's props.
-What's specific to this worked example: the exact fix (spread syntax
-building a new object) is idiomatic for plain JS objects, but a
-different language or a deeply nested structure needs a different
-mechanical approach (persistent data structures, structural sharing
-libraries) to stay efficient. **Try extending it yourself:** if
-`cart.items` were a large array (thousands of line items) instead of
-one book, would spreading the whole array on every discount preview
-still be cheap enough to call on every keystroke, or does the fix
-need something smarter than a full copy?
+## What does copying actually cost?
 
-## What immutability actually costs
+**Does rebuilding the whole items array on every update stay cheap?** The
+interactive demo below uses a cost model recorded from a Node benchmark of a
+`map`-based array copy: about 0.0000085 ms per item plus 0.001 ms fixed (a
+rough, machine-dependent estimate, so trust the order of magnitude, not the
+decimals).
 
-Immutability isn't free — copying an object or array on every change
-does real, measurable work, and for large or deeply nested data
-structures, naive copying (`{ ...bigObject }` on something with
-thousands of entries, or deep-cloning a nested tree) can become a
-genuine performance problem, not just a style preference. Production
-systems that lean heavily on immutability typically reach for
-**structural sharing** — data structures designed so that "changing"
-one part only copies the small piece that actually changed, while
-reusing (not copying) every unchanged part — rather than paying for a
-full deep copy on every update.
+| Items in list | Estimated copy time | Share of a 16.6 ms frame |
+| ------------- | ------------------- | ------------------------ |
+| 10            | 0.0011 ms           | about 0.007%             |
+| 1,000         | 0.0095 ms           | about 0.06%              |
+| 200,000       | 1.70 ms             | about 10%                |
+
+At everyday sizes a full copy is negligible. Around the hundred-thousand
+mark it starts competing with everything else a frame must do, and doing it
+on every keystroke would add up. This is where **structural sharing** earns
+its keep: a data structure arranged so an update rebuilds only the path to
+the change (as in the diagram above) and shares everything else, rather than
+copying all items each time.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="copy-cost"
+/>
+
+## A case, not the whole territory
+
+The cart is one case. The same reasoning applies to any shared mutable
+thing: a settings object read by many modules, a cached response reused
+across requests, a component's props. What is specific here is the tool:
+spread and `map` suit plain objects at modest sizes; other languages and
+larger data want persistent structures.
+
+Try extending it yourself. If the list held 200,000 items and the user
+edited one on every keystroke, would you copy the array, share the
+untouched items, or change the design so the list is not rebuilt per
+keystroke at all? What would you want to measure before choosing?
 
 ## Failure modes
 
-| Failure mode                                                           | What it gets wrong                                                                                                                                                |
-| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Mutating a parameter because "it's just a local variable"              | A parameter is a reference to the caller's object — mutating it mutates something the caller (and anyone else holding it) still owns                              |
-| Assuming `{ ...obj }` deep-copies nested objects                       | Spread syntax only copies one level — a nested object or array inside `obj` is still shared by reference after the spread                                         |
-| Mixing calculation and side effects in one function for convenience    | Makes the function harder to test, harder to reuse, and reintroduces the exact "did this also do something I didn't expect" risk immutability is meant to prevent |
-| Treating immutability as a free correctness upgrade with no trade-offs | Naive full copies of large structures have a real performance cost — the right answer is often structural sharing, not "copy everything, always"                  |
+| Failure mode                                   | What it gets wrong                                              |
+| ---------------------------------------------- | --------------------------------------------------------------- |
+| Editing a parameter because it is "just local" | A parameter is the caller's object                              |
+| Believing spread copies nested data            | Only the first level is new; nested objects are still shared    |
+| Mixing calculation and saving                  | Hard to test, and surprises callers that wanted only the number |
+| Copying everything, always, on large data      | Full copies scale with size; share the unchanged parts instead  |

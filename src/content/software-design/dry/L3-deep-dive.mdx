@@ -5,197 +5,151 @@ title: "L3 — Three pasted copies, one extraction, and the flag that revealed t
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="One rule, three pasted copies, then a new rule that isn't the same one">
+export const unit = {
+  track: "software-design",
+  unitSlug: "dry",
+};
+
+<Scenario label="A shared function, a new rule, and an order nobody chose">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>📋</span> <strong>Start</strong> — the exact same bulk-discount rule, pasted into checkout, cart preview, and the admin refund tool</div>
-      <div class="flex items-center gap-1.5"><span>🔧</span> <strong>Extraction</strong> — consolidated into one shared <code>applyBulkDiscount</code> function</div>
-      <div class="flex items-center gap-1.5"><span>⚠️</span> <strong>The trap</strong> — a new, genuinely different loyalty-discount rule gets bolted onto the same function via a boolean flag</div>
+      <div class="flex items-center gap-1.5"><span>📋</span> <strong>Start</strong> — 10% off at quantity 5 or more, pasted into 3 places</div>
+      <div class="flex items-center gap-1.5"><span>🔧</span> <strong>Extraction</strong> — one shared function, earned by 3 real copies</div>
+      <div class="flex items-center gap-1.5"><span>⚠️</span> <strong>The trap</strong> — a loyalty rule (15% off at quantity 3 or more) added as a flag</div>
+      <div class="flex items-center gap-1.5"><span>🧮</span> <strong>The overlap</strong> — 5 units at $10 for a loyalty customer fit both rules</div>
     </div>
   </Fragment>
 
-**Before reading further, predict: once the loyalty discount is added
-as a flag on the shared function, what's the first kind of bug likely
-to show up — and would it show up immediately, or only later?**
+A shop gives 10% off when you buy 5 or more. Management adds a loyalty rule:
+members get 15% off from 3 units. A member buys 5 units at $10 each, so both
+rules apply. **What should the total be, and who decided?**
 
 </Scenario>
 
-L2 gave the test (same reason to change?) and the rule of three
-(evidence before extracting). This walkthrough applies both to a real
-sequence: three genuine pasted copies, a correctly-earned extraction,
-and then a new requirement that tempts the same trap L2 only described
-in the abstract.
+L2 gave the test (same reason to change?) and the rule of three (evidence
+before extracting). This case applies both: a justified extraction first, then
+a new requirement that tempts the trap.
 
 <LevelIntro
   items={[
-    "Extracting a shared function that's actually earned",
-    "How a boolean flag quietly stitches two rules together",
-    "Composition as the fix, not just a workaround",
+    "An extraction that earned its place",
+    "How a flag hides a priority decision",
+    "Ordered rules as the explicit fix",
   ]}
 />
 
-## Step 1: true duplication, three pasted copies
+## Step 1: three copies of one rule, then an earned extraction
+
+Checkout, the cart preview and the refund tool each carry the same rule:
+10% off at quantity 5 or more. That is true duplication (one rule, must change
+everywhere at once) and it is the third occurrence, so the evidence is real.
 
 ```js
-// checkout.js
-function checkoutDiscount(price, quantity) {
-  if (quantity >= 5) return Math.round(price * quantity * 0.9 * 100) / 100;
-  return Math.round(price * quantity * 100) / 100;
-}
-
-// cart-preview.js — pasted from checkout.js, same rule
-function cartPreviewDiscount(price, quantity) {
-  if (quantity >= 5) return Math.round(price * quantity * 0.9 * 100) / 100;
-  return Math.round(price * quantity * 100) / 100;
-}
-
-// admin-refund-tool.js — pasted again, same rule, third copy
-function refundToolDiscount(price, quantity) {
-  if (quantity >= 5) return Math.round(price * quantity * 0.9 * 100) / 100;
-  return Math.round(price * quantity * 100) / 100;
-}
-```
-
-This is genuinely **true duplication**, not coincidental — all three
-copies express the exact same rule ("10% off at quantity 5 or more"),
-and per L2's test, a change to that rule should hit all three at once.
-By the rule of three, this is the third occurrence: real evidence, not
-a guess.
-
-## Step 2: extracting the shared rule
-
-```js
-// discounts.js
 function applyBulkDiscount(price, quantity) {
   const total = price * quantity;
   const discounted = quantity >= 5 ? total * 0.9 : total;
   return Math.round(discounted * 100) / 100;
 }
-
-console.log(applyBulkDiscount(10, 5)); // 45
-console.log(applyBulkDiscount(10, 4)); // 40
 ```
 
-All three call sites now import and call `applyBulkDiscount`. One rule,
-one place it lives — exactly what DRY was asking for, and correctly
-earned by three real occurrences of the _same_ rule, not extracted on a
-guess after just one or two.
+For price 10, quantity 5 this returns 45; for quantity 4 it returns 40.
 
-<Checkpoint question="What specifically made this extraction safe, rather than the kind of premature abstraction L2 warned against?">
+<Checkpoint question="What made this extraction safe rather than premature?">
 
-Two things had to both be true, and both were: the three copies were
-genuinely the same rule (10% off at quantity 5+, expressed identically
-in checkout, cart preview, and the refund tool — not three rules that
-merely looked alike), and there were three real occurrences, not two.
-The rule of three isn't a superstition about the number three — it's a
-proxy for having enough independent evidence to know what's actually
-constant across the callers versus what only happened to match by
-coincidence. A fourth copy showing up later would change nothing; a
-second copy would not have been enough to extract on.
+Two things were both true: the three copies were the same rule (not three rules
+that merely looked alike), and there were three real occurrences, enough to
+see what was constant. A fourth copy would change nothing; a second copy would
+not have been enough.
 
 </Checkpoint>
 
-## Step 3: the trap — a new rule that only looks like the old one
+## Step 2: the trap, a second rule behind a flag
 
-A product requirement arrives: loyalty-program customers get 15% off
-starting at quantity 3, instead of the standard bulk discount. The
-existing `applyBulkDiscount` function is right there, already shared,
-already imported everywhere discounts happen — so it gets a flag:
+The shared function is right there, so the loyalty rule gets a flag:
 
 ```js
-// discounts.js — the trap
 function applyDiscount(price, quantity, isLoyalty) {
   const total = price * quantity;
   let discounted = total;
-  if (isLoyalty && quantity >= 3) {
-    discounted = total * 0.85;
-  } else if (quantity >= 5) {
-    discounted = total * 0.9;
-  }
+  if (isLoyalty && quantity >= 3) discounted = total * 0.85;
+  else if (quantity >= 5) discounted = total * 0.9;
   return Math.round(discounted * 100) / 100;
 }
-
-console.log(applyDiscount(10, 5, false)); // 45  — bulk, unchanged
-console.log(applyDiscount(10, 3, true)); // 25.5 — loyalty
-console.log(applyDiscount(10, 5, true)); // 42.5 — loyalty silently wins over bulk here
 ```
 
-The function still passes every existing test — `applyDiscount(10, 5,
-false)` still returns `45`, exactly as `applyBulkDiscount` always did.
-**But look at the third call**: a loyalty customer buying 5 units
-qualifies for _both_ rules, and the `if/else if` ordering silently
-decided loyalty wins, with no caller ever having stated that priority
-on purpose — it fell out of which branch happened to be written first.
-This is the forced-abstraction warning sign from L2, now concrete: a
-boolean flag that exists purely to let one function serve two rules
-that were never actually the same rule.
+Every old bulk-only call still returns what it did. But the overlap case now
+has three defensible answers, and the code silently picked one:
 
-<Checkpoint question="Why did every existing test keep passing even though the priority bug — loyalty silently beating bulk — was real and already shipped?">
+| Quantity | Loyalty | Total (price 10) | Rule applied                               |
+| -------- | ------- | ---------------- | ------------------------------------------ |
+| 2        | no      | 20               | none                                       |
+| 3        | no      | 30               | none (bulk starts at 5)                    |
+| 3        | yes     | 25.5             | loyalty                                    |
+| 5        | no      | 45               | bulk                                       |
+| 5        | yes     | 42.5             | loyalty, because its `if` is written first |
 
-Because the existing tests only ever called the function with one rule
-active at a time — `isLoyalty: false` for the old bulk cases, and the
-new loyalty cases were tested on their own too. None of them exercised
-the one scenario where both rules could apply to the same call, which
-is exactly where the `if/else if` ordering silently made an
-undocumented priority decision. Passing tests only prove the cases you
-thought to write still work; they say nothing about a case — like two
-rules overlapping — that nobody wrote a test for because nobody
-realized it was now possible.
+For the last row the alternatives were 45 (bulk wins) or 38.25 (both stack,
+since 50 × 0.85 × 0.9). Nobody chose 42.5; it fell out of which branch came
+first. You can move the quantity and loyalty sliders in the demo to see where
+the answer flips.
+
+<Checkpoint question="Why did every existing test keep passing while the priority bug shipped?">
+
+The old tests only ever ran one rule at a time, so none exercised a call where
+both rules apply. Passing tests prove the cases someone thought of still work.
+They say nothing about a case that only became possible when the second rule
+arrived.
 
 </Checkpoint>
 
-## Step 4: undoing it — composition instead of a flag
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="hidden-priority"
+/>
 
-```js
-// discounts.js — fixed
-const discountRules = [
-  { name: "loyalty", applies: (q, ctx) => ctx.isLoyalty && q >= 3, rate: 0.85 },
-  { name: "bulk", applies: (q, ctx) => q >= 5, rate: 0.9 },
-];
+## Step 3: composition makes the priority visible
 
-function calculateDiscount(price, quantity, ctx = {}) {
-  const total = price * quantity;
-  const rule = discountRules.find((r) => r.applies(quantity, ctx));
-  const discounted = rule ? total * rule.rate : total;
-  return Math.round(discounted * 100) / 100;
-}
-
-console.log(calculateDiscount(10, 5, {})); // 45   — bulk
-console.log(calculateDiscount(10, 3, { isLoyalty: true })); // 25.5 — loyalty
-console.log(calculateDiscount(10, 5, { isLoyalty: true })); // 42.5 — loyalty, now explicit
-console.log(calculateDiscount(10, 2, {})); // 20   — no rule applies
+```mermaid
+flowchart TD
+    Start["price, quantity, customer"] --> L{"Loyalty member\nand quantity 3 or more?"}
+    L -->|yes| R85["Total x 0.85"]
+    L -->|no| B{"Quantity 5 or more?"}
+    B -->|yes| R90["Total x 0.90"]
+    B -->|no| R100["Total x 1.00"]
 ```
 
-The numeric results are identical to Step 3 — this isn't a behavior
-change, it's a legibility one. `discountRules`'s **order is now the
-explicit, visible statement of priority** ("loyalty is checked before
-bulk") instead of an accidental side effect of `if/else if` ordering
-buried inside a function nobody meant to make a priority decision in.
-Adding a third, future discount rule means adding one more object to
-the array — not editing a growing chain of `if/else if` branches that
-each have to know about every rule that came before them.
+In code this is an ordered list of rules, each with its own condition and
+rate, and the first rule that applies wins. Results are identical to Step 2,
+so this is a legibility change, not a behavior change. The list order is now
+the written statement of priority, and a third rule is one more entry rather
+than another branch that must know about all earlier ones.
 
-## Extend it: what if the two rules needed genuinely shared logic, not just a shared shape?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="composition-fix"
+/>
 
-**Everything above assumed loyalty and bulk discounts share nothing but
-percentage-off-and-round. What if a real requirement existed that both
-rules truly need — say, a company-wide policy that no discount may ever
-exceed 50%, regardless of which rule applied?** That constraint _is_
-true duplication in L2's sense (the same rule, needing to change
-everywhere at once) — the right fix is a shared clamp applied once,
-after whichever rule's rate is selected, not copied into each rule
-object: `Math.min(rule?.rate ?? 1, 0.5)`. The lesson isn't "never share
-logic between the two rules" — it's that only the parts genuinely
-representing one rule belong in one place; the parts that don't should
-stay separate, even while living right next to each other.
+## Extend it: this is a case, not the whole territory
+
+This example assumed loyalty and bulk share only "percentage off, then round".
+Now ask the question yourself: **a company policy says no discount may ever
+take more than half off, whichever rule applied. Does that belong inside each
+rule or somewhere else, and which kind of duplication is it?** It is true
+duplication, one policy that must change everywhere at once, so it belongs in
+one place applied after the rule is chosen (the multiplier is never allowed
+below 0.5), not copied into each rule. Try more variations: what if stacking
+were the intended behavior, or if a fourth rule came from another team?
 
 ## Failure modes
 
-| Failure mode                                                                                         | What it gets wrong                                                                                                              |
-| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Extracting a shared function after only one or two occurrences                                       | Not enough evidence yet to know if it's true or coincidental duplication                                                        |
-| Adding a boolean flag to an existing function for a new, different rule                              | Stitches two unrelated rules together behind one signature, hiding which one takes priority when both could apply               |
-| Treating "the tests still pass" as proof an abstraction is still correct                             | The existing tests only exercised the old rule — they can't catch an ordering bug between two rules that never coexisted before |
-| Refusing to ever share code between two genuinely related rules                                      | Coincidental-duplication caution taken too far re-introduces true duplication for the parts that actually are the same rule     |
-| Judging duplication by whether the code looks similar, not by whether it changes for the same reason | Identical-looking code can be coincidental; different-looking code can encode the same rule twice                               |
+| Failure mode                                     | What it gets wrong                                                        |
+| ------------------------------------------------ | ------------------------------------------------------------------------- |
+| Extracting after only one or two occurrences     | No evidence yet whether the duplication is true or coincidental           |
+| Adding a flag for a new, different rule          | Hides which rule wins when both could apply                               |
+| Trusting that old tests still pass               | They never covered rules coexisting                                       |
+| Refusing to share anything between related rules | Brings back true duplication for the parts that really are one rule       |
+| Judging by how similar the code looks            | Look-alikes can be coincidental; different-looking code can repeat a rule |

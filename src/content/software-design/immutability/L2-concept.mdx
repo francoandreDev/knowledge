@@ -1,143 +1,115 @@
 ---
-title: "L2 — Aliasing, pure functions, and keeping side effects in one place"
+title: "L2 — Aliasing, purity, and keeping side effects in one place"
 ---
 
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-L1 named the promo-code bug as a mutation problem, not a logic problem — the
-same shared cart object got changed in place instead of a fresh one being
-returned. L2 works out exactly why sharing a reference causes that, what a
-pure function actually requires beyond "no `var`," and how a real program
-keeps its unavoidable side effects from causing the same kind of surprise.
+export const unit = { track: "software-design", unitSlug: "immutability" };
+
+L1 explained the surprise: the promo function edited the one cart that the
+preview and checkout both held. L2 asks why sharing causes that, what makes a
+function safe to call, and where a real program puts the changes it cannot
+avoid.
 
 <LevelIntro
   items={[
-    "Aliasing and action-at-a-distance",
-    "What purity actually requires",
+    "Aliasing and action at a distance",
+    "What purity really requires",
     "Functional core, imperative shell",
   ]}
 />
 
-## Why aliasing turns a local change into action at a distance
-
-**The preview button and checkout each call `applyPromoCode`
-independently — so why does a change in one show up in the other?**
-Because they were never holding two separate carts — they were both
-holding a reference to the exact same object in memory. Mutating
-"the cart" through one reference mutates the only cart that exists:
+## Why does a local edit show up somewhere else?
 
 ```mermaid
 flowchart LR
-    subgraph Before["Before the mutating call"]
-    A1["previewButton"] --> C1["{ total: 50 }"]
+    subgraph Before["Before the call"]
+    A1["previewButton"] --> C1["cart: total 50"]
     B1["checkoutStep"] --> C1
     end
-    subgraph After["After applyPromoCode mutates in place"]
-    A2["previewButton"] --> C2["{ total: 45 }"]
+    subgraph After["After a mutating call"]
+    A2["previewButton"] --> C2["cart: total 45"]
     B2["checkoutStep"] --> C2
     end
 ```
 
-Both diagrams show the same underlying shape: `previewButton` and
-`checkoutStep` were never two independent copies — they were always
-two names for the same object. A function that mutates that object
-changes what _every_ holder of that reference sees, whether or not
-that holder ever called the function itself.
+Names do not hold carts; they hold arrows to carts. The preview and the
+checkout were never two carts. They were two arrows into one. Editing the
+target through one arrow changes what every other arrow shows, including
+arrows held by code that never called the function.
 
-**Would `applyPromoCode` returning a new object instead of mutating
-fix this, and why?**
+Returning a new cart adds a second box and moves only the caller's own
+arrow:
 
-| Approach                                | What happens on `applyPromoCode(cart, "SAVE10")`                      | Effect on other holders of `cart`                       |
-| --------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------- |
-| Mutating (`cart.total *= 0.9`)          | The one shared object is changed in place                             | Every reference to it sees the change immediately       |
-| Pure (`return { ...cart, total: ... }`) | A brand-new object is created and returned; the original is untouched | Other holders of the original `cart` see nothing change |
+```mermaid
+flowchart LR
+    P["previewButton"] --> N["new cart: total 45"]
+    K["checkoutStep"] --> O["original cart: total 50"]
+```
 
-Returning a new object instead of mutating the shared one means the
-preview button gets its own discounted copy to display, while
-`checkoutStep`'s reference to the original cart is completely
-unaffected until — and unless — something explicitly decides to use
-the new, discounted version.
+<Checkpoint question="A third part of the program, adminPanel, builds its own copy by spreading the cart into a new object and then edits the copy. Does checkoutStep see the edit?">
 
-<Checkpoint question="Two variables, previewButton and checkoutStep, both point at the same cart object. If a third variable, adminPanel, is assigned a *new* object built with `{ ...cart }` and then adminPanel's copy is mutated, does checkoutStep see that change?">
-
-No. `{ ...cart }` creates a brand-new object with its own copies of `cart`'s
-top-level properties — `adminPanel` now points at that new object, not at
-the one `previewButton` and `checkoutStep` share. Mutating `adminPanel`'s
-copy only changes that copy; the original object `checkoutStep` still
-points at is untouched. This is the whole mechanism the fix relies on:
-aliasing only causes action-at-a-distance when two names point at the
-_same_ object, and spreading breaks that shared pointer by handing back a
-different object entirely.
+No. The spread produces a different object, so `adminPanel` now holds an
+arrow to a box that nobody else points at. Aliasing only causes distant
+surprises when two arrows lead to the same box, and making a new box is
+exactly what breaks that link.
 
 </Checkpoint>
 
-## What "pure function" actually requires
+## Is a function pure just because it looks modern?
 
-**Is a function pure just because it doesn't use `var` or classes?**
-No — purity is about behavior, not syntax. A function is pure only if
-both of these hold:
+No. Purity is about behavior, not syntax. Arrow functions, `const` and
+`map` can all hide an edit. Two properties together make a function pure:
 
-- **Same input, same output, always.** No hidden dependency on
-  something that can change between calls (today's date, a random
-  number, a database row) — call it twice with the same arguments and
-  get the same result both times.
-- **No observable side effects.** It doesn't mutate anything it was
-  given, write to a file, make a network call, or change any state
-  outside itself.
+| Property                   | What it forbids                                                  | Example that breaks it                                   |
+| -------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------- |
+| Same input, same output    | Reading anything that can change between calls                   | Reading the clock or a random number inside the function |
+| No observable side effects | Editing its arguments, writing files, calling a network, logging | `cart.total *= 0.9` inside an arrow function             |
 
-A function using `const` and arrow syntax that still does
-`cart.total *= 0.9` is not pure — the syntax changed, the mutation
-didn't.
+A pure function can be called twice, or called just to see what happens,
+with no consequences. That is the property the preview button needed.
 
-## Managing the side effects a real program can't avoid
+<PracticeCheck track={unit.track} unitSlug={unit.unitSlug} topicId="purity" />
 
-**If side effects are the problem, how does a real program ever save
-anything to a database?** It can't avoid side effects entirely —
-saving data, sending a request, logging, are the whole point of most
-programs. The useful move isn't eliminating side effects, it's
-**isolating** them: keep the actual calculation (discount math, order
-totals) in pure functions, and push every side effect (writing to a
-database, calling an API) to the thin outer layer that calls those
-pure functions — a pattern often called **functional core, imperative
-shell**.
+## If side effects are the problem, how does anything get saved?
+
+It cannot avoid them: saving, sending and logging are the point of most
+programs. The move is to isolate them. Keep the calculation (discounts,
+totals) in pure functions and let a thin outer layer do the saving and
+calling. The pattern is called **functional core, imperative shell**.
 
 ```mermaid
 flowchart TD
-    A["Imperative shell\n(reads request, calls DB, sends response)"] --> B["Functional core\n(pure: compute totals, apply discount)"]
-    B --> A
-    A --> C["Side effect: save to DB"]
+    R["Request arrives"] --> S["Shell: read input"]
+    S --> F["Core: pure calculation<br/>totals and discounts"]
+    F --> S2["Shell: save and respond"]
+    S2 --> DB[("Database")]
 ```
 
-The core never touches the database or the network — it just takes
-data in and returns data out, which makes it trivial to test (call it
-twice, expect the same result, no mocking required) and impossible
-for it to cause the exact bug in this unit's Scenario, since it never
-holds onto or mutates anything the caller still needs.
+The core never touches the database, so it can be tested with plain
+inputs and plain outputs, and it can be reused by a preview, a report or a
+checkout without any of them saving anything by accident.
 
-<Checkpoint question="A function computeAndSaveTotal(cart, db) both calculates the discounted total and writes it to the database in one step. Using the functional-core/imperative-shell idea above, what's the concrete downside of leaving it that way instead of splitting it into two functions?">
+<Checkpoint question="One function both computes the discounted total and writes it to the database. Name the concrete cost of leaving it as one function.">
 
-It can't be tested or reused without a database. Every test of the discount
-math now needs a real or mocked `db`, even though the math itself has
-nothing to do with persistence — and if that calculation is ever needed
-somewhere that shouldn't write to the database (a preview, a report), the
-only way to reuse it is to duplicate the math elsewhere or pass in a fake
-`db` just to satisfy the function's shape. Splitting it into a pure
-`computeTotal(cart)` and a thin `saveTotal(db, total)` removes both
-problems at once: the pure function is trivially testable with no setup,
-and the side effect stays isolated to the one place that actually needs it.
+Every test of the discount math now needs a database, real or fake, and any
+place that wants the number without a save (a preview, a report) must
+either duplicate the math or accept an unwanted write. Splitting into a pure
+calculation and a thin save removes both problems, and the save stays in the
+one place that needs it.
 
 </Checkpoint>
 
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="core-and-shell"
+/>
+
 ## Failure modes at this level
 
-- **Assuming "functional-looking" code is automatically pure.** Using
-  `map`/`filter`/arrow functions doesn't guarantee purity if the
-  callback still mutates its argument or reaches out to shared state.
-- **Mixing calculation and side effects in one function.** A function
-  that both computes a total _and_ saves it to a database is harder
-  to test and reuse than two separate functions, one pure and one
-  not.
-- **Treating immutability as free.** Returning a new object on every
-  change has a real cost for large data structures — covered
-  honestly in L3, not glossed over here.
+- **Trusting the style.** Code that uses `map` or arrow functions is not automatically pure if the callback edits its argument.
+- **Blending calculation and saving.** The mixed function is harder to test and quietly reintroduces unexpected writes.
+- **Treating copies as free.** A new object per change has a price on large data; L3 puts a number on it.
