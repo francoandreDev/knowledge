@@ -5,123 +5,138 @@ title: "L2 — Coupling and cohesion: the two properties the cost is actually ma
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = { track: "software-design", unitSlug: "cost-design" };
 
 <Scenario label="Two teams, same requirement">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🔗</span> <strong>Team A</strong> — reaches into <code>EmailService</code>'s internals directly</div>
-      <div class="flex items-center gap-1.5"><span>🧩</span> <strong>Team B</strong> — depends only on a stable <code>.notify()</code> interface</div>
+      <div class="flex items-center gap-1.5"><span>🔗</span> <strong>Team A</strong> — reaches into the mailer's internals directly</div>
+      <div class="flex items-center gap-1.5"><span>🧩</span> <strong>Team B</strong> — calls one stable <code>notify()</code> method</div>
     </div>
     <div class="not-prose mt-3 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs dark:border-amber-800 dark:bg-amber-950">
-      Both versions ship the identical feature today. The difference is invisible until something else has to change.
+      Both ship the identical feature today. The difference only shows when something else changes.
     </div>
   </Fragment>
 
-Two teams independently build the same order-confirmation feature. Team A's
-`OrderService` reaches directly into `EmailService`'s internal SMTP client
-to send the confirmation. Team B's `OrderService` just calls
-`notifier.notify(order)` on whatever object it was given. Both pass code
-review. Both pass every test. Both ship this week.
+Two teams build the same order-confirmation feature. Team A's order code
+reaches into the mailer's internal connection object and sends the message
+itself. Team B's order code just calls `notifier.notify(order)` on whatever it
+was given. Both pass review, both pass every test, both ship this week.
 
-**If both versions do the same thing today and both pass every test, what
-question would actually tell you which one is the better design — and why
-can't "does it work" answer it?**
+**If both do the same thing today, what question would tell you which design
+is better, and why can't "does it work" answer it?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "The compounding cost curve",
-    "Coupling: entanglement between pieces",
-    "Cohesion: whether responsibilities belong together",
+    "Coupling: the size of the breakage surface",
+    "Cohesion: one reason to change",
+    "How both bend the cost curve",
   ]}
 />
 
-## The cost curve design quality is trying to bend
+## What actually makes Team A riskier than Team B?
+
+Neither has a bug today. The difference is the **surface a future, unrelated
+change could break**.
+
+```mermaid
+flowchart LR
+    subgraph A["Team A: high coupling"]
+        OA["Order code"] -->|"uses internal connection"| MA["Mailer internals"]
+    end
+    subgraph B["Team B: low coupling"]
+        OB["Order code"] -->|"notify()"| IB["Stable interface"]
+        IB --> MB["Mailer internals"]
+    end
+```
+
+In pseudocode, the whole difference is one line:
+
+```text
+Team A:  mailer.connection.send_raw(build_message(order))   # depends on internals
+Team B:  notifier.notify(order)                             # depends on a promise
+```
+
+Team B is not better because it is shorter. The set of mailer changes that
+could break the order code shrank from "almost anything" to "changing what
+`notify()` means", a small and deliberate surface.
+
+<Checkpoint question="Team C's order code calls only notify(order), but the class behind notify() imports and calls into three unrelated internal services. Has Team C achieved low coupling?">
+
+Between the order code and the notifier, yes. But coupling is a property of
+every relationship in the system, not just the one you checked. The notifier
+reaching into three unrelated services is Team A's mistake one layer deeper:
+a change to any of those services can still ripple outward, passing through
+the notifier first. A narrow interface at one boundary says nothing about the
+boundaries behind it.
+
+</Checkpoint>
+
+<PracticeCheck track={unit.track} unitSlug={unit.unitSlug} topicId="coupling" />
+
+## Is a module cohesive just because its parts touch the same data?
+
+**Two methods both read the same order. Does that make them belong together?**
+No. The test is whether they would ever change for the same reason.
+
+```mermaid
+flowchart TD
+    subgraph LOW["Low cohesion: one class, three reasons to change"]
+        P["OrderProcessor"] --> T["price rules change"]
+        P --> E["email wording changes"]
+        P --> L["analytics format changes"]
+    end
+    subgraph HIGH["High cohesion: split by reason to change"]
+        PC["PricingCalculator"] --> T2["price rules change"]
+        ON["OrderNotifier"] --> E2["email wording changes"]
+        AL["AnalyticsLogger"] --> L2["analytics format changes"]
+    end
+```
+
+Pricing, email wording and analytics format are three independent reasons to
+change code. Bundled in one file, an edit for any one of them risks breaking
+the other two, purely because they share a file.
+
+<Checkpoint question="A developer splits OrderProcessor into three classes, but each one still reaches into the other two to share state. Did the split help?">
+
+It raised cohesion inside each class, since each now has one reason to
+change. But reaching across the new classes brought coupling back, the same
+kind Team A had. The two are separate measurements, not opposites you trade:
+a real improvement splits by reason to change and then lets the pieces talk
+through narrow interfaces.
+
+</Checkpoint>
+
+<PracticeCheck track={unit.track} unitSlug={unit.unitSlug} topicId="cohesion" />
+
+## How do the two properties bend the cost curve?
+
+**Why do early changes cost the same under both designs, and later ones
+don't?** Every future change must (1) work out what else it might affect, and
+(2) touch only what is relevant.
+
+| A change must…                 | Harder under… | Because…                                           |
+| ------------------------------ | ------------- | -------------------------------------------------- |
+| Find out what else might break | High coupling | Dependents reach past the interface into internals |
+| Touch only what is relevant    | Low cohesion  | Unrelated logic is tangled into the same unit      |
+
+Here is the effect as a model, using the unit's own demo formula: the first
+change costs 2 hours, and under the coupled design each later change costs 15%
+more than the one before (an assumed penalty, not a measurement).
 
 ```mermaid
 xychart-beta
-    title "Cumulative cost of changes over a codebase's life"
-    x-axis "Change number" [1, 5, 10, 15, 20, 25]
-    y-axis "Cumulative cost" 0 --> 100
-    line "Poorly designed" [4, 22, 48, 78, 100, 100]
-    line "Well-designed" [5, 23, 38, 50, 61, 71]
+    title "Cumulative hours after N changes (model: 2h first change)"
+    x-axis "Changes made" [1, 5, 10, 15, 20]
+    y-axis "Cumulative hours" 0 --> 210
+    line "No coupling penalty" [2, 10, 20, 30, 40]
+    line "15% penalty per change" [2, 13.48, 40.61, 95.16, 204.89]
 ```
 
-Both lines start at roughly the same place — early changes cost about the same regardless of design quality, which is exactly why the cost of bad design is easy to miss at first. The poorly-designed line curves upward (each change gets more expensive than the last, because it has to work around all the entanglement left by previous changes); the well-designed line stays closer to linear (each change costs roughly what the last one did, because the code's structure isn't actively fighting the next person).
-
-## Coupling: how entangled two pieces of code are
-
-**What actually makes Team A's version riskier than Team B's, if neither has a bug today?** It's the size of the surface that a future, unrelated change to `EmailService` could break.
-
-```python
-# High coupling — OrderService reaches directly into EmailService's
-# internals and assumes a specific implementation detail (the exact
-# SMTP client shape) rather than a stable interface.
-class OrderService:
-    def complete_order(self, order):
-        email_service = EmailService()
-        smtp_client = email_service.smtp_client  # reaching into internals
-        smtp_client.send_raw(build_mime_message(order))
-        # Any change to EmailService's internal structure now
-        # potentially breaks OrderService too.
-
-# Low coupling — OrderService depends only on a stable, narrow interface
-class OrderService:
-    def __init__(self, notifier):
-        self.notifier = notifier  # any object with a .notify(order) method
-
-    def complete_order(self, order):
-        self.notifier.notify(order)
-        # EmailService's internals can change freely — OrderService
-        # only ever depended on the shape of `.notify()`.
-```
-
-The second version isn't "better" because it's shorter — it's better because the set of changes to `EmailService` that could break `OrderService` shrank from "almost anything" to "changing the meaning of `.notify()` itself," which is a much smaller, much more deliberate surface.
-
-<Checkpoint question="A third team, Team C, writes OrderService so it depends on a stable .notify(order) interface, but that interface is implemented by a single EmailNotifier class that itself directly imports and calls into three other unrelated internal services. Has Team C actually achieved low coupling?">
-
-Between `OrderService` and the notifier, yes — `OrderService` only knows about `.notify()`, exactly like Team B. But coupling is a property of every relationship in the system, not just the one you happened to check. `EmailNotifier` reaching directly into three unrelated internal services is the same high-coupling mistake Team A made, just one layer deeper — and a future change to any of those three services can still ripple outward, it just has to pass through `EmailNotifier` first instead of `OrderService` directly. A narrow interface at one boundary doesn't say anything about the boundaries behind it.
-
-</Checkpoint>
-
-## Cohesion: whether a module's responsibilities actually belong together
-
-**Two methods both touch the same `order` object — does that make them cohesive?** Not necessarily. The real test is whether they'd ever need to change for the same reason.
-
-```python
-# Low cohesion — one class doing three unrelated jobs. Any of the three
-# reasons to change it (billing logic changes, email copy changes,
-# logging format changes) forces touching THIS file.
-class OrderProcessor:
-    def calculate_total(self, order): ...
-    def send_confirmation_email(self, order): ...
-    def log_analytics_event(self, order): ...
-
-# High cohesion — split by reason to change, not just by "related enough"
-class PricingCalculator:
-    def calculate_total(self, order): ...
-
-class OrderNotifier:
-    def send_confirmation_email(self, order): ...
-
-class AnalyticsLogger:
-    def log_analytics_event(self, order): ...
-```
-
-The test for cohesion isn't "do these methods all touch `order` somehow" (they do, in both versions) — it's "do these methods change for the same reason." Pricing logic, email copy, and analytics schema are three genuinely independent reasons to change code, and bundling them means a change to any one risks introducing a bug in the other two, purely because they happen to live in the same file.
-
-<Checkpoint question="A developer splits OrderProcessor into three files — PricingCalculator, OrderNotifier, AnalyticsLogger — but each new class still imports and calls the other two directly to share state. Did this split actually raise cohesion?">
-
-The split raised cohesion inside each class (each one now has a single reason to change), but it didn't come for free — reaching across the new files to share state has re-introduced coupling between them, of the same kind Team A had with `EmailService`. Cohesion and coupling aren't opposites you can trade one for the other; they're two separate measurements of the same codebase, and a real improvement usually needs both: split by reason to change, then let the split pieces talk through narrow interfaces rather than reaching into each other directly.
-
-</Checkpoint>
-
-## Why these two properties determine the cost curve
-
-| Future change has to…                    | Harder under… | Because…                                                  |
-| ---------------------------------------- | ------------- | --------------------------------------------------------- |
-| Figure out what else might be affected   | High coupling | Dependents reach past the stable interface into internals |
-| Touch only what's relevant to the change | Low cohesion  | Unrelated logic is tangled into the same unit             |
-
-Every future change to a codebase has to (1) figure out what else might be affected (harder under high coupling) and (2) touch only what's actually relevant to the change (harder under low cohesion, since unrelated logic is tangled into the same unit). High coupling and low cohesion don't cause bugs directly — they multiply the _cost and risk_ of every subsequent change, which is exactly the mechanism behind the diverging cost curve above. **Team A and Team B's code both work today — the cost curve is what tells you, months from now, which team chose well.**
+The lines are almost together at the start, which is why bad design is easy
+to miss. Coupling and cohesion do not cause bugs directly; they multiply the
+cost and risk of every later change.

@@ -1010,7 +1010,7 @@ export const UNIT_TEASERS: Record<string, UnitTeaser> = {
   "software-design/long-term-design-judgment": {
     myth: "A good design decision is one that solves today's requirements well.",
     reality:
-      "A staff-level design decision also accounts for outliving the person who made it — designing for whoever inherits it, not just for the current sprint.",
+      "A good design decision also accounts for outliving the person who made it — designing for whoever inherits it, not just for the current sprint.",
   },
 
   // sustainable-performance/

@@ -5,200 +5,173 @@ title: "L3 — Reproducing the notification bug and fixing it with names alone"
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-<Scenario label="One field, two meanings, reproduced exactly">
+export const unit = {
+  track: "software-design",
+  unitSlug: "naming",
+};
+
+<Scenario label="One field, two meanings, replayed row by row">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>💳</span> <strong>Billing sets</strong> — <code>order.flag = true</code> to mean "this invoice is overdue"</div>
-      <div class="flex items-center gap-1.5"><span>🔔</span> <strong>Notifications reads</strong> — <code>order.flag</code>, assuming it means "customer muted notifications"</div>
+      <div class="flex items-center gap-1.5"><span>💳</span> <strong>Billing sets</strong> — <code>flag = true</code> meaning "invoice overdue"</div>
+      <div class="flex items-center gap-1.5"><span>🔔</span> <strong>Notifications reads</strong> — <code>flag</code> as "reminders muted"</div>
+      <div class="flex items-center gap-1.5"><span>🔢</span> 2 real facts, 4 combinations to check against the rule</div>
     </div>
   </Fragment>
 
-**Before reading the code, predict: does the buggy function's logic
-contain an actual mistake in its own right, or is the bug entirely in
-what the field name allowed a reader to assume?**
+**Before reading on, predict: does the buggy "skip if flag" rule contain a
+mistake in its own logic, or is the entire bug in what the name let a reader
+assume?** Then predict how many of the four real-world situations the buggy
+rule gets right only by luck.
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "Reproducing the notification bug from real code",
-    "Fixing it with two explicit fields instead of one shared one",
-    "When a shared field should become an enum instead of more booleans",
+    "Replaying the bug against every real situation",
+    "Fixing it with two explicit fields and a positive predicate",
+    "When separate booleans should become one enumerated field",
   ]}
 />
 
-## The buggy version, reproducing the incident exactly
+## Replaying the bug against every real situation
 
-```js
-// The buggy Notifications-team code — logically simple, semantically wrong
-function shouldSkipNotification(order) {
-  return order.flag; // assumed: true means "customer muted notifications"
-}
-```
+Two real facts exist about an order: is it overdue, and has the customer muted
+reminders. That gives four situations. The correct rule is "skip the reminder
+exactly when the customer has muted them". The buggy code reads `flag`, which
+Billing sets from the _overdue_ fact, as if it were the _muted_ fact.
 
-```js
-// Billing's code, written years earlier, sets order.flag = true
-// to mean something completely different: "this invoice is overdue"
-const overdueOrder = { flag: true }; // set by Billing: this invoice IS overdue
+| Overdue? | Muted? | Should the reminder be skipped? | `flag` holds (Billing sets it) | Buggy "skip if flag" does | Result         |
+| -------- | ------ | ------------------------------- | ------------------------------ | ------------------------- | -------------- |
+| yes      | no     | no                              | true                           | skips                     | wrong          |
+| yes      | yes    | yes                             | true                           | skips                     | right, by luck |
+| no       | no     | no                              | false                          | does not skip             | right, by luck |
+| no       | yes    | yes                             | false                          | does not skip             | wrong          |
 
-shouldSkipNotification(overdueOrder);
-// true — the overdue customer's reminder gets silently skipped
-```
+Two of the four rows are wrong, and the two that look right do so only because
+the two facts happened to agree. The worst row is the first: an overdue,
+unmuted customer is silently dropped. The rule `skip if flag` is perfectly
+well-formed. **The function has no logic bug; the name allowed the wrong fact
+to be put in the slot.** Nothing in the code could catch that, because both
+usages are syntactically valid.
 
-**The function itself has no bug in its logic** — `return order.flag`
-does exactly what it says. The entire failure is that `flag` was
-ambiguous enough for two teams to load it with contradictory meanings, and
-nothing in the code could catch that, because syntactically both usages
-are completely valid.
+<Checkpoint question="If the buggy function's logic is correct as written, what exactly does a fix have to change, and what does it leave alone?">
 
-## The fix: two explicit fields, no shared ambiguity
-
-```js
-function shouldSkipNotification(order) {
-  return order.notificationsMuted;
-}
-
-const overdueUnmutedOrder = { isOverdue: true, notificationsMuted: false };
-shouldSkipNotification(overdueUnmutedOrder); // false — correctly does NOT skip
-
-const mutedOrder = { isOverdue: false, notificationsMuted: true };
-shouldSkipNotification(mutedOrder); // true — correctly skips
-```
-
-Nothing about the _logic_ changed — it's still a single boolean field
-read directly. What changed is that `notificationsMuted` can only mean
-one thing, and `isOverdue` is now its own separate, equally unambiguous
-field. The bug's actual root cause — one name serving two purposes — is
-structurally impossible once the two concepts have two names.
-
-<Checkpoint question="The fixed shouldSkipNotification function still reads a single boolean field directly, exactly like the buggy version did. If the logic didn't change, what actually fixed the bug?">
-
-The fix was never in the logic — `return order.someField` was already
-correct in both versions. What was broken was that `flag` was one name
-carrying two teams' contradictory intentions at once, so the exact same
-line of code silently meant two different things depending on who wrote
-it and who read it. Splitting that single overloaded field into
-`isOverdue` and `notificationsMuted` doesn't change what the function
-does; it removes the possibility of the collision in the first place,
-because now there's no shared name left for a second team to load with a
-different meaning. This is why the earlier claim that "the function has
-no bug in its own logic" matters: the failure was entirely a naming
-problem, so a naming fix — not a logic fix — is what resolves it.
+It has to change the names and the data, not the logic. The skip rule
+("if this field is true, skip") stays identical. What changes is that the two
+facts get two fields, `isOverdue` and `notificationsMuted`, so the rule can read
+the field that actually means "muted". The root cause was one name serving two
+purposes, so the fix removes the shared name. Rewriting the condition without
+splitting the field would leave the collision in place for the next reader.
 
 </Checkpoint>
 
-## Combining fields with a positive-phrased predicate
+## The fix: two explicit fields and a positive predicate
 
-```js
-// A combined check, phrased as a direct positive assertion — no negation
-// stacked on an ambiguous name
-function isOverdueAndUnmuted(order) {
-  return order.isOverdue && !order.notificationsMuted;
-}
+With separate fields, the rule becomes "skip if `notificationsMuted`", and the
+combined question "should a reminder go out?" becomes a positively phrased
+check, `isOverdue` and not `notificationsMuted`.
 
-isOverdueAndUnmuted({ isOverdue: true, notificationsMuted: false }); // true
-isOverdueAndUnmuted({ isOverdue: true, notificationsMuted: true }); // false
-isOverdueAndUnmuted({ isOverdue: false, notificationsMuted: false }); // false
+| `isOverdue` | `notificationsMuted` | Reminder goes out? |
+| ----------- | -------------------- | ------------------ |
+| true        | false                | yes                |
+| true        | true                 | no                 |
+| false       | false                | no                 |
+| false       | true                 | no                 |
+
+The single negation here is safe precisely because `notificationsMuted` is
+unambiguous. A reviewer can guess the behaviour from the predicate's name before
+reading its body.
+
+## Extraction over comments, with numbers
+
+Take an order of 2 items at 100 each, a 10 percent discount and 8 percent tax.
+Both versions of the total function (one long body with three comments, or three
+named steps) must give the same answer.
+
+| Step     | Named function        | Working         | Result    |
+| -------- | --------------------- | --------------- | --------- |
+| Subtotal | `calculateSubtotal`   | 2 x 100         | 200       |
+| Discount | `calculateDiscount`   | 10% of 200      | 20        |
+| Tax      | `calculateTax`        | 8% of 180       | 14.4      |
+| Total    | `calculateOrderTotal` | 200 - 20 + 14.4 | **194.4** |
+
+The behaviour is identical. The difference shows up at the next edit. If someone
+reorders the discount and tax steps, the named calls show the new sequence
+immediately, while stale comments would keep describing the old one until
+someone remembers to fix them.
+
+## Extend the example: what if the states are mutually exclusive?
+
+**The fix assumed `isOverdue` and `notificationsMuted` are two independent
+facts. What if a field truly is "exactly one of several values", like an order
+being pending, shipped or cancelled?** Splitting that into three booleans
+creates combinations the real world never allows.
+
+| `isPending` | `isShipped` | `isCancelled` | Valid state?                    |
+| ----------- | ----------- | ------------- | ------------------------------- |
+| true        | false       | false         | yes, pending                    |
+| false       | true        | false         | yes, shipped                    |
+| false       | false       | true          | yes, cancelled                  |
+| true        | true        | false         | no, pending and shipped at once |
+| false       | false       | false         | no, no state at all             |
+
+The table shows the 3 valid rows and 2 examples of the invalid ones. Three booleans give 2 x 2 x 2 = 8 combinations, of which only 3 are valid, so 5
+are nonsense the code must now defend against. A single enumerated field removes
+them by construction:
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> shipped
+    pending --> cancelled
+    shipped --> [*]
+    cancelled --> [*]
 ```
 
-The single `!` here is safe precisely because `notificationsMuted` is
-unambiguous — negating a clear name stays clear. This is the same
-function that a reviewer could accurately guess the behavior of just from
-its name, before reading a single line of its body.
+One field, `status`, holds exactly one of three named values. The "exactly one at
+a time" guarantee is built into its shape, while the name still says what it
+means, so `flag`'s original failing is avoided too.
 
-## Extraction over comments, on real code
+<Checkpoint question="Splitting one field into two booleans fixed the notification bug. Why would the same move make an order's pending/shipped/cancelled status worse?">
 
-```js
-// BEFORE: one function, three responsibilities, explained by comments
-function calculateOrderTotalWithComments(order) {
-  // sum up the items
-  let subtotal = 0;
-  for (const item of order.items) {
-    subtotal += item.price * item.quantity;
-  }
-  // now apply the discount
-  const discount = subtotal * (order.discountPercent / 100);
-  // finally add tax
-  const tax = (subtotal - discount) * (order.taxRate / 100);
-  return subtotal - discount + tax;
-}
-```
-
-```js
-// AFTER: the same behavior, structured as three named steps
-function calculateOrderTotal(order) {
-  const subtotal = calculateSubtotal(order.items);
-  const discount = calculateDiscount(subtotal, order.discountPercent);
-  const tax = calculateTax(subtotal - discount, order.taxRate);
-  return subtotal - discount + tax;
-}
-
-function calculateSubtotal(items) {
-  return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-}
-function calculateDiscount(subtotal, discountPercent) {
-  return subtotal * (discountPercent / 100);
-}
-function calculateTax(taxableAmount, taxRate) {
-  return taxableAmount * (taxRate / 100);
-}
-```
-
-```js
-const order = {
-  items: [{ price: 100, quantity: 2 }],
-  discountPercent: 10,
-  taxRate: 8,
-};
-calculateOrderTotal(order); // 194.4 — identical result to the commented version
-```
-
-The two versions compute the identical result — **194.4** — but the
-extracted version's structure survives a future edit the commented
-version wouldn't: if someone reorders the discount and tax steps, the
-extracted version's function _names_ immediately show the new sequence,
-while the commented version's stale comments would keep describing the
-old one until someone remembers to update them.
-
-## Extend the example: what if the field genuinely needs to serve two purposes?
-
-**The fix above assumed `isOverdue` and `notificationsMuted` really are
-two separate concepts. What if a field genuinely represents one true
-either/or state — like an order being exactly one of `pending`,
-`shipped`, or `cancelled` — where splitting it into three separate
-booleans (`isPending`, `isShipped`, `isCancelled`) would let invalid
-combinations exist that shouldn't (like `isPending: true` and
-`isShipped: true` at once)?** In that case, the fix isn't more booleans —
-it's a single, explicitly named field with an enumerated set of valid
-values (`order.status = OrderStatus.Pending`), which keeps the "exactly
-one state at a time" guarantee a set of loose booleans can't express, while
-still avoiding `flag`'s original sin of not saying what it means at all.
-
-<Checkpoint question="isOverdue and notificationsMuted were correctly split into two separate fields earlier in this unit. Why wouldn't the same split-into-booleans move work for an order's pending/shipped/cancelled status?">
-
-The two cases look similar on the surface — both start as "one field
-meaning too many things" — but they differ in whether the underlying
-states are truly independent or mutually exclusive.
-`isOverdue`/`notificationsMuted` are genuinely independent facts: an
-order can be overdue and muted, overdue and unmuted, or neither, and all
-four combinations are meaningful. Pending/shipped/cancelled is the
-opposite — an order is exactly one of those at a time, never two.
-Splitting that into `isPending`, `isShipped`, and `isCancelled` as three
-separate booleans would let the code represent nonsense states like
-`isPending: true, isShipped: true` simultaneously, which the real world
-never allows. An enumerated `status` field keeps the "exactly one value"
-guarantee built into its very shape, which is precisely the guarantee
-loose independent booleans can't express.
+The two cases look alike (one field doing too much), but they differ in whether
+the states are independent or mutually exclusive. Overdue and muted are
+independent: all four combinations are meaningful. Pending, shipped and
+cancelled are exclusive: an order is exactly one at a time. Three loose booleans
+allow 8 combinations and only 3 mean anything, so every reader and every write
+must guard against the other 5. An enumerated field keeps the "exactly one"
+guarantee inside its type, which loose booleans cannot express.
 
 </Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="enum-vs-booleans"
+/>
+
+## A case, not the whole territory
+
+This unit followed one bug through one pair of fields. It is a case, not the
+whole territory, so test the idea on others:
+
+- **What changes if three teams read `flag` instead of two?** Does the number of
+  possible wrong readings stay the same, or grow?
+- **What changes if the bug had crashed loudly instead of skipping silently?**
+  How would the months-undetected total in the demo change, and what does that
+  say about which naming failures are the most expensive?
+- **What if the field is already in production data under the old name?**
+  Renaming costs a migration; which readers and writers must change together?
 
 ## Failure modes
 
-| Failure mode                                                                              | What it gets wrong                                                                                 |
-| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Reusing a generic field name (`flag`, `data`, `value`) across unrelated concepts          | Nothing stops two readers from loading it with contradictory meanings                              |
-| Negating an already-ambiguous name (`!order.flag`)                                        | Compounds one uncertain question into two, doubling the chance of a reversed reading               |
-| Explaining a block of logic with a comment instead of extracting it into a named function | The comment can silently drift out of sync with the code; a function's name can't                  |
-| Splitting a true either/or state into several independent booleans                        | Allows invalid combinations that an enumerated single field would have ruled out by construction   |
-| Treating naming quality as equally important everywhere                                   | A name's blast radius (shared field vs. a 3-line loop variable) should drive how much care it gets |
+| Failure mode                                                                  | What it gets wrong                                                               |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Reusing a generic field name (`flag`, `data`, `value`) across unrelated ideas | Nothing stops two readers from loading it with contradictory meanings            |
+| Negating an already ambiguous name (`!order.flag`)                            | Turns one uncertain question into two, doubling the chance of a reversed reading |
+| Explaining a block with a comment instead of extracting a named function      | The comment can drift from the code; a function's name cannot                    |
+| Splitting a true either/or state into several independent booleans            | Allows invalid combinations that an enumerated field rules out by construction   |
+| Giving every name the same care regardless of reach                           | A shared field and a 3-line loop variable carry very different risk              |

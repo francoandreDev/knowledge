@@ -3737,3 +3737,11 @@ Migrated to the three-tier model: `property-based-testing` (7 topics, 84 items, 
 Checks: typecheck 0 errors, 273 pages built, 35 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (7/6/5/6), no Mermaid errors, Mark as done enabled.
 
 Total migrated: 181 of 246. Next: `testing-quality/quality-culture` (last of the track) plus software-design batch 1 (`cost-design`, `single-responsibility`, `naming`). `software-design/long-term-design-judgment` roadmap title has "staff engineer" to fix.
+
+## 2026-11-04 — testing-quality closed + software-design batch 1
+
+Migrated to the three-tier model: `testing-quality/quality-culture` (5 topics, 60 items, all quiz; "staff engineer" wording removed), `software-design/cost-design` (5 topics, 60 items; corrected an L3 figure — `cumulativeChangeCost(4, 2, 15)` is 9.99, not 10.23 — and replaced an invented cost chart with the formula's real output), `software-design/single-responsibility` (6 topics, 71 items, code topic `pricing-extension`; L3 chart now uses (n−1)/n percentages; demo description reworded so it no longer says a longer class raises the share), `software-design/naming` (6 topics, 72 items, all quiz). Also removed "staff" from the `long-term-design-judgment` roadmap title and teaser.
+
+Checks: typecheck 0 errors, 273 pages built, 11 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (5/5/6/6), no Mermaid errors, Mark as done enabled.
+
+`testing-quality/` is complete: 13 of 13. Total migrated: 185 of 246. Next: software-design batch 2 (`dry`, `solid-principles`, `oop-design-trade-offs`, `immutability`).

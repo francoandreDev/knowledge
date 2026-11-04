@@ -4,6 +4,12 @@ title: "L1 — How do I decide where one function's responsibility ends?"
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "software-design",
+  unitSlug: "single-responsibility",
+};
 
 <Scenario label="The stray edit that overbilled every customer">
   <Fragment slot="facts">
@@ -13,42 +19,114 @@ import LevelIntro from "../../../components/LevelIntro.astro";
       <div class="flex items-center gap-1.5"><span>💥</span> <strong>Stray change</strong> — one adjacent line: <code>0.001</code> → <code>0.01</code></div>
       <div class="flex items-center gap-1.5"><span>📉</span> <strong>Impact</strong> — every API-call customer billed 10x for a month</div>
     </div>
+    <div class="not-prose mt-3 flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300">
+      <div>
+        <div class="flex justify-between"><span>Lines in the method unrelated to a layout edit</span><span>10 of 15</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 66.7%"></div></div>
+      </div>
+    </div>
     <div class="not-prose mt-3 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs dark:border-amber-800 dark:bg-amber-950">
-      Nobody touched billing on purpose. The billing math just happened to live in the same method as the layout code someone else needed to change.
+      Nobody touched billing on purpose. The billing math just happened to live in the same method as the layout code someone else needed to change. (An illustrative case, with round numbers chosen for the example.)
     </div>
   </Fragment>
 
 A designer asks for a rebrand: new fonts, a new header, a logo on the monthly
 invoice PDF. An engineer opens `MonthlyReportGenerator.generate()` to make the
-change — and while editing the layout lines, brushes past an adjacent line
-that computes the billing rate and nudges it by accident. The rebrand ships.
-Two weeks later, finance discovers every API-call customer was billed 10x
-for the month.
+change, and while editing the layout lines brushes past an adjacent line that
+sets the billing rate. The rate goes from `0.001` to `0.01` by accident. The
+rebrand ships. Two weeks later, finance finds every API-call customer was
+billed 10 times too much.
 
-**The engineer never intended to touch billing. So what actually caused
-this — carelessness, or something about how the code was organized that
-made billing logic easy to hit by accident while doing something unrelated?**
+**The engineer never meant to touch billing. So what actually caused this:
+carelessness, or something about how the code was organized that made billing
+easy to hit while doing something unrelated?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "The real SRP test: reasons to change, not literal step count",
-    "Why responsibility boundaries depend on context, not a fixed rule",
-    "The overcorrection: splitting without independent reasons to change",
+    "The real test: reasons to change",
+    "Why the boundary depends on the codebase",
+    "The overcorrection to avoid",
   ]}
 />
 
-- **Single responsibility** isn't "a function should do one thing" in the literal, one-line sense — a function can do several literal steps and still have a single responsibility, if all those steps serve one cohesive purpose. The real test, introduced in `software-design/cost-design` and made precise here, is **reasons to change**: a unit of code has a single responsibility if there's only one kind of change that would require editing it.
-- **The test, applied concretely**: if you can name two genuinely different reasons someone might need to modify a function — a business-rule change and a data-format change, say — it has (at least) two responsibilities, even if it's ten lines long and reads as "doing one thing" at a glance.
+## What does "one responsibility" actually mean?
 
-| Reading "does one thing" as…             | `MonthlyReportGenerator.generate()` verdict                                                 |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------- |
-| One literal block of code, one method    | Passes — it's a single method, reads top to bottom as "generate the report"                 |
-| One reason to change (the real SRP test) | Fails — a rebrand, a pricing-tier change, and a new data source are three unrelated reasons |
+**If the method reads top to bottom as "generate the report", why does it still
+count as a problem?** Because "does one thing" is a feeling about how code
+reads, and the incident came from how code _changes_. The test that predicts
+the incident is different:
 
-- **Responsibility boundaries aren't fixed — they depend on what's actually likely to change independently in this specific codebase.** The right boundary in one system (where billing rates and PDF layout change on totally different schedules, owned by different people) can be the wrong boundary in another (where they're small, stable, and always change together) — this is why SRP is a judgment call informed by context, not a rule with a universal correct answer.
-- **A common overcorrection**: splitting code into many tiny functions/classes purely because each one "does less," without checking whether they actually have independent reasons to change — this produces more files and more indirection with none of SRP's real benefit, and is exactly the over-engineering failure mode from `cost-design`.
-- **The practical symptom of a responsibility violation**: a change requested for one reason (say, a rebrand) requires editing code that also handles something unrelated (say, billing math), risking a bug in the unrelated part purely because it happened to sit nearby.
-- This unit is the "how do I actually decide, in a specific case" companion to `cost-design`'s "why does this matter at all" — same underlying principle (coupling/cohesion, reasons to change), applied here as a concrete, repeatable test rather than a general argument.
-- The practical skill: before splitting or merging code, name the actual reasons it might need to change in the future, and let _that_ — not line count, not "feels like it's doing a lot" — determine where the responsibility boundary belongs.
+> A unit of code has a **single responsibility** if only one kind of change
+> would ever require editing it.
+
+Name the reasons someone might open `generate()` to edit it, and the count
+appears:
+
+```mermaid
+flowchart LR
+    R1["Rebrand request"] --> M["generate()\none method, 15 lines"]
+    R2["New pricing tier"] --> M
+    R3["New usage data source"] --> M
+    M --> L["layout lines"]
+    M --> B["billing lines"]
+    M --> D["fetch lines"]
+```
+
+Three unrelated requests, three unrelated owners, one place to edit. That is
+the shape to look for. This test comes from `software-design/cost-design`, which
+explains why coupling like this is expensive. This unit makes it a repeatable
+procedure.
+
+| Reading "does one thing" as...           | `generate()` verdict                                                                 |
+| ---------------------------------------- | ------------------------------------------------------------------------------------ |
+| One literal block of code, one method    | Passes: a single method that reads as "generate the report"                          |
+| One reason to change (the real SRP test) | Fails: a rebrand, a pricing change and a new data source are three unrelated reasons |
+
+A function can have several literal steps and still pass, if every step serves
+one purpose. A ten-line function can fail if two of those lines answer to
+different owners.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="reasons-to-change"
+/>
+
+## Is the boundary the same in every codebase?
+
+**Two teams both have validation rules and error-message wording in one
+function. One should split them and one should not. What decides which?** The
+people and schedules behind the changes, not the code:
+
+| System                                                            | Who changes the rules | Who changes the wording | Same reason to change? |
+| ----------------------------------------------------------------- | --------------------- | ----------------------- | ---------------------- |
+| Small app, one developer owns both                                | The developer         | The developer           | Yes: keep together     |
+| Larger product, compliance owns rules, a writer owns the messages | Compliance team       | A UX writer             | No: separate           |
+
+So the same code can be correctly unsplit in one system and a violation in
+another. SRP is a judgment about what is likely to change independently _here_,
+not a rule with one universal answer.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="context-boundary"
+/>
+
+## What goes wrong if you overcorrect?
+
+- **The overcorrection**: splitting code into many tiny functions because each
+  "does less", without checking that the pieces have independent reasons to
+  change. You get more files and more jumps while reading, and none of the
+  benefit. This is the over-engineering failure mode from `cost-design`.
+- **The symptom of a real violation**: a change requested for one reason forces
+  an edit to code that also handles something unrelated, and the unrelated part
+  is at risk only because it sits nearby.
+- **The practical skill**: before splitting or merging, name the actual reasons
+  the code might change, and let those, not line count or a feeling that it
+  "does a lot", decide where the boundary goes.
+
+L2 turns this into a step-by-step procedure with a worked split, and L3 returns
+to the billing incident to see what the fix changes.

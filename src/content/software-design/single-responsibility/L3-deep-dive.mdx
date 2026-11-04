@@ -1,165 +1,190 @@
 ---
-title: "L3 — A real incident caused by a responsibility violation, and the refactor that actually fixes it"
+title: "L3 — A real-shaped incident caused by a responsibility violation, and the refactor that fixes it"
 ---
 
+import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-## The scenario: one class, three reasons to change, one real bug
+export const unit = {
+  track: "software-design",
+  unitSlug: "single-responsibility",
+};
 
-A `MonthlyReportGenerator` class fetches usage data, calculates billing totals, and renders a PDF — three steps that all "belong to generating the report" in a surface reading, but represent three genuinely independent reasons to change: the data source might change (a new usage-tracking system), the billing calculation might change (a new pricing tier), and the PDF layout might change (a rebrand). **Before reading the incident, look at the code below and ask: if a rebrand landed tomorrow, which lines would someone actually have to scroll past to make it?**
+<Scenario label="Three jobs in one 15-line method">
+  <Fragment slot="facts">
+    <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
+      <div class="flex items-center gap-1.5"><span>📥</span> <strong>Fetch</strong> — read usage events for an account and month (5 lines)</div>
+      <div class="flex items-center gap-1.5"><span>🧮</span> <strong>Calculate</strong> — turn events into a billing total (5 lines)</div>
+      <div class="flex items-center gap-1.5"><span>🖨️</span> <strong>Render</strong> — lay the total out as a PDF (5 lines)</div>
+    </div>
+    <div class="not-prose mt-3 flex flex-col gap-1.5 text-xs text-slate-700 dark:text-slate-300">
+      <div>
+        <div class="flex justify-between"><span>Unrelated to a rebrand</span><span>10 of 15 lines</span></div>
+        <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div class="h-full rounded-full bg-rose-500 animate-fill-bar" style="--target-width: 66.7%"></div></div>
+      </div>
+    </div>
+  </Fragment>
 
-```js
-// BEFORE — three responsibilities, one class
-class MonthlyReportGenerator {
-  async generate(accountId, month) {
-    // Reason 1: how usage data is fetched
-    const usage = await db.query(
-      "SELECT * FROM usage_events WHERE account_id = ? AND month = ?",
-      [accountId, month],
-    );
+A `MonthlyReportGenerator` fetches usage data, calculates billing totals and
+renders a PDF. All three steps "belong to generating the report", yet each
+answers to a different change: a new usage-tracking system, a new pricing tier,
+a rebrand. They sit as adjacent lines in one method, and nothing marks which
+lines are safe to touch for which request.
 
-    // Reason 2: how billing is calculated
-    const total = usage.reduce((sum, event) => {
-      const rate = event.type === "api_call" ? 0.001 : 0.01;
-      return sum + event.quantity * rate;
-    }, 0);
+**If a rebrand landed tomorrow, which lines would an editor have to scroll past
+to make it, and which of those could cost real money if touched by accident?**
 
-    // Reason 3: how the PDF is laid out
-    const pdf = new PDFDocument();
-    pdf.fontSize(18).text("Monthly Report", { align: "center" });
-    pdf.fontSize(12).text(`Total: $${total.toFixed(2)}`);
-    return pdf;
-  }
-}
-```
-
-Every one of the three reasons above lives inside the same 15-line method, with no boundary between them — the fetch logic, the billing math, and the PDF layout are all just adjacent lines, indistinguishable in risk from one another to whoever is scrolling through to make an edit.
+</Scenario>
 
 <LevelIntro
   items={[
-    "A real incident traced back to a bundled responsibility",
-    "How scroll-past risk scales with responsibilities per method",
-    "The three-class split, and how it changes future edits",
+    "How a bundled method caused the incident",
+    "How the risk scales with responsibilities bundled",
+    "The split, and what it does to future edits",
   ]}
 />
 
-## The incident this shape actually caused
+## What actually caused the incident?
 
-A designer requests a rebrand: new fonts, new header layout, a logo added to the PDF. An engineer makes the change, editing the `generate` method's PDF-layout lines. While doing so, they accidentally also modify the adjacent billing-calculation line (a stray edit while navigating the same large method) — changing `0.001` to `0.01` for `api_call` events. The rebrand ships. Two weeks later, finance flags that API-call billing is 10x too high for every customer that month.
+A designer requests a rebrand. An engineer edits the PDF-layout lines of
+`generate()`. In the same scroll, a stray edit changes the adjacent billing
+line from `0.001` to `0.01` for `api_call` events. That is a factor of
+10 (0.01 / 0.001). The rebrand ships; two weeks later finance sees API-call
+billing ten times too high for every customer that month.
 
-**The root cause isn't the typo itself — mistakes happen.** The root cause is that a rebrand (a PDF-layout-only change, made by someone focused on layout, likely a frontend-leaning engineer or even a designer pairing with one) required editing a method that also contained unrelated, financially-sensitive billing logic, sitting close enough in the same function to be touched by accident with no test isolating it from layout changes.
+**The root cause is not the typo.** Mistakes happen. The root cause is that a
+layout-only change required editing a method that also held financially
+sensitive billing logic, close enough to touch by accident and with no test
+isolating it from layout work.
 
-<Checkpoint question="The engineer who caused the incident never intended to touch billing at all. Given that, would adding a code-review checklist item ('did you mean to change the billing line?') have reliably prevented this bug — why or why not?">
+<Checkpoint question="The engineer never intended to touch billing. Would adding a review checklist item ('did you mean to change the billing line?') have reliably prevented the bug?">
 
-Not reliably — a checklist depends on the reviewer noticing that an
-unrelated line changed inside a diff that's mostly about layout, which is
-exactly the kind of small, easy-to-miss edit that slips past review when
-it's surrounded by dozens of legitimate layout lines in the same method.
-A checklist adds a chance of catching it; separating the responsibilities
-into different files removes the opportunity for it to happen in the same
-diff at all. That's the real difference between a process fix and a
-structural fix — the incident's actual root cause is that billing logic
-was reachable from a layout-only change, and only a structural boundary
-removes that reachability outright.
+Not reliably. A checklist depends on a reviewer noticing one unrelated line
+inside a diff that is mostly about layout, which is exactly the kind of small
+edit that slips past review. A checklist adds a chance of catching it;
+separating the responsibilities into different files removes the opportunity
+for it to appear in the same diff at all. That is the difference between a
+process fix and a structural fix: the root cause is that billing was reachable
+from a layout-only change, and only a structural boundary removes that.
 
 </Checkpoint>
 
-## How the risk scales with how many reasons share one method
+## How does the risk scale with the number of responsibilities bundled?
+
+**Is one extra bundled concern a small problem or a growing one?** Assume each
+responsibility takes 5 lines, as in the scenario. For an edit to any one
+responsibility, the unrelated share of the method is (n − 1) / n lines for n
+bundled:
 
 ```mermaid
 xychart-beta
-    title "Lines of unrelated code an editor scrolls past, by responsibilities bundled"
+    title "Share of the method unrelated to any one edit (%)"
     x-axis "Responsibilities bundled into one method" [1, 2, 3, 4, 5]
-    y-axis "Lines belonging to OTHER responsibilities" 0 --> 60
-    bar [0, 12, 24, 36, 48]
+    y-axis "Unrelated lines (%)" 0 --> 100
+    bar [0, 50, 66.7, 75, 80]
 ```
 
-At one responsibility, there's no "other" code to accidentally touch — the risk is structurally zero. Each additional responsibility bundled into the same method adds another block of unrelated code sitting in the same scroll-past zone; `MonthlyReportGenerator` bundled three, meaning roughly two-thirds of the method's lines were irrelevant to any single change someone might come to make.
+At one responsibility there is nothing unrelated to hit, so the risk is
+structurally zero. At three, the incident's shape, two thirds of the method is
+irrelevant to any single request. The slider demo on this page lets you vary
+both the number of bundled concerns and the lines each one takes; the share
+depends only on the count, which is why the answer to a bigger method is not
+"be more careful" but "bundle fewer reasons".
 
-## The fix: split along the three actual reasons to change
-
-```js
-// AFTER — three responsibilities, three units, each independently testable and changeable
-class UsageDataFetcher {
-  async fetch(accountId, month) {
-    return db.query(
-      "SELECT * FROM usage_events WHERE account_id = ? AND month = ?",
-      [accountId, month],
-    );
-  }
-}
-
-class BillingCalculator {
-  calculateTotal(usageEvents) {
-    return usageEvents.reduce((sum, event) => {
-      const rate = event.type === "api_call" ? 0.001 : 0.01;
-      return sum + event.quantity * rate;
-    }, 0);
-  }
-}
-
-class ReportPdfRenderer {
-  render(total) {
-    const pdf = new PDFDocument();
-    pdf.fontSize(18).text("Monthly Report", { align: "center" });
-    pdf.fontSize(12).text(`Total: $${total.toFixed(2)}`);
-    return pdf;
-  }
-}
-
-class MonthlyReportGenerator {
-  constructor(fetcher, calculator, renderer) {
-    this.fetcher = fetcher;
-    this.calculator = calculator;
-    this.renderer = renderer;
-  }
-  async generate(accountId, month) {
-    const usage = await this.fetcher.fetch(accountId, month);
-    const total = this.calculator.calculateTotal(usage);
-    return this.renderer.render(total);
-  }
-}
-```
+## What does the split change?
 
 ```mermaid
 flowchart TD
     subgraph Before["Before: one shared method"]
-        M["MonthlyReportGenerator.generate()"] --> F1["fetch usage"]
+        M["generate()"] --> F1["fetch usage"]
         M --> C1["calculate billing"]
         M --> R1["render PDF"]
     end
-    subgraph After["After: rebrand touches one class"]
-        G["MonthlyReportGenerator.generate() — orchestrates only"] --> UF["UsageDataFetcher"]
+    subgraph After["After: a rebrand touches one unit"]
+        G["generate(): orchestrates only"] --> UF["UsageDataFetcher"]
         G --> BC["BillingCalculator"]
-        G --> RR["ReportPdfRenderer — rebrand edits land HERE only"]
+        G --> RR["ReportPdfRenderer: rebrand edits land here only"]
     end
 ```
 
-The rebrand now only touches `ReportPdfRenderer` — `BillingCalculator`'s rate logic isn't in the same file, isn't visually adjacent, and can have its own dedicated, protected test suite (`billing-calculator.test.mjs`, testing rates directly) that a layout-focused PR wouldn't even run against unless it actually changed billing code. The bug that shipped in the "before" version becomes structurally much harder to cause by accident in the "after" version — not impossible, but no longer one stray line away in an unrelated part of a shared method.
+| Unit                | Its one reason to change            | Has its own tests for              |
+| ------------------- | ----------------------------------- | ---------------------------------- |
+| `UsageDataFetcher`  | How usage data is stored or queried | Query results for an account/month |
+| `BillingCalculator` | Pricing rules                       | Rates, directly, with fixed events |
+| `ReportPdfRenderer` | Layout and branding                 | Output structure                   |
+| `generate()`        | Order or composition of the steps   | That the three steps are called    |
 
-<Checkpoint question="In the split version, MonthlyReportGenerator.generate() still calls all three classes in sequence. Does that mean it secretly still has all three responsibilities, just spread across method calls instead of inline code?">
+The rebrand now edits `ReportPdfRenderer` only. The rate logic is in another
+file, not visually adjacent, and protected by a test that pins `api_call` to
+its rate. A layout pull request would not touch it, and if it did, that test
+would fail.
 
-No — `generate()`'s one responsibility is now orchestration: calling the
-three collaborators in the right order. Its reason to change is different
-from any of theirs: it changes only if the _sequence or composition_ of
-steps changes (say, adding a fourth step, or caching the fetch), not if a
-pricing rate or a font size changes. That's a real, single, distinct
-reason to change, which is exactly what makes it a legitimate
-responsibility of its own rather than a disguised bundle of the other
-three — calling into other classes isn't the same as owning their logic.
+<Checkpoint question="generate() still calls all three units in sequence. Does it secretly still own all three responsibilities, just spread across calls?">
+
+No. Its one responsibility is orchestration, and its reason to change differs
+from any of theirs: it changes if the _sequence or composition_ of steps
+changes (a fourth step, or caching the fetch), not if a rate or a font size
+changes. Calling into other units is not the same as owning their logic.
 
 </Checkpoint>
 
-## Extend the example: what if the next request isn't a rebrand?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="structural-fix"
+/>
 
-The rebrand is one case, not the whole territory. **What happens to the blast radius if the next request is instead "add a second pricing tier for enterprise accounts" — does the split still hold, and which class absorbs that change?** Trace it through the "after" version: a new pricing tier is a change to the rate lookup, which lives entirely inside `BillingCalculator.calculateTotal` — `UsageDataFetcher` and `ReportPdfRenderer` are untouched, and the engineer making the pricing change never has to scroll past a single line of PDF layout code to do it. The same question is worth asking for "the usage-tracking system migrates to a new event schema" (touches `UsageDataFetcher` only) — the split isn't just a fix for the one incident that happened to occur, it holds for any future change that maps to one of the three original reasons.
+## What happens to the next request, and can you write it?
+
+The rebrand is one case, not the whole territory. **What if the next request is
+"add an enterprise pricing tier": does the split hold, and which unit absorbs
+the change?** Only the billing calculator changes, because only the rate lookup
+changes:
+
+```mermaid
+flowchart LR
+    Req["Enterprise tier request"] --> BC["BillingCalculator: rate lookup"]
+    BC -. untouched .-> UF["UsageDataFetcher"]
+    BC -. untouched .-> RR["ReportPdfRenderer"]
+```
+
+Here code is the clearest vehicle, because the claim is "the whole change fits
+in one small function". Using whole cents per unit so no floating-point
+rounding is involved:
+
+```js
+function calculateTotal(usageEvents, tier) {
+  const cents =
+    tier === "enterprise"
+      ? { api_call: 1, storage: 4 }
+      : { api_call: 2, storage: 5 };
+  return usageEvents.reduce((sum, e) => sum + e.quantity * cents[e.type], 0);
+}
+```
+
+The rate table is the only thing that moved. The fetcher and renderer do not
+know tiers exist.
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="pricing-extension"
+/>
+
+**Now extend it yourself.** What if the request were "the usage system moves to
+a new event schema", or "finance wants a CSV export beside the PDF"? Which unit
+absorbs each? And what would you have to believe about the team (who owns what,
+how often each changes) before deciding that a CSV export deserves its own
+renderer instead of a flag on the existing one? The worked example shows the
+method; the answer in your codebase depends on its real change patterns.
 
 ## Failure modes
 
-| Failure mode                                                           | What it gets wrong                                                                                                                                                                                                                                                                                  |
-| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Believing the split alone prevents the bug                             | The refactor reduces the _chance_ of an accidental cross-responsibility edit — it doesn't make it impossible. The real protection is separation **plus** a dedicated billing test suite that would catch an incorrect rate regardless of which file it happened in                                  |
-| Splitting only reactively, after an incident                           | The reasons-to-change test from L2 could have flagged this violation during the original code review, before any bug shipped, by simply asking "what are the distinct reasons this method might need to change"                                                                                     |
-| Over-rotating after one incident into splitting everything defensively | Per L2's overcorrection warning, the lesson is "split along genuinely independent reasons to change," not "always prefer more, smaller classes" — applying that overcorrected lesson to code with no real independent-change pattern reintroduces the over-engineering cost for no matching benefit |
-| Assuming this class of bug is rare enough not to worry about           | Editing unrelated code that happens to sit nearby is a common, easy mistake — not a rare, exotic one — which is exactly why responsibility boundaries matter as a structural safeguard, not just an aesthetic preference for how code reads                                                         |
+| Failure mode                                        | What it gets wrong                                                                                                                                                             |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Believing the split alone prevents the bug          | It reduces the chance of an accidental cross-responsibility edit, but does not make it impossible. Real protection is separation plus a billing test that catches a wrong rate |
+| Splitting only reactively, after an incident        | The reasons-to-change test from L2 could have flagged the violation in the original review, before anything shipped                                                            |
+| Over-rotating into splitting everything defensively | The lesson is "split along genuinely independent reasons", not "prefer more, smaller classes"; the overcorrection reintroduces cost with no matching benefit                   |
+| Assuming this class of bug is rare                  | Editing unrelated code that sits nearby is an easy, common mistake, which is why boundaries are a structural safeguard and not an aesthetic preference                         |

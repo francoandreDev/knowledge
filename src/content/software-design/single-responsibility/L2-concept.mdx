@@ -5,11 +5,17 @@ title: 'L2 — The "reasons to change" test, applied precisely'
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "software-design",
+  unitSlug: "single-responsibility",
+};
 
 <Scenario label="One signup function, two engineers, one Friday">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🧾</span> <strong>Reason 1</strong> — password policy needs a special-character rule</div>
+      <div class="flex items-center gap-1.5"><span>🔐</span> <strong>Reason 1</strong> — password policy needs a special-character rule</div>
       <div class="flex items-center gap-1.5"><span>📦</span> <strong>Reason 2</strong> — response envelope needs an API-version field</div>
       <div class="flex items-center gap-1.5"><span>👥</span> <strong>Both land</strong> — in the same function, same week, different engineers</div>
     </div>
@@ -19,85 +25,73 @@ import Checkpoint from "../../../components/Checkpoint.astro";
   </Fragment>
 
 `handleSignup(request)` validates the request and formats the success
-response, all in one function. This week, one engineer needs to add a
-special-character rule to the password policy; a second, unrelated engineer
-needs to add an API-version field to the response envelope. Neither change
-is hard on its own.
+response, all in one function. This week, one engineer must add a
+special-character rule to the password policy, and a second, unrelated
+engineer must add an API-version field to the response envelope. Neither
+change is hard on its own.
 
-**Both changes touch the same function. Is that a coincidence of timing, or
-a sign the function was carrying two responsibilities all along — and how
-would you actually tell the difference?**
+**Both changes touch the same function. Is that a coincidence of timing, or a
+sign the function was carrying two responsibilities all along, and how would
+you tell the difference?**
 
 </Scenario>
 
 <LevelIntro
   items={[
-    "The decision procedure: count distinct reasons to change",
-    "Why 'distinct' depends on the codebase, not the code shape",
-    "The overcorrection: splitting with no independent reason to change",
+    "The decision procedure: count distinct reasons",
+    "Why the orchestrator still has one reason",
+    "Splitting too far: no independent reason to change",
   ]}
 />
 
-## The test, as a decision procedure
+## What is the decision procedure?
+
+**What do you actually do at the keyboard when you suspect a function is doing
+too much?** You do not count lines. You list the reasons it could change and
+count the distinct ones:
 
 ```mermaid
 flowchart LR
-    Code["A function/module"] --> Ask["List every DISTINCT reason\nit might need to change"]
+    Code["A function or module"] --> Ask["List every DISTINCT reason\nit might need to change"]
     Ask --> Count{"How many\ndistinct reasons?"}
-    Count -- "One" --> Good["Single responsibility —\nno action needed"]
+    Count -- "One" --> Good["Single responsibility:\nno action needed"]
     Count -- "More than one" --> Split["Candidate for splitting,\nalong those reason boundaries"]
 ```
 
-The word "distinct" is doing the real work here — "the validation rules changed" and "the validation _error messages_ changed" might genuinely be the same reason in a small system (one person owns both, they always change together) or genuinely different ones in a larger system (a compliance team owns validation rules, a UX writer owns error message wording, and they change on unrelated schedules) — the same code can have a correct single responsibility in one context and a real violation in another.
+The word "distinct" does the real work. "The validation rules changed" and "the
+validation error messages changed" can be one reason in a small team (one
+person owns both and they move together) or two reasons in a larger one (a
+compliance team owns the rules, a UX writer owns the wording, on unrelated
+schedules). The same code can pass in one context and fail in another.
 
-## Applying the test to `handleSignup`
+Run the procedure on `handleSignup`:
 
-**Run the decision procedure on the scenario above: list the distinct reasons this function might change.** A password-policy rule and a response-envelope field are not variations of the same concern — one is business validation, the other is data formatting, and they're plausible candidates for changing on unrelated schedules, owned by different people.
+| Part of the function                    | Who asks for a change       | Reason          |
+| --------------------------------------- | --------------------------- | --------------- |
+| Email must contain `@`; password length | Business and security rules | Validation      |
+| Shape of the returned envelope          | API consumers, versioning   | Response format |
 
-```js
-// BEFORE — one function, two independent reasons to change
-function handleSignup(request) {
-  // Reason 1: business validation rules
-  if (!request.email.includes("@")) {
-    throw new Error("Invalid email");
-  }
-  if (request.password.length < 8) {
-    throw new Error("Password too short");
-  }
+Two rows, two owners, two schedules. A password-policy rule and an envelope
+field are not variations of one concern.
 
-  // Reason 2: response formatting
-  return {
-    status: "ok",
-    data: { email: request.email.toLowerCase() },
-    timestamp: new Date().toISOString(),
-  };
-}
+## Where does the split go, and what is left over?
+
+```mermaid
+flowchart TD
+    subgraph Before["Before: one function"]
+        H1["handleSignup"] --> V1["validation lines"]
+        H1 --> F1["formatting lines"]
+    end
+    subgraph After["After: three units"]
+        H2["handleSignup: order of steps"] --> V2["validateSignup"]
+        H2 --> F2["formatSignupResponse"]
+    end
 ```
 
-A change to the password policy and a change to the response envelope's shape are two genuinely unrelated reasons to touch this function — a developer fixing the response format has to read past validation logic to find where to edit, and a developer changing validation logic risks the unrelated response-formatting code purely by proximity, not because the two are actually coupled in any meaningful way.
-
-```js
-// AFTER — split along the two independent reasons to change
-function validateSignup(request) {
-  if (!request.email.includes("@")) throw new Error("Invalid email");
-  if (request.password.length < 8) throw new Error("Password too short");
-}
-
-function formatSignupResponse(request) {
-  return {
-    status: "ok",
-    data: { email: request.email.toLowerCase() },
-    timestamp: new Date().toISOString(),
-  };
-}
-
-function handleSignup(request) {
-  validateSignup(request);
-  return formatSignupResponse(request);
-}
-```
-
-`handleSignup` itself now has a single, different responsibility: orchestrating the two steps in the right order — which is itself a legitimate, single reason to change (if the _sequence_ of signup steps changes, e.g. adding a third step). Each of the three functions can now change independently: a validation rule addition touches only `validateSignup`, a response format change touches only `formatSignupResponse`, and neither risks the other.
+**Doesn't `handleSignup` still do both things, just by calling them?** No. After
+the split it owns a different reason to change: the _sequence_ of signup steps
+(for example, adding a third step). Calling other units is not the same as
+owning their logic.
 
 | Function               | Its one reason to change             | Untouched by                                   |
 | ---------------------- | ------------------------------------ | ---------------------------------------------- |
@@ -105,52 +99,59 @@ function handleSignup(request) {
 | `formatSignupResponse` | Response envelope shape changes      | Validation rule changes, step ordering changes |
 | `handleSignup`         | The sequence of signup steps changes | Validation rules, response format              |
 
-<Checkpoint question="Suppose a third engineer now needs to add rate-limiting (reject a signup if the same IP has tried more than 5 times in a minute). In the split version above, does that change belong inside validateSignup, formatSignupResponse, or handleSignup — and why?">
+<Checkpoint question="A third engineer must add rate-limiting (reject a signup if the same IP has tried more than 5 times in a minute). In the split version, does that change belong inside validateSignup, formatSignupResponse, or handleSignup, and why?">
 
-None of the three, cleanly — rate-limiting is a fourth distinct reason to
-change (traffic/abuse policy, not business validation and not response
-formatting), so forcing it into `validateSignup` would just recreate the
-same problem one level down: a function now carrying two unrelated reasons
-to change again. The reasons-to-change test doesn't stop applying once a
-function has been split once — a new kind of change is a signal to ask the
-same question again, this time about a `checkRateLimit` step that
-`handleSignup` would orchestrate alongside the other two.
+None of the three, cleanly. Rate-limiting is a fourth distinct reason to
+change (abuse policy, not business validation and not response formatting), so
+forcing it into `validateSignup` recreates the same problem one level down: a
+function with two unrelated reasons again. The test keeps applying after a
+split. A new kind of change is a signal to ask the same question again, this
+time about a `checkRateLimit` step that `handleSignup` would orchestrate
+alongside the other two.
 
 </Checkpoint>
 
-## When NOT to split: the overcorrection
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="decision-procedure"
+/>
 
-**If splitting along reasons to change is good, is splitting further always better?** Not automatically — the next example applies the same test and gets a "no."
+## When should you not split?
 
-```js
-// Over-split — three functions with no independent reason to change,
-// just extra indirection for its own sake
-function getEmailField(request) {
-  return request.email;
-}
-function isValidEmailFormat(email) {
-  return email.includes("@");
-}
-function validateEmail(request) {
-  return isValidEmailFormat(getEmailField(request));
-}
+**If splitting along reasons to change is good, is splitting further always
+better?** Apply the same test to a function that checks an email:
+
+```mermaid
+flowchart LR
+    V["validateEmail"] --> I["isValidEmailFormat"]
+    I --> G["getEmailField"]
 ```
 
-None of these three functions has a reason to change independently of the others — `getEmailField` only ever exists to feed `isValidEmailFormat`, and both only ever exist to implement `validateEmail`. Splitting here doesn't buy independent evolvability, because there's nothing independent about how these pieces actually change; it only adds three names to track and three extra jumps to follow when reading the code, which is real, ongoing cost with no corresponding benefit — precisely the over-engineering failure mode `cost-design` warns about.
+`getEmailField` exists only to feed `isValidEmailFormat`, and both exist only to
+implement `validateEmail`. None has a reason to change independently of the
+others. The split buys no independent evolution; it adds three names to track
+and three extra jumps to follow when reading, which is a real ongoing cost.
 
-<Checkpoint question="Both handleSignup (before the split) and the getEmailField/isValidEmailFormat/validateEmail chain (the over-split) are 'wrong' by the reasons-to-change test — but for opposite reasons. What's the one-sentence distinction between the two mistakes?">
+<Checkpoint question="handleSignup before the split and the three-function email chain are both 'wrong' by the reasons-to-change test, but for opposite reasons. What is the one-sentence difference between the two mistakes?">
 
-`handleSignup` bundled two functions' worth of _genuinely independent_
-reasons to change into one place; the over-split chain broke _one_
-function's worth of a single reason to change into three places with no
-independent existence of their own. The test isn't "more functions is
-safer" or "fewer functions is safer" — it's whether each resulting unit
-maps to exactly one reason to change, and both directions of getting that
-wrong (too few units for the reasons that exist, or too many units for the
-reasons that don't) carry a real cost.
+`handleSignup` bundled two _genuinely independent_ reasons to change into one
+place; the email chain broke _one_ reason to change into three places with no
+independent existence. The test is not "more functions is safer" or "fewer is
+safer". It is whether each resulting unit maps to exactly one reason, and both
+directions of getting that wrong carry a cost.
 
 </Checkpoint>
 
-## The boundary is about the codebase's actual change patterns, not code shape
+The `handleSignup` split paid off because validation and formatting plausibly
+change independently, for different reasons, owned by different people. The
+email chain did not, because its pieces have no independent existence. The test
+is never "can this be split": almost anything can be split further. It is
+"would splitting let two different future changes happen without touching each
+other's code."
 
-The `handleSignup` split was worth it specifically because validation rules and response formatting are plausible candidates for changing independently, for different reasons, potentially owned by different people. The `validateEmail` over-split wasn't worth it because none of its three pieces have any independent existence — the test isn't "can this be split," almost anything can be split further; the test is "would splitting this actually let two different kinds of future change happen without touching each other's code."
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="overcorrection"
+/>
