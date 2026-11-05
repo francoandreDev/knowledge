@@ -3809,3 +3809,11 @@ Migrated to the three-tier model: `accessibility-by-design` (9 topics, 105 items
 Checks: typecheck 0 errors, 273 pages built, 9 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (9/9/7/7), no Mermaid errors, Mark as done enabled.
 
 Total migrated: 217 of 246. Next: design batch 3 (`prototyping-feedback-loops`, `usability-testing`, `responsive-adaptive-design`, `design-engineering-handoff`), then `dark-patterns-ethics`, `design-debt-at-scale`.
+
+## 2026-11-05 — design batch 3 (4 units)
+
+Migrated to the three-tier model: `prototyping-feedback-loops` (6 topics, 72 items, all quiz; L1 and L2 now agree on the demo's 3/10/28/90 build hours), `usability-testing` (8 topics, 96 items, all quiz; an invented "support tickets tripled" claim and a "every confused user still finished" contradiction removed, severity table reconciled with the 33% success chart, sample-size curve recomputed as 84% at 5 and 98% at 10 participants), `responsive-adaptive-design` (7 topics, 79 items, code topic `fluid-math`; heading size at 700px corrected to 35.5px), `design-engineering-handoff` (6 topics, 72 items, all quiz; "3 of 5 states shipped" vs "only one" contradiction resolved to 2 of 5).
+
+Checks: typecheck 0 errors, 273 pages built, 7 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (6/8/7/6), no Mermaid errors, Mark as done enabled.
+
+Total migrated: 221 of 246. Next: `design/dark-patterns-ethics`, `design/design-debt-at-scale` (closes design), `sustainable-performance` (8 units), `people-management` (15 units; second unit has slug `1` and needs a real slug).
