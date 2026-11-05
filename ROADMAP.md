@@ -288,7 +288,7 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 | 11  | architecture-for-compliance    | How does architecture change when regulators, not just users, are a stakeholder? (architecture in regulated/compliance-heavy contexts)                     | architecture, security, risk-management                         | done   |
 | 12  | cost-aware-architecture        | How do I design a system that's cheap to run, not just correct? (cost-aware architecture, the unit economics of infrastructure)                            | architecture, cost-management, infra                            | done   |
 | 13  | architecture-review            | How do I review someone else's system design without rubber-stamping it or nitpicking it to death? (architecture review, asking the right questions)       | architecture, feedback, leadership, communication               | done   |
-| 14  | technical-strategy-roadmapping | How do you set multi-year technical direction for an org? (technical strategy, roadmapping, sequencing architectural bets)        | architecture, leadership, decision-making                       | done   |
+| 14  | technical-strategy-roadmapping | How do you set multi-year technical direction for an org? (technical strategy, roadmapping, sequencing architectural bets)                                 | architecture, leadership, decision-making                       | done   |
 
 ## design/
 

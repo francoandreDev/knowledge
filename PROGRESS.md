@@ -3785,3 +3785,11 @@ Migrated to the three-tier model, all quiz and no code topics: `tech-radar` (5 t
 Checks: typecheck 0 errors, 273 pages built, every DomainCheck topic passes live (5/6/6/6), no Mermaid errors, Mark as done enabled. Also removed "staff/principal engineer" from the `technical-strategy-roadmapping` roadmap title.
 
 Total migrated: 205 of 246. Next: architecture batch 4 (`architecture-for-compliance`, `cost-aware-architecture`, `architecture-review`, `technical-strategy-roadmapping`), which closes the track.
+
+## 2026-11-05 — architecture batch 4 (track complete)
+
+Migrated to the three-tier model, all quiz and no code topics: `architecture-for-compliance` (7 topics, 80 items; invented services-per-surface chart removed, and the claim that a hash chain detects any deletion corrected — truncating the newest events is not detectable by the chain alone), `cost-aware-architecture` (7 topics, 84 items; an internally inconsistent cost table recomputed to match the demo, 720 vs 730 hours reconciled, instance names replaced by tiers), `architecture-review` (10 topics, 120 items; invented cost-of-change chart replaced by a qualitative ordering table), `technical-strategy-roadmapping` (9 topics, 99 items; conflicting bet scores 7/6/9 vs 8/7/7 reconciled, Gantt bar for the two-week fix corrected, "staff engineer" labels removed).
+
+Checks: typecheck 0 errors, 273 pages built, every DomainCheck topic passes live (7/7/10/9), no Mermaid errors, Mark as done enabled.
+
+`architecture/` is complete: 14 of 14. Total migrated: 209 of 246. Next tracks: design (14), sustainable-performance (8), people-management (15; the second unit currently has slug `1` and needs a proper slug).

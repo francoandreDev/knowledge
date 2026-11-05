@@ -1,397 +1,186 @@
 ---
-title: "L3 — Building it: a tamper-evident audit log, an access gate, and a retention job"
+title: "L3 — Proving it: a tamper-evident audit log and retention that respects legal holds"
 ---
 
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
 
-This deep dive uses **plain TypeScript**, since all three pieces below are
-small, self-contained modules a real service would import directly — the
-ideas transfer to any language; nothing here depends on TypeScript's type
-system specifically.
+export const unit = {
+  track: "architecture",
+  unitSlug: "architecture-for-compliance",
+};
 
-<Scenario label="Three properties, three separate mechanisms">
+<Scenario label="The log says what happened. Who says the log is honest?">
   <Fragment slot="facts">
     <div class="not-prose flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-300">
-      <div class="flex items-center gap-1.5"><span>🔗</span> Auditability → a hash-chained append-only log</div>
-      <div class="flex items-center gap-1.5"><span>🚪</span> Minimality → a field-level access gate</div>
-      <div class="flex items-center gap-1.5"><span>⏳</span> Boundedness → a scheduled retention enforcer</div>
-      <div class="flex items-center gap-1.5"><span>⚖️</span> All three have to survive a legal hold colliding with a deletion deadline</div>
+      <div class="flex items-center gap-1.5"><span>🔗</span> Auditability: an append-only log</div>
+      <div class="flex items-center gap-1.5"><span>🚪</span> Minimality: a field-level gate</div>
+      <div class="flex items-center gap-1.5"><span>⏳</span> Boundedness: a retention job</div>
+      <div class="flex items-center gap-1.5"><span>⚖️</span> Edge cases: a quiet edit to the log, and a hold that forbids a deletion</div>
     </div>
   </Fragment>
 
-L2 sketched the shape of each mechanism. **Can one of them stand in for
-the others — does a good audit log already give you minimality and
-boundedness for free?** No: the log proves what happened, the gate
-controls what's allowed to happen, and the retention job decides how long
-any of it may keep existing. All three need to exist, and they need to
-agree with each other when they interact — which is where the sharpest
-edge case in this unit lives.
+Larch Pay now appends an event for every read. Then someone with raw
+database access changes event 2 of the log, replacing the name of a
+service that read a tax ID. The log is still "append-only" by convention,
+and nothing in it shows the edit. **How could an auditor ever trust a
+record that its own custodian could have rewritten?**
 
 </Scenario>
 
+L2 built three mechanisms. This level pushes on two of their hardest
+edges: making the log _evidently_ unedited, and keeping retention lawful
+when a deadline and a legal order disagree.
+
 <LevelIntro
   items={[
-    "An audit-log writer that detects if its own history was tampered with",
-    "A field-level access gate that logs every read, allowed or not",
-    "A retention enforcer that respects legal holds instead of just a deadline",
+    "A hash chain that exposes edits",
+    "What a chain cannot catch",
+    "Retention colliding with a legal hold",
   ]}
 />
 
-## Piece 1: an audit log that can prove it wasn't rewritten
+## Piece 1: how can a log prove it was not rewritten?
 
-L2 established that a correction must be a new event, never an edit to
-an old one — but _appending only new events_ still doesn't prove nobody
-went back and edited an old one directly in storage. An `UPDATE` or
-`DELETE` against the log's own table is exactly the "rewrite the story"
-attack the append-only rule exists to prevent, and a plain append-only
-table has no way to detect it happened.
+An append-only rule is a convention. A direct `UPDATE` against the log's
+storage bypasses it, and a plain table cannot tell. The fix is a **hash
+chain**: each event stores a fingerprint (hash) computed over its own
+content _plus the previous event's fingerprint_.
 
-The fix is a **hash chain**: each event's hash is computed over its own
-content plus the previous event's hash, so tampering with any past event
-changes every hash after it — a cheap, mechanical way to detect rewrites
-without needing to trust that nobody had `UPDATE` privileges.
-
-```typescript
-// audit-log.ts
-import { createHash } from "node:crypto";
-
-export interface AuditEvent {
-  seq: number;
-  actor: string; // e.g. "svc-billing" or "user:alex@example.com"
-  action: "read" | "write" | "delete" | "deletion-enforced";
-  resource: string; // e.g. "customer:9911.ssn"
-  ts: string; // ISO timestamp
-  prevHash: string; // hash of the event immediately before this one
-  hash: string; // hash of this event's own content + prevHash
-}
-
-type NewEvent = Omit<AuditEvent, "seq" | "prevHash" | "hash">;
-
-function computeHash(seq: number, prevHash: string, event: NewEvent): string {
-  const payload = JSON.stringify({ seq, prevHash, ...event });
-  return createHash("sha256").update(payload).digest("hex");
-}
-
-export const GENESIS_HASH = "0".repeat(64);
-
-export class AuditLog {
-  private events: AuditEvent[] = [];
-
-  append(event: NewEvent): AuditEvent {
-    const seq = this.events.length;
-    const prevHash = seq === 0 ? GENESIS_HASH : this.events[seq - 1].hash;
-    const hash = computeHash(seq, prevHash, event);
-    const stored: AuditEvent = { ...event, seq, prevHash, hash };
-    this.events.push(stored);
-    return stored;
-  }
-
-  all(): readonly AuditEvent[] {
-    return this.events;
-  }
-
-  /** Recomputes every hash from scratch and compares — detects any
-   *  edit, insertion, deletion, or reordering of past events. */
-  verify(): { valid: boolean; firstBadSeq: number | null } {
-    let prevHash = GENESIS_HASH;
-    for (const stored of this.events) {
-      const { seq, prevHash: storedPrevHash, hash, ...rest } = stored;
-      if (storedPrevHash !== prevHash) {
-        return { valid: false, firstBadSeq: seq };
-      }
-      const expectedHash = computeHash(seq, prevHash, rest as NewEvent);
-      if (expectedHash !== hash) {
-        return { valid: false, firstBadSeq: seq };
-      }
-      prevHash = hash;
-    }
-    return { valid: true, firstBadSeq: null };
-  }
-}
+```mermaid
+flowchart LR
+    G["Start value<br/>fixed constant"] --> E0["Event 0<br/>hash0 = H(content0 + start)"]
+    E0 --> E1["Event 1<br/>hash1 = H(content1 + hash0)"]
+    E1 --> E2["Event 2<br/>hash2 = H(content2 + hash1)"]
+    E2 --> E3["Event 3<br/>hash3 = H(content3 + hash2)"]
 ```
 
-```typescript
-// example run
-const log = new AuditLog();
-log.append({
-  actor: "svc-billing",
-  action: "read",
-  resource: "customer:9911.ssn",
-  ts: "2026-08-29T10:00:00Z",
-});
-log.append({
-  actor: "user:alex@example.com",
-  action: "deletion-enforced",
-  resource: "customer:4410.ssn",
-  ts: "2026-08-29T10:05:00Z",
-});
+To **verify**, recompute every fingerprint from the start and compare with
+what is stored. Now edit event 2's content in storage:
 
-log.verify();
-// => { valid: true, firstBadSeq: null }
+| Event | Stored hash | Recomputed from the stored content   | Verdict                                        |
+| ----- | ----------- | ------------------------------------ | ---------------------------------------------- |
+| 0     | hash0       | hash0                                | matches                                        |
+| 1     | hash1       | hash1                                | matches                                        |
+| 2     | hash2       | different (content changed)          | **first mismatch**                             |
+| 3     | hash3       | built on the _stored_ hash2, not new | chain no longer consistent from event 2 onward |
 
-// Now simulate someone editing event #0 directly in storage
-// (bypassing append() entirely — e.g. a raw DB edit):
-(log as any).events[0].actor = "svc-billing-but-actually-attacker";
+Verification reports the first failing position, so investigators know
+exactly where to start rather than comparing every event by hand.
 
-log.verify();
-// => { valid: false, firstBadSeq: 0 }
-// The edit changes event #0's content hash, which no longer matches
-// what's stored — and every event chained after it is now provably
-// inconsistent too, even though we only touched #0.
-```
+<Checkpoint question="Someone edits event 4821 out of 9000. Does verification flag only that event?">
 
-The chain doesn't _prevent_ someone with raw database access from editing
-a row — nothing running only inside the application can prevent that.
-What it does is turn a silent, undetectable rewrite into a **detectable**
-one: `verify()` run on a schedule (or before trusting the log for an
-audit response) will catch it and say exactly where the chain broke.
-
-<Checkpoint question="Someone tampers with event #4821 out of 9000. Does verify() only flag event #4821, or does it flag more than that — and why does that matter for an investigation?">
-
-It flags event #4821 as the first bad sequence, but every event from
-#4821 onward is now also provably inconsistent, because each one's
-`prevHash` depends on the hash of the one before it — tampering with
-#4821 changes its hash, which no longer matches the `prevHash` stored in
-#4822, cascading forward through the rest of the chain. This matters
-practically: `firstBadSeq` tells investigators exactly where to start
-looking (the earliest point of tampering), rather than forcing them to
-manually diff all 9000 events to find it.
+It reports 4821 as the first failure, but everything after it is also no
+longer consistent, because each event's fingerprint was built on the one
+before. That is a feature: the first mismatch is the earliest possible
+point of tampering, which is where the investigation begins.
 
 </Checkpoint>
 
-## Piece 2: an access gate that logs every read, allowed or not
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="hash-chain"
+/>
 
-L2's gate decides whether a caller's scope covers a field's
-classification, and logs the access either way. Here it is wired
-directly to the audit log above:
+### What the chain does not do
 
-```typescript
-// access-gate.ts
-import { AuditLog } from "./audit-log";
+A chain makes a silent rewrite _detectable_; it does not make it
+impossible, and it has two honest blind spots.
 
-export type Classification = "PUBLIC" | "INTERNAL" | "PII_RESTRICTED";
+| Attack                                                | Does verification alone catch it?        | What closes the gap                                              |
+| ----------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------- |
+| Edit one event's content                              | Yes                                      | Nothing more needed to detect it                                 |
+| Edit a middle event and recompute every hash after it | No, the rebuilt chain is self-consistent | Store the latest hash somewhere the log's operators cannot write |
+| Delete the last few events                            | No, the shorter chain is still valid     | Keep an externally held event count or latest hash               |
+| Raw database access in the first place                | Detects after the fact only              | Real access control on the log's own storage                     |
 
-export interface FieldSpec {
-  name: string;
-  classification: Classification;
-}
+So the chain is one layer: it works together with an externally anchored
+head value and with strict access control on the log, not instead of them.
 
-export interface CallerScope {
-  serviceId: string;
-  grantedClassifications: Classification[];
-}
+## Piece 2: the gate, in one sentence
 
-export interface GatedRecord {
-  [field: string]: unknown;
-}
+The access gate from L2 needs no new theory here: for each field it
+compares the caller's scope with the field's class, returns the real or
+redacted value, and appends one event per field requested. Logging the
+_denied_ attempts too is what lets an investigator notice a service that
+keeps asking for tax IDs it is never given.
 
-export function gateRecord(
-  record: Record<string, unknown>,
-  fields: FieldSpec[],
-  caller: CallerScope,
-  resourceId: string,
-  log: AuditLog,
-): GatedRecord {
-  const result: GatedRecord = {};
-  for (const field of fields) {
-    const allowed = caller.grantedClassifications.includes(
-      field.classification,
-    );
-    result[field.name] = allowed ? record[field.name] : "[REDACTED]";
-    log.append({
-      actor: caller.serviceId,
-      action: "read",
-      resource: `${resourceId}.${field.name}`,
-      ts: new Date().toISOString(),
-    });
-    // Note: the event is appended whether or not access was allowed —
-    // a *denied* read attempt on PII is itself something an auditor
-    // or a security investigation may need to see.
-  }
-  return result;
-}
+## Piece 3: retention when a legal hold says "keep it"
+
+**What should the retention job do with a record that is past its deadline
+but covered by a legal hold?** A hold (litigation, an investigation, a
+regulator's order) requires keeping data beyond its normal lifetime;
+deleting it then can itself be a violation. So the job's decision has three
+outcomes, not two:
+
+```mermaid
+flowchart TD
+    R["Record examined"] --> D{"Past its<br/>retention deadline?"}
+    D -->|"no"| U["Untouched, nothing logged"]
+    D -->|"yes"| H{"Under a<br/>legal hold?"}
+    H -->|"no"| X["Deleted, deletion event logged"]
+    H -->|"yes"| K["Kept, 'held back' event logged"]
 ```
 
-```typescript
-// example run
-const fields: FieldSpec[] = [
-  { name: "displayName", classification: "PUBLIC" },
-  { name: "email", classification: "INTERNAL" },
-  { name: "ssn", classification: "PII_RESTRICTED" },
-];
+The held-back case is logged on purpose. An auditor will eventually ask
+about a record that "should have been deleted eighteen months ago"; only
+the logged skip lets the team prove it was a deliberate, lawful decision
+and not an oversight.
 
-const analyticsService: CallerScope = {
-  serviceId: "svc-analytics",
-  grantedClassifications: ["PUBLIC", "INTERNAL"],
-};
+### Worked example end to end
 
-const record = {
-  displayName: "A. Rivera",
-  email: "a@example.com",
-  ssn: "078-05-1120",
-};
-const log = new AuditLog();
+The job runs on 2026-08-29 over three records, all kept 24 months:
 
-gateRecord(record, fields, analyticsService, "customer:9911", log);
-// => { displayName: "A. Rivera", email: "a@example.com", ssn: "[REDACTED]" }
-// and 3 read events appended to `log`, including the redacted ssn attempt
-```
+| Record | Created    | Months old | Past 24-month deadline? | Hold? | Outcome                 |
+| ------ | ---------- | ---------- | ----------------------- | ----- | ----------------------- |
+| 4410   | 2024-06-01 | 26         | yes                     | no    | deleted, deletion event |
+| 5521   | 2024-01-01 | 31         | yes                     | yes   | kept, held-back event   |
+| 6632   | 2026-06-01 | 2          | no                      | no    | untouched, no event     |
 
-<Checkpoint question="svc-analytics never gets the real SSN back — it only sees '[REDACTED]'. Is logging that read attempt still worth the audit-log entry it costs?">
+Months old counts calendar months between the creation month and the run
+month. The audit log gains two events, and its chain is extended as usual.
 
-Yes — a denied read attempt on a restricted field is exactly the kind of
-signal a security investigation needs: if `svc-analytics` starts
-requesting SSNs repeatedly with no legitimate reason, that pattern is
-invisible if only _successful_ PII reads get logged. Auditability isn't
-only about proving lawful access happened — it's equally about proving
-what was _attempted_, which is often the earlier and more useful signal
-when something is going wrong.
+<Checkpoint question="Record 5521 sits at 31 months with a 24-month period under a hold. The hold is lifted next month. What does the nightly job do, and is the timing a problem?">
+
+On the first run after the hold lifts, 5521 is past its deadline and no
+longer held, so it is deleted that night. This is by design: the delay is
+at most one scheduler cycle. The real risk is a scheduler that silently
+stopped running, which is a monitoring problem for the job, not a flaw in
+the decision logic.
 
 </Checkpoint>
 
-## Piece 3: a retention enforcer that respects legal holds
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="legal-hold"
+/>
 
-L2 sketched a scheduler that deletes anything past its retention
-deadline. The real-world wrinkle: a legal hold (litigation, an open
-investigation, a regulator's explicit order) can require keeping data
-_past_ its normal deadline — deleting it while a hold is active isn't
-just a bug, it can itself be a violation.
+Retention also has a storage side. The demo on this page assumes a steady
+20,000 audit events per day: a 24-month window keeps 24 x 30 x 20,000 =
+14,400,000 events resident, and halving the window to 12 months halves
+that. A longer window gives more evidence for a late audit, but also more
+sensitive history to secure and store. Retention windows trade evidence
+against exposure; the number is chosen, not discovered.
 
-```typescript
-// retention-enforcer.ts
-import { AuditLog } from "./audit-log";
+## Where judgment, not mechanism, decides
 
-export interface RetainedRecord {
-  id: string;
-  classification: string;
-  createdAt: string; // ISO date
-  retentionMonths: number;
-  legalHold: boolean;
-}
+| Situation                                                      | What the mechanisms do not solve                            |
+| -------------------------------------------------------------- | ----------------------------------------------------------- |
+| Two regulations disagree (delete at 12 months vs 36)           | A person must decide which applies, or satisfy the longer   |
+| A hold arrives for data already deleted                        | Nothing restores it, so holds are checked _before_ deletion |
+| A request to erase data that another rule requires you to keep | A documented exception process, not a code change           |
 
-export interface EnforcementResult {
-  deleted: string[];
-  heldBack: string[]; // past deadline, but under legal hold — not deleted
-}
+## This is a case, not the whole territory
 
-function monthsSince(createdAt: string, asOf: Date): number {
-  const created = new Date(createdAt);
-  return (
-    (asOf.getFullYear() - created.getFullYear()) * 12 +
-    (asOf.getMonth() - created.getMonth())
-  );
-}
-
-export function enforceRetention(
-  records: RetainedRecord[],
-  asOf: Date,
-  log: AuditLog,
-): EnforcementResult {
-  const deleted: string[] = [];
-  const heldBack: string[] = [];
-
-  for (const record of records) {
-    const isPastDeadline =
-      monthsSince(record.createdAt, asOf) >= record.retentionMonths;
-    if (!isPastDeadline) continue;
-
-    if (record.legalHold) {
-      heldBack.push(record.id);
-      log.append({
-        actor: "retention-enforcer",
-        action: "deletion-enforced",
-        resource: `${record.id}:held-not-deleted`,
-        ts: asOf.toISOString(),
-      });
-      continue;
-    }
-
-    deleted.push(record.id);
-    log.append({
-      actor: "retention-enforcer",
-      action: "delete",
-      resource: record.id,
-      ts: asOf.toISOString(),
-    });
-  }
-
-  return { deleted, heldBack };
-}
-```
-
-```typescript
-// example run
-const records: RetainedRecord[] = [
-  {
-    id: "customer:4410",
-    classification: "PII_RESTRICTED",
-    createdAt: "2024-06-01",
-    retentionMonths: 24,
-    legalHold: false,
-  },
-  {
-    id: "customer:5521",
-    classification: "PII_RESTRICTED",
-    createdAt: "2024-01-01",
-    retentionMonths: 24,
-    legalHold: true,
-  },
-  {
-    id: "customer:6632",
-    classification: "PII_RESTRICTED",
-    createdAt: "2026-06-01",
-    retentionMonths: 24,
-    legalHold: false,
-  },
-];
-
-const log = new AuditLog();
-enforceRetention(records, new Date("2026-08-29"), log);
-// => { deleted: ["customer:4410"], heldBack: ["customer:5521"] }
-// customer:6632 isn't past its 24-month deadline yet, so it's untouched
-// and not even logged — nothing happened to it.
-```
-
-Note what still gets logged even when a record is _not_ deleted: the
-`heldBack` case appends a `deletion-enforced` event too, with a resource
-tag that makes clear deletion was skipped and why. **A retention job that
-only logs deletions leaves exactly the gap an auditor will ask about
-next** — "you say this record should have been deleted eighteen months
-ago and wasn't; prove that was a deliberate, lawful decision and not an
-oversight." Without that log entry, there's no way to tell those two
-apart after the fact.
-
-<Checkpoint question="A record is 30 months old with a 24-month retention period and legalHold set to true. The next month, the hold is lifted. What does enforceRetention do on the run immediately after the hold is lifted, and is that timing a problem?">
-
-On the run immediately after `legalHold` flips to `false`, the record is
-already past its deadline (30+ months against a 24-month limit), so
-`isPastDeadline` is true and `legalHold` is now false — it gets deleted
-on that very next scheduled run. This isn't a problem as designed: the
-job runs on a fixed schedule (e.g. daily), so the deletion happens within
-one cycle of the hold lifting, not months later. The only real risk is a
-scheduler that isn't actually running on schedule — which is a
-monitoring problem for the job itself, not a gap in this function's
-logic.
-
-</Checkpoint>
-
-## Where this still needs judgment, not just code
-
-| Situation                                                                                         | What the three pieces above don't solve by themselves                                                      |
-| ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Two regulations disagree (one says delete at 12 months, another 36)                               | A human has to decide which applies, or whether to satisfy the longer window                               |
-| A legal hold is placed on data that's already been deleted                                        | No log can restore deleted data — this is why holds must be checked _before_ deletion, never after         |
-| An engineer with raw production DB access could still bypass the app                              | The hash chain detects tampering after the fact; it doesn't replace access controls on the database itself |
-| A subject-access or right-to-erasure request touches data another regulation requires you to keep | Requires a documented exception process, not a code fix — some jurisdictions explicitly carve this out     |
-
-**Extend it yourself:** `gateRecord` currently grants or denies a whole
-field per caller. What would the gate need to look like if the rule were
-more specific — e.g. `svc-fraud` may read `ssn` only when investigating a
-specific case, but not for arbitrary lookups? And separately: `AuditLog`
-here lives entirely in memory. What has to change about `append` and
-`verify` for a log that's durable across process restarts and shared by
-multiple services writing concurrently — is the hash-chain logic itself
-still correct once two processes might append at "the same time," or does
-that require a different design?
+Everything above is one slice: a payments app, tax IDs, an in-house log.
+**What changes if the data is health records and the "regulator" is a
+hospital's ethics board? What if the log lives in a shared service that
+five teams write to at the same time: does a single chain still make
+sense, or does each writer need its own, and who anchors the latest hash?
+And what if the gate must allow a fraud service to read a tax ID only
+while a specific case is open?** Redraw the diagrams for your version and
+note which boxes moved and which stayed put.
