@@ -1061,7 +1061,7 @@ export const UNIT_TEASERS: Record<string, UnitTeaser> = {
     reality:
       "Managing requires a genuinely different skill set — coaching, delegation, calibration — that individual technical excellence doesn't automatically transfer into.",
   },
-  "people-management/1": {
+  "people-management/one-on-one": {
     myth: "A 1:1 is just a status check on what someone's working on.",
     reality:
       "A useful 1:1 is structured around listening and coaching questions — status belongs in async updates, not the one recurring time you have for the person.",

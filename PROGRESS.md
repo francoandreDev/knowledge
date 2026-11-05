@@ -3825,3 +3825,13 @@ Migrated to the three-tier model, all quiz and no code topics: `design/dark-patt
 Checks: typecheck 0 errors, 273 pages built, every DomainCheck topic passes live (7/7/6/8), no Mermaid errors, Mark as done enabled.
 
 `design/` is complete: 14 of 14. Total migrated: 225 of 246. To verify later: the L3 passage in `myth-linear-output` citing a munitions-factory working-hours study was written from memory and kept deliberately vague; check it against the source. Next: `sustainable-performance` batch 2 (`attention-management`, `energy-management-across-day-week`, `sustainable-boundary-setting`, `recovery-practices-crunch`), then its last two units, then `people-management`.
+
+## 2026-11-05 — sustainable-performance batch 2 (4 units) + slug fix
+
+Migrated to the three-tier model, all quiz and no code topics: `attention-management` (7 topics, 84 items; engineer/Slack hook replaced by a universal kitchen-table essay scenario, invented "40 minutes of progress" and "270-minute Day B" figures rebuilt on the demo model: 120 deep minutes at defaults, 225 with three 90-minute blocks), `energy-management-across-day-week` (6 topics, 69 items; the old claim that the whole gain comes from "fixing the other four assignments" corrected — only two task scores change, net +4.5, schedule totals 18.0 vs 22.5), `sustainable-boundary-setting` (5 topics, 60 items), `recovery-practices-crunch` (6 topics, 72 items; invented capacity-percentage charts dropped, demo figures 7.8 weeks at 20% concreteness vs 3.6 at 90%; "often within a week" softened to "days").
+
+Checks: typecheck 0 errors, 273 pages built, every DomainCheck topic passes live (7/6/5/6), no Mermaid errors, Mark as done enabled.
+
+Slug fix: the `people-management` 1:1 unit had slug `1` (the generator dropped "1:1"). Renamed the folder to `src/content/people-management/one-on-one/` with `git mv`, updated the `ROADMAP.md` Slug column and the `unit-teasers.ts` key. Any saved "Mark as done" state under `progress:people-management/1` will not carry over.
+
+Total migrated: 229 of 246. Next: `sustainable-long-term-learning-pace`, `long-horizon-sustainability` (closes sustainable-performance), then `people-management` (15 units, starting with `ic-excellence-management` and `one-on-one`).
