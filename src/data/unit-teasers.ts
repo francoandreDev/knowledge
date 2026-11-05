@@ -1052,7 +1052,7 @@ export const UNIT_TEASERS: Record<string, UnitTeaser> = {
   "sustainable-performance/long-horizon-sustainability": {
     myth: "Sustaining high output over a career just means repeating what worked for one good quarter.",
     reality:
-      "A staff engineer paces output like a marathon, not a sprint — a decade of sustainability requires a fundamentally different strategy than any single quarter.",
+      "Sustaining output over a decade means pacing it like a marathon, not a sprint — it takes a fundamentally different strategy than any single quarter.",
   },
 
   // people-management/

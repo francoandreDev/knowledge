@@ -3793,3 +3793,11 @@ Migrated to the three-tier model, all quiz and no code topics: `architecture-for
 Checks: typecheck 0 errors, 273 pages built, every DomainCheck topic passes live (7/7/10/9), no Mermaid errors, Mark as done enabled.
 
 `architecture/` is complete: 14 of 14. Total migrated: 209 of 246. Next tracks: design (14), sustainable-performance (8), people-management (15; the second unit currently has slug `1` and needs a proper slug).
+
+## 2026-11-05 — design batch 1 (4 units)
+
+Migrated to the three-tier model: `design-thinking-process` (10 topics, 120 items, all quiz; hook corrected to a third register since the demo default already has two, invented usefulness chart replaced by a table, ExpenseFlow case labelled as assumptions), `usability-heuristics` (7 topics, 84 items, all quiz; unsupported "10–15 seconds" undo claim removed, incident labelled hypothetical), `information-architecture` (5 topics, 65 items, all quiz; breadth/depth cost model added from the demo formula, invented shop figures labelled), `visual-design-fundamentals` (8 topics, 95 items, code topic `contrast-calc`; contrast figures recomputed — pure blue on white is 8.59:1, not a failure; mint `#7FE8C4` luminance 0.662 and 1.47:1; `#767676` luminance 0.1812, 4.54:1 on white).
+
+Checks: typecheck 0 errors, 273 pages built, 11 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (10/7/5/8), no Mermaid errors, Mark as done enabled. Also removed "staff engineer" from the `long-horizon-sustainability` roadmap title and teaser.
+
+Total migrated: 213 of 246. Next: design batch 2 (`accessibility-by-design`, `interaction-design-patterns`, `design-systems`, `ux-writing-microcopy`). The visual-design-fundamentals demo description says 4.54:1 at 46% lightness, which is close to but not exactly `#767676` (118 vs 117) — worth a wording touch-up later.
