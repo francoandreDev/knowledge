@@ -3817,3 +3817,11 @@ Migrated to the three-tier model: `prototyping-feedback-loops` (6 topics, 72 ite
 Checks: typecheck 0 errors, 273 pages built, 7 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (6/8/7/6), no Mermaid errors, Mark as done enabled.
 
 Total migrated: 221 of 246. Next: `design/dark-patterns-ethics`, `design/design-debt-at-scale` (closes design), `sustainable-performance` (8 units), `people-management` (15 units; second unit has slug `1` and needs a real slug).
+
+## 2026-11-05 — design closed + sustainable-performance batch 1
+
+Migrated to the three-tier model, all quiz and no code topics: `design/dark-patterns-ethics` (7 topics, 84 items; invented "11 minutes reported by real users", a specific lawsuit and a $287 figure removed, regulation described only by the shape of the flow and hedged by jurisdiction; the demo description's FTC mention reworded the same way), `design/design-debt-at-scale` (7 topics, 84 items; invented per-year and orphan-growth charts replaced by values computed from the demo formulas, "senior designers" removed), `sustainable-performance/myth-linear-output` (6 topics, 72 items; L3 crunch rebuilt with explicit assumed numbers, 162 vs 160 baseline and 144 after repair), `sustainable-performance/early-warning-signs` (8 topics, 88 items; L1 opens with a universal exam-season scenario).
+
+Checks: typecheck 0 errors, 273 pages built, every DomainCheck topic passes live (7/7/6/8), no Mermaid errors, Mark as done enabled.
+
+`design/` is complete: 14 of 14. Total migrated: 225 of 246. To verify later: the L3 passage in `myth-linear-output` citing a munitions-factory working-hours study was written from memory and kept deliberately vague; check it against the source. Next: `sustainable-performance` batch 2 (`attention-management`, `energy-management-across-day-week`, `sustainable-boundary-setting`, `recovery-practices-crunch`), then its last two units, then `people-management`.
