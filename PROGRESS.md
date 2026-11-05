@@ -3801,3 +3801,11 @@ Migrated to the three-tier model: `design-thinking-process` (10 topics, 120 item
 Checks: typecheck 0 errors, 273 pages built, 11 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (10/7/5/8), no Mermaid errors, Mark as done enabled. Also removed "staff engineer" from the `long-horizon-sustainability` roadmap title and teaser.
 
 Total migrated: 213 of 246. Next: design batch 2 (`accessibility-by-design`, `interaction-design-patterns`, `design-systems`, `ux-writing-microcopy`). The visual-design-fundamentals demo description says 4.54:1 at 46% lightness, which is close to but not exactly `#767676` (118 vs 117) — worth a wording touch-up later.
+
+## 2026-11-05 — design batch 2 (4 units)
+
+Migrated to the three-tier model: `accessibility-by-design` (9 topics, 105 items, code topic `contrast-math`; contrast figures recomputed — error-red `#f28d8d` is 2.34:1, `#c02626` 5.92:1, gray 118 is 4.54:1 and gray 120 fails at 4.42:1; the claim that `aria-modal` blocks focus corrected, native `<dialog>` with `showModal()` does the containment), `interaction-design-patterns` (9 topics, 99 items, all quiz; CSS block replaced by a signifier-coverage table), `design-systems` (7 topics, 84 items, all quiz; audit figures made consistent with the sampled table, invented "$60k abandoned carts" removed, adoption chart recomputed from the demo formula), `ux-writing-microcopy` (7 topics, 77 items, all quiz; invented "warmth" scores and a "90 seconds to write" claim removed).
+
+Checks: typecheck 0 errors, 273 pages built, 9 code items with 0 failing sandbox assertions, every DomainCheck topic passes live (9/9/7/7), no Mermaid errors, Mark as done enabled.
+
+Total migrated: 217 of 246. Next: design batch 3 (`prototyping-feedback-loops`, `usability-testing`, `responsive-adaptive-design`, `design-engineering-handoff`), then `dark-patterns-ethics`, `design-debt-at-scale`.

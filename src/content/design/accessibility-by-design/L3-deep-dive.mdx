@@ -5,147 +5,175 @@ title: "L3 — Walking a real accessibility audit end to end"
 import Scenario from "../../../components/Scenario.astro";
 import LevelIntro from "../../../components/LevelIntro.astro";
 import Checkpoint from "../../../components/Checkpoint.astro";
+import PracticeCheck from "../../../components/PracticeCheck.astro";
+
+export const unit = {
+  track: "design",
+  unitSlug: "accessibility-by-design",
+};
 
 <Scenario label="The audit">
   <Fragment slot="facts">
     <p class="not-prose mb-1 text-xs font-semibold tracking-wide text-slate-400 uppercase">4 findings — "Notify me" signup modal</p>
     <div class="not-prose flex flex-col gap-1.5 text-sm text-slate-700 dark:text-slate-300">
       <div>1. Close button — no accessible name (Perceivable)</div>
-      <div>2. Modal — no focus trap, no <code>role="dialog"</code> (Operable)</div>
+      <div>2. Modal — no dialog role, no focus management (Operable)</div>
       <div>3. Error text — 2.3:1 contrast, fails AA (Perceivable)</div>
       <div>4. Email field — placeholder used as label (Understandable)</div>
     </div>
-    <p class="not-prose mt-3 text-xs text-slate-500 dark:text-slate-400">All four passed visual QA and a mouse-driven manual test. None were caught until an audit specifically tested with keyboard and a screen reader.</p>
+    <p class="not-prose mt-3 text-xs text-slate-500 dark:text-slate-400">All four passed visual QA and a mouse-driven manual test. None were caught until an audit tested with keyboard and a screen reader.</p>
   </Fragment>
 
-A product team asks for an accessibility audit of a "Notify me when back in stock" modal before a launch. It looks finished: clean layout, on-brand colors, a close `×` in the corner, a single email field, inline validation. Manual QA — click through it with a mouse, check the layout at a few screen sizes — passed clean.
+A product team asks for an accessibility audit of a "Notify me when back in stock" modal before a launch. It looks finished: clean layout, on-brand colors, a close `×` in the corner, a single email field, inline validation. Manual QA — click through it with a mouse, check a few screen sizes — passed clean.
 
-**The auditor's first move isn't reading the code. It's unplugging the mouse and turning on a screen reader. What does that immediately surface that a visual pass through the same modal never would?**
+**The auditor's first move is not reading the code. It is unplugging the mouse and turning on a screen reader. What does that surface that a visual pass never would?**
 
 </Scenario>
 
-Four separate, unrelated failures — each one invisible unless you specifically test the thing it breaks. This level walks each finding the way the audit actually found it: what the auditor experienced, the markup that caused it, and the fix.
+Four separate, unrelated failures, each invisible unless you test the exact thing it breaks. This level walks them the way the audit found them, with the numbers behind the one that is pure arithmetic.
 
 <LevelIntro
   items={[
-    "Four real findings: name, focus, contrast, and labeling",
-    "The exact before/after markup for each fix",
-    "How to prioritize when you can't fix everything before launch",
+    "Contrast as arithmetic you can compute",
+    "Dialogs: what the markup promises vs. what must be built",
+    "Triage: ordering fixes by who is blocked",
   ]}
 />
 
-## Finding 1: the icon-only close button
+## Why is "it looks readable to me" not a contrast test?
 
-The auditor tabs to the modal's close control and hears the screen reader announce a single word: **"button."** Not "close," not "dismiss" — just the fact that some button exists, with nothing about what it does.
+**The error text looks fine on the designer's monitor. How would anyone prove it fails?** By computing it. WCAG defines contrast as a ratio of the **relative luminance** of two colors: each color channel is converted from its stored value to linear light, the channels are weighted (green counts most), and the lighter and darker luminances are compared.
 
-```html
-<!-- Before: an SVG icon, no text anywhere for the accessible name to fall back to -->
-<button onclick="closeModal()">
-  <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
-</button>
+```mermaid
+flowchart LR
+    C["Channel value 0-255"] --> N["Divide by 255"]
+    N --> Lin["Convert to linear light"]
+    Lin --> W["Weight: 0.2126 R + 0.7152 G + 0.0722 B"]
+    W --> L["Relative luminance L (0 black to 1 white)"]
+    L --> R["Ratio = (L_light + 0.05) / (L_dark + 0.05)"]
 ```
 
-The accessible-name lookup order from L2 explains exactly why this fails: no `aria-label`, no `aria-labelledby`, no associated `<label>` (buttons don't take one anyway), and the element's own text content is empty — an SVG's internal path data isn't text. The lookup runs out of places to look and falls back to nothing, so the browser exposes the bare role with an empty name.
+Worked on the finding. White has luminance 1. The audit's error red `#f28d8d` has luminance about 0.40, so its ratio is (1 + 0.05) / (0.40 + 0.05), roughly 2.3. The fix `#c02626` has luminance about 0.127, giving 1.05 / 0.177, roughly 5.9.
 
-```html
-<!-- After: one attribute, and the announcement becomes usable -->
-<button onclick="closeModal()" aria-label="Close">
-  <svg viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M6 6l12 12M18 6L6 18" />
-  </svg>
-</button>
+| Element             | Foreground | Background | Ratio   | AA text (4.5:1)? |
+| ------------------- | ---------- | ---------- | ------- | ---------------- |
+| Error text (before) | `#f28d8d`  | `#ffffff`  | 2.3 : 1 | Fails            |
+| Error text (after)  | `#c02626`  | `#ffffff`  | 5.9 : 1 | Passes           |
+
+The fix is not a markup change at all: same `<p class="error">`, just one color value. A "friendly" light red can look intentional and on-brand while sitting far too close to white in luminance.
+
+How fast does the ratio fall as a gray text darkens or lightens on white? Not evenly, which is why eyeballing misleads:
+
+```mermaid
+xychart-beta
+    title "Contrast of gray text on white, by gray value (0 black, 255 white)"
+    x-axis "Gray value" [0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220, 240]
+    y-axis "Contrast ratio (:1)" 0 --> 22
+    line [21.00, 18.42, 14.74, 11.03, 8.06, 5.92, 4.42, 3.36, 2.61, 2.07, 1.67, 1.37, 1.14]
 ```
 
-Two changes: `aria-label="Close"` gives it a name, and `aria-hidden="true"` on the decorative SVG stops the screen reader from trying (and failing) to describe the icon's raw path data as if it were meaningful content. Announcement after the fix: **"Close, button."**
+Gray 118 (4.54:1) is the lightest gray that still passes AA for body text; gray 120 (4.42:1) already fails, and gray 89 (7.00:1) is the lightest that reaches AAA. Two grays that look nearly identical sit on opposite sides of the line. Large text (about 24 px regular, or about 18.7 px bold) only needs 3:1 at AA, and UI component boundaries and focus indicators also need 3:1.
 
-<Checkpoint question="The fix used `aria-label='Close'` instead of adding visible text next to the icon that says 'Close.' Both would fix the screen reader announcement — so why might visible text actually be the better fix here, not just an equally valid alternative?">
+<Checkpoint question="A designer picks body-text gray 120 on white because it looks the same as 118. By the numbers above, does it pass AA, and what does that say about checking by eye?">
 
-Because `aria-label` only helps people who can't see the icon in the first place — it does nothing for someone with low vision who can see there's a button but can't tell what a small `×` glyph means, or a new user who simply doesn't recognize the icon convention. Visible text ("Close") fixes the ambiguity for everyone looking at the screen, while an `aria-label` fixes it only for screen reader users, leaving the visual ambiguity untouched for everyone else. `aria-label` is the right tool when space genuinely doesn't allow visible text (a small icon-only toolbar button, say), but it's a narrower fix than it looks — reaching for visible text first, and `aria-label` only when that's truly not an option, closes a wider set of gaps with one change.
+It fails: 120 gives 4.42:1, just under the 4.5:1 line, while 118 gives 4.54:1. The two are visually indistinguishable, which is exactly why the check has to be computed. A threshold is a hard edge; perception is not.
 
 </Checkpoint>
 
-## Finding 2: the modal that isn't a real dialog
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="contrast-math"
+/>
 
-With the close button fixed, the auditor tries to use the modal by keyboard alone. Tab moves focus _through_ the modal's controls and then out into the page behind it — the modal is still open, but focus has silently left it. Reversing direction, Shift+Tab from the email field jumps backward into page content the modal is supposed to be blocking.
+## Finding 1: what does the icon-only close button announce?
 
-```html
-<!-- Before: a positioned div with no role, no focus management -->
-<div class="modal">
-  <button aria-label="Close">...</button>
-  <h2>Get notified</h2>
-  <input type="text" placeholder="Email" />
-  <button>Notify me</button>
-</div>
-```
-
-Nothing in this markup tells the accessibility tree "this is a dialog, and everything outside it is currently inert." A sighted mouse user experiences the modal as blocking the page because of an overlay's CSS `z-index` and a semi-transparent backdrop — but a screen reader user, navigating by the accessibility tree rather than by what's visually on top, isn't blocked by CSS at all. This is a **keyboard trap** in reverse: not stuck inside, but able to wander into content that's supposed to be unreachable while the modal is open.
+The auditor tabs to the close control and hears one word: **"button."** Not "close," not "dismiss." The name lookup from L2 ran out of places to look: no `aria-labelledby`, no `aria-label`, and the element's own text is empty, since an SVG's path data is not text.
 
 ```html
-<!-- After: role, modal state, and a labeled dialog -->
-<div
-  class="modal"
-  role="dialog"
-  aria-modal="true"
-  aria-labelledby="modal-title"
->
-  <button aria-label="Close">...</button>
-  <h2 id="modal-title">Get notified</h2>
-  <input type="text" id="email" />
-  <button>Notify me</button>
-</div>
+<!-- Before: no text for the name to fall back to -->
+<button onclick="closeModal()"><svg viewBox="0 0 24 24">...</svg></button>
+
+<!-- After: a name, and the decorative icon hidden from the tree -->
+<button onclick="closeModal()" aria-label="Close">
+  <svg viewBox="0 0 24 24" aria-hidden="true">...</svg>
+</button>
 ```
 
-`role="dialog"` tells the accessibility tree what this element is. `aria-modal="true"` is the signal that everything outside it should be treated as inert while it's open. `aria-labelledby="modal-title"` gives the dialog itself an accessible name, borrowed from its own heading, so a screen reader announces _what_ dialog just opened ("Get notified, dialog") rather than just "dialog."
+The announcement becomes **"Close, button."** Visible text would help even more people (someone with low vision who cannot decode a small `×`); `aria-label` is the right tool when space truly does not allow text.
 
-Markup alone doesn't finish the job — `aria-modal` describes the _intended_ behavior, but the actual behavior still has to be implemented: when the dialog opens, focus needs to move to the first focusable element inside it (here, the close button or the email field); Tab and Shift+Tab need to cycle only among the dialog's own controls, never escaping into the page behind it; and pressing Escape needs to close the dialog and return focus to whatever button originally opened it, so the keyboard user ends up back where they started rather than lost at the top of the page.
+## Finding 2: why is a positioned `<div>` not a dialog?
 
-## Finding 3: the error text that fails contrast
+Tab moves through the modal and then out into the page behind it. A sighted mouse user is blocked by the backdrop's CSS; a screen reader user navigates the accessibility tree, which CSS does not block.
 
-The auditor submits the form with an invalid email to check the error state, and even with normal vision finds the red error text hard to read against the white background.
+| Layer             | What it must do                            | Who supplies it                                              |
+| ----------------- | ------------------------------------------ | ------------------------------------------------------------ |
+| Role and name     | Announce "Get notified, dialog"            | `role="dialog"` plus `aria-labelledby`, or native `<dialog>` |
+| Modality          | Treat the page behind as unavailable       | `aria-modal="true"` hints; real blocking is behavior         |
+| Focus in          | Move focus into the dialog on open         | Script, or native `showModal()`                              |
+| Focus contained   | Tab and Shift+Tab stay inside              | Script, or native `showModal()`                              |
+| Escape and return | Escape closes; focus returns to the opener | Script, or native `showModal()`                              |
 
-| Element             | Foreground | Background | Ratio   | AA (4.5:1)? |
-| ------------------- | ---------- | ---------- | ------- | ----------- |
-| Error text (before) | `#f28b8b`  | `#ffffff`  | 2.3 : 1 | Fails       |
-| Error text (after)  | `#c02626`  | `#ffffff`  | 5.9 : 1 | Passes      |
+```mermaid
+sequenceDiagram
+    participant U as Keyboard user
+    participant O as Opener button
+    participant D as Dialog
+    U->>O: Press Enter
+    O->>D: Open, move focus inside
+    U->>D: Tab, Shift+Tab (stays inside)
+    U->>D: Press Escape
+    D->>O: Close, return focus to opener
+```
 
-The fix here isn't a markup change at all — same `<p class="error">`, same DOM structure — it's purely a color value. This is exactly the failure mode L2's visual-design-fundamentals unit walks in detail: a light, "friendly" red can look intentional and on-brand while still being mathematically too close in luminance to white for reliably readable text. Nothing about "this red looks like an error color" catches that on its own — only checking the actual ratio does.
+The key point: `aria-modal` describes the _intended_ behavior but does not implement it. A native `<dialog>` opened with `showModal()` supplies the containment, Escape handling, and inert background itself, which is the same "native first" lesson from L2 applied to a bigger widget.
 
-## Finding 4: the label that disappears exactly when it's needed
+<Checkpoint question="A team adds `role='dialog'` and `aria-modal='true'` to the modal's `<div>` and ships. Focus still starts on the page behind it and Escape does nothing. Which of the five layers in the table did the markup actually cover?">
 
-Look again at the "before" markup from Finding 2: `<input type="text" placeholder="Email" />`. Visually, this looks labeled — the word "Email" sits right there in the field. The problem is _when_ it's there.
+Only the first, role and name, plus a hint about modality. Focus in, focus containment, and Escape-and-return are behavior that someone has to build (or get free from a native `<dialog>`). The attributes tell assistive tech what to expect; they cannot make it true.
+
+</Checkpoint>
+
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="dialog-focus"
+/>
+
+## Finding 4: why does a placeholder fail as a label?
 
 ```mermaid
 flowchart LR
     A["Field empty\nPlaceholder shows: 'Email'"] -->|user starts typing| B["Field has text\nPlaceholder is gone"]
-    B -->|user pauses, gets distracted,\ncomes back later| C["What field was this again?"]
+    B -->|user pauses, comes back later| C["What field was this again?"]
 ```
 
-A placeholder isn't a label — it's a hint that disappears the instant there's any content in the field, which is precisely when a user (anyone, not only someone with a cognitive or memory-related disability) is most likely to have looked away and need the reminder. It's also invisible to the accessible-name lookup order in a way many people assume it isn't: some screen readers do announce placeholder text, but inconsistently, and it's never a substitute for a real programmatic label.
+A placeholder is a hint that disappears the instant there is content, which is exactly when anyone who looked away needs the reminder. Some screen readers announce placeholders inconsistently; it is never a substitute for a programmatic label.
 
 ```html
-<!-- Before: a hint, not a label -->
-<input type="text" placeholder="Email" />
-```
-
-```html
-<!-- After: a real label, permanently visible, programmatically associated -->
 <label for="email">Email</label>
 <input type="text" id="email" placeholder="you@example.com" />
 ```
 
-The fix keeps a placeholder — placeholders are genuinely useful as _examples_ of expected format — but adds a real `<label for="email">` tied to the input's `id`. Now the label is always visible, and `aria-label`'s fallback chain from L2 finds it directly instead of running out of places to look.
+The fix keeps the placeholder as a format _example_ and adds a real `<label>` tied to the input's `id`: always visible, found directly by the name lookup.
 
-## Prioritizing when you can't fix everything before launch
+## Which finding do you fix first when you cannot fix them all?
 
-Not every audit finding can be fixed the same day. Severity — how completely a finding blocks someone, not how easy it looks to fix — is what should drive the order:
+**Four findings, one week before launch. What decides the order: effort, or who is blocked?** Who is blocked, and how completely.
 
-| Finding                   | Blocks                                                                  | Severity                                                               | Fix effort                                        |
-| ------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------- |
-| Close button has no name  | Screen reader users can't tell what the button does                     | High — confusing, not fully blocking (they can still guess or explore) | Trivial — one attribute                           |
-| Modal isn't a real dialog | Screen reader users can wander into page content the modal should block | High — breaks the core interaction model                               | Moderate — role, state, and real focus management |
-| Error text contrast       | Low-vision users may not perceive the error at all                      | High — can fully block task completion                                 | Trivial — one color value                         |
-| Placeholder-as-label      | Anyone who pauses mid-form loses the field's identity                   | Medium — recoverable, but adds real friction                           | Trivial — one `<label>`                           |
+| Finding                    | Blocks                                                   | Severity                                | Fix effort                              |
+| -------------------------- | -------------------------------------------------------- | --------------------------------------- | --------------------------------------- |
+| Close button has no name   | Screen reader users cannot tell what it does             | High: confusing, not fully blocking     | Trivial: one attribute                  |
+| Modal is not a real dialog | Screen reader users wander into content the modal blocks | High: breaks the core interaction model | Moderate: role, state, focus management |
+| Error text contrast        | Low-vision users may not perceive the error at all       | High: can fully block task completion   | Trivial: one color value                |
+| Placeholder-as-label       | Anyone who pauses mid-form loses the field's identity    | Medium: recoverable, adds friction      | Trivial: one `<label>`                  |
 
-Three of these four findings are a single attribute or a single color value — genuinely cheap once found. The expensive part was never the fix; it was that none of the four were caught by a visual pass with a mouse, because none of them are visible that way. That's the real cost of "we'll add accessibility later": not that the fixes are hard, but that finding them requires testing with keyboard and assistive tech specifically, which a deadline-driven visual QA pass simply doesn't do unless someone builds it in from the start.
+Three of four fixes are a single attribute or color. The expensive part was never the fix; it was that none of the four showed up in a mouse-driven visual pass. That is the real cost of "later": finding the problems requires keyboard and assistive-tech testing that a deadline-driven QA pass skips unless someone built it in from the start.
 
-**This modal is one worked case, not the whole territory.** The same four categories of failure — missing accessible names, broken focus management, insufficient contrast, and labels that vanish — show up constantly in completely different components: a data table with sortable columns, a multi-step wizard, a custom date picker. Before moving on, it's worth asking: if this had been a banking app's password-reset flow instead of a "notify me" signup — used disproportionately by an older population with a higher rate of low vision and reduced fine motor control — would the priority order in the table above change, and which finding would you refuse to ship without first?
+<PracticeCheck
+  track={unit.track}
+  unitSlug={unit.unitSlug}
+  topicId="audit-triage"
+/>
+
+**This modal is one worked case, not the whole territory.** The same four failure families (missing names, broken focus management, insufficient contrast, vanishing labels) appear in a sortable data table, a multi-step wizard, or a custom date picker. Extend it: if this had been a banking app's password-reset flow, used by an older population with more low vision and reduced fine motor control, would the priority order change, and which finding would you refuse to ship without? And if the error text had been an icon-only red circle with no text at all, which principle (and which row of the audit) would that fall under?
