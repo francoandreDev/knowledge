@@ -3835,3 +3835,11 @@ Checks: typecheck 0 errors, 273 pages built, every DomainCheck topic passes live
 Slug fix: the `people-management` 1:1 unit had slug `1` (the generator dropped "1:1"). Renamed the folder to `src/content/people-management/one-on-one/` with `git mv`, updated the `ROADMAP.md` Slug column and the `unit-teasers.ts` key. Any saved "Mark as done" state under `progress:people-management/1` will not carry over.
 
 Total migrated: 229 of 246. Next: `sustainable-long-term-learning-pace`, `long-horizon-sustainability` (closes sustainable-performance), then `people-management` (15 units, starting with `ic-excellence-management` and `one-on-one`).
+
+## 2026-11-05 — sustainable-performance closed + people-management batch 1 (4 units)
+
+Migrated to the three-tier model, all quiz and no code topics: `sustainable-performance/sustainable-long-term-learning-pace` (6 topics, 72 items; L3 claim that 15 hours a week was "too little" corrected — 780 hours a year actually exceeds 15 × 30 hours, so the problem is hours scattered across restarts; demo figures 156 hours, 5.2 things, 34.7% coverage), `sustainable-performance/long-horizon-sustainability` (5 topics, 57 items; "staff engineer" wording removed everywhere; demo outputs 18/25.5/40/36/34 for 0–4 recovery quarters), `people-management/ic-excellence-management` (6 topics, 66 items; "junior"/"senior" wording removed, a wrong 20% progress bar corrected to 50%), `people-management/one-on-one` (6 topics, 66 items; openings per quarter charted from the demo formula floor(90 / cadence): 12, 6, 4, 3, 2, 1).
+
+Checks: typecheck 0 errors, 273 pages built, every DomainCheck topic passes live (6/5/6/6), no Mermaid errors, Mark as done enabled.
+
+`sustainable-performance/` is complete: 8 of 8. Total migrated: 233 of 246. Next: `people-management` batch 2 (`delegation-levels`, `sbi-framework`, `goal-setting`, `early-signals`), then 9 more units.
