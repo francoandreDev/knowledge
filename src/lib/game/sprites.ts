@@ -518,6 +518,20 @@ export function drawProjectile(
     ctx.stroke();
     ctx.restore();
   }
+  // The hero's own shots glow, so they read as energy against the floor and
+  // stay easy to tell from the enemies' projectiles.
+  if (source === "bolt" || source === "homingDart") {
+    ctx.save();
+    const halo = ctx.createRadialGradient(x, y, 0, x, y, radius * 3.4);
+    halo.addColorStop(0, color);
+    halo.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.globalAlpha = 0.38;
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 3.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
   ctx.save();
   ctx.translate(x, y);
   if (source === "homingDart") {
@@ -702,6 +716,13 @@ export function drawImpactBurst(
   if (alpha <= 0) return;
   const outer = 6 + progress * 12;
   ctx.save();
+  // A thin shockwave leaves the point of impact, ahead of the starburst.
+  ctx.globalAlpha = alpha * 0.7;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2 * (1 - progress) + 0.5;
+  ctx.beginPath();
+  ctx.arc(x, y, 4 + progress * 20, 0, Math.PI * 2);
+  ctx.stroke();
   ctx.globalAlpha = alpha;
   spikeStar(ctx, x, y, outer, outer * 0.42, 8, progress * 0.8);
   inkFill(ctx, progress < 0.35 ? "#ffffff" : color, 2);

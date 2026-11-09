@@ -1392,6 +1392,63 @@ in-run behaviour of the branches (Vortex, Ironclad, Last stand, Phantom...)
 or a real study mission being paid; the numbers are first guesses to tune by
 playing.
 
+### Phase 18 — Living arena, mutations, weapon visuals ✅ implemented, renders confirmed by the user; in-run balance untested
+
+Done at the user's request: the field was "free ground", progression after
+weapon level 6 was a straight line, and weapon art could be richer.
+
+**Hazards (`hazards.ts`, `hazardView.ts`, hooks in `engine.ts`).** Every run
+(not the lab) starts with 14 hazards placed clear of the start point and of
+each other: 3 pillars (block movement for the hero and ground enemies), 2 tar
+pits (hero x0.6 speed, ground enemies x0.55), 2 spike plates (3.2 s cycle with
+a 0.6 s red warning), 3 explosive barrels and 4 mines. Mines arm after 0.9 s;
+mines and barrels go off when the hero or any ground enemy touches them, and a
+blast sets nearby mines and barrels off after a short fuse, so a field chains.
+Enemies ignore the hazards and walk straight at the hero, so the hero can lure
+them across a trap, and can set one off by accident. Fliers (bat, wasp, ghost,
+phantom) pass over everything. Mines and barrels restock every 9 s up to a cap
+of 7 and 5, never within 110 px of the hero. Damage to enemies scales with the
+run on the same curve as enemy HP. To pay for the extra danger every spawn gap
+is 1.2x longer (`SPAWN_RELIEF`, floor included). Art is seeded from the hazard
+id so nothing shimmers: tar pit (glossy, toxic rim, popping bubbles), naval
+mine (horns, trigger ring once armed), steel barrel with a fuse and a flame
+plate (deliberately not a box with a ribbon), carved pillar, riveted spike
+plate. Note for the user: there are no healing zones; the green pit used to be
+read as one, which is why it is now dark with a toxic rim.
+
+**Mutations (`mutations.ts`, `engine.ts`, level-up UI).** After weapon level 6
+the card pool dried up (only capped stats and special swaps; Overdrive existed
+only in Endless). From the 4th level-up one of the four cards is a mutation, and
+every 5th level-up is a crossroads of three mutations, none common. Eleven
+mutations in three rarities, some with a cost: Glass cannon, Momentum, Cold
+snap, Bastion (common); Volatile, Echo, Adrenaline, Demolitionist (rare);
+Devil's bargain, Time warp, Titan (legendary). One-off stat changes happen in
+`applyMutation`; the rest are read where they act (`has(...)`). Demolitionist
+makes hazards hit enemies twice as hard and never hurt the hero. Overdrive and
+a new Overclock (+10% attack speed per stack, per weapon) join the pool when it
+would run thin, or always in Endless.
+
+**Weapon visuals (`fx.ts`, `sprites.ts`).** The bolt, dart, slash, nova,
+orbiter and meteor already had considered art, so only the weak ones changed.
+The Sentry Totem is a carved stone sentry whose cannon head turns to its last
+target, kicks back when it fires and cracks near the end of its life. Flame
+Trail is three layers of flame (red, orange, yellow core) that sway out of
+step, over a glow and a scorch, with rising embers. Gravity Well has a dark
+core with a bright event horizon, turning arms, motes spiralling in and a
+dashed ring for its reach. Meteors leave a scorched crater with glowing
+cracks that cools over 4.2 s. Ranged weapons (bolt, dart, chain lightning)
+flash at the hero's hand. Chain lightning crackles (it re-forms a few times in
+its short life) and glows, the blade slash leaves a soft glow along its edge,
+the hero's own shots have a halo so they read apart from enemy fire, and every
+hit sends out a thin shockwave ring.
+
+**Verification.** `bun test`, lint, `astro check` and a full build pass; 22 new
+tests cover hazard placement, spike phases, pillar push-out, blast falloff and
+mutation draws. The user confirmed hazards and mutations work in play and that
+their art renders. Not exercised: the new weapon art (totem, flames, well,
+scorch, muzzle flash) and balance of hazard and mutation numbers; all are first
+guesses to tune by playing.
+
 ## Current state
 
 **All 8 originally-planned phases, plus Phase 9 (composite sprite detail),

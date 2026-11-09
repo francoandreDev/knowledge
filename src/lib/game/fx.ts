@@ -213,6 +213,21 @@ export function drawSlash(
   ctx.lineWidth = 3;
   ctx.strokeStyle = INK;
   ctx.stroke();
+  // A soft glow riding the edge, so the sweep leaves light behind it.
+  ctx.save();
+  ctx.globalAlpha = alpha * 0.4;
+  ctx.lineCap = "round";
+  ctx.lineWidth = 9;
+  ctx.strokeStyle = color;
+  ctx.beginPath();
+  for (let i = 2; i <= steps; i++) {
+    const a = a0 + (lead - a0) * (i / steps);
+    const rad = outerAt(i);
+    if (i === 2) ctx.moveTo(x + Math.cos(a) * rad, y + Math.sin(a) * rad);
+    else ctx.lineTo(x + Math.cos(a) * rad, y + Math.sin(a) * rad);
+  }
+  ctx.stroke();
+  ctx.restore();
   // Bright outer rim.
   ctx.lineWidth = 2.2;
   ctx.strokeStyle = "#ffffff";
@@ -340,7 +355,9 @@ export function drawBolt(
   const pts: [number, number][] = [[x1, y1]];
   for (let i = 1; i < segments; i++) {
     const t = i / segments;
-    const jitter = Math.sin(seed * 12.9898 + i * 78.233) * 8;
+    // The bolt re-forms a few times in its short life, so it crackles.
+    const flick = Math.floor(progress * 5) * 37.7;
+    const jitter = Math.sin(seed * 12.9898 + i * 78.233 + flick) * 8;
     pts.push([
       x1 + (x2 - x1) * t + nx * jitter,
       y1 + (y2 - y1) * t + ny * jitter,
@@ -381,6 +398,7 @@ export function drawBolt(
     ]);
   }
   for (const [w, c] of [
+    [14, "rgba(103,232,249,0.22)"],
     [7, INK],
     [3.6, "#67e8f9"],
     [1.6, "#ffffff"],
@@ -1118,5 +1136,374 @@ export function drawMeteorWarning(
   ctx.arc(x, ry, r * 0.45, 0, Math.PI * 2);
   ctx.fillStyle = "#f97316";
   ctx.fill();
+  ctx.restore();
+}
+
+// --- Weapon effects on the ground and at the hero --------------------------
+
+const frac = (v: number) => v - Math.floor(v);
+
+/** What a meteor leaves behind: a scorched crater whose cracks glow orange,
+ * then cool and fade. `age` runs 0 (just landed) to 1 (gone). */
+export function drawScorch(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  age: number,
+) {
+  const a = Math.max(0, 1 - age);
+  if (a <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = 0.6 * a;
+  const g = ctx.createRadialGradient(x, y, radius * 0.1, x, y, radius);
+  g.addColorStop(0, "#0b0614");
+  g.addColorStop(0.65, "#1b1020");
+  g.addColorStop(1, "rgba(27,16,32,0)");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.ellipse(x, y, radius, radius * 0.72, 0, 0, Math.PI * 2);
+  ctx.fill();
+  const heat = Math.max(0, 1 - age * 2.2);
+  if (heat > 0) {
+    ctx.globalAlpha = 0.85 * heat;
+    ctx.strokeStyle = "#fb923c";
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (let k = 0; k < 7; k++) {
+      const ang = k * 0.9 + x * 0.013;
+      const len = radius * (0.35 + 0.45 * frac(k * 0.37 + y * 0.01));
+      const bend = (frac(k * 0.61 + x * 0.02) - 0.5) * 0.6;
+      ctx.beginPath();
+      ctx.moveTo(
+        x + Math.cos(ang) * radius * 0.12,
+        y + Math.sin(ang) * radius * 0.09,
+      );
+      ctx.lineTo(
+        x + Math.cos(ang + bend) * len * 0.6,
+        y + Math.sin(ang + bend) * len * 0.6 * 0.72,
+      );
+      ctx.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len * 0.72);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+/** A planted sentry: carved stone with glowing eyes and a cannon head that
+ * turns to its last target, kicks back when it fires, and cracks as it nears
+ * the end of its life. `sinceShot` is ms since the last shot. */
+export function drawTotem(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  now: number,
+  fade: number,
+  life: number,
+  aim: number,
+  sinceShot: number,
+) {
+  // `aim` is NaN until the totem has fired once; it idles, scanning, till then.
+  const hot = sinceShot < 140;
+  ctx.save();
+  ctx.globalAlpha = fade;
+  // Shadow and plinth.
+  ctx.fillStyle = "rgba(0,0,0,0.32)";
+  ctx.beginPath();
+  ctx.ellipse(x + 2, y + 9, 13, 4.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#57534e";
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(x - 11, y + 2, 22, 7, 2);
+  ctx.fill();
+  ctx.stroke();
+  // Body: a stone column, lit from the left.
+  const body = ctx.createLinearGradient(x - 8, 0, x + 8, 0);
+  body.addColorStop(0, "#d6d3d1");
+  body.addColorStop(0.4, "#a8a29e");
+  body.addColorStop(1, "#57534e");
+  ctx.fillStyle = body;
+  ctx.beginPath();
+  ctx.moveTo(x - 8, y + 3);
+  ctx.lineTo(x - 7, y - 13);
+  ctx.lineTo(x + 7, y - 13);
+  ctx.lineTo(x + 8, y + 3);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // A carved face: two eyes that flare when it fires, and a slot of a mouth.
+  const eye = hot ? "#fef08a" : "#f59e0b";
+  ctx.fillStyle = eye;
+  ctx.shadowColor = "#f59e0b";
+  ctx.shadowBlur = hot ? 10 : 4;
+  for (const sx of [-3.2, 3.2]) {
+    ctx.beginPath();
+    ctx.moveTo(x + sx - 1.9, y - 7);
+    ctx.lineTo(x + sx + 1.9, y - 7);
+    ctx.lineTo(x + sx, y - 3.6);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = INK;
+  ctx.fillRect(x - 3, y - 1, 6, 1.6);
+  ctx.strokeStyle = "rgba(15,23,42,0.5)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x - 6, y - 11);
+  ctx.lineTo(x - 3, y - 11);
+  ctx.moveTo(x + 3, y - 11);
+  ctx.lineTo(x + 6, y - 11);
+  ctx.stroke();
+  // Cracks as it crumbles.
+  if (life > 0.7) {
+    ctx.strokeStyle = "rgba(15,23,42,0.75)";
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.moveTo(x + 2, y - 12);
+    ctx.lineTo(x - 1, y - 6);
+    ctx.lineTo(x + 3, y);
+    ctx.stroke();
+  }
+  // The cannon head: turns toward the target, recoils on a shot.
+  const idle = Math.sin(now / 700 + x) * 0.45 - Math.PI / 2;
+  const dir = Number.isFinite(aim) ? aim : idle;
+  const recoil = hot ? -3.5 * (1 - sinceShot / 140) : 0;
+  ctx.translate(x, y - 15);
+  ctx.rotate(dir);
+  ctx.fillStyle = "#78716c";
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(recoil - 1, -3.2, 12, 6.4, 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#292524";
+  ctx.fillRect(recoil + 9.5, -2.2, 2, 4.4);
+  if (hot) {
+    ctx.fillStyle = "#fef08a";
+    ctx.beginPath();
+    ctx.moveTo(recoil + 12, 0);
+    ctx.lineTo(recoil + 19, -4);
+    ctx.lineTo(recoil + 24, 0);
+    ctx.lineTo(recoil + 19, 4);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.fillStyle = "#a8a29e";
+  ctx.beginPath();
+  ctx.arc(0, 0, 4.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Burning ground: a glow, a dark scorch, and flames in three layers (red
+ * outside, orange, a yellow core) that sway out of step, with embers rising. */
+export function drawFlamePatch(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  life: number,
+  now: number,
+) {
+  const fade = Math.min(1, life * 8, (1 - life) * 4);
+  if (fade <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = fade;
+  const glow = ctx.createRadialGradient(
+    x,
+    y,
+    radius * 0.1,
+    x,
+    y,
+    radius * 1.15,
+  );
+  glow.addColorStop(0, "rgba(251,146,60,0.5)");
+  glow.addColorStop(0.7, "rgba(220,38,38,0.2)");
+  glow.addColorStop(1, "rgba(220,38,38,0)");
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.ellipse(x, y, radius * 1.15, radius * 0.85, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(67,20,7,0.5)";
+  ctx.beginPath();
+  ctx.ellipse(x, y, radius * 0.9, radius * 0.62, 0, 0, Math.PI * 2);
+  ctx.fill();
+  const tongues = 6 + Math.round(radius / 14);
+  const scale = radius / 30;
+  const layers: [string, number, number][] = [
+    ["#dc2626", 1, 1],
+    ["#fb923c", 0.74, 0.78],
+    ["#fde047", 0.46, 0.5],
+  ];
+  for (const [color, hMul, wMul] of layers) {
+    ctx.fillStyle = color;
+    for (let k = 0; k < tongues; k++) {
+      const a = (k / tongues) * Math.PI * 2 + x * 0.01;
+      const rr = 0.35 + 0.35 * frac(k * 0.618 + y * 0.01);
+      const fx = x + Math.cos(a) * radius * rr;
+      const fy = y + Math.sin(a) * radius * rr * 0.62;
+      const h = (8 + 5 * Math.sin(now / 105 + k * 1.7)) * scale * hMul;
+      const w = 4.6 * Math.max(0.7, scale) * wMul;
+      const sway = Math.sin(now / 170 + k * 2.3) * 2 * scale;
+      ctx.beginPath();
+      ctx.moveTo(fx - w, fy);
+      ctx.quadraticCurveTo(
+        fx - w * 0.3 + sway,
+        fy - h * 0.9,
+        fx + sway,
+        fy - h * 1.7,
+      );
+      ctx.quadraticCurveTo(fx + w * 0.3 + sway, fy - h * 0.9, fx + w, fy);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+  ctx.fillStyle = "#fde68a";
+  for (let k = 0; k < 6; k++) {
+    const ph = (now / 1200 + k / 6) % 1;
+    ctx.globalAlpha = fade * (1 - ph);
+    ctx.beginPath();
+    ctx.arc(
+      x +
+        (frac(k * 0.73 + x * 0.01) - 0.5) * radius * 1.3 +
+        Math.sin(ph * 6 + k) * 4,
+      y - ph * radius * 0.9,
+      1.6,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** A gravity well: a dark core ringed by a bright event horizon, spiral arms
+ * that turn, and motes of light streaming in toward the middle. */
+export function drawGravityWell(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  life: number,
+  now: number,
+) {
+  const fade = Math.min(1, life * 6, (1 - life) * 6);
+  if (fade <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = fade;
+  const lens = ctx.createRadialGradient(x, y, radius * 0.05, x, y, radius);
+  lens.addColorStop(0, "rgba(15,10,40,0.85)");
+  lens.addColorStop(0.45, "rgba(76,29,149,0.38)");
+  lens.addColorStop(1, "rgba(167,139,250,0)");
+  ctx.fillStyle = lens;
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+  // The reach of the pull, as a slow dashed ring.
+  ctx.strokeStyle = "rgba(196,181,253,0.45)";
+  ctx.lineWidth = 1.6;
+  ctx.setLineDash([6, 8]);
+  ctx.lineDashOffset = -now / 40;
+  ctx.beginPath();
+  ctx.arc(x, y, radius * 0.97, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // Spiral arms.
+  ctx.lineCap = "round";
+  for (let k = 0; k < 4; k++) {
+    const a0 = now / 480 + (k * Math.PI * 2) / 4;
+    for (const [rr, w, col] of [
+      [radius * 0.9, 3.5, "rgba(196,181,253,0.9)"],
+      [radius * 0.62, 3, "rgba(167,139,250,0.9)"],
+      [radius * 0.34, 2.4, "rgba(221,214,254,0.95)"],
+    ] as const) {
+      ctx.lineWidth = w;
+      ctx.strokeStyle = col;
+      ctx.beginPath();
+      ctx.arc(x, y, rr, a0 + rr / 45, a0 + rr / 45 + 0.75);
+      ctx.stroke();
+    }
+  }
+  // Motes spiralling in, faster and brighter as they near the core.
+  ctx.fillStyle = "#ede9fe";
+  for (let k = 0; k < 16; k++) {
+    const p = (now / 1300 + k / 16) % 1;
+    const rr = radius * (1 - p) * 0.95;
+    const ang = k * 2.4 + p * 5;
+    ctx.globalAlpha = fade * Math.min(1, p * 2);
+    ctx.beginPath();
+    ctx.arc(
+      x + Math.cos(ang) * rr,
+      y + Math.sin(ang) * rr,
+      1.2 + p * 1.8,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+  }
+  ctx.globalAlpha = fade;
+  // The event horizon: a black disc with a bright rim.
+  ctx.fillStyle = "#06031a";
+  ctx.beginPath();
+  ctx.arc(x, y, radius * 0.14, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.lineWidth = 2.4;
+  ctx.strokeStyle = "#ddd6fe";
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** A short flash at the hero's hand when a ranged weapon fires. `progress`
+ * runs 0 (just fired) to 1 (gone). */
+export function drawMuzzleFlash(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  angle: number,
+  progress: number,
+  color: string,
+) {
+  const a = Math.max(0, 1 - progress);
+  if (a <= 0) return;
+  const len = 9 + 11 * (1 - progress);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.globalAlpha = a;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(len * 0.6, -5.5);
+  ctx.lineTo(len * 1.7, 0);
+  ctx.lineTo(len * 0.6, 5.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(len * 0.5, -2.6);
+  ctx.lineTo(len * 1.1, 0);
+  ctx.lineTo(len * 0.5, 2.6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 1.4;
+  ctx.lineCap = "round";
+  for (const [dy, l] of [
+    [-7, 1.3],
+    [7, 1.3],
+    [0, 2.1],
+  ] as const) {
+    ctx.beginPath();
+    ctx.moveTo(len * 0.5, dy * 0.3);
+    ctx.lineTo(len * l, dy);
+    ctx.stroke();
+  }
   ctx.restore();
 }

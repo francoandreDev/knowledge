@@ -144,6 +144,37 @@ import {
 } from "kontra";
 import { createLogger } from "./logger";
 import { BIOMES, createBackdrop, type Biome } from "./scenery";
+import {
+  AIRBORNE_KINDS,
+  BARREL_BLAST,
+  FUSE_MS,
+  GOO_ENEMY_SPEED,
+  GOO_PLAYER_SPEED,
+  HAZARD_CAP,
+  MINE_BLAST,
+  REFILL_EVERY_MS,
+  SPIKE_ENEMY_DAMAGE,
+  SPIKE_PLAYER_DAMAGE,
+  SPIKE_TICK_MS,
+  blastFalloff,
+  insideGoo,
+  onSpikes,
+  placeHazards,
+  placeOne,
+  pushOutOfPillars,
+  touches,
+  type Blast,
+  type Hazard,
+} from "./hazards";
+import { drawHazards } from "./hazardView";
+import {
+  MUTATION_FIRST_LEVELUP,
+  drawMutations,
+  isCrossroads,
+  mutationById,
+  type MutationId,
+  type MutationRarity,
+} from "./mutations";
 import type { UpgradeEffects } from "./shop";
 import { noEffects } from "./relics";
 import { lighten } from "./characters";
@@ -209,7 +240,12 @@ import {
   drawDashLine,
   drawEliteMarker,
   drawMeteorWarning,
+  drawMuzzleFlash,
   drawNovaRing,
+  drawScorch,
+  drawTotem,
+  drawFlamePatch,
+  drawGravityWell,
   drawOffscreenArrow,
   drawParticles,
   drawSlamWarning,
@@ -255,6 +291,9 @@ const DEFAULT_RUN_DURATION_S = 90; // fallback only if a caller omits durationS
 
 // --- Phase 2: spawn density ramp ---
 const BASE_SPAWN_INTERVAL_MS = 1400;
+// The field now fights back (mines, traps, barrels), so fewer enemies arrive:
+// every spawn gap is this much longer, floor included.
+const SPAWN_RELIEF = 1.2;
 const RAMP_HALF_LIFE_S = 45; // spawn interval halves roughly every 45s
 const MIN_SPAWN_INTERVAL_MS = 150; // perf floor — see file header
 const MAX_ALIVE_ENEMIES = 60; // perf cap — see file header
@@ -852,6 +891,8 @@ const ORBIT_TRAIL_VISUAL_RADIUS = 5;
 const SHOCKWAVE_KNOCKBACK = 40; // Nova Pulse evolution (Lv6)
 
 const PULSE_EFFECT_DURATION_MS = 300;
+const SCORCH_DURATION_MS = 4200; // a meteor's crater cools and fades
+const MUZZLE_FLASH_MS = 130;
 const TOTEM_RANGE = 270; // a totem shoots enemies within this of itself
 const TOTEM_SPREAD_PX = 56; // how far from the hero a totem is planted
 const WELL_RANGE = 380; // wells open on crowds within this of the player
@@ -991,12 +1032,19 @@ export interface LevelUpCard {
   // added "ability" — a one-time, non-stacking, non-leveled pick (currently
   // just "Embrace Necromancy") that changes run-scoped state rather than a
   // weapon or a stat, see applyCard()'s "ability" branch.
-  kind: "weaponUpgrade" | "newWeapon" | "stat" | "ability";
+  kind: "weaponUpgrade" | "newWeapon" | "stat" | "ability" | "mutation";
   weaponId?: WeaponId;
   statId?: string;
   isEvolution?: boolean;
   title: string;
   description: string;
+  /** Mutation cards: how rare it is, and what it costs, if anything. */
+  rarity?: MutationRarity;
+  drawback?: string;
+  /** Mutation cards: true when this pick is one of a crossroads' three. */
+  crossroads?: boolean;
+  /** Weapon cards past their evolution: faster fire instead of a level. */
+  overclock?: boolean;
   /** Weapon cards: the level now (0 when the weapon is not owned yet). */
   specialId?: SpecialId;
   /** How well the card fits the run's style (set by the opening weapon). */
@@ -1029,6 +1077,8 @@ export interface LevelUpBuild {
     stacks: number;
     maxStacks: number;
   }[];
+  /** Mutations taken this run. */
+  mutations: { id: string; name: string; rarity: MutationRarity }[];
 }
 
 export interface GameHudState {
@@ -1184,6 +1234,8 @@ interface Enemy extends GameObject {
   lastOrbitHitAt?: number;
   // Phase 11: brief white hit-flash, see HIT_FLASH_MS
   hitFlashUntil?: number;
+  /** HP at the first hit it took: what Volatile scales its blast from. */
+  hp0?: number;
   // Phase 16A: zombie lunge (tier 2+)
   lungeUntil?: number;
   lastLungeAt?: number;
@@ -1273,6 +1325,8 @@ interface WeaponRuntime {
   level: number;
   lastActionAt: number;
   orbitAngle?: number;
+  /** Overclock picks: each makes this weapon fire 10% faster. */
+  overclock?: number;
 }
 
 interface ArcEffect {
@@ -1401,12 +1455,18 @@ const FREEZE_MS = 2500;
 
 interface InternalCard {
   id: string;
-  kind: "weaponUpgrade" | "newWeapon" | "stat" | "ability";
+  kind: "weaponUpgrade" | "newWeapon" | "stat" | "ability" | "mutation";
   weaponId?: WeaponId;
   statId?: string;
   isEvolution?: boolean;
   title: string;
   description: string;
+  rarity?: MutationRarity;
+  drawback?: string;
+  crossroads?: boolean;
+  /** Overclock cards: a weapon past its evolution fires faster instead of
+   * hitting harder. */
+  overclock?: boolean;
   synergy?: { name: string; blurb: string };
   specialId?: SpecialId;
   fit?: CardFit;
@@ -1454,7 +1514,7 @@ function currentSpawnIntervalMs(elapsedS: number): number {
   // Phase 16A: spawn density drops as threat tier rises — a smarter/more
   // dangerous roster means fewer enemies on screen, not more of them.
   const tierMult = SPAWN_INTERVAL_TIER_MULT[computeThreatTier(elapsedS)] ?? 1;
-  return Math.max(MIN_SPAWN_INTERVAL_MS, interval * tierMult);
+  return Math.max(MIN_SPAWN_INTERVAL_MS, interval * tierMult) * SPAWN_RELIEF;
 }
 
 function pickEnemyDef(elapsedS: number): EnemyDef {
@@ -1742,6 +1802,11 @@ export function startGame(
     lastTickAt: number;
   }[] = [];
   // Meteor Rain: marked ground waiting for its rock to land.
+  // Visual-only effects: the crater a meteor leaves, and the flash at the
+  // hero's hand when a ranged weapon fires.
+  const scorchMarks: { x: number; y: number; radius: number; at: number }[] =
+    [];
+  const muzzleFlashes: { angle: number; at: number; color: string }[] = [];
   const meteorStrikes: {
     x: number;
     y: number;
@@ -1808,6 +1873,27 @@ export function startGame(
   let xp = 0;
   let pendingLevelUps = 0;
   let lastDrawnCards: Map<string, InternalCard> = new Map();
+  // Mutations taken this run, and the clocks and queues they run on.
+  const mutations = new Set<MutationId>();
+  const has = (id: MutationId) => mutations.has(id);
+  let levelUpNo = 0;
+  let momentum = 0;
+  let lastKillAt = -Infinity;
+  let nextColdSnapAt = 18000;
+  let nextTimeWarpAt = 30000;
+  let timeWarpUntil = -Infinity;
+  let blastDepth = 0;
+  const echoQueue: { at: number; target: Enemy; amount: number }[] = [];
+  // The field's hazards (none in the lab): see hazards.ts.
+  const hazards: Hazard[] = [];
+  let nextRefillAt = REFILL_EVERY_MS;
+  if (!training) {
+    hazards.push(
+      ...placeHazards(Math.random, { w: WORLD_W, h: WORLD_H }, [
+        { x: WORLD_W / 2, y: WORLD_H / 2, r: 90 },
+      ]),
+    );
+  }
   const statStacks: Record<string, number> = {};
   let damageMult = 1;
   let speedMult = 1;
@@ -2351,6 +2437,7 @@ export function startGame(
   }
 
   function damageEnemy(e: Enemy, amount: number, source: string) {
+    if (e.hp0 === undefined) e.hp0 = e.hp;
     const crit = upgradeEffects.critChance + critTemp;
     if (
       crit > 0 &&
@@ -2386,6 +2473,19 @@ export function startGame(
     const finalAmount = e.shieldWalled
       ? amount * (1 - SHIELD_WALL_DAMAGE_REDUCTION)
       : amount;
+    // Echo: some weapon hits strike again a moment later.
+    if (
+      has("echo") &&
+      source !== "echo" &&
+      weaponIdForSource(source) &&
+      Math.random() < 0.12
+    ) {
+      echoQueue.push({
+        at: elapsedMs + 220,
+        target: e,
+        amount: finalAmount * 0.6,
+      });
+    }
     const dealt = Math.min(finalAmount, Math.max(0, e.hp));
     e.hp -= finalAmount;
     const owner =
@@ -2468,6 +2568,32 @@ export function startGame(
       }
       log.log("kill:enemy", { kind: e.kind, source, totalKills: kills });
       leaveCorpse(e, isBoss);
+      // Momentum: a kill within 3 s of the last builds the streak.
+      if (has("momentum")) {
+        momentum =
+          elapsedMs - lastKillAt <= 3000 ? Math.min(10, momentum + 1) : 1;
+        lastKillAt = elapsedMs;
+      }
+      // Volatile: the dead explode, and chains build on themselves (depth
+      // capped so a packed crowd cannot recurse without end).
+      if (has("volatile") && blastDepth < 4) {
+        const reach = 52;
+        const burstDmg = Math.max(6, (e.hp0 ?? 10) * 0.4);
+        blastDepth += 1;
+        for (const o of enemies) {
+          if (!o.alive || o === e) continue;
+          const d = distance(o, e);
+          if (d < reach + o.radius) {
+            damageEnemy(
+              o,
+              burstDmg * blastFalloff(Math.max(0, d - o.radius * 0.5), reach),
+              "volatile",
+            );
+          }
+        }
+        blastDepth -= 1;
+        if (!reduceMotion) ringPop(particles, e.x, e.y, "#fb923c", reach);
+      }
       spawnGem(e.x, e.y);
       maybeSpawnCoin(e);
       if (e.kind === "reaper" || e.kind === "lich") {
@@ -2766,6 +2892,8 @@ export function startGame(
       }
     }
     amount *= 1 - Math.min(0.6, upgradeEffects.armor + armorTemp);
+    // Bastion: standing still turns you into a wall.
+    if (has("bastion") && playerIsIdle) amount *= 0.7;
     // Ironclad: no single hit takes more than a slice of max HP.
     if (upgradeEffects.hitCap > 0) {
       amount = Math.min(amount, effectiveMaxHp() * upgradeEffects.hitCap);
@@ -2835,6 +2963,213 @@ export function startGame(
     if (player.hp <= 0) {
       playDeath();
       endGame("death");
+    }
+  }
+
+  // --- Mutations -----------------------------------------------------------
+  // One-off stat changes happen here when a mutation is picked; the rest are
+  // read where they act (see has(...) in damageEnemy, damagePlayer, the kill
+  // block, movement and the weapon loop below).
+  function applyMutation(id: MutationId) {
+    const base = PLAYER_MAX_HP * upgradeEffects.maxHpMult;
+    switch (id) {
+      case "glassCannon":
+        damageMult *= 1.45;
+        maxHpBonus -= base * 0.25;
+        break;
+      case "titan":
+        damageMult *= 1.25;
+        maxHpBonus += base * 0.5;
+        speedMult *= 0.8;
+        player.hp += base * 0.5;
+        break;
+      case "bastion":
+        speedMult *= 0.9;
+        break;
+      case "devilsBargain":
+        xpTemp += 1;
+        slowTemp -= 0.15;
+        break;
+      case "coldSnap":
+        nextColdSnapAt = elapsedMs + 18000;
+        break;
+      case "timeWarp":
+        nextTimeWarpAt = elapsedMs + 30000;
+        break;
+      default:
+        break;
+    }
+    player.hp = Math.min(player.hp, effectiveMaxHp());
+  }
+
+  const lowHp = () => player.hp / effectiveMaxHp() < 0.4;
+
+  // Attack speed the mutations add, on top of the shop's and the cards'.
+  function mutationHaste(): number {
+    let h = 0;
+    if (has("momentum")) h += Math.min(0.4, momentum * 0.04);
+    if (has("bastion") && playerIsIdle) h += 0.15;
+    if (has("adrenaline") && lowHp()) h += 0.3;
+    return h;
+  }
+
+  // The mutations that run on a clock rather than on an event.
+  function runMutationClocks() {
+    if (has("momentum") && elapsedMs - lastKillAt > 3000) momentum = 0;
+    while (echoQueue.length > 0 && echoQueue[0].at <= elapsedMs) {
+      const q = echoQueue.shift()!;
+      if (q.target.alive) damageEnemy(q.target, q.amount, "echo");
+    }
+    if (has("coldSnap") && elapsedMs >= nextColdSnapAt) {
+      nextColdSnapAt = elapsedMs + 18000;
+      const reach = FREEZE_RADIUS * 0.7;
+      for (const e of enemies) {
+        if (e.alive && distance(player, e) <= reach) {
+          e.frozenUntil = elapsedMs + 1500;
+        }
+      }
+      pulseEffects.push({
+        x: player.x,
+        y: player.y,
+        radius: reach,
+        createdAt: elapsedMs,
+        color: "#7dd3fc",
+      });
+    }
+    if (has("timeWarp") && elapsedMs >= nextTimeWarpAt) {
+      nextTimeWarpAt = elapsedMs + 30000;
+      timeWarpUntil = elapsedMs + 4000;
+      banners.push({
+        text: "TIME WARP",
+        sub: "the enemies crawl",
+        at: elapsedMs,
+        color: "#fcd34d",
+      });
+    }
+  }
+
+  // --- Hazards ---------------------------------------------------------------
+  // Hazards hit harder as the run goes on, on the same curve as enemy HP, so
+  // a mine that flattens a crowd early still matters late.
+  function hazardScale(): number {
+    return 0.7 * enemyTimeScale(elapsedMs / 1000, ENEMY_HP_SCALE_CAP) + 0.3;
+  }
+
+  function explodeAt(x: number, y: number, blast: Blast, from: Hazard | null) {
+    const demo = has("demolitionist");
+    const scale = hazardScale() * (demo ? 2 : 1);
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      const d = Math.hypot(e.x - x, e.y - y);
+      if (d < blast.radius + e.radius) {
+        const fall = blastFalloff(
+          Math.max(0, d - e.radius * 0.5),
+          blast.radius,
+        );
+        damageEnemy(e, blast.enemyDamage * scale * fall, "hazard");
+      }
+    }
+    const dp = Math.hypot(player.x - x, player.y - y);
+    if (!demo && dp < blast.radius) {
+      damagePlayer(
+        blast.playerDamage * blastFalloff(dp, blast.radius),
+        "hazard:blast",
+        x,
+        y,
+      );
+    }
+    // Anything volatile nearby goes off a beat later, so a minefield chains.
+    for (const h of hazards) {
+      if (!h.alive || h === from || h.fuseAt !== null) continue;
+      if (
+        (h.kind === "mine" || h.kind === "barrel") &&
+        Math.hypot(h.x - x, h.y - y) < blast.radius
+      ) {
+        h.fuseAt = elapsedMs + FUSE_MS;
+      }
+    }
+    if (!reduceMotion) {
+      ringPop(particles, x, y, "#fb923c", blast.radius);
+      burst(particles, x, y, "#fde047", 18, 260);
+      burst(particles, x, y, "#f97316", 12, 190);
+    }
+    if (feedbackOn) {
+      shakeMag = 5;
+      shakeUntil = elapsedMs + 220;
+    }
+    playHit();
+    log.log("hazard:explode", { x, y, radius: blast.radius });
+  }
+
+  function updateHazards() {
+    const now = elapsedMs;
+    const demo = has("demolitionist");
+    const scale = hazardScale() * (demo ? 2 : 1);
+    for (const h of hazards) {
+      if (!h.alive) continue;
+      if (h.kind === "mine" || h.kind === "barrel") {
+        if (h.fuseAt === null) {
+          const armed = h.kind === "barrel" || now >= h.armedAt;
+          if (!armed) continue;
+          let tripped = touches(h, player, PLAYER_RADIUS);
+          if (!tripped) {
+            for (const e of enemies) {
+              if (
+                e.alive &&
+                !AIRBORNE_KINDS.has(e.kind) &&
+                touches(h, e, e.radius)
+              ) {
+                tripped = true;
+                break;
+              }
+            }
+          }
+          if (tripped) h.fuseAt = now + FUSE_MS;
+        } else if (now >= h.fuseAt) {
+          h.alive = false;
+          explodeAt(h.x, h.y, h.kind === "mine" ? MINE_BLAST : BARREL_BLAST, h);
+          if (status !== "running") return;
+        }
+      } else if (h.kind === "spikes" && now - h.lastTickAt >= SPIKE_TICK_MS) {
+        let hit = false;
+        for (const e of enemies) {
+          if (
+            e.alive &&
+            !AIRBORNE_KINDS.has(e.kind) &&
+            onSpikes(h, e, e.radius, now)
+          ) {
+            damageEnemy(e, SPIKE_ENEMY_DAMAGE * scale, "hazard");
+            hit = true;
+          }
+        }
+        if (!demo && onSpikes(h, player, PLAYER_RADIUS, now)) {
+          damagePlayer(SPIKE_PLAYER_DAMAGE, "hazard:spikes", h.x, h.y);
+          hit = true;
+          if (status !== "running") return;
+        }
+        if (hit) h.lastTickAt = now;
+      }
+    }
+    for (let i = hazards.length - 1; i >= 0; i--) {
+      if (!hazards[i].alive) hazards.splice(i, 1);
+    }
+    // Mines and barrels are used up, so the field restocks them slowly and
+    // never right on top of the player.
+    if (now >= nextRefillAt) {
+      nextRefillAt = now + REFILL_EVERY_MS;
+      for (const kind of ["mine", "barrel"] as const) {
+        const cap = HAZARD_CAP[kind] ?? 0;
+        if (hazards.filter((h) => h.kind === kind).length >= cap) continue;
+        const fresh = placeOne(
+          Math.random,
+          { w: WORLD_W, h: WORLD_H },
+          kind,
+          hazards,
+          [{ x: player.x, y: player.y, r: 110 }],
+          now,
+        );
+        if (fresh) hazards.push(fresh);
+      }
     }
   }
 
@@ -2997,12 +3332,28 @@ export function startGame(
   function applyCard(card: InternalCard) {
     if (card.kind === "weaponUpgrade" && card.weaponId) {
       const w = ownedWeapons.find((w) => w.id === card.weaponId);
-      if (w) {
+      if (w && card.overclock) {
+        w.overclock = (w.overclock ?? 0) + 1;
+        log.log("card:overclock", { id: w.id, stacks: w.overclock });
+      } else if (w) {
         w.level += 1;
         if (w.level === WEAPON_MAX_LEVEL) {
           playEvolution();
         }
         log.log("card:weaponUpgrade", { id: w.id, newLevel: w.level });
+      }
+    } else if (card.kind === "mutation" && card.id.startsWith("mutation:")) {
+      const id = card.id.slice("mutation:".length) as MutationId;
+      if (!mutations.has(id)) {
+        mutations.add(id);
+        applyMutation(id);
+        banners.push({
+          text: card.title.toUpperCase(),
+          sub: card.drawback ?? "the run takes a new shape",
+          at: elapsedMs,
+          color: card.rarity === "legendary" ? "#fcd34d" : "#c084fc",
+        });
+        log.log("card:mutation", { id });
       }
     } else if (card.kind === "newWeapon" && card.weaponId) {
       if (ownedWeapons.some((w) => w.id === card.weaponId)) {
@@ -3049,17 +3400,6 @@ export function startGame(
   function buildCardPool(): InternalCard[] {
     const pool: InternalCard[] = [];
     for (const w of ownedWeapons) {
-      if (w.level >= WEAPON_MAX_LEVEL && endless) {
-        // Past the evolution, endless runs keep levelling: no ceiling.
-        const gain = Math.round((OVERDRIVE_DAMAGE_PER_LEVEL - 1) * 100);
-        pool.push({
-          id: `weaponUpgrade:${w.id}`,
-          kind: "weaponUpgrade",
-          weaponId: w.id,
-          title: `Overdrive ${EVOLVED_NAMES[w.id]} — Lv ${w.level + 1}`,
-          description: `+${gain}% damage, stacks with no limit`,
-        });
-      }
       if (w.level < WEAPON_MAX_LEVEL) {
         const isEvolution = w.level + 1 === WEAPON_MAX_LEVEL;
         pool.push({
@@ -3135,6 +3475,32 @@ export function startGame(
         });
       }
     }
+    // Past the evolution a weapon can still grow, two ways: hit harder
+    // (Overdrive) or fire faster (Overclock). They only join the pool when it
+    // would otherwise run thin, or in Endless, so a run that is still
+    // levelling weapons is not buried in them.
+    if (endless || pool.length < 3) {
+      for (const w of ownedWeapons) {
+        if (w.level < WEAPON_MAX_LEVEL) continue;
+        const gain = Math.round((OVERDRIVE_DAMAGE_PER_LEVEL - 1) * 100);
+        pool.push({
+          id: `weaponUpgrade:${w.id}`,
+          kind: "weaponUpgrade",
+          weaponId: w.id,
+          title: `Overdrive ${EVOLVED_NAMES[w.id]} — Lv ${w.level + 1}`,
+          description: `+${gain}% damage, stacks with no limit`,
+        });
+        pool.push({
+          id: `overclock:${w.id}`,
+          kind: "weaponUpgrade",
+          weaponId: w.id,
+          overclock: true,
+          title: `Overclock ${EVOLVED_NAMES[w.id]}${w.overclock ? ` — ×${w.overclock + 1}` : ""}`,
+          description:
+            "+10% attack speed for this weapon, stacks with no limit",
+        });
+      }
+    }
     for (const c of pool) {
       let style: RunStyle | undefined;
       let fit: CardFit = "neutral";
@@ -3170,7 +3536,28 @@ export function startGame(
 
   // Weighted pick of four without repeats: cards that fit the run's style are
   // likelier, off-style ones rare but never gone.
+  function mutationCard(
+    m: ReturnType<typeof mutationById> & object,
+    crossroads: boolean,
+  ): InternalCard {
+    return {
+      id: `mutation:${m.id}`,
+      kind: "mutation",
+      title: m.name,
+      description: m.blurb,
+      rarity: m.rarity,
+      drawback: m.drawback,
+      crossroads,
+    };
+  }
+
   function drawCards(): InternalCard[] {
+    levelUpNo += 1;
+    // Every fifth level-up is a crossroads: three mutations, none common.
+    if (isCrossroads(levelUpNo)) {
+      const picks = drawMutations([...mutations], 3, Math.random, "rare");
+      if (picks.length > 0) return picks.map((m) => mutationCard(m, true));
+    }
     const rest = buildCardPool();
     const out: InternalCard[] = [];
     while (out.length < 4 && rest.length > 0) {
@@ -3184,6 +3571,16 @@ export function startGame(
         if (r <= 0) break;
       }
       out.push(rest.splice(idx, 1)[0]);
+    }
+    // From the fourth level-up a mutation takes the last slot: a twist
+    // among the usual upgrades, and which one it is is luck.
+    if (levelUpNo >= MUTATION_FIRST_LEVELUP) {
+      const [m] = drawMutations([...mutations], 1);
+      if (m) {
+        const card = mutationCard(m, false);
+        if (out.length >= 4) out[out.length - 1] = card;
+        else out.push(card);
+      }
     }
     return out;
   }
@@ -3202,6 +3599,10 @@ export function startGame(
       style: c.style,
       synergy: c.synergy,
       isEvolution: c.isEvolution,
+      overclock: c.overclock,
+      rarity: c.rarity,
+      drawback: c.drawback,
+      crossroads: c.crossroads,
       title: c.title,
       description: c.description,
       fromLevel:
@@ -3227,6 +3628,10 @@ export function startGame(
         maxLevel: WEAPON_MAX_LEVEL,
         evolvedName: EVOLVED_NAMES[w.id],
       })),
+      mutations: [...mutations].flatMap((id) => {
+        const d = mutationById(id);
+        return d ? [{ id, name: d.name, rarity: d.rarity }] : [];
+      }),
       stats: TEMP_STATS.filter((s) => (statStacks[s.id] ?? 0) > 0).map((s) => ({
         id: s.id,
         label: s.label,
@@ -3705,6 +4110,9 @@ export function startGame(
       ? Math.atan2(target.y - player.y, target.x - player.x)
       : playerFacingAngle;
     lastAttack = { id: w.id, at: elapsedMs, angle };
+    if (w.id === "bolt" || w.id === "homingDart" || w.id === "chainLightning") {
+      muzzleFlashes.push({ angle, at: elapsedMs, color: WEAPON_COLOR[w.id] });
+    }
     if (!reduceMotion && w.id !== "orbitShield" && w.id !== "novaPulse") {
       burst(
         particles,
@@ -4499,7 +4907,12 @@ export function startGame(
       if (moveMagnitude > 0) {
         playerFacingAngle = Math.atan2(moveY, moveX); // Phase 9: sprite orientation
         const speed =
-          PLAYER_SPEED * speedMult * upgradeEffects.speedMult * moveMagnitude;
+          PLAYER_SPEED *
+          speedMult *
+          upgradeEffects.speedMult *
+          (has("adrenaline") && lowHp() ? 1.25 : 1) *
+          (insideGoo(player, PLAYER_RADIUS, hazards) ? GOO_PLAYER_SPEED : 1) *
+          moveMagnitude;
         player.x = Math.min(
           Math.max(player.x + moveX * speed * dt, PLAYER_RADIUS),
           WORLD_W - PLAYER_RADIUS,
@@ -4508,12 +4921,20 @@ export function startGame(
           Math.max(player.y + moveY * speed * dt, PLAYER_RADIUS),
           WORLD_H - PLAYER_RADIUS,
         );
+        pushOutOfPillars(player, PLAYER_RADIUS, hazards);
         playerVelX = moveX * speed; // Phase 16A: zombie lunge's "moving away" check
         playerVelY = moveY * speed;
       } else {
         playerVelX = 0;
         playerVelY = 0;
       }
+
+      // --- hazards and the clocks the mutations run on ---
+      if (!training) {
+        updateHazards();
+        if (status !== "running") return;
+      }
+      runMutationClocks();
 
       // --- Phase 16B: enemy pack synergies, throttled scan (not per-frame) ---
       if (elapsedMs - lastSynergyScanAt >= SYNERGY_SCAN_INTERVAL_MS) {
@@ -4567,6 +4988,10 @@ export function startGame(
           dt *
             (1 - Math.min(0.5, upgradeEffects.enemySlow + slowTemp)) *
             (options.enemySpeedMult ?? 1) *
+            (elapsedMs < timeWarpUntil ? 0.4 : 1) *
+            (!AIRBORNE_KINDS.has(e.kind) && insideGoo(e, e.radius, hazards)
+              ? GOO_ENEMY_SPEED
+              : 1) *
             (e.tier === "elite" ? ELITE_SPEED_MULT : 1) *
             (frozen ? 0.05 : 1),
         );
@@ -4598,8 +5023,9 @@ export function startGame(
       }
 
       // --- weapons (Phase 3: all owned weapons act every frame) ---
-      const haste = upgradeEffects.haste + hasteTemp;
+      const baseHaste = upgradeEffects.haste + hasteTemp + mutationHaste();
       for (const w of ownedWeapons) {
+        const haste = baseHaste + (w.overclock ?? 0) * 0.1;
         // Haste: age the cooldown faster than the clock does.
         if (haste > 0) w.lastActionAt -= dt * 1000 * haste;
         const before = w.lastActionAt;
@@ -4973,9 +5399,20 @@ export function startGame(
         });
         burst(particles, m.x, m.y, "#fb923c", 12, 260);
         burst(particles, m.x, m.y, "#fde68a", 6, 140);
+        scorchMarks.push({ x: m.x, y: m.y, radius: m.radius, at: elapsedMs });
         if (m.radius >= 60) {
           shakeMag = 3;
           shakeUntil = elapsedMs + 140;
+        }
+      }
+      for (let i = scorchMarks.length - 1; i >= 0; i--) {
+        if (elapsedMs - scorchMarks[i].at >= SCORCH_DURATION_MS) {
+          scorchMarks.splice(i, 1);
+        }
+      }
+      for (let i = muzzleFlashes.length - 1; i >= 0; i--) {
+        if (elapsedMs - muzzleFlashes[i].at >= MUZZLE_FLASH_MS) {
+          muzzleFlashes.splice(i, 1);
         }
       }
       for (let i = pulseEffects.length - 1; i >= 0; i--) {
@@ -5071,6 +5508,16 @@ export function startGame(
           );
         }
       }
+      for (const sc of scorchMarks) {
+        drawScorch(
+          context,
+          sc.x,
+          sc.y,
+          sc.radius,
+          (elapsedMs - sc.at) / SCORCH_DURATION_MS,
+        );
+      }
+      drawHazards(context, hazards, elapsedMs);
       // Ground warnings first, so enemies and the player stand on top.
       for (const e of enemies) {
         if (e.kind === "ogre" && e.chargeUntil && e.chargeStartedAt != null) {
@@ -5472,6 +5919,17 @@ export function startGame(
         );
       }
 
+      for (const f of muzzleFlashes) {
+        drawMuzzleFlash(
+          context,
+          player.x + Math.cos(f.angle) * PLAYER_RADIUS * 1.8,
+          player.y + Math.sin(f.angle) * PLAYER_RADIUS * 1.8,
+          f.angle,
+          (elapsedMs - f.at) / MUZZLE_FLASH_MS,
+          f.color,
+        );
+      }
+
       for (const st of enemyStrikes) {
         drawSlash(
           context,
@@ -5486,88 +5944,55 @@ export function startGame(
       }
 
       for (const f of firePatches) {
-        const life = (elapsedMs - f.startedAt) / (f.endsAt - f.startedAt);
-        const fade = Math.min(1, life * 8, (1 - life) * 4);
-        context.save();
-        context.globalAlpha = 0.32 * fade;
-        context.fillStyle = "#9a3412";
-        context.beginPath();
-        context.ellipse(f.x, f.y, f.radius, f.radius * 0.7, 0, 0, Math.PI * 2);
-        context.fill();
-        context.globalAlpha = 0.9 * fade;
-        for (let k = 0; k < 5; k++) {
-          const a = (k / 5) * Math.PI * 2 + f.x;
-          const fx = f.x + Math.cos(a) * f.radius * 0.55;
-          const fy = f.y + Math.sin(a) * f.radius * 0.38;
-          const h =
-            (5 + 4 * Math.sin(elapsedMs / 110 + k * 1.7)) * (f.radius / 30);
-          context.fillStyle = k % 2 ? "#fb923c" : "#fbbf24";
-          context.beginPath();
-          context.moveTo(fx - 3, fy);
-          context.quadraticCurveTo(fx, fy - h * 1.6, fx + 3, fy);
-          context.closePath();
-          context.fill();
-        }
-        context.restore();
+        drawFlamePatch(
+          context,
+          f.x,
+          f.y,
+          f.radius,
+          (elapsedMs - f.startedAt) / (f.endsAt - f.startedAt),
+          elapsedMs,
+        );
       }
       for (const t of totems) {
         const life = (elapsedMs - t.startedAt) / (t.endsAt - t.startedAt);
-        const fade = Math.min(1, life * 10, (1 - life) * 6);
-        context.save();
-        context.globalAlpha = fade;
-        context.fillStyle = "rgba(0,0,0,0.3)";
-        context.beginPath();
-        context.ellipse(t.x, t.y + 8, 10, 4, 0, 0, Math.PI * 2);
-        context.fill();
-        context.fillStyle = "#78716c";
-        context.fillRect(t.x - 6, t.y - 14, 12, 22);
-        context.fillStyle = "#a8a29e";
-        context.fillRect(t.x - 6, t.y - 14, 4, 22);
-        const hot = elapsedMs - t.shotAt < 140;
-        context.fillStyle = hot ? "#fef08a" : "#f59e0b";
-        context.beginPath();
-        context.arc(t.x, t.y - 6, hot ? 4.5 : 3, 0, Math.PI * 2);
-        context.fill();
-        if (hot) {
+        drawTotem(
+          context,
+          t.x,
+          t.y,
+          elapsedMs,
+          Math.min(1, life * 10, (1 - life) * 6),
+          life,
+          t.shotAt > -9000
+            ? Math.atan2(t.shotY - (t.y - 15), t.shotX - t.x)
+            : NaN,
+          elapsedMs - t.shotAt,
+        );
+        // The tracer of a shot that has just left the barrel.
+        if (elapsedMs - t.shotAt < 140) {
+          context.save();
+          context.globalAlpha = Math.min(
+            1,
+            t.shotAt > -9000 ? 1 - (elapsedMs - t.shotAt) / 140 : 0,
+          );
           context.strokeStyle = "#fde047";
           context.lineWidth = 2;
+          context.lineCap = "round";
           context.beginPath();
-          context.moveTo(t.x, t.y - 6);
+          context.moveTo(t.x, t.y - 15);
           context.lineTo(t.shotX, t.shotY);
           context.stroke();
+          context.restore();
         }
-        context.restore();
       }
       for (const g of gravityWells) {
-        const life = (elapsedMs - g.startedAt) / (g.endsAt - g.startedAt);
-        const fade = Math.min(1, life * 6, (1 - life) * 6);
-        context.save();
-        context.globalAlpha = 0.28 * fade;
-        context.fillStyle = "#4c1d95";
-        context.beginPath();
-        context.arc(g.x, g.y, g.radius, 0, Math.PI * 2);
-        context.fill();
-        context.globalAlpha = 0.9 * fade;
-        context.lineCap = "round";
-        for (let k = 0; k < 3; k++) {
-          const a0 = elapsedMs / 450 + (k * Math.PI * 2) / 3;
-          for (const [rr, w, col] of [
-            [g.radius * 0.92, 4, "#c4b5fd"],
-            [g.radius * 0.6, 3, "#a78bfa"],
-            [g.radius * 0.3, 2.5, "#ddd6fe"],
-          ] as const) {
-            context.lineWidth = w;
-            context.strokeStyle = col;
-            context.beginPath();
-            context.arc(g.x, g.y, rr, a0 + rr / 50, a0 + rr / 50 + 0.9);
-            context.stroke();
-          }
-        }
-        context.fillStyle = "#1e1b4b";
-        context.beginPath();
-        context.arc(g.x, g.y, g.radius * 0.12, 0, Math.PI * 2);
-        context.fill();
-        context.restore();
+        drawGravityWell(
+          context,
+          g.x,
+          g.y,
+          g.radius,
+          (elapsedMs - g.startedAt) / (g.endsAt - g.startedAt),
+          elapsedMs,
+        );
       }
       for (const pool of acidPools) {
         const left = Math.min(1, (pool.until - elapsedMs) / 900);

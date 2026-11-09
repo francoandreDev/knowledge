@@ -21,10 +21,12 @@ const GROUND_Y = 66;
 const INK = "#0f172a";
 
 export interface DemoSpec {
-  kind: "weaponUpgrade" | "newWeapon" | "stat" | "ability";
+  kind: "weaponUpgrade" | "newWeapon" | "stat" | "ability" | "mutation";
   weaponId?: WeaponId;
   statId?: string;
   specialId?: SpecialId;
+  /** Mutation cards: the aura colour, from the rarity. */
+  color?: string;
 }
 
 /** The one-line "best when" shown under each pick. */
@@ -647,6 +649,32 @@ const ABILITY_SCENE: Scene = (c, p, t) => {
   c.restore();
 };
 
+// A mutation has no single picture: the hero stands in a pulsing aura of the
+// card's rarity colour, with sparks drifting up, so the card reads as a
+// twist on the run rather than another weapon.
+function mutationScene(color: string): Scene {
+  return (c, p, t) => {
+    const pulse = 0.5 + 0.5 * Math.sin(p * Math.PI * 2);
+    c.save();
+    c.strokeStyle = color;
+    c.globalAlpha = 0.25 + 0.35 * pulse;
+    c.lineWidth = 3;
+    c.beginPath();
+    c.arc(HERO.x, HERO.y, 18 + pulse * 6, 0, Math.PI * 2);
+    c.stroke();
+    c.fillStyle = color;
+    for (let i = 0; i < 6; i++) {
+      const rise = (p + i / 6) % 1;
+      c.globalAlpha = 0.8 * (1 - rise);
+      c.beginPath();
+      c.arc(HERO.x - 20 + i * 8, HERO.y + 10 - rise * 34, 1.6, 0, Math.PI * 2);
+      c.fill();
+    }
+    c.restore();
+    hero(c, t);
+  };
+}
+
 export function drawCardDemo(c: Ctx, t: number, spec: DemoSpec) {
   const p = (t % PERIOD_MS) / PERIOD_MS;
   c.fillStyle = "#2a2160";
@@ -662,13 +690,15 @@ export function drawCardDemo(c: Ctx, t: number, spec: DemoSpec) {
   c.stroke();
   c.setLineDash([]);
   const scene =
-    spec.kind === "ability"
-      ? spec.specialId
-        ? SPECIAL_SCENE[spec.specialId]
-        : ABILITY_SCENE
-      : spec.kind === "stat"
-        ? STAT_SCENE[spec.statId ?? ""]
-        : WEAPON_SCENE[spec.weaponId as WeaponId];
+    spec.kind === "mutation"
+      ? mutationScene(spec.color ?? "#c084fc")
+      : spec.kind === "ability"
+        ? spec.specialId
+          ? SPECIAL_SCENE[spec.specialId]
+          : ABILITY_SCENE
+        : spec.kind === "stat"
+          ? STAT_SCENE[spec.statId ?? ""]
+          : WEAPON_SCENE[spec.weaponId as WeaponId];
   if (scene) scene(c, p, t);
   else hero(c, t);
 }

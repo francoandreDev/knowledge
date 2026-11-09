@@ -142,6 +142,21 @@ Separately, each calendar day has one event (clear, blood moon, fog, storm)
 that tilts coins and enemy speed and repaints the lobby sky. Both stack, and
 neither applies to the balance lab.
 
+### The living arena
+
+The field is no longer empty ground: pillars, tar pits, spike plates, mines and
+explosive barrels share it with the player and the enemies. Enemies ignore them,
+so the player can lure a pack over a trap; the player can also set one off by
+accident. Enemy spawn gaps are 1.2x longer to pay for it. See Phase 18 in
+`GAME-PROGRESS.md`.
+
+### Mutations
+
+From the 4th level-up one of the four cards is a mutation, a run-long twist
+(some with a cost) of common, rare or legendary rarity; every 5th level-up is a
+crossroads of three, none common. They exist because past weapon level 6 the
+rest of the pool is a straight line. Each can be taken once per run.
+
 ## HUD
 
 **In-run overlay:**
