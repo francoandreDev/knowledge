@@ -73,39 +73,74 @@ export const DIFFICULTY: Record<
   {
     speedMult: number;
     label: string;
-    reactMs: number; // how stale its read of the fight is
-    aimErr: number; // radians of aim jitter
-    lead: number; // how well it leads a moving target
-    dodge: number; // chance to react to a threat when it notices one
-    idleMs: number; // average breather between attacks
+    /** Time: how stale its read of the fight is (ms, rolled 0.7-1.3x). */
+    reactMs: number;
+    /** Time: the wait between seeing a chance and starting to charge, as a
+     * range in ms. A person does not strike the instant something is in
+     * reach. */
+    engageMs: [number, number];
+    /** Time: how long it takes to settle into a new direction (ms); it
+     * cannot change its velocity in a single frame. */
+    moveLagMs: number;
+    /** Time: chance that a look at the fight is missed, so it acts on the
+     * last one it had. */
+    lapse: number;
+    /** Aim: the fastest it can swing its aim, in radians per second. */
+    turnRate: number;
+    /** Aim: radians of error in where it points, and how well it leads a
+     * moving target. */
+    aimErr: number;
+    lead: number;
+    /** Precision: how wrong its sense of the distance can be, as a share of
+     * it. This is what makes it fall short or overshoot a charge. */
+    rangeErr: number;
+    /** Chance to react to a threat when it notices one. */
+    dodge: number;
+    /** Average breather between attacks (ms). */
+    idleMs: number;
   }
 > = {
   easy: {
     speedMult: 0.85,
     label: "Easy",
-    reactMs: 620,
-    aimErr: 0.42,
+    reactMs: 640,
+    engageMs: [450, 950],
+    moveLagMs: 260,
+    lapse: 0.22,
+    turnRate: 2.8,
+    aimErr: 0.46,
     lead: 0,
-    dodge: 0.3,
-    idleMs: 900,
+    rangeErr: 0.24,
+    dodge: 0.25,
+    idleMs: 950,
   },
   normal: {
     speedMult: 1,
     label: "Normal",
-    reactMs: 400,
-    aimErr: 0.24,
-    lead: 0.3,
-    dodge: 0.55,
-    idleMs: 550,
+    reactMs: 480,
+    engageMs: [300, 700],
+    moveLagMs: 190,
+    lapse: 0.14,
+    turnRate: 4.2,
+    aimErr: 0.32,
+    lead: 0.22,
+    rangeErr: 0.17,
+    dodge: 0.42,
+    idleMs: 680,
   },
   hard: {
     speedMult: 1,
     label: "Hard",
-    reactMs: 250,
-    aimErr: 0.13,
-    lead: 0.6,
-    dodge: 0.8,
-    idleMs: 300,
+    reactMs: 340,
+    engageMs: [180, 450],
+    moveLagMs: 130,
+    lapse: 0.08,
+    turnRate: 6,
+    aimErr: 0.2,
+    lead: 0.42,
+    rangeErr: 0.1,
+    dodge: 0.62,
+    idleMs: 440,
   },
 };
 
@@ -666,27 +701,49 @@ export function stepDuel(
 }
 
 // --- The rival ------------------------------------------------------------
-// It plays by the same rules as you: it has to hold a charge, it cannot see
-// the future, it reads the fight a beat late, aims with some error, and can
-// simply fail to notice an attack coming.
+// It plays by the same rules as you, and it plays like a person: it looks at
+// the fight only every so often and sometimes misses a look, so it works from
+// where you were rather than where you are; it swings its aim at a human
+// speed and points with some error that drifts; it misjudges distance, so it
+// falls short or overshoots a charge; it waits a beat between spotting a
+// chance and starting to charge; and it cannot change direction in a single
+// frame. Each fight it also rolls a "form" for the day, so it is sharper some
+// matches and sloppier others. Three things set how good it is: aim (where it
+// points and how fast), precision (how wrong it is about range and angle) and
+// time (how long it takes to notice and to act).
 
 export interface AiMemory {
   nextDecideMs: number;
   strafe: 1 | -1;
   strafeUntilMs: number;
+  /** Aim error this look, plus a slow drift on top of it. */
   aimErr: number;
+  aimDrift: number;
+  /** How wrong its sense of the distance is, as a share of it. */
+  rangeErr: number;
+  /** A per-fight multiplier on its errors: >1 is a sloppy day. 0 until set. */
+  form: number;
   targetCharge: number;
   charging: boolean;
   idleUntilMs: number;
+  /** When it will start a charge it has decided on; 0 when it has not. */
+  engageAtMs: number;
+  /** It stands still to line up a shot until then. */
+  pauseUntilMs: number;
   overholdMs: number;
   dodgeVx: number;
   dodgeVy: number;
   dodgeUntilMs: number;
+  /** Where it last saw the foe, how it was moving, and when. */
   foeX: number;
   foeY: number;
   foeVx: number;
   foeVy: number;
   foeSeenMs: number;
+  /** Its own smoothed movement, and the time of the last call. */
+  vx: number;
+  vy: number;
+  lastT: number;
 }
 
 export const newAiMemory = (): AiMemory => ({
@@ -694,9 +751,14 @@ export const newAiMemory = (): AiMemory => ({
   strafe: 1,
   strafeUntilMs: 0,
   aimErr: 0,
+  aimDrift: 0,
+  rangeErr: 0,
+  form: 0,
   targetCharge: 0.6,
   charging: false,
-  idleUntilMs: 900,
+  idleUntilMs: 1200,
+  engageAtMs: 0,
+  pauseUntilMs: 0,
   overholdMs: 0,
   dodgeVx: 0,
   dodgeVy: 0,
@@ -706,6 +768,9 @@ export const newAiMemory = (): AiMemory => ({
   foeVx: 0,
   foeVy: 0,
   foeSeenMs: -1,
+  vx: 0,
+  vy: 0,
+  lastT: -1,
 });
 
 function preferredRange(f: Fighter) {
@@ -729,6 +794,14 @@ const isRanged = (id: WeaponId) =>
   id === "flameTrail" ||
   id === "sentryTotem";
 
+/** The shortest signed turn from `from` to `to`, in -PI..PI. */
+function signedTurn(from: number, to: number): number {
+  let d = to - from;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+
 /** A fighter that keeps its weapon's range, strafes, charges and lets go. */
 export function aiInput(
   state: DuelState,
@@ -740,29 +813,57 @@ export function aiInput(
   const foe = state.fighters[me.side === 0 ? 1 : 0];
   const skill = DIFFICULTY[difficulty];
   const t = state.timeMs;
-  const dx = foe.x - me.x;
-  const dy = foe.y - me.y;
+  const dtS = Math.min(
+    0.1,
+    Math.max(0.001, (t - (mem.lastT < 0 ? t - 16.7 : mem.lastT)) / 1000),
+  );
+  mem.lastT = t;
+  if (mem.form === 0) mem.form = 0.85 + rng() * 0.3;
+
+  // What it believes about the foe is what it saw at its last look, not where
+  // the foe is now.
+  const bx = mem.foeSeenMs >= 0 ? mem.foeX : foe.x;
+  const by = mem.foeSeenMs >= 0 ? mem.foeY : foe.y;
+  const dx = bx - me.x;
+  const dy = by - me.y;
   const dist = Math.hypot(dx, dy) || 1;
   const ux = dx / dist;
   const uy = dy / dist;
   const px = -uy;
   const py = ux;
+  // ...and its sense of how far away that is has an error of its own.
+  const feltDist = dist * (1 + mem.rangeErr);
 
   // It looks at the fight only every `reactMs`: that is its reaction time.
+  // Now and then it misses a look entirely and carries on with the last one.
   if (t >= mem.nextDecideMs) {
     mem.nextDecideMs = t + skill.reactMs * (0.7 + rng() * 0.6);
-    if (mem.foeSeenMs >= 0) {
-      const el = Math.max(0.05, (t - mem.foeSeenMs) / 1000);
-      mem.foeVx = (foe.x - mem.foeX) / el;
-      mem.foeVy = (foe.y - mem.foeY) / el;
+    const missed = mem.foeSeenMs >= 0 && rng() < skill.lapse;
+    if (!missed) {
+      if (mem.foeSeenMs >= 0) {
+        const el = Math.max(0.05, (t - mem.foeSeenMs) / 1000);
+        mem.foeVx = (foe.x - mem.foeX) / el;
+        mem.foeVy = (foe.y - mem.foeY) / el;
+      }
+      mem.foeX = foe.x;
+      mem.foeY = foe.y;
+      mem.foeSeenMs = t;
+      mem.rangeErr = (rng() + rng() - 1) * skill.rangeErr * mem.form;
     }
-    mem.foeX = foe.x;
-    mem.foeY = foe.y;
-    mem.foeSeenMs = t;
-    mem.aimErr = (rng() + rng() - 1) * skill.aimErr;
+    const foeSpeed = Math.hypot(mem.foeVx, mem.foeVy);
+    // A fast foe is harder to point at, so the error grows with its speed.
+    mem.aimErr =
+      (rng() + rng() - 1) *
+      skill.aimErr *
+      mem.form *
+      (1 + Math.min(1, foeSpeed / FIGHTER_SPEED) * 0.5);
     if (t >= mem.strafeUntilMs) {
       mem.strafe = rng() < 0.5 ? 1 : -1;
       mem.strafeUntilMs = t + 700 + rng() * 900;
+    }
+    // Sometimes it plants its feet to line up a shot.
+    if (rng() < 0.18 && t >= mem.pauseUntilMs) {
+      mem.pauseUntilMs = t + 250 + rng() * 350;
     }
 
     // Threat: is the foe winding something up at me, or is a shot coming?
@@ -778,7 +879,7 @@ export function aiInput(
             Math.min(1, chargeFrac(foe) + 0.3),
           ) + 28;
         const aimedAtMe =
-          angleDiff(foe.aim, Math.atan2(-dy, -dx)) < 0.5 ||
+          angleDiff(foe.aim, Math.atan2(me.y - foe.y, me.x - foe.x)) < 0.5 ||
           foe.weaponId === "novaPulse";
         if (dist < reach + FIGHTER_RADIUS && aimedAtMe) {
           if (foe.weaponId === "novaPulse") {
@@ -800,10 +901,10 @@ export function aiInput(
         const sx = me.x - s.x;
         const sy = me.y - s.y;
         const sd = Math.hypot(sx, sy);
-        if (sd > 170) continue;
+        if (sd > 150) continue;
         const sp = Math.hypot(s.vx, s.vy) || 1;
         const along = (sx * s.vx + sy * s.vy) / (sd * sp || 1);
-        if (along < 0.85) continue;
+        if (along < 0.88) continue;
         const cross = sx * (-s.vy / sp) + sy * (s.vx / sp);
         const side = cross >= 0 ? 1 : -1;
         tx += (-s.vy / sp) * side * 2.2;
@@ -816,29 +917,49 @@ export function aiInput(
       }
     }
 
-    // Start a charge when the foe is within reach of a full one.
+    // A chance to strike: the foe seems to be within reach of a full charge.
+    // It does not act on it at once; it takes a beat, as a person would.
+    const need = chargeToReach(me.weaponId, me.level, feltDist);
     if (
       !mem.charging &&
       t >= mem.idleUntilMs &&
       me.recoverMs <= 0 &&
-      me.dashMs <= 0
+      me.dashMs <= 0 &&
+      need !== null
     ) {
-      const need = chargeToReach(me.weaponId, me.level, dist);
-      if (need !== null) {
-        mem.charging = true;
-        mem.overholdMs = 0;
-        // Usually more than the bare minimum: hits that matter need charge.
-        mem.targetCharge = Math.min(1, Math.max(need, 0.45 + rng() * 0.55));
+      if (mem.engageAtMs === 0) {
+        const [lo, hi] = skill.engageMs;
+        mem.engageAtMs = t + lo + rng() * (hi - lo);
       }
+    } else if (need === null) {
+      mem.engageAtMs = 0;
+    }
+  }
+  if (
+    !mem.charging &&
+    mem.engageAtMs > 0 &&
+    t >= mem.engageAtMs &&
+    me.recoverMs <= 0 &&
+    me.dashMs <= 0
+  ) {
+    mem.engageAtMs = 0;
+    const need = chargeToReach(me.weaponId, me.level, feltDist);
+    if (need !== null) {
+      mem.charging = true;
+      mem.overholdMs = 0;
+      // Usually more than the bare minimum: hits that matter need charge.
+      mem.targetCharge = Math.min(1, Math.max(need, 0.45 + rng() * 0.55));
     }
   }
 
-  // Charging: let go once the charge is enough, or give up on a lost cause.
+  // Charging: let go once the charge is enough by its own estimate of the
+  // range, or give up on a lost cause. Its estimate is off, so the shot can
+  // fall short or carry past the target.
   let charge = false;
   if (mem.charging && me.recoverMs <= 0) {
     const cNow = chargeFrac(me);
-    const need = chargeToReach(me.weaponId, me.level, dist);
-    if (me.chargeMs > 0 && cNow >= 1) mem.overholdMs += 16.7;
+    const need = chargeToReach(me.weaponId, me.level, feltDist);
+    if (me.chargeMs > 0 && cNow >= 1) mem.overholdMs += dtS * 1000;
     if (
       (need !== null && cNow >= Math.max(need, mem.targetCharge) - 0.01) ||
       mem.overholdMs > 450
@@ -853,13 +974,16 @@ export function aiInput(
     mem.idleUntilMs = t + skill.idleMs * (0.5 + rng());
   }
 
-  // Movement.
+  // Movement: it moves by its picture of the fight, strafes less than a
+  // machine would, stops now and then, and eases into each change.
   const pref = preferredRange(me);
-  const margin = 22;
-  const radial = dist > pref + margin ? 1 : dist < pref - margin ? -1 : 0;
+  const margin = 26;
+  const radial =
+    feltDist > pref + margin ? 1 : feltDist < pref - margin ? -1 : 0;
   const ranged = isRanged(me.weaponId);
-  let vx = ux * radial + px * mem.strafe * (ranged ? 0.9 : 0.5);
-  let vy = uy * radial + py * mem.strafe * (ranged ? 0.9 : 0.5);
+  const settled = t < mem.pauseUntilMs ? 0 : 1;
+  let vx = ux * radial + px * mem.strafe * (ranged ? 0.6 : 0.4) * settled;
+  let vy = uy * radial + py * mem.strafe * (ranged ? 0.6 : 0.4) * settled;
   if (t < mem.dodgeUntilMs) {
     vx += mem.dodgeVx;
     vy += mem.dodgeVy;
@@ -869,13 +993,30 @@ export function aiInput(
   if (me.x > ARENA_W - m) vx -= 1.5;
   if (me.y < m) vy += 1.5;
   if (me.y > ARENA_H - m) vy -= 1.5;
+  const ease = 1 - Math.exp(-dtS / (skill.moveLagMs / 1000));
+  mem.vx += (vx - mem.vx) * ease;
+  mem.vy += (vy - mem.vy) * ease;
 
-  // Aim at where it last saw the target, partly led, with human error.
-  const flight = ranged && me.weaponId !== "chainLightning" ? dist / 300 : 0;
-  const tx = foe.x + mem.foeVx * flight * skill.lead;
-  const ty = foe.y + mem.foeVy * flight * skill.lead;
-  const aim = Math.atan2(ty - me.y, tx - me.x) + mem.aimErr;
-  return { x: vx, y: vy, aim, charge };
+  // Aim at where it last saw the target, led a little by how it was moving
+  // then, plus its error and a slow drift. The aim swings at a human speed:
+  // it cannot snap onto a target that has moved.
+  const flight =
+    ranged && me.weaponId !== "chainLightning" ? feltDist / 300 : 0;
+  const ageS = mem.foeSeenMs >= 0 ? (t - mem.foeSeenMs) / 1000 : 0;
+  const tx = bx + mem.foeVx * (flight + ageS * 0.5) * skill.lead;
+  const ty = by + mem.foeVy * (flight + ageS * 0.5) * skill.lead;
+  mem.aimDrift = Math.max(
+    -skill.aimErr * 0.5,
+    Math.min(
+      skill.aimErr * 0.5,
+      mem.aimDrift + (rng() - 0.5) * skill.aimErr * 2.2 * dtS,
+    ),
+  );
+  const wanted = Math.atan2(ty - me.y, tx - me.x) + mem.aimErr + mem.aimDrift;
+  const turn = signedTurn(me.aim, wanted);
+  const maxTurn = skill.turnRate * dtS;
+  const aim = me.aim + Math.max(-maxTurn, Math.min(maxTurn, turn));
+  return { x: mem.vx, y: mem.vy, aim, charge };
 }
 
 /** Headless match for tests and tuning: AI vs AI. Returns the winning side
@@ -883,17 +1024,20 @@ export function aiInput(
 export function simulateMatch(
   a: Loadout,
   b: Loadout,
-  difficulty: Difficulty,
+  difficulty: Difficulty | [Difficulty, Difficulty],
   rng: () => number,
   limitMs = 90_000,
 ) {
+  const [da, db] = Array.isArray(difficulty)
+    ? difficulty
+    : [difficulty, difficulty];
   const state = createDuel(a, b);
   const mems = [newAiMemory(), newAiMemory()];
   const STEP = 1000 / 60;
   while (state.timeMs < limitMs) {
     stepDuel(state, STEP, [
-      aiInput(state, state.fighters[0], difficulty, mems[0], rng),
-      aiInput(state, state.fighters[1], difficulty, mems[1], rng),
+      aiInput(state, state.fighters[0], da, mems[0], rng),
+      aiInput(state, state.fighters[1], db, mems[1], rng),
     ]);
     if (state.fighters[0].hp <= 0 || state.fighters[1].hp <= 0) break;
   }

@@ -138,23 +138,44 @@ export function drawDamageNumber(
   amount: number,
   progress: number,
   big: boolean,
+  crit = false,
 ) {
   const alpha = Math.max(0, 1 - progress * progress);
   const pop =
     progress < 0.18
       ? 0.6 + (progress / 0.18) * 0.6
       : 1.2 - 0.2 * Math.min(1, (progress - 0.18) * 4);
-  const size = (big ? 17 : 12) * pop;
+  const size = (big ? 17 : 12) * pop * (crit ? 1.35 : 1);
   ctx.save();
   ctx.globalAlpha = alpha;
+  // A critical hit bursts: rays behind the number for the first third of it.
+  if (crit && progress < 0.35) {
+    ctx.strokeStyle = "#fb923c";
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = "round";
+    const reach = 10 + progress * 40;
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + 0.3;
+      ctx.beginPath();
+      ctx.moveTo(
+        x + Math.cos(a) * (reach - 6),
+        y - size * 0.35 + Math.sin(a) * (reach - 6) * 0.6,
+      );
+      ctx.lineTo(
+        x + Math.cos(a) * reach,
+        y - size * 0.35 + Math.sin(a) * reach * 0.6,
+      );
+      ctx.stroke();
+    }
+  }
   ctx.font = `800 ${size.toFixed(1)}px sans-serif`;
   ctx.textAlign = "center";
   ctx.lineJoin = "round";
   ctx.lineWidth = big ? 5 : 4;
   ctx.strokeStyle = INK;
-  const label = String(Math.round(amount));
+  const label = String(Math.round(amount)) + (crit ? "!" : "");
   ctx.strokeText(label, x, y);
-  ctx.fillStyle = big ? "#fde047" : "#ffffff";
+  ctx.fillStyle = crit ? "#fdba74" : big ? "#fde047" : "#ffffff";
   ctx.fillText(label, x, y);
   ctx.restore();
 }
@@ -1503,6 +1524,248 @@ export function drawMuzzleFlash(
     ctx.beginPath();
     ctx.moveTo(len * 0.5, dy * 0.3);
     ctx.lineTo(len * l, dy);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// --- Motion, slowness and power: the small things that make a body feel its
+// speed. All of them are cheap strokes and fills, no blur, and every one is
+// skipped when reduced motion is on (the engine decides). -------------------
+
+/** Speed lines behind something moving fast. (dx, dy) is the unit direction
+ * of travel; `strength` runs 0..1 and sets their length and opacity. */
+export function drawSpeedStreaks(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  dx: number,
+  dy: number,
+  radius: number,
+  strength: number,
+  color = "#e2e8f0",
+) {
+  if (strength <= 0) return;
+  const nx = -dy;
+  const ny = dx;
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.6;
+  for (const [off, len] of [
+    [-0.7, 1.0],
+    [0, 1.5],
+    [0.7, 1.1],
+  ] as const) {
+    const start = radius * 0.9;
+    const L = (10 + 22 * strength) * len;
+    const ox = nx * off * radius;
+    const oy = ny * off * radius;
+    const g = ctx.createLinearGradient(
+      x - dx * start + ox,
+      y - dy * start + oy,
+      x - dx * (start + L) + ox,
+      y - dy * (start + L) + oy,
+    );
+    g.addColorStop(0, color);
+    g.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.strokeStyle = g;
+    ctx.globalAlpha = 0.65 * strength;
+    ctx.beginPath();
+    ctx.moveTo(x - dx * start + ox, y - dy * start + oy);
+    ctx.lineTo(x - dx * (start + L) + ox, y - dy * (start + L) + oy);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+export type SlowKind = "goo" | "frost" | "warp" | "chill";
+
+/** What being slowed looks like. Goo: a green film and drips falling from the
+ * feet. Frost: a pale blue tint with ice crystals turning round the body.
+ * Warp: faint echo rings spreading out, as if the air were thick. */
+export function drawSlowOverlay(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  kind: SlowKind,
+  now: number,
+) {
+  ctx.save();
+  if (kind === "goo") {
+    ctx.globalAlpha = 0.28;
+    ctx.fillStyle = "#84cc16";
+    ctx.beginPath();
+    ctx.ellipse(
+      x,
+      y + radius * 0.2,
+      radius * 1.15,
+      radius * 1.2,
+      0,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+    ctx.fillStyle = "#a3e635";
+    for (let i = 0; i < 3; i++) {
+      const ph = (now / 650 + i / 3) % 1;
+      ctx.globalAlpha = 0.9 * (1 - ph);
+      ctx.beginPath();
+      ctx.ellipse(
+        x + (i - 1) * radius * 0.6,
+        y + radius * 0.5 + ph * radius * 0.9,
+        1.6,
+        2.6 + ph * 1.4,
+        0,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fill();
+    }
+  } else if (kind === "chill") {
+    // The light version, for enemies Frost Charm or Frostbite merely slows: a
+    // cool sheen and a few flakes drifting down, no crystals.
+    ctx.globalAlpha = 0.14;
+    ctx.fillStyle = "#bae6fd";
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 1.05, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#e0f2fe";
+    for (let i = 0; i < 3; i++) {
+      const ph = (now / 1100 + i / 3) % 1;
+      ctx.globalAlpha = 0.85 * (1 - ph);
+      ctx.beginPath();
+      ctx.arc(
+        x + (i - 1) * radius * 0.7 + Math.sin(ph * 5 + i) * 2,
+        y - radius + ph * radius * 2,
+        1.3,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fill();
+    }
+  } else if (kind === "frost") {
+    ctx.globalAlpha = 0.34;
+    ctx.fillStyle = "#bae6fd";
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 1.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle = "#e0f2fe";
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = 1.2;
+    for (let i = 0; i < 4; i++) {
+      const a = now / 1200 + (i * Math.PI) / 2;
+      const cx = x + Math.cos(a) * radius * 1.25;
+      const cy = y + Math.sin(a) * radius * 1.25;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 4);
+      ctx.lineTo(cx + 2.4, cy);
+      ctx.lineTo(cx, cy + 4);
+      ctx.lineTo(cx - 2.4, cy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+  } else {
+    ctx.strokeStyle = "#7dd3fc";
+    ctx.lineWidth = 1.4;
+    for (let i = 0; i < 2; i++) {
+      const ph = (now / 900 + i / 2) % 1;
+      ctx.globalAlpha = 0.4 * (1 - ph);
+      ctx.beginPath();
+      ctx.arc(x, y, radius * (1 + ph * 0.9), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+/** A pulsing ring of heat under the hero while their damage is far above
+ * normal, with embers lifting off. */
+export function drawPowerAura(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  now: number,
+  color = "#fb923c",
+) {
+  const pulse = 0.5 + 0.5 * Math.sin(now / 220);
+  ctx.save();
+  const g = ctx.createRadialGradient(
+    x,
+    y + radius * 0.3,
+    radius * 0.4,
+    x,
+    y + radius * 0.3,
+    radius * 2.1,
+  );
+  g.addColorStop(0, "rgba(255,255,255,0)");
+  g.addColorStop(0.55, color);
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.globalAlpha = 0.28 + 0.14 * pulse;
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.ellipse(
+    x,
+    y + radius * 0.3,
+    radius * 2.1,
+    radius * 1.5,
+    0,
+    0,
+    Math.PI * 2,
+  );
+  ctx.fill();
+  ctx.fillStyle = color;
+  for (let i = 0; i < 5; i++) {
+    const ph = (now / 1100 + i / 5) % 1;
+    ctx.globalAlpha = 0.9 * (1 - ph);
+    ctx.beginPath();
+    ctx.arc(
+      x + (frac(i * 0.7) - 0.5) * radius * 2.2 + Math.sin(ph * 5 + i) * 3,
+      y + radius * 0.6 - ph * radius * 2.4,
+      1.5,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** While time crawls for the enemies, the screen edges fill with a cool blue
+ * and slow ripples drift in from them. `strength` fades it in and out. */
+export function drawTimeWarpVignette(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  strength: number,
+  now: number,
+) {
+  if (strength <= 0) return;
+  ctx.save();
+  const g = ctx.createRadialGradient(
+    w / 2,
+    h / 2,
+    Math.min(w, h) * 0.3,
+    w / 2,
+    h / 2,
+    Math.max(w, h) * 0.62,
+  );
+  g.addColorStop(0, "rgba(56,189,248,0)");
+  g.addColorStop(1, "rgba(56,189,248,0.3)");
+  ctx.globalAlpha = strength;
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = "rgba(186,230,253,0.5)";
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 2; i++) {
+    const ph = (now / 2200 + i / 2) % 1;
+    ctx.globalAlpha = strength * 0.5 * (1 - ph);
+    ctx.beginPath();
+    ctx.arc(w / 2, h / 2, Math.max(w, h) * (0.62 - ph * 0.42), 0, Math.PI * 2);
     ctx.stroke();
   }
   ctx.restore();

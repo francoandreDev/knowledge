@@ -168,6 +168,16 @@ import {
 } from "./hazards";
 import { drawHazards } from "./hazardView";
 import {
+  CUE_MS,
+  RELIC_CUE,
+  drawBastionShield,
+  drawBerserkAura,
+  drawCue,
+  drawHasteRing,
+  drawMomentumChevrons,
+  type Cue,
+} from "./cueView";
+import {
   MUTATION_FIRST_LEVELUP,
   drawMutations,
   isCrossroads,
@@ -176,7 +186,7 @@ import {
   type MutationRarity,
 } from "./mutations";
 import type { UpgradeEffects } from "./shop";
-import { noEffects } from "./relics";
+import { RELICS, noEffects, relicById } from "./relics";
 import { lighten } from "./characters";
 import {
   playPickup,
@@ -246,6 +256,10 @@ import {
   drawTotem,
   drawFlamePatch,
   drawGravityWell,
+  drawSpeedStreaks,
+  drawSlowOverlay,
+  drawPowerAura,
+  drawTimeWarpVignette,
   drawOffscreenArrow,
   drawParticles,
   drawSlamWarning,
@@ -1190,6 +1204,9 @@ export interface GameOptions {
   enemySpeedMult?: number;
   /** The chosen risk level: scales every enemy's HP on top of the ramp. */
   enemyHpMult?: number;
+  /** Ids of the relics the player owns, for the parade at the start of a run
+   * that shows what each one does. */
+  relicIds?: string[];
   /** Backing-store pixels per world pixel (default 1). */
   renderScale?: number;
   /** The ground this run is fought on; random when omitted. */
@@ -1236,6 +1253,11 @@ interface Enemy extends GameObject {
   hitFlashUntil?: number;
   /** HP at the first hit it took: what Volatile scales its blast from. */
   hp0?: number;
+  /** How fast it moved last frame, in px/s (for speed streaks), and which
+   * kind of slowness it is under, if any (for the tint on top of it). */
+  mvx?: number;
+  mvy?: number;
+  slowKind?: "goo" | "frost" | "warp" | "chill";
   // Phase 16A: zombie lunge (tier 2+)
   lungeUntil?: number;
   lastLungeAt?: number;
@@ -1369,6 +1391,7 @@ interface DamageNumber {
   y: number;
   amount: number;
   createdAt: number;
+  crit?: boolean;
 }
 
 // Phase 15: a fading line segment between two chain-lightning jump points —
@@ -1883,6 +1906,50 @@ export function startGame(
   let nextTimeWarpAt = 30000;
   let timeWarpUntil = -Infinity;
   let blastDepth = 0;
+  // Motion feel: the hero's afterimages, footstep dust and goo drips, and the
+  // pause a heavy hit leaves. All cosmetic; none touches the numbers.
+  const heroTrail: { x: number; y: number; facing: number; at: number }[] = [];
+  let nextDustAt = 0;
+  let lastTrailAt = 0;
+  let nextDripAt = 0;
+  let heroFast = false;
+  let heroInGoo = false;
+  let lastHeavyStopAt = -Infinity;
+  let nextRegenCueAt = 0;
+  // Effect cues (cueView.ts): a short animation where a relic or power acts.
+  const cues: Cue[] = [];
+  const cueGap: Record<string, number> = {};
+  /** Fires a cue, at most once per `gapMs` of its kind, so a crowd of
+   * identical events cannot bury the screen. */
+  function addCue(cue: Omit<Cue, "at">, gapMs = 0) {
+    const last = cueGap[cue.kind] ?? -Infinity;
+    if (elapsedMs - last < gapMs) return;
+    cueGap[cue.kind] = elapsedMs;
+    cues.push({ ...cue, at: elapsedMs });
+  }
+  // The parade: at the start of a run each relic carried shows its own
+  // animation over the hero, one after another, rarest first.
+  {
+    const ids = (options.relicIds ?? [])
+      .filter((id) => RELIC_CUE[id] && relicById(id))
+      .sort(
+        (a, b) =>
+          RELICS.findIndex((r) => r.id === b) -
+          RELICS.findIndex((r) => r.id === a),
+      )
+      .slice(0, 5);
+    ids.forEach((id, i) => {
+      cues.push({
+        kind: RELIC_CUE[id],
+        x: 0,
+        y: 0,
+        onHero: true,
+        dx: (i - (ids.length - 1) / 2) * 24,
+        at: 600 + i * 320,
+        label: relicById(id)?.name,
+      });
+    });
+  }
   const echoQueue: { at: number; target: Enemy; amount: number }[] = [];
   // The field's hazards (none in the lab): see hazards.ts.
   const hazards: Hazard[] = [];
@@ -2438,6 +2505,7 @@ export function startGame(
 
   function damageEnemy(e: Enemy, amount: number, source: string) {
     if (e.hp0 === undefined) e.hp0 = e.hp;
+    let wasCrit = false;
     const crit = upgradeEffects.critChance + critTemp;
     if (
       crit > 0 &&
@@ -2445,6 +2513,7 @@ export function startGame(
       Math.random() < crit
     ) {
       amount *= 2 + upgradeEffects.critDamage;
+      wasCrit = true;
     }
     // Berserker: the emptier the HP bar, the harder every hit lands.
     if (upgradeEffects.berserk > 0) {
@@ -2508,7 +2577,34 @@ export function startGame(
       y: e.y - e.radius,
       amount: finalAmount,
       createdAt: elapsedMs,
+      crit: wasCrit,
     });
+    // A heavy hit has weight: it shoves the enemy back, shakes the screen and
+    // holds the world for a heartbeat. Only the player's own weapons do this,
+    // and the pause is rationed so a rapid fire does not stutter.
+    const weaponHit = !!weaponIdForSource(source) || source === "echo";
+    const heavy =
+      wasCrit || finalAmount >= Math.max(BIG_HIT_DAMAGE, (e.hp0 ?? 0) * 0.3);
+    if (weaponHit && heavy) {
+      if (e.hp > 0 && e.kind !== "reaper" && e.kind !== "lich") {
+        const away = Math.atan2(e.y - player.y, e.x - player.x);
+        const shove = (wasCrit ? 16 : 10) * (e.radius >= 22 ? 0.5 : 1);
+        e.x += Math.cos(away) * shove;
+        e.y += Math.sin(away) * shove;
+      }
+      if (feedbackOn) {
+        shakeMag = Math.max(shakeMag, wasCrit ? 3 : 2);
+        shakeUntil = Math.max(shakeUntil, elapsedMs + 110);
+        if (elapsedMs - lastHeavyStopAt > 280) {
+          lastHeavyStopAt = elapsedMs;
+          hitStopMs = Math.max(hitStopMs, wasCrit ? 38 : 24);
+        }
+      }
+      if (!reduceMotion && wasCrit) {
+        burst(particles, e.x, e.y, "#fdba74", 8, 220);
+        ringPop(particles, e.x, e.y, "#fb923c", e.radius * 2.2);
+      }
+    }
     playHit();
     log.log("hit:enemy", { kind: e.kind, source, remainingHp: e.hp });
     if (e.maxHp && e.hp > 0) {
@@ -2610,6 +2706,15 @@ export function startGame(
       }
       const healPerKill = upgradeEffects.killHeal + killHealTemp;
       if (healPerKill > 0) {
+        addCue(
+          {
+            kind: "drain",
+            x: e.x,
+            y: e.y,
+            text: `+${healPerKill.toFixed(1)}`,
+          },
+          140,
+        );
         player.hp = Math.min(effectiveMaxHp(), player.hp + healPerKill);
       }
       if (e.kind === "slime" && !e.mini) spawnSlimelets(e);
@@ -2723,6 +2828,7 @@ export function startGame(
       (e.tier !== "normal" || e.kind === "reaper" || e.kind === "lich")
     ) {
       value *= 1 + upgradeEffects.bounty;
+      addCue({ kind: "bounty", x: e.x, y: e.y }, 200);
     }
     spawnCoin(e.x, e.y, value);
   }
@@ -2866,6 +2972,10 @@ export function startGame(
     // Phantom: some hits simply miss.
     if (upgradeEffects.dodge > 0 && Math.random() < upgradeEffects.dodge) {
       if (!reduceMotion) ringPop(particles, player.x, player.y, "#a5f3fc", 44);
+      addCue(
+        { kind: "dodge", x: player.x, y: player.y, onHero: true, text: "MISS" },
+        200,
+      );
       log.log("player:dodged", { source });
       return;
     }
@@ -2891,7 +3001,25 @@ export function startGame(
         }
       }
     }
+    const beforeArmor = amount;
     amount *= 1 - Math.min(0.6, upgradeEffects.armor + armorTemp);
+    // Iron Plate, Bulwark: a steel flash where the armor soaked part of it.
+    if (beforeArmor - amount >= 0.6) {
+      addCue(
+        {
+          kind: "block",
+          x: player.x,
+          y: player.y,
+          onHero: true,
+          angle:
+            fromX !== undefined && fromY !== undefined
+              ? Math.atan2(fromY - player.y, fromX - player.x)
+              : undefined,
+          text: `-${Math.round(beforeArmor - amount)}`,
+        },
+        180,
+      );
+    }
     // Bastion: standing still turns you into a wall.
     if (has("bastion") && playerIsIdle) amount *= 0.7;
     // Ironclad: no single hit takes more than a slice of max HP.
@@ -2957,6 +3085,13 @@ export function startGame(
         ringPop(particles, player.x, player.y, "#fb923c", 150);
         burst(particles, player.x, player.y, "#fde047", 26, 260);
       }
+      addCue({
+        kind: "phoenix",
+        x: player.x,
+        y: player.y,
+        onHero: true,
+        label: "Second wind",
+      });
       log.log("player:revived", { hp: player.hp });
       return;
     }
@@ -3018,7 +3153,10 @@ export function startGame(
     if (has("momentum") && elapsedMs - lastKillAt > 3000) momentum = 0;
     while (echoQueue.length > 0 && echoQueue[0].at <= elapsedMs) {
       const q = echoQueue.shift()!;
-      if (q.target.alive) damageEnemy(q.target, q.amount, "echo");
+      if (q.target.alive) {
+        damageEnemy(q.target, q.amount, "echo");
+        addCue({ kind: "echo", x: q.target.x, y: q.target.y }, 120);
+      }
     }
     if (has("coldSnap") && elapsedMs >= nextColdSnapAt) {
       nextColdSnapAt = elapsedMs + 18000;
@@ -4863,6 +5001,10 @@ export function startGame(
       // --- passive regen (Quick Recovery stacks + shop's Recovery) ---
       const totalRegenPerS = hpRegenPerS + upgradeEffects.regenPerS;
       if (totalRegenPerS > 0 && player.hp > 0) {
+        if (player.hp < effectiveMaxHp() && elapsedMs >= nextRegenCueAt) {
+          nextRegenCueAt = elapsedMs + 1100;
+          addCue({ kind: "regen", x: player.x, y: player.y, onHero: true });
+        }
         player.hp = Math.min(effectiveMaxHp(), player.hp + totalRegenPerS * dt);
       }
 
@@ -4922,11 +5064,58 @@ export function startGame(
           WORLD_H - PLAYER_RADIUS,
         );
         pushOutOfPillars(player, PLAYER_RADIUS, hazards);
+        // Fast enough to leave afterimages: Gale, Adrenaline, boosts.
+        heroFast =
+          speedMult *
+            upgradeEffects.speedMult *
+            (has("adrenaline") && lowHp() ? 1.25 : 1) >=
+          1.25;
+        if (!reduceMotion) {
+          if (elapsedMs >= nextDustAt) {
+            nextDustAt = elapsedMs + (heroFast ? 70 : 150);
+            burst(
+              particles,
+              player.x - moveX * PLAYER_RADIUS,
+              player.y + PLAYER_RADIUS * 0.9,
+              "#cbd5e1",
+              heroFast ? 3 : 2,
+              40,
+            );
+          }
+          if (heroFast && elapsedMs - lastTrailAt >= 45) {
+            lastTrailAt = elapsedMs;
+            heroTrail.push({
+              x: player.x,
+              y: player.y,
+              facing: playerFacingAngle,
+              at: elapsedMs,
+            });
+          }
+          if (
+            insideGoo(player, PLAYER_RADIUS, hazards) &&
+            elapsedMs >= nextDripAt
+          ) {
+            nextDripAt = elapsedMs + 130;
+            burst(
+              particles,
+              player.x,
+              player.y + PLAYER_RADIUS,
+              "#a3e635",
+              3,
+              45,
+            );
+          }
+        }
         playerVelX = moveX * speed; // Phase 16A: zombie lunge's "moving away" check
         playerVelY = moveY * speed;
       } else {
         playerVelX = 0;
         playerVelY = 0;
+        heroFast = false;
+      }
+      heroInGoo = insideGoo(player, PLAYER_RADIUS, hazards);
+      while (heroTrail.length > 0 && elapsedMs - heroTrail[0].at > 260) {
+        heroTrail.shift();
       }
 
       // --- hazards and the clocks the mutations run on ---
@@ -4983,18 +5172,37 @@ export function startGame(
       for (const e of enemies) {
         if (!e.alive) continue;
         const frozen = e.frozenUntil !== undefined && elapsedMs < e.frozenUntil;
+        const inGooE =
+          !AIRBORNE_KINDS.has(e.kind) && insideGoo(e, e.radius, hazards);
+        e.slowKind = frozen
+          ? "frost"
+          : elapsedMs < timeWarpUntil
+            ? "warp"
+            : inGooE
+              ? "goo"
+              : upgradeEffects.enemySlow + slowTemp >= 0.06
+                ? "chill"
+                : undefined;
+        const bx = e.x;
+        const by = e.y;
         updateEnemyBehavior(
           e,
           dt *
             (1 - Math.min(0.5, upgradeEffects.enemySlow + slowTemp)) *
             (options.enemySpeedMult ?? 1) *
             (elapsedMs < timeWarpUntil ? 0.4 : 1) *
-            (!AIRBORNE_KINDS.has(e.kind) && insideGoo(e, e.radius, hazards)
-              ? GOO_ENEMY_SPEED
-              : 1) *
+            (inGooE ? GOO_ENEMY_SPEED : 1) *
             (e.tier === "elite" ? ELITE_SPEED_MULT : 1) *
             (frozen ? 0.05 : 1),
         );
+        // Pillars stop ground enemies too, so they slide round them.
+        if (!AIRBORNE_KINDS.has(e.kind)) {
+          pushOutOfPillars(e, e.radius, hazards);
+        }
+        if (dt > 0) {
+          e.mvx = (e.x - bx) / dt;
+          e.mvy = (e.y - by) / dt;
+        }
         if (training) {
           const minDist = PLAYER_RADIUS + e.radius + training.standoffPx;
           const dx = e.x - player.x;
@@ -5017,6 +5225,7 @@ export function startGame(
             const thorns = upgradeEffects.thorns + thornsTemp;
             if (thorns > 0 && e.alive) {
               damageEnemy(e, contact * thorns, "thorns");
+              addCue({ kind: "reflect", x: e.x, y: e.y }, 160);
             }
           }
         }
@@ -5204,6 +5413,29 @@ export function startGame(
             ringPop(particles, player.x, player.y, "#a78bfa", 22);
           }
           addXp(GEM_XP_VALUE * (upgradeEffects.xpMult + xpTemp));
+          if (upgradeEffects.xpMult + xpTemp > 1.1) {
+            addCue(
+              {
+                kind: "xp",
+                x: g.x,
+                y: g.y,
+                text: `+${Math.round(GEM_XP_VALUE * (upgradeEffects.xpMult + xpTemp))}`,
+              },
+              320,
+            );
+          }
+          if (upgradeEffects.pickupRadiusMult > 1.25) {
+            addCue(
+              {
+                kind: "magnet",
+                x: player.x,
+                y: player.y,
+                onHero: true,
+                r: pickupRadius,
+              },
+              900,
+            );
+          }
           playPickup();
           log.log("pickup:gem", { totalGems: gemsCollected });
           continue;
@@ -5229,6 +5461,19 @@ export function startGame(
             upgradeEffects.coinLuck > 0 &&
             Math.random() < upgradeEffects.coinLuck;
           coinsCollected += lucky ? c.value * 3 : c.value;
+          if (lucky) {
+            addCue({ kind: "lucky", x: c.x, y: c.y, text: "×3" });
+          } else if (upgradeEffects.coinMult > 1.05) {
+            addCue(
+              {
+                kind: "coin",
+                x: c.x,
+                y: c.y,
+                text: `+${Math.round(c.value * upgradeEffects.coinMult)}`,
+              },
+              120,
+            );
+          }
           if (!reduceMotion) {
             burst(particles, c.x, c.y, "#fde047", lucky ? 14 : 6, 150);
             ringPop(particles, c.x, c.y, "#fef08a", lucky ? 36 : 18);
@@ -5404,6 +5649,9 @@ export function startGame(
           shakeMag = 3;
           shakeUntil = elapsedMs + 140;
         }
+      }
+      for (let i = cues.length - 1; i >= 0; i--) {
+        if (elapsedMs - cues[i].at >= CUE_MS[cues[i].kind]) cues.splice(i, 1);
       }
       for (let i = scorchMarks.length - 1; i >= 0; i--) {
         if (elapsedMs - scorchMarks[i].at >= SCORCH_DURATION_MS) {
@@ -5650,12 +5898,30 @@ export function startGame(
               ? 0.55
               : 0
             : 0;
+        if (!reduceMotion && (!e.slowKind || e.slowKind === "chill")) {
+          const sp = Math.hypot(e.mvx ?? 0, e.mvy ?? 0);
+          if (sp > 110) {
+            drawSpeedStreaks(
+              context,
+              e.x,
+              e.y,
+              (e.mvx ?? 0) / sp,
+              (e.mvy ?? 0) / sp,
+              e.radius,
+              Math.min(1, (sp - 110) / 160),
+              e.color,
+            );
+          }
+        }
         drawEnemy(context, e.kind, e.x, e.y, e.radius, e.color, {
           flashAlpha: Math.max(flashAlpha, fuseBlink),
           pose: enemyPose(e),
           t: elapsedMs + (e.seed ?? 0) * 997,
           armed: e.swing?.kind !== "melee",
         });
+        if (e.slowKind && !reduceMotion) {
+          drawSlowOverlay(context, e.x, e.y, e.radius, e.slowKind, elapsedMs);
+        }
         // The arm and weapon of a melee swing: drawn back while winding up,
         // whipped across on the strike.
         const meleeCfg = MELEE_SWING[e.kind];
@@ -5799,6 +6065,76 @@ export function startGame(
         context.stroke();
         context.restore();
       }
+      if (!reduceMotion) {
+        for (const g of heroTrail) {
+          const a = 0.38 * (1 - (elapsedMs - g.at) / 260);
+          if (a <= 0) continue;
+          context.save();
+          context.globalAlpha = a;
+          drawPlayer(context, g.x, g.y, PLAYER_RADIUS, "#7dd3fc", g.facing);
+          context.restore();
+        }
+        if (heroFast && !playerIsIdle) {
+          drawSpeedStreaks(
+            context,
+            player.x,
+            player.y,
+            Math.cos(playerFacingAngle),
+            Math.sin(playerFacingAngle),
+            PLAYER_RADIUS,
+            0.8,
+            "#bae6fd",
+          );
+        }
+        const hasteNow = upgradeEffects.haste + hasteTemp + mutationHaste();
+        if (hasteNow >= 0.2) {
+          drawHasteRing(
+            context,
+            player.x,
+            player.y,
+            PLAYER_RADIUS * 1.7,
+            elapsedMs,
+          );
+        }
+        if (upgradeEffects.berserk > 0) {
+          drawBerserkAura(
+            context,
+            player.x,
+            player.y,
+            PLAYER_RADIUS,
+            elapsedMs,
+            1 - player.hp / effectiveMaxHp(),
+          );
+        }
+        if (has("bastion") && playerIsIdle) {
+          drawBastionShield(
+            context,
+            player.x,
+            player.y,
+            PLAYER_RADIUS,
+            elapsedMs,
+          );
+        }
+        if (has("momentum")) {
+          drawMomentumChevrons(
+            context,
+            player.x,
+            player.y,
+            PLAYER_RADIUS,
+            momentum,
+          );
+        }
+        if (totalDamageMult() >= 1.5) {
+          drawPowerAura(
+            context,
+            player.x,
+            player.y,
+            PLAYER_RADIUS,
+            elapsedMs,
+            has("adrenaline") && lowHp() ? "#f87171" : "#fb923c",
+          );
+        }
+      }
       drawPlayer(
         context,
         player.x,
@@ -5810,6 +6146,16 @@ export function startGame(
         playerPose(playerFlashAlpha),
         elapsedMs,
       );
+      if (heroInGoo && !reduceMotion) {
+        drawSlowOverlay(
+          context,
+          player.x,
+          player.y,
+          PLAYER_RADIUS,
+          "goo",
+          elapsedMs,
+        );
+      }
       // The weapon in hand: it points where the player last struck, and the
       // blade swings through its arc.
       const heldId =
@@ -6096,6 +6442,22 @@ export function startGame(
 
       drawParticles(context, particles);
 
+      if (!reduceMotion) {
+        for (const cue of cues) drawCue(context, cue, elapsedMs, player);
+      }
+      if (!reduceMotion && elapsedMs < timeWarpUntil) {
+        drawTimeWarpVignette(
+          context,
+          WORLD_W,
+          WORLD_H,
+          Math.min(
+            1,
+            (timeWarpUntil - elapsedMs) / 400,
+            (elapsedMs - (timeWarpUntil - 4000)) / 300,
+          ),
+          elapsedMs,
+        );
+      }
       // Phase 14: floating damage numbers — rise and fade over
       // DAMAGE_NUMBER_DURATION_MS, drawn last so they sit above everything
       // else at the hit point.
@@ -6111,6 +6473,7 @@ export function startGame(
           n.amount,
           progress,
           n.amount >= BIG_HIT_DAMAGE,
+          n.crit ?? false,
         );
       }
       context.restore();

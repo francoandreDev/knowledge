@@ -1442,6 +1442,71 @@ its short life) and glows, the blade slash leaves a soft glow along its edge,
 the hero's own shots have a halo so they read apart from enemy fire, and every
 hit sends out a thin shockwave ring.
 
+**Game feel (follow-up).** Motion, slowness and weight now read on screen.
+Fast: footstep dust (denser when fast), and above x1.25 movement (Gale,
+Adrenaline, boosts) afterimages and speed lines on the hero; enemies moving
+faster than 110 px/s (charging boars, ogres) get streaks. Slow: a green film
+and drips on anything wading through tar, an ice tint with turning crystals on
+the frozen, echo rings on enemies during Time warp, and a blue vignette with
+slow ripples over the whole screen while it lasts. Strong: a crit or a hit of
+30% of the target's starting HP or more (and at least the old big-hit number)
+shoves the enemy back (half as far for big ones, never bosses), shakes the
+screen and holds the world for 24-38 ms (at most one pause per 280 ms); crits
+also burst in sparks and show a larger number with rays and a "!". The hero
+gets a heat aura while their damage multiplier is x1.5 or more. All of it is
+cosmetic apart from the knockback, and skipped under reduced motion (shake and
+hit-stop are already off in the lab). Also fixed: pillars now stop ground
+enemies as well as the hero; at first only the hero was pushed out of them,
+although the notes above said otherwise.
+
+**Effect cues (`cueView.ts`, `relicDemo.ts`, hooks in `engine.ts`).** A
+passive bonus is invisible by nature, so every relic and power now has its own
+short animation at the moment it acts: a steel hexagon and "-N" where armor
+soaks a hit (Iron Plate, Bulwark), green orbs flying from a kill to the hero
+(Leech Fang, Siphon), thorns lashing at the attacker (Thorn Ring), rising green
+crosses while regenerating (Ember Heart), a ghost and "MISS" on a dodge
+(Phantom), a gold "+N" per coin and a coin shower with "x3" on a lucky one
+(Lucky Coin, Gambler), a violet "+N" per gem (Scholar's Quill), a ring and
+inward arrows showing the pickup reach (Lodestone, Magnetism), a crown over a
+rich kill (Bounty hunter), a second ring on an Echo hit, flame feathers on
+Phoenix's return. Effects that stay on are drawn while they hold: a ticking
+ring for haste, red flames that grow as HP falls (Berserker), a steel hexagon
+while standing still (Bastion), a stack of chevrons per kill (Momentum). Frost
+Charm and Frostbite put a light frost on the enemies they slow. At the start of
+a run the relics carried (up to five, rarest first) parade over the hero, each
+with its own animation and name, so the ones with no moment of their own (more
+HP, more damage) are seen too. `RELIC_CUE` maps every relic to a distinct cue
+and a test enforces it, so a new relic cannot ship without an animation. The
+same drawing is staged on a small hero-and-zombie scene (`relicDemo.ts`) on
+each relic's card in a chest and in its lobby description.
+
+**Chests and missions (`chestFx.ts`, `index.astro`).** A chest now builds for
+0.9 s (1.25 s golden): sparks gather, a glow in the colour of the rarest find
+swells and the lid rattles harder, then it bursts in a flash with rotating rays
+and a spray of coins and stars. Coins count up; each find flies out in turn
+with the glow of its rarity (a light sweep on rare and up, a pulse on epic and
+legendary, a pop on NEW). At the end of a run each mission or achievement drops
+in with a check mark that draws itself, a spark ring and a coin count-up. In
+the Missions panel rows slide in one after another, progress bars fill, and a
+mission finished since the panel was last open flashes once (remembered per
+day only while the panel is open). Finishing a study mission on a unit page
+shows a toast right there. All of it is skipped under reduced motion.
+
+**Duel rival.** The rival played with absolute precision: it aimed every frame
+at the foe's true position, turned without limit, knew the exact distance and
+struck the moment something was in reach. It now has three kinds of limit: aim
+(it aims at where it last saw the foe, led imperfectly, and swings at a limited
+rate that depends on the level), precision (a per-look error in the distance it
+believes, a pointing error with a slow drift that grows with the foe's speed,
+and a per-fight "form" that makes it sharper or sloppier), and time (a slower
+look at the fight with some looks missed, a wait of 0.2-1 s between spotting a
+chance and starting to charge, inertia when it changes direction, and pauses to
+line up a shot). On a target that moves but does not fight back, the damage it
+lands in 30 s fell from 88/94/98% (easy/normal/hard) to 66/82/90%, and Bolt on
+Hard from 80% to 39%. Large area weapons still land nearly always on a target
+that stays in the area, as they always did. `simulateMatch` now takes a
+difficulty per side so a test can set a strong player against each rival.
+
 **Verification.** `bun test`, lint, `astro check` and a full build pass; 22 new
 tests cover hazard placement, spike phases, pillar push-out, blast falloff and
 mutation draws. The user confirmed hazards and mutations work in play and that
