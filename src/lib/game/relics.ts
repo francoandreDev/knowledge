@@ -46,6 +46,26 @@ export interface RelicEffects {
   enemySlow: number;
   /** HP fraction restored by a once-per-run revive; 0 means none. */
   reviveHpFrac: number;
+  // Behaviours that upgrade branches add (see branches.ts). Each is 0 when
+  // no branch grants it, so a run without branches plays exactly as before.
+  /** Extra damage per whole bar of missing HP: 0.5 means +50% at the brink. */
+  berserk: number;
+  /** Added to the x2 a crit deals: 0.5 makes crits hit for x2.5. */
+  critDamage: number;
+  /** Chance to ignore a hit outright. */
+  dodge: number;
+  /** Every this many seconds gems and coins are pulled in from the whole
+   * field for a moment; 0 means never. */
+  gemBurstEveryS: number;
+  /** Extra coin value from veteran and elite enemies and from bosses. */
+  bounty: number;
+  /** Chance a coin pickup pays triple. */
+  coinLuck: number;
+  /** No single hit may take more than this fraction of max HP; 0 is no cap. */
+  hitCap: number;
+  /** Fraction of max HP healed when HP first drops under 30%, at most once
+   * every 25 s. */
+  panicHeal: number;
 }
 
 export function noEffects(): RelicEffects {
@@ -64,6 +84,14 @@ export function noEffects(): RelicEffects {
     thorns: 0,
     enemySlow: 0,
     reviveHpFrac: 0,
+    berserk: 0,
+    critDamage: 0,
+    dodge: 0,
+    gemBurstEveryS: 0,
+    bounty: 0,
+    coinLuck: 0,
+    hitCap: 0,
+    panicHeal: 0,
   };
 }
 

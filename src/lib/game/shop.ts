@@ -6,6 +6,13 @@
 import { pStorage } from "../profile";
 import { SHOP_RECOVERY_HPS_PER_LEVEL } from "./balance";
 import {
+  BRANCH_LEVEL,
+  BRANCH_SWITCH_COST,
+  applyBranch,
+  branchesFor,
+  soft,
+} from "./branches";
+import {
   RELICS,
   RELIC_MAX_LEVEL,
   noEffects,
@@ -247,11 +254,52 @@ export function upgradeCost(id: UpgradeId): number | null {
   return Math.ceil(def.baseCost * Math.pow(level + 1, 1.5));
 }
 
+const BRANCH_KEY_PREFIX = "game:branch:";
+
+/** The path chosen for a branched upgrade, or null when none (or the stored
+ * value is not one of its paths). */
+export function getBranch(id: UpgradeId): string | null {
+  const defs = branchesFor(id);
+  if (!defs) return null;
+  const stored = pStorage.getItem(BRANCH_KEY_PREFIX + id);
+  return defs.some((b) => b.id === stored) ? stored : null;
+}
+
+/** True when an upgrade has reached its branch level and still has no path:
+ * buying more levels waits until one is chosen. */
+export function needsBranchChoice(id: UpgradeId): boolean {
+  return (
+    branchesFor(id) !== null &&
+    getUpgradeLevel(id) >= BRANCH_LEVEL &&
+    getBranch(id) === null
+  );
+}
+
+/** Picks a path. The first choice is free; changing it later costs
+ * BRANCH_SWITCH_COST and keeps the levels. Returns true when it took effect. */
+export function chooseBranch(id: UpgradeId, branchId: string): boolean {
+  const defs = branchesFor(id);
+  if (!defs || !defs.some((b) => b.id === branchId)) return false;
+  if (getUpgradeLevel(id) < BRANCH_LEVEL) return false;
+  const current = getBranch(id);
+  if (current === branchId) return false;
+  if (current !== null) {
+    const balance = getCoinBalance();
+    if (balance < BRANCH_SWITCH_COST) return false;
+    pStorage.setItem(COIN_BALANCE_KEY, String(balance - BRANCH_SWITCH_COST));
+    document.dispatchEvent(new CustomEvent("game:coins-changed"));
+  }
+  pStorage.setItem(BRANCH_KEY_PREFIX + id, branchId);
+  document.dispatchEvent(new CustomEvent("game:upgrades-changed"));
+  return true;
+}
+
 /** Spends coins to buy the next level of an upgrade, if affordable and not
  * maxed. Returns true on a successful purchase. */
 export function purchaseUpgrade(id: UpgradeId): boolean {
   const cost = upgradeCost(id);
   if (cost === null) return false;
+  if (needsBranchChoice(id)) return false;
   const balance = getCoinBalance();
   if (balance < cost) return false;
   pStorage.setItem(COIN_BALANCE_KEY, String(balance - cost));
@@ -283,16 +331,10 @@ export function setRelicLevel(id: string, level: number): void {
   pStorage.setItem(RELIC_KEY_PREFIX + id, String(level));
 }
 
-/** Aggregates owned shop upgrade levels and relics into the numbers
- * engine.ts applies for the duration of one run. */
-/** Diminishing returns for the stats that would break the game if they grew
- * forever: it starts exactly as `perLevel` per level and bends toward `cap`,
- * so the first levels feel the same and the hundredth cannot make you
- * untouchable. */
-function soft(levels: number, perLevel: number, cap: number): number {
-  return cap * (1 - Math.exp((-perLevel * levels) / cap));
-}
-
+/** Aggregates owned shop upgrade levels, chosen branches and relics into the
+ * numbers engine.ts applies for the duration of one run. Stats that would
+ * break the game if they grew forever go through `soft` (branches.ts):
+ * diminishing returns that start exactly as `perLevel` per level. */
 export function getUpgradeEffects(): UpgradeEffects {
   const fx = noEffects();
   fx.maxHpMult += 0.1 * getUpgradeLevel("vigor");
@@ -312,6 +354,10 @@ export function getUpgradeEffects(): UpgradeEffects {
   fx.killHeal += soft(getUpgradeLevel("siphon"), 0.1, 3);
   fx.thorns += soft(getUpgradeLevel("thornmail"), 0.04, 2);
   fx.enemySlow += soft(getUpgradeLevel("frostbite"), 0.02, 0.45);
+  // Chosen paths add behaviours the flat levels above cannot.
+  for (const u of UPGRADES) {
+    applyBranch(fx, u.id, getBranch(u.id), getUpgradeLevel(u.id));
+  }
   // Relics stack additively on top of the shop's levels.
   const rel = relicEffects(getRelicLevels());
   fx.maxHpMult += rel.maxHpMult - 1;
@@ -327,6 +373,7 @@ export function getUpgradeEffects(): UpgradeEffects {
   fx.killHeal += rel.killHeal;
   fx.thorns += rel.thorns;
   fx.enemySlow += rel.enemySlow;
-  fx.reviveHpFrac = rel.reviveHpFrac;
+  // A relic's revive and a Phoenix path do not stack: the better one wins.
+  fx.reviveHpFrac = Math.max(fx.reviveHpFrac, rel.reviveHpFrac);
   return fx;
 }

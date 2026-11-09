@@ -92,6 +92,64 @@ export function missionsForDay(day: string): MissionDef[] {
   return out;
 }
 
+// Study missions: the same daily shelf as the run missions above, but won on
+// the curriculum pages rather than in a run. Marking a unit done is what pays,
+// so the game can ask for the thing it exists to encourage. A unit counts once
+// per day however often it is marked, un-marked and marked again.
+export interface StudyStats {
+  /** Distinct units marked done today. */
+  passed: number;
+  /** Of those, how many were a repeat pass after a review came due. */
+  reviewed: number;
+}
+
+export interface StudyMissionDef {
+  id: string;
+  text: string;
+  coins: number;
+  chest?: "wooden" | "golden";
+  /** Current and target value, for the progress bar. */
+  progress: (s: StudyStats) => [number, number];
+}
+
+export const STUDY_MISSIONS: StudyMissionDef[] = [
+  {
+    id: "study-pass-1",
+    text: "Mark a unit as done",
+    coins: 80,
+    progress: (s) => [Math.min(s.passed, 1), 1],
+  },
+  {
+    id: "study-pass-3",
+    text: "Mark 3 units as done in one day",
+    coins: 200,
+    chest: "wooden",
+    progress: (s) => [Math.min(s.passed, 3), 3],
+  },
+  {
+    id: "study-review",
+    text: "Pass a unit again once its review is due",
+    coins: 150,
+    chest: "wooden",
+    progress: (s) => [Math.min(s.reviewed, 1), 1],
+  },
+];
+
+export function isStudyDone(def: StudyMissionDef, s: StudyStats): boolean {
+  const [cur, target] = def.progress(s);
+  return cur >= target;
+}
+
+/** The study missions `stats` completes that were not already claimed. */
+export function newlyCompletedStudy(
+  stats: StudyStats,
+  claimed: readonly string[],
+): StudyMissionDef[] {
+  return STUDY_MISSIONS.filter(
+    (m) => !claimed.includes(m.id) && isStudyDone(m, stats),
+  );
+}
+
 export interface Lifetime {
   runs: number;
   kills: number;

@@ -1324,6 +1324,74 @@ patterns — **a future session with a real focused browser (or a human
 playthrough) should close out that remaining gap**, the same follow-up
 already on file for a handful of Phase 8/9/13 items below.
 
+### Phase 17 — Lobby redesign, upgrade branches, study missions, risk levels ✅ implemented, renders confirmed by the user; in-run effects untested
+
+Done in one session at the user's request. The user said the shop's flat
+"+N% per level" upgrades were boring and predictable, and asked for study
+missions and a risk level before a run.
+
+**Lobby (`src/pages/game/index.astro`).** The title screen is now a
+battlefield: the stage canvas fills the whole card, the hero stands in front
+of a moon with the five areas docked beside it, and the controls sit in one
+glass "deck" below (weapon strip + weapon sheet, Start, risk picker, Endless,
+stats). Hero and ground position are pixel offsets (`--hero-y`, `--ground-y`)
+read by `startHeroStage`, so they do not move when the deck grows. The canvas
+draws two parallax ridges, tombstones and drifting mist. Every colour comes
+from `--t-*` / sky tokens, with a light and a dark set (the site's theme is
+the `dark` class on `<html>`); a `MutationObserver` repaints the sky on a
+toggle. The docks show their own status (mission ring, "7 ready", relic bar)
+and only the ones with something to do glow. On phones the areas become one
+row of icons on top and Start is sticky at the bottom of the deck. Gotchas:
+dynamic children inserted with `innerHTML` need `:global()` in scoped styles
+(this broke the weapon sheet once), and an absolutely positioned grid child
+with auto height and `align-self: center` collapses to 0px.
+
+**The night's event (`dailyEvent.ts`).** One modifier per calendar day, picked
+from the day key: clear night (40% of days), blood moon (+25% coins, enemies
+10% faster), fog night (enemies 8% slower), storm night (+30% coins, enemies
+12% faster). It repaints the lobby sky, shows a chip under the title, and is
+applied in `launch()`: the coin bonus folds into `upgradeEffects.coinMult`,
+the speed goes to the new `GameOptions.enemySpeedMult` (one factor on the
+`dt` passed to `updateEnemyBehavior`). Training is exempt.
+
+**Upgrade branches (`branches.ts`, `shop.ts`, `engine.ts`).** Might, Vigor,
+Fleetness, Magnetism, Greed and Bulwark fork at level 3 (`BRANCH_LEVEL`): the
+player picks one of two paths, further levels stay locked until they do, and
+the first choice is free (switching later costs `BRANCH_SWITCH_COST`, 80
+coins, and keeps the levels). Level 6 (`CAPSTONE_LEVEL`) adds a capstone.
+Paths: Berserker / Duelist, Juggernaut / Phoenix, Phantom / Gale, Vortex /
+Scholar, Bounty hunter / Gambler, Ironclad / Last stand. They add eight new
+behaviours to `RelicEffects` (`berserk`, `critDamage`, `dodge`,
+`gemBurstEveryS`, `bounty`, `coinLuck`, `hitCap`, `panicHeal`), all 0 by
+default, read at small hooks in `damageEnemy`, `damagePlayer`,
+`maybeSpawnCoin`, the coin pickup and the gem loop. The stat-style upgrades
+keep their per-level numbers; the branch is on top of them. A relic's revive
+and a Phoenix path take the better of the two rather than stacking.
+
+**Study missions (`missions.ts`, `missionStore.ts`, `ProgressToggle.astro`).**
+Three daily missions won on the curriculum pages: mark a unit done, mark three
+units done in a day, and pass a unit again once its spaced-repetition review is
+due. The review one is only offered while a review is due (or once won), so it
+is never impossible. `ProgressToggle` calls `recordStudyEvent` right after
+`addToken`; a unit counts once per day however often it is un-marked and
+re-marked. They pay coins and chests and show in the Missions panel and in the
+Missions dock ring.
+
+**Risk level (`risk.ts`, `tokens.ts`).** Calm, Hard and Nightmare, chosen
+under Start. Hard: +35% coins, enemies 8% faster, 25% more spawns, 15% more
+HP; Nightmare: +80%, 16%, 55%, 35%. Hard unlocks after 2 runs, Nightmare
+after a whole timed run is survived. Stacks with the night's event. Uses the
+existing `spawnRateMult` option and a new `enemyHpMult` (applied in
+`hpScaleAt`). Training is always calm. The choice is stored in `game:risk`.
+
+**Verification.** `bun test` (70 tests, 21 new: branches, study missions,
+risk, daily event), lint, `astro check` and a full build pass. The user
+confirmed in the browser that the new lobby, both themes, the weapon sheet and
+the new pickers and panels render. What has **not** been exercised is any
+in-run behaviour of the branches (Vortex, Ironclad, Last stand, Phantom...)
+or a real study mission being paid; the numbers are first guesses to tune by
+playing.
+
 ## Current state
 
 **All 8 originally-planned phases, plus Phase 9 (composite sprite detail),

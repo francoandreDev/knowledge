@@ -21,6 +21,7 @@ The five hooks the design is built around, from the original request:
 - A token is one play attempt; it is consumed when a run starts, not on death.
 - Tokens accumulate **without limit and never expire** — deliberately, to reward binge study sessions with a stockpile of runs.
 - Re-marking a unit `done` again (e.g. after a spaced-repetition reset forces a re-take) also grants a token — this rewards review, not just first-time completion.
+- **Study missions** (added in Phase 17) pay coins and chests for studying itself: mark a unit done, mark three in a day, pass one again once its review is due. They count each unit once per day.
 
 ## Run duration
 
@@ -125,6 +126,21 @@ Cost per level: `cost = base × (current_level + 1)^1.5`.
 | Greed      | +10% coins earned per run | 5         |
 | Amanuensis | +5% XP earned             | 5         |
 | Recovery   | Passive HP regen          | 3         |
+
+### Upgrade branches
+
+Six upgrades (Might, Vigor, Fleetness, Magnetism, Greed, Bulwark) fork at
+level 3 into two paths with different behaviour, not just a bigger number;
+level 6 adds a capstone. The first choice is free and later switches cost
+80 coins. See Phase 17 in `GAME-PROGRESS.md` for the list and the hooks.
+
+### Risk level and the night's event
+
+Before a run the player picks Calm, Hard or Nightmare: more coins in exchange
+for faster, thicker, tougher waves. Hard and Nightmare unlock with play.
+Separately, each calendar day has one event (clear, blood moon, fog, storm)
+that tilts coins and enemy speed and repaints the lobby sky. Both stack, and
+neither applies to the balance lab.
 
 ## HUD
 

@@ -25,6 +25,7 @@ const TOKENS_KEY = "game:tokens";
 const BEST_TIME_KEY = "game:bestTimeS";
 const BEST_ENDLESS_KEY = "game:bestEndlessS";
 const ENDLESS_MODE_KEY = "game:endlessMode";
+const RISK_KEY = "game:risk";
 
 const BASE_RUN_DURATION_S = 60;
 const RUN_DURATION_BONUS_PER_UNIT_S = 30;
@@ -113,4 +114,14 @@ export function getEndlessMode(): boolean {
 
 export function setEndlessMode(on: boolean): void {
   pStorage.setItem(ENDLESS_MODE_KEY, on ? "1" : "0");
+}
+
+/** The risk level last picked in the lobby (an id from risk.ts), or null. The
+ * caller checks it is still unlocked; see risk.ts's effectiveRisk(). */
+export function getStoredRisk(): string | null {
+  return pStorage.getItem(RISK_KEY);
+}
+
+export function setStoredRisk(id: string): void {
+  pStorage.setItem(RISK_KEY, id);
 }

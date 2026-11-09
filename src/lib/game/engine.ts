@@ -244,6 +244,10 @@ const PROJECTILE_RADIUS = 4;
 const GEM_RADIUS = 5;
 const GEM_PICKUP_RADIUS = 90; // magnetic pull begins within this distance
 const GEM_PULL_SPEED = 260;
+// Vortex (a Magnetism branch): the pull covers the field for this long, and
+// long enough for the slowest gem to arrive at GEM_PULL_SPEED.
+const GEM_BURST_DURATION_S = 3.5;
+const GEM_BURST_RADIUS_MULT = 12;
 const GEM_COLLECT_DISTANCE = 14;
 const GEM_XP_VALUE = 4; // placeholder — see "Deliberate simplifications"
 
@@ -1131,6 +1135,11 @@ export interface GameOptions {
   /** Benchmarks only: spawn this many times faster, so a fixed-length run is
    * a dense wave a weapon can't fully clear (kills stop saturating). */
   spawnRateMult?: number;
+  /** The night's event and the chosen risk level: scale how fast every enemy
+   * moves and acts. See dailyEvent.ts and risk.ts. */
+  enemySpeedMult?: number;
+  /** The chosen risk level: scales every enemy's HP on top of the ramp. */
+  enemyHpMult?: number;
   /** Backing-store pixels per world pixel (default 1). */
   renderScale?: number;
   /** The ground this run is fought on; random when omitted. */
@@ -1547,7 +1556,8 @@ export function startGame(
   const endlessExtra = (elapsedS: number) =>
     endless ? Math.max(0, elapsedS - ENDLESS_RAMP_START_S) / ENDLESS_RAMP_S : 0;
   const hpScaleAt = (elapsedS: number) =>
-    enemyTimeScale(elapsedS, ENEMY_HP_SCALE_CAP) + endlessExtra(elapsedS);
+    (enemyTimeScale(elapsedS, ENEMY_HP_SCALE_CAP) + endlessExtra(elapsedS)) *
+    (options.enemyHpMult ?? 1);
   const damageScaleAt = (elapsedS: number) =>
     enemyTimeScale(elapsedS, ENEMY_DAMAGE_SCALE_CAP) +
     endlessExtra(elapsedS) * 0.5;
@@ -1814,6 +1824,10 @@ export function startGame(
   let xpTemp = 0;
   let thornsTemp = 0;
   let revivesLeft = upgradeEffects.reviveHpFrac > 0 ? 1 : 0;
+  // Branch behaviours (see branches.ts): when Last Stand may fire again, and
+  // whether the Vortex pull was already on last frame.
+  let panicReadyAt = 0;
+  let gemBurstWasOn = false;
   let bossDefeated = false;
 
   function effectiveMaxHp(): number {
@@ -2343,7 +2357,12 @@ export function startGame(
       (weaponIdForSource(source) ?? SYNERGY_SOURCE_OWNER[source]) &&
       Math.random() < crit
     ) {
-      amount *= 2;
+      amount *= 2 + upgradeEffects.critDamage;
+    }
+    // Berserker: the emptier the HP bar, the harder every hit lands.
+    if (upgradeEffects.berserk > 0) {
+      const missing = 1 - player.hp / effectiveMaxHp();
+      amount *= 1 + upgradeEffects.berserk * Math.max(0, Math.min(1, missing));
     }
     const styled = weaponIdForSource(source);
     if (styled && WEAPON_STYLE[styled] === runStyle)
@@ -2572,6 +2591,13 @@ export function startGame(
     if (Math.random() >= dropChance) return;
     let value = COIN_VALUE_BY_TIER[e.tier];
     if (BETTER_DROP_KINDS.has(e.kind)) value *= BETTER_DROP_VALUE_MULT;
+    // Bounty hunter: tougher enemies and bosses pay more.
+    if (
+      upgradeEffects.bounty > 0 &&
+      (e.tier !== "normal" || e.kind === "reaper" || e.kind === "lich")
+    ) {
+      value *= 1 + upgradeEffects.bounty;
+    }
     spawnCoin(e.x, e.y, value);
   }
 
@@ -2711,6 +2737,12 @@ export function startGame(
   ) {
     if (training) return; // the lab never hurts the player
     if (elapsedMs < invulnUntil) return; // Dash and Aegis
+    // Phantom: some hits simply miss.
+    if (upgradeEffects.dodge > 0 && Math.random() < upgradeEffects.dodge) {
+      if (!reduceMotion) ringPop(particles, player.x, player.y, "#a5f3fc", 44);
+      log.log("player:dodged", { source });
+      return;
+    }
     // The Orbit Shield soaks hits that arrive from an orbiter's side.
     if (orbitCoverNow && fromX !== undefined && fromY !== undefined) {
       const bearing = Math.atan2(fromY - player.y, fromX - player.x);
@@ -2734,7 +2766,31 @@ export function startGame(
       }
     }
     amount *= 1 - Math.min(0.6, upgradeEffects.armor + armorTemp);
+    // Ironclad: no single hit takes more than a slice of max HP.
+    if (upgradeEffects.hitCap > 0) {
+      amount = Math.min(amount, effectiveMaxHp() * upgradeEffects.hitCap);
+    }
     player.hp = Math.max(0, player.hp - amount);
+    // Last stand: the first time HP falls under 30% it refills a chunk.
+    if (
+      upgradeEffects.panicHeal > 0 &&
+      player.hp > 0 &&
+      player.hp / effectiveMaxHp() < 0.3 &&
+      elapsedMs >= panicReadyAt
+    ) {
+      panicReadyAt = elapsedMs + 25000;
+      player.hp = Math.min(
+        effectiveMaxHp(),
+        player.hp + effectiveMaxHp() * upgradeEffects.panicHeal,
+      );
+      banners.push({
+        text: "LAST STAND",
+        sub: "you dig in and push back",
+        at: elapsedMs,
+        color: "#86efac",
+      });
+      if (!reduceMotion) ringPop(particles, player.x, player.y, "#86efac", 90);
+    }
     playerHitFlashUntil = elapsedMs + HIT_FLASH_MS;
     if (fromX !== undefined && fromY !== undefined) {
       hitIndicators.push({
@@ -4510,6 +4566,7 @@ export function startGame(
           e,
           dt *
             (1 - Math.min(0.5, upgradeEffects.enemySlow + slowTemp)) *
+            (options.enemySpeedMult ?? 1) *
             (e.tier === "elite" ? ELITE_SPEED_MULT : 1) *
             (frozen ? 0.05 : 1),
         );
@@ -4687,8 +4744,29 @@ export function startGame(
       if (status !== "running") return;
 
       // --- gems: magnetic pull + collect (feeds XP) ---
+      // Vortex: for a couple of seconds every so often the pull covers the
+      // whole field. The first one waits a full interval.
+      const burstEveryS = upgradeEffects.gemBurstEveryS;
+      const burstOn =
+        burstEveryS > 0 &&
+        elapsedS >= burstEveryS &&
+        elapsedS % burstEveryS < GEM_BURST_DURATION_S;
+      if (burstOn && !gemBurstWasOn) {
+        banners.push({
+          text: "VORTEX",
+          sub: "everything on the field flies to you",
+          at: elapsedMs,
+          color: "#c4b5fd",
+        });
+        if (!reduceMotion)
+          ringPop(particles, player.x, player.y, "#a78bfa", 160);
+      }
+      gemBurstWasOn = burstOn;
       const pickupRadius =
-        GEM_PICKUP_RADIUS * pickupRadiusMult * upgradeEffects.pickupRadiusMult;
+        GEM_PICKUP_RADIUS *
+        pickupRadiusMult *
+        upgradeEffects.pickupRadiusMult *
+        (burstOn ? GEM_BURST_RADIUS_MULT : 1);
       for (const g of gems) {
         if (!g.alive) continue;
         const d = distance(player, g);
@@ -4720,10 +4798,14 @@ export function startGame(
         const d = distance(player, c);
         if (d < GEM_COLLECT_DISTANCE) {
           c.alive = false;
-          coinsCollected += c.value;
+          // Gambler: any coin can pay triple.
+          const lucky =
+            upgradeEffects.coinLuck > 0 &&
+            Math.random() < upgradeEffects.coinLuck;
+          coinsCollected += lucky ? c.value * 3 : c.value;
           if (!reduceMotion) {
-            burst(particles, c.x, c.y, "#fde047", 6, 150);
-            ringPop(particles, c.x, c.y, "#fef08a", 18);
+            burst(particles, c.x, c.y, "#fde047", lucky ? 14 : 6, 150);
+            ringPop(particles, c.x, c.y, "#fef08a", lucky ? 36 : 18);
           }
           playPickup();
           log.log("pickup:coin", {
