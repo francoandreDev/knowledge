@@ -377,6 +377,9 @@ export const MENU_ICON = {
   chests: tile(
     `<path d="M8 22 V18 Q8 9 24 9 Q40 9 40 18 V22Z" fill="#bf7632"/><rect x="8" y="22" width="32" height="17" rx="3" fill="#a2602a"/><rect x="21" y="20" width="6" height="8" rx="1.5" fill="#f5c542"/>`,
   ),
+  missions: tile(
+    `<path d="M10 14 L14 18 L21 10 M10 30 L14 34 L21 26" stroke-width="3.5"/><path d="M27 15 H39 M27 31 H39" stroke-width="4"/>`,
+  ),
   relics: tile(
     `<path d="M24 6 L39 17 L24 42 L9 17 Z" fill="#c4b5fd"/><path d="M9 17 H39 M24 6 L18 17 L24 42 L30 17 Z" stroke-width="2.5"/>`,
   ),

@@ -3384,6 +3384,15 @@ Picked from the design canvas (icons B, HUD B, UI B):
 - **HUD (Corners)**: HP as a ring around a portrait with the level badge, timer and threat pips top centre, pause and kills/gems/coins top right, weapons as a left column (icon with a recharge sweep, name, level, kills), XP as a thin bar along the bottom. The in-canvas weapon slots were removed (the engine now reports `ready` per weapon). The special-move button is the single round button bottom right on every device.
 - **UI (Dark glass)**: Chakra Petch font (`@fontsource/chakra-petch`), translucent blurred panels with thin light borders, neon accents on the lobby, panels, weapon picker, pause menu and the level-up screen.
 
+### Glass panels, missions and wave events (2026-11-09)
+
+- **Glass everywhere**: shop tiles, unlock rows, chest rows, relic grid, chest reveal and the results screen now use shared `gl-*` classes (translucent card, accent border and glow, `--c` colour per rarity) instead of the old pastel cards with thick dark borders. `badgeClass` is no longer used by the page.
+- **Missions panel** (lobby tile, odd tile spans the grid): three daily missions picked deterministically per calendar day (`missions.ts`, `hash.ts`), plus lifetime achievements with progress bars. `missionStore.ts` keeps the counters (`game:lifetime`, `game:missions:<day>`, `game:achieved`), pays coins and some chests, and the results screen lists what a run just won. Training runs are not scored. Tests in `missions.test.ts`.
+- **Wave events** (`runWaveEvent` in `engine.ts`): from 50 s, every 55–80 s, alternating a Horde (14+ enemies, up to 40) and a Treasure shower (12 coins and 8 gems across the arena). Skipped in training, during a boss and in the last 25 s of a timed run.
+- **Weapon pair synergies** (`PAIR_SYNERGIES`): Razor Orbit (Blade Arc + Orbit Shield), Burning Ground (Flame Trail + Meteor Rain), Kill Zone (Sentry Totem + Gravity Well); both weapons hit 20% harder. A new-weapon card that completes a pair shows "Synergy" in the detail pane and is drawn twice as often.
+
+Untuned first guesses: mission targets and rewards, event gap and size, the 20% pair bonus. Not yet checked in a browser. Not done: a new boss type (the Reaper and Lich already have phases) and a seeded daily run.
+
 ## 2026-10-30 — `logic/` batch 1: `formal-informal-logic`, `fallacies`, `problem-decomposition`, `boolean-logic`
 
 Started the `logic/` track (12 units) with 4 parallel content-only subagents. Same pipeline; `build` 273 pages (other work added pages), `typecheck` 0 errors; Node sandbox check of 19 code items 0 failing assertions; live click-through passed all 22 `DomainCheck` topics (including the 2 code topics), 0 Mermaid errors.

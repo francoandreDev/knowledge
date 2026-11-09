@@ -181,6 +181,8 @@ import {
   gravityWellShape,
   flameTrailShape,
   OVERDRIVE_DAMAGE_PER_LEVEL,
+  PAIR_SYNERGIES,
+  PAIR_SYNERGY_MULT,
   sentryTotemShape,
   meteorRainShape,
   homingDartShape,
@@ -877,6 +879,18 @@ const VAMPIRIC_MIGHT_HEAL = 3; // flat HP per evolved-weapon kill
 const TWIN_FANGS_MIN_LEVEL = 4; // Bolt + Homing Dart, both at Lv4+
 const TWIN_FANGS_INTERVAL_MS = 2000;
 
+// Weapon pair synergies: owning both weapons of a pair makes each of their
+// hits land 20% harder, announced once per run by the synergy toast. Shown
+// on the level-up cards so a pick that completes a pair is visible.
+
+// Wave events break up the steady trickle: a horde pours in from every edge,
+// or a treasure shower scatters coins to run for. Never during a boss, never
+// in the last seconds of a timed run.
+const EVENT_FIRST_S = 50;
+const EVENT_GAP_MIN_S = 55;
+const EVENT_GAP_MAX_S = 80;
+const EVENT_QUIET_END_S = 25;
+
 // --- Phase 3: temporary (run-only) stat cards ---
 interface TempStatDef {
   id: string;
@@ -984,6 +998,8 @@ export interface LevelUpCard {
   /** How well the card fits the run's style (set by the opening weapon). */
   fit?: CardFit;
   style?: RunStyle;
+  /** New-weapon cards: the pair synergy this pick would complete. */
+  synergy?: { name: string; blurb: string };
   fromLevel?: number;
   /** Stat cards: stacks owned now and the most it can reach. */
   stacks?: number;
@@ -1382,6 +1398,7 @@ interface InternalCard {
   isEvolution?: boolean;
   title: string;
   description: string;
+  synergy?: { name: string; blurb: string };
   specialId?: SpecialId;
   fit?: CardFit;
   style?: RunStyle;
@@ -1822,6 +1839,8 @@ export function startGame(
     ? ENDLESS_FIRST_BOSS_S
     : Math.max(20, runDurationS - 20);
   let bossCycle = 0;
+  let nextEventAtS = EVENT_FIRST_S;
+  let eventCount = 0;
   let bossSpawned = false;
   let bossWarned = false; // Phase 14
   let bossPowerScale = 1; // set by spawnBoss(), used to scale ring damage too
@@ -1953,6 +1972,54 @@ export function startGame(
       y: Math.round(y),
       aliveCount: enemies.length,
     });
+  }
+
+  function runWaveEvent(elapsedS: number) {
+    eventCount++;
+    nextEventAtS =
+      elapsedS +
+      EVENT_GAP_MIN_S +
+      Math.random() * (EVENT_GAP_MAX_S - EVENT_GAP_MIN_S);
+    if (eventCount % 2 === 1) {
+      // Horde: a burst of enemies, bigger the later it comes.
+      const n = Math.min(40, 14 + Math.floor(elapsedS / 15));
+      for (let i = 0; i < n; i++) spawnEnemy(elapsedS);
+      banners.push({
+        text: "HORDE!",
+        sub: "they come from every side",
+        at: elapsedMs,
+        color: "#fb7185",
+      });
+      if (feedbackOn) {
+        shakeMag = 5;
+        shakeUntil = elapsedMs + 350;
+      }
+      log.log("event:horde", { n });
+    } else {
+      // Treasure shower: coins and gems scattered across the arena.
+      const coinValue = 2 + Math.floor(elapsedS / 60);
+      for (let i = 0; i < 12; i++) {
+        spawnCoin(
+          60 + Math.random() * (WORLD_W - 120),
+          60 + Math.random() * (WORLD_H - 120),
+          coinValue,
+        );
+      }
+      for (let i = 0; i < 8; i++) {
+        spawnGem(
+          60 + Math.random() * (WORLD_W - 120),
+          60 + Math.random() * (WORLD_H - 120),
+        );
+      }
+      banners.push({
+        text: "TREASURE!",
+        sub: "grab it before they do",
+        at: elapsedMs,
+        color: "#fde047",
+      });
+      log.log("event:treasure", { coinValue });
+    }
+    if (!reduceMotion) ringPop(particles, player.x, player.y, "#fde047", 160);
   }
 
   function spawnBoss() {
@@ -2281,6 +2348,18 @@ export function startGame(
     const styled = weaponIdForSource(source);
     if (styled && WEAPON_STYLE[styled] === runStyle)
       amount *= STYLE_MATCH_DAMAGE;
+    if (styled) {
+      const pair = PAIR_SYNERGIES.find(
+        (p) =>
+          (p.a === styled || p.b === styled) &&
+          ownedWeapons.some((w) => w.id === p.a) &&
+          ownedWeapons.some((w) => w.id === p.b),
+      );
+      if (pair) {
+        amount *= PAIR_SYNERGY_MULT;
+        maybeTriggerSynergy(pair.name);
+      }
+    }
     if (e.kind === "knight") amount *= KNIGHT_DAMAGE_TAKEN;
     if (e.kind === "golem") amount *= GOLEM_DAMAGE_TAKEN;
     // Phase 16B: "Shield Wall" — 2+ adjacent skeletons take reduced damage
@@ -3021,6 +3100,14 @@ export function startGame(
       }
       c.style = style;
       c.fit = fit;
+      if (c.kind === "newWeapon" && c.weaponId) {
+        const pair = PAIR_SYNERGIES.find(
+          (p) =>
+            (p.a === c.weaponId && ownedWeapons.some((w) => w.id === p.b)) ||
+            (p.b === c.weaponId && ownedWeapons.some((w) => w.id === p.a)),
+        );
+        if (pair) c.synergy = { name: pair.name, blurb: pair.blurb };
+      }
     }
     return pool;
   }
@@ -3031,7 +3118,9 @@ export function startGame(
     const rest = buildCardPool();
     const out: InternalCard[] = [];
     while (out.length < 4 && rest.length > 0) {
-      const weights = rest.map((c) => FIT_WEIGHT[c.fit ?? "neutral"]);
+      const weights = rest.map(
+        (c) => FIT_WEIGHT[c.fit ?? "neutral"] * (c.synergy ? 2 : 1),
+      );
       let r = Math.random() * weights.reduce((a, b) => a + b, 0);
       let idx = 0;
       for (; idx < rest.length - 1; idx++) {
@@ -3055,6 +3144,7 @@ export function startGame(
       specialId: c.specialId,
       fit: c.fit,
       style: c.style,
+      synergy: c.synergy,
       isEvolution: c.isEvolution,
       title: c.title,
       description: c.description,
@@ -4384,6 +4474,18 @@ export function startGame(
       }
       if (!bossSpawned && elapsedS >= bossSpawnAtS) {
         spawnBoss();
+      }
+
+      // --- wave events ---
+      if (
+        !training &&
+        elapsedS >= nextEventAtS &&
+        elapsedS < runDurationS - EVENT_QUIET_END_S &&
+        !enemies.some(
+          (e) => e.alive && (e.kind === "reaper" || e.kind === "lich"),
+        )
+      ) {
+        runWaveEvent(elapsedS);
       }
 
       // --- spawning (exponential-ish ramp, floored — see file header) ---

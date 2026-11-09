@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { WeaponId } from "./engine";
 import {
+  PAIR_SYNERGIES,
   BASIC_ENEMY_HP,
   CONTACT_DISTANCE_PX,
   FELT_REGEN_RATIO,
@@ -157,5 +158,16 @@ describe("orbit shield protection", () => {
   test("it starts as a nudge and ends as real cover", () => {
     expect(avgProtection(1)).toBeLessThan(0.1);
     expect(avgProtection(WEAPON_MAX_LEVEL)).toBeGreaterThan(0.3);
+  });
+});
+
+describe("weapon pair synergies", () => {
+  test("pairs are distinct, valid weapons and never the same weapon twice", () => {
+    const names = PAIR_SYNERGIES.map((p) => p.name);
+    expect(new Set(names).size).toBe(names.length);
+    for (const p of PAIR_SYNERGIES) {
+      expect(p.a).not.toBe(p.b);
+      expect(p.blurb.length).toBeGreaterThan(0);
+    }
   });
 });

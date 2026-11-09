@@ -362,3 +362,30 @@ export function maxRecoveryHps(): number {
     SHOP_RECOVERY_HPS_PER_LEVEL * SHOP_RECOVERY_MAX_LEVEL
   );
 }
+
+export const PAIR_SYNERGIES: {
+  name: string;
+  a: WeaponId;
+  b: WeaponId;
+  blurb: string;
+}[] = [
+  {
+    name: "Razor Orbit",
+    a: "bladeArc",
+    b: "orbitShield",
+    blurb: "Blades and orbiters hit 20% harder",
+  },
+  {
+    name: "Burning Ground",
+    a: "flameTrail",
+    b: "meteorRain",
+    blurb: "Flames and meteors hit 20% harder",
+  },
+  {
+    name: "Kill Zone",
+    a: "sentryTotem",
+    b: "gravityWell",
+    blurb: "Totems and wells hit 20% harder",
+  },
+];
+export const PAIR_SYNERGY_MULT = 1.2;
