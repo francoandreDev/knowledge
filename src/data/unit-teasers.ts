@@ -335,7 +335,7 @@ export const UNIT_TEASERS: Record<string, UnitTeaser> = {
   "business-communication/org-level-influence": {
     myth: "Shaping company-wide technical direction requires a VP title.",
     reality:
-      "A staff engineer does it through credibility, writing, and relationships across teams — org-level influence is earned, not granted by a title.",
+      "It happens through credibility, writing, and relationships across teams — org-level influence is earned, not granted by a title.",
   },
 
   // logic/
@@ -397,7 +397,7 @@ export const UNIT_TEASERS: Record<string, UnitTeaser> = {
   "logic/multi-criteria-decisions-under-ambiguity": {
     myth: "A hard trade-off with no clearly right answer just means someone hasn't found the right answer yet.",
     reality:
-      "Some decisions genuinely have no dominant option across every criterion — staff-level judgment is choosing well anyway, and defending why.",
+      "Some decisions genuinely have no dominant option across every criterion — good judgment is choosing well anyway, and defending why.",
   },
 
   // security/

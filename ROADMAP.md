@@ -30,46 +30,46 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 
 ## systems/
 
-| #   | Slug                    | Problem                                                                                                                      | Tags                                               | Status |
-| --- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------ |
-| 01  | process                 | What actually happens when you run a program? (process, memory layout, the OS as mediator)                                   | backend, mental-models, architecture               | done   |
-| 02  | persistence             | Why does my program still "remember" data after a crash? (persistence, disk vs. memory)                                      | backend, databases, reliability                    | done   |
-| 03  | algorithmic-complexity  | Why is my code fast on my machine but slow in production? (algorithmic complexity, Big-O in practice)                        | algorithms, performance, math                      | done   |
-| 04  | sockets                 | How do two programs talk to each other? (sockets, ports, protocols)                                                          | networking, backend, mental-models                 | done   |
-| 05  | concurrency             | Why does my server fall over under load? (concurrency: threads, processes, async I/O)                                        | concurrency, backend, performance                  | done   |
-| 06  | race-conditions         | How do we avoid two processes corrupting shared data? (race conditions, locks, atomicity)                                    | concurrency, debugging, reliability                | done   |
-| 07  | transactions            | Why did my request "succeed" but the data never saved? (transactions, ACID)                                                  | databases, reliability, backend                    | done   |
-| 08  | indexing                | How do we store data so it's fast to find later? (indexing, B-trees, hashing)                                                | databases, algorithms, performance                 | done   |
-| 09  | query-planning          | Why does the database get slow as data grows? (query planning, normalization vs. denormalization)                            | databases, performance, architecture               | done   |
-| 10  | timeouts                | How do we keep a service running when a dependency dies? (timeouts, retries, circuit breakers, backpressure)                 | reliability, backend, incident-response            | done   |
-| 11  | logging                 | How do we know something broke before the user tells us? (logging, metrics, tracing, observability)                          | observability, debugging, reliability              | done   |
-| 12  | horizontal-scaling      | How do we scale beyond one machine? (horizontal scaling, load balancing, statelessness)                                      | architecture, backend, performance, infra          | done   |
-| 13  | cap-theorem             | How do two datacenters agree on the truth? (CAP theorem, consistency models)                                                 | databases, architecture, mental-models             | done   |
-| 14  | queues                  | How do we move data between systems without losing or duplicating it? (queues, delivery guarantees)                          | architecture, backend, reliability                 | done   |
-| 15  | redundancy              | How do we design a system that survives a whole region going down? (redundancy, failover, disaster recovery)                 | reliability, architecture, incident-response       | done   |
-| 16  | domain-boundaries       | How do we evolve a monolith into services without a big-bang rewrite? (domain boundaries, strangler pattern)                 | architecture, decision-making, risk-management     | done   |
-| 17  | trade-off-documentation | How do we reason about a system nobody has fully seen end-to-end? (trade-off documentation, ADRs, staff-level system design) | architecture, decision-making, writing, leadership | done   |
+| #   | Slug                    | Problem                                                                                                                   | Tags                                               | Status |
+| --- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------ |
+| 01  | process                 | What actually happens when you run a program? (process, memory layout, the OS as mediator)                                | backend, mental-models, architecture               | done   |
+| 02  | persistence             | Why does my program still "remember" data after a crash? (persistence, disk vs. memory)                                   | backend, databases, reliability                    | done   |
+| 03  | algorithmic-complexity  | Why is my code fast on my machine but slow in production? (algorithmic complexity, Big-O in practice)                     | algorithms, performance, math                      | done   |
+| 04  | sockets                 | How do two programs talk to each other? (sockets, ports, protocols)                                                       | networking, backend, mental-models                 | done   |
+| 05  | concurrency             | Why does my server fall over under load? (concurrency: threads, processes, async I/O)                                     | concurrency, backend, performance                  | done   |
+| 06  | race-conditions         | How do we avoid two processes corrupting shared data? (race conditions, locks, atomicity)                                 | concurrency, debugging, reliability                | done   |
+| 07  | transactions            | Why did my request "succeed" but the data never saved? (transactions, ACID)                                               | databases, reliability, backend                    | done   |
+| 08  | indexing                | How do we store data so it's fast to find later? (indexing, B-trees, hashing)                                             | databases, algorithms, performance                 | done   |
+| 09  | query-planning          | Why does the database get slow as data grows? (query planning, normalization vs. denormalization)                         | databases, performance, architecture               | done   |
+| 10  | timeouts                | How do we keep a service running when a dependency dies? (timeouts, retries, circuit breakers, backpressure)              | reliability, backend, incident-response            | done   |
+| 11  | logging                 | How do we know something broke before the user tells us? (logging, metrics, tracing, observability)                       | observability, debugging, reliability              | done   |
+| 12  | horizontal-scaling      | How do we scale beyond one machine? (horizontal scaling, load balancing, statelessness)                                   | architecture, backend, performance, infra          | done   |
+| 13  | cap-theorem             | How do two datacenters agree on the truth? (CAP theorem, consistency models)                                              | databases, architecture, mental-models             | done   |
+| 14  | queues                  | How do we move data between systems without losing or duplicating it? (queues, delivery guarantees)                       | architecture, backend, reliability                 | done   |
+| 15  | redundancy              | How do we design a system that survives a whole region going down? (redundancy, failover, disaster recovery)              | reliability, architecture, incident-response       | done   |
+| 16  | domain-boundaries       | How do we evolve a monolith into services without a big-bang rewrite? (domain boundaries, strangler pattern)              | architecture, decision-making, risk-management     | done   |
+| 17  | trade-off-documentation | How do we reason about a system nobody has fully seen end-to-end? (trade-off documentation, ADRs, system design at scale) | architecture, decision-making, writing, leadership | done   |
 
 ## git-teamwork/
 
-| #   | Slug                    | Problem                                                                                                                       | Tags                                                         | Status |
-| --- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------ |
-| 01  | snapshots-manual-copies | Why do we need version control at all? (snapshots vs. manual copies)                                                          | version-control, mental-models                               | done   |
-| 02  | checkout                | How do I undo a mistake without losing everything? (checkout, revert, reset semantics)                                        | version-control, debugging                                   | done   |
-| 03  | working-tree            | Why did my change disappear when I switched branches? (working tree, staging, commit model)                                   | version-control, mental-models                               | done   |
-| 04  | merge                   | How do two people edit the same file without destroying each other's work? (merge, conflicts)                                 | version-control, collaboration                               | done   |
-| 05  | merge-rebase            | Why does `git pull` sometimes create a mess? (merge vs. rebase, fast-forward)                                                 | version-control, debugging                                   | done   |
-| 06  | commit-conventions      | How do we keep history readable as a team? (commit conventions, atomic commits)                                               | version-control, code-quality, collaboration                 | done   |
-| 07  | branching-strategies    | How do we let many people ship to the same codebase safely? (branching strategies: trunk-based vs. gitflow)                   | version-control, collaboration, architecture                 | done   |
-| 08  | prs                     | How do we catch mistakes before they reach main? (PRs, review culture, CI gating)                                             | version-control, collaboration, feedback, code-quality       | done   |
-| 09  | shared-history          | Why did a "safe" force-push break someone else's day? (shared history, rewriting risk)                                        | version-control, risk-management, collaboration              | done   |
-| 10  | feature-flags           | How do we ship fast without breaking main constantly? (feature flags, small PRs, trunk hygiene)                               | version-control, deployment, risk-management                 | done   |
-| 11  | reflog                  | How do we recover history after someone really messes it up? (reflog, bisect, forensic git)                                   | version-control, debugging                                   | done   |
-| 12  | feedback-framing        | How do we review code without making it personal? (feedback framing, async review etiquette)                                  | feedback, communication, collaboration                       | done   |
-| 13  | rfcs                    | How do we disagree with a teammate's technical decision productively? (RFCs, design docs, disagree-and-commit)                | writing, decision-making, communication, conflict-resolution | done   |
-| 14  | documentation-culture   | How do we onboard someone into years of undocumented decisions? (documentation culture, ADRs)                                 | writing, onboarding, collaboration                           | done   |
-| 15  | ownership               | How do we run a team where nobody knows everything? (ownership, on-call, knowledge sharing)                                   | team-management, collaboration, reliability                  | done   |
-| 16  | technical-leadership    | How does a staff engineer influence a codebase without writing most of the code? (technical leadership, cross-team alignment) | leadership, influence-politics, architecture                 | done   |
+| #   | Slug                    | Problem                                                                                                        | Tags                                                         | Status |
+| --- | ----------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------ |
+| 01  | snapshots-manual-copies | Why do we need version control at all? (snapshots vs. manual copies)                                           | version-control, mental-models                               | done   |
+| 02  | checkout                | How do I undo a mistake without losing everything? (checkout, revert, reset semantics)                         | version-control, debugging                                   | done   |
+| 03  | working-tree            | Why did my change disappear when I switched branches? (working tree, staging, commit model)                    | version-control, mental-models                               | done   |
+| 04  | merge                   | How do two people edit the same file without destroying each other's work? (merge, conflicts)                  | version-control, collaboration                               | done   |
+| 05  | merge-rebase            | Why does `git pull` sometimes create a mess? (merge vs. rebase, fast-forward)                                  | version-control, debugging                                   | done   |
+| 06  | commit-conventions      | How do we keep history readable as a team? (commit conventions, atomic commits)                                | version-control, code-quality, collaboration                 | done   |
+| 07  | branching-strategies    | How do we let many people ship to the same codebase safely? (branching strategies: trunk-based vs. gitflow)    | version-control, collaboration, architecture                 | done   |
+| 08  | prs                     | How do we catch mistakes before they reach main? (PRs, review culture, CI gating)                              | version-control, collaboration, feedback, code-quality       | done   |
+| 09  | shared-history          | Why did a "safe" force-push break someone else's day? (shared history, rewriting risk)                         | version-control, risk-management, collaboration              | done   |
+| 10  | feature-flags           | How do we ship fast without breaking main constantly? (feature flags, small PRs, trunk hygiene)                | version-control, deployment, risk-management                 | done   |
+| 11  | reflog                  | How do we recover history after someone really messes it up? (reflog, bisect, forensic git)                    | version-control, debugging                                   | done   |
+| 12  | feedback-framing        | How do we review code without making it personal? (feedback framing, async review etiquette)                   | feedback, communication, collaboration                       | done   |
+| 13  | rfcs                    | How do we disagree with a teammate's technical decision productively? (RFCs, design docs, disagree-and-commit) | writing, decision-making, communication, conflict-resolution | done   |
+| 14  | documentation-culture   | How do we onboard someone into years of undocumented decisions? (documentation culture, ADRs)                  | writing, onboarding, collaboration                           | done   |
+| 15  | ownership               | How do we run a team where nobody knows everything? (ownership, on-call, knowledge sharing)                    | team-management, collaboration, reliability                  | done   |
+| 16  | technical-leadership    | How do you influence a codebase without writing most of the code? (technical leadership, cross-team alignment) | leadership, influence-politics, architecture                 | done   |
 
 ## business-communication/
 
@@ -88,24 +88,24 @@ Tags draw from a shared, reused vocabulary rather than free text, so the roadmap
 | 11  | upward-disagreement                      | How do I tell someone senior "this plan will fail"? (upward disagreement, psychological safety)                      | communication, conflict-resolution, feedback        | done   |
 | 12  | change-management                        | How do I lead a team through a reorg or layoffs? (change management, uncertainty)                                    | leadership, team-management, communication          | done   |
 | 13  | translating-technical-risk-business-risk | How do I represent engineering trade-offs to non-technical leadership? (translating technical risk to business risk) | communication, risk-management, decision-making     | done   |
-| 14  | org-level-influence                      | How does a staff engineer shape company-wide technical direction? (org-level influence, technical strategy)          | leadership, influence-politics, architecture        | done   |
+| 14  | org-level-influence                      | How do you shape company-wide technical direction? (org-level influence, technical strategy)                         | leadership, influence-politics, architecture        | done   |
 
 ## logic/
 
-| #   | Slug                                     | Problem                                                                                                                    | Tags                                         | Status |
-| --- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------ |
-| 01  | formal-informal-logic                    | What actually makes an argument valid vs. just convincing? (formal vs. informal logic)                                     | mental-models, decision-making               | done   |
-| 02  | fallacies                                | Why does "if it's not A, it must be B" often fail? (fallacies, false dichotomy)                                            | mental-models, debugging                     | done   |
-| 03  | problem-decomposition                    | How do I break a vague problem into solvable pieces? (problem decomposition)                                               | mental-models, algorithms                    | done   |
-| 04  | boolean-logic                            | Why do two "correct" pieces of code produce different results? (boolean logic, precedence, De Morgan's laws)               | algorithms, debugging, code-quality          | done   |
-| 05  | state-machines                           | How do I reason about a system with many possible states? (state machines, truth tables)                                   | mental-models, architecture, design-patterns | done   |
-| 06  | edge-case-reasoning                      | How do I prove my code handles every case, not just the ones I tested? (edge case reasoning, invariants)                   | testing, code-quality, debugging             | done   |
-| 07  | induction                                | How do I reason about something recursive without getting lost? (induction, recursion tracing)                             | algorithms, mental-models                    | done   |
-| 08  | fermi-estimation                         | How do I estimate an answer when I can't compute the exact one? (Fermi estimation, back-of-envelope reasoning)             | estimation, math, mental-models              | done   |
-| 09  | expected-value                           | How do I make a decision under uncertainty? (expected value, probabilistic reasoning)                                      | decision-making, math, risk-management       | done   |
-| 10  | correlation-causation                    | How do I avoid fooling myself with data? (correlation vs. causation, cognitive biases, base rate fallacy)                  | mental-models, decision-making               | done   |
-| 11  | abstraction                              | How do I formally model a messy real-world problem well enough to solve it? (abstraction, formal modeling)                 | mental-models, architecture, design-patterns | done   |
-| 12  | multi-criteria-decisions-under-ambiguity | How does a staff engineer reason about trade-offs with no clearly right answer? (multi-criteria decisions under ambiguity) | decision-making, leadership, risk-management | done   |
+| #   | Slug                                     | Problem                                                                                                        | Tags                                         | Status |
+| --- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------ |
+| 01  | formal-informal-logic                    | What actually makes an argument valid vs. just convincing? (formal vs. informal logic)                         | mental-models, decision-making               | done   |
+| 02  | fallacies                                | Why does "if it's not A, it must be B" often fail? (fallacies, false dichotomy)                                | mental-models, debugging                     | done   |
+| 03  | problem-decomposition                    | How do I break a vague problem into solvable pieces? (problem decomposition)                                   | mental-models, algorithms                    | done   |
+| 04  | boolean-logic                            | Why do two "correct" pieces of code produce different results? (boolean logic, precedence, De Morgan's laws)   | algorithms, debugging, code-quality          | done   |
+| 05  | state-machines                           | How do I reason about a system with many possible states? (state machines, truth tables)                       | mental-models, architecture, design-patterns | done   |
+| 06  | edge-case-reasoning                      | How do I prove my code handles every case, not just the ones I tested? (edge case reasoning, invariants)       | testing, code-quality, debugging             | done   |
+| 07  | induction                                | How do I reason about something recursive without getting lost? (induction, recursion tracing)                 | algorithms, mental-models                    | done   |
+| 08  | fermi-estimation                         | How do I estimate an answer when I can't compute the exact one? (Fermi estimation, back-of-envelope reasoning) | estimation, math, mental-models              | done   |
+| 09  | expected-value                           | How do I make a decision under uncertainty? (expected value, probabilistic reasoning)                          | decision-making, math, risk-management       | done   |
+| 10  | correlation-causation                    | How do I avoid fooling myself with data? (correlation vs. causation, cognitive biases, base rate fallacy)      | mental-models, decision-making               | done   |
+| 11  | abstraction                              | How do I formally model a messy real-world problem well enough to solve it? (abstraction, formal modeling)     | mental-models, architecture, design-patterns | done   |
+| 12  | multi-criteria-decisions-under-ambiguity | How do you reason about trade-offs with no clearly right answer? (multi-criteria decisions under ambiguity)    | decision-making, leadership, risk-management | done   |
 
 ## security/
 
