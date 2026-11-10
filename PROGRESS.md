@@ -3870,8 +3870,17 @@ Final gate: `bun run check` exits 0 (generate:roadmap, lint, format:check, typec
 **All 246 units are now on the three-tier exercise model with rule-9 diagram-first content.**
 
 Open items:
+
 - **Live browser click-through pending for 13 units** (the nine of the 2026-11-10 batches 2–3 plus these four): the Chrome bridge stopped accepting tabs this session. To run when it is back: for each unit answer every exam topic correctly and expect "Passed", count Mermaid errors (expect 0), expect "Mark as done" enabled.
 - Verify the L3 passage in `sustainable-performance/myth-linear-output` that cites a munitions-factory working-hours study (written from memory, kept vague) against the source.
 - Demo-description wording touch-ups left in `interactives.json` files (e.g. `design/visual-design-fundamentals` says 4.54:1 at 46% lightness, close to but not exactly `#767676`; `architecture/architecture-for-compliance` still mentions `enforceRetention`; `testing-quality` and others noted in earlier entries).
 - Rule-5c gap: `testing-quality/tdd-basics` has no `interactives.json` demo.
 - Saved "Mark as done" state under `progress:people-management/1` does not carry over to the renamed `one-on-one` unit.
+
+## 2026-11-10 — post-migration cleanup (open items closed, no live browser check)
+
+- **Stale demo wording:** scanned every `interactives.json` for identifiers that no longer exist in the unit's content (functions/variables from code removed during the diagram-first rewrite) and found 17; all reworded in plain language (capacity-planning-math, architecture-for-compliance, cost-aware-architecture, feature-flags, shared-history, orchestration-basics, edge-case-reasoning, fermi-estimation, induction, api-design, evolutionary-design, immutability, oop-design-trade-offs, domain-boundaries, test-doubles, css-cascade-specificity; `security-testing` no longer calls the 10× stage cost "well-documented", it is now described as a commonly observed pattern modelled as a tenfold step). The scan is rerunnable: `scratchpad/stale-demo-scan.mjs` (not committed).
+- **Numeric mismatches fixed:** `config-management` demo uses `PAYMENT_TIMEOUT_MS` like the content; `visual-design-fundamentals` demo default (46% lightness) is about 4.6:1, with `#767676` at 46.3% giving the unit's 4.54:1; `fermi-estimation` default 1.48 gives roughly 10.5×, close to the unit's ~10.7×; `graph-theory-basics` BFS at the defaults is 48 steps versus 66 pair-checks (only a little cheaper), 160 versus 780 at 40 services; `credit-stealing` first-instance score is 60 (85 × 0.7 = 59.5 rounds up), changed in L3 (score bar, chart, table) and in its exam item.
+- **Rule-5c gap closed:** `testing-quality/tdd-basics` now has an `interactives.json` demo (earlier expectations edited as rules accumulate, R(R−1)/2: 3 edits at the unit's 3 rules, matching its cycle-3 and cycle-4 updates), with a pointer sentence in L3.
+- **Source check:** the Pencavel passage in `sustainable-performance/myth-linear-output` was checked against search results (IZA Discussion Paper 8129, later in the Economic Journal; British First World War munitions workers; output rises at a decreasing rate with weekly hours). Qualitative description confirmed, still deliberately without exact figures; title and venue added.
+- Still pending: live browser click-through of the last 13 `people-management` units (Chrome bridge unavailable), `architecture-for-compliance`'s demo description wording around "L2's classification table".
