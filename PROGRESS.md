@@ -3860,3 +3860,18 @@ Migrated to the three-tier model, all quiz and no code topics: `delegation-level
 Checks: typecheck 0 errors, 273 pages built, validate/lint/format/tests green. **Not verified live in the browser**: the Chrome bridge stopped accepting tabs this session (tab group lost, three consecutive failures). Substitute smoke test over HTTP on the built pages: all nine render, and each renders exactly as many Domain check pools as it has exam topics (6/8/6/5/8/6/7/6/7). The live click-through of these nine (correct answers → Passed, Mermaid errors, Mark as done enabled) is still pending and should be run when the bridge is back.
 
 Total migrated: 242 of 246. Next: `people-management` last four (`termination-process`, `bus-factor`, `org-design`, `management-managers`).
+
+## 2026-11-10 — people-management closed: migration complete (246 of 246)
+
+Migrated to the three-tier model, all quiz and no code topics: `termination-process` (8 topics, 96 items; the flat zero-bar chart removed, legal points hedged by jurisdiction with a not-legal-advice note), `bus-factor` (9 topics, 99 items; L3 chart now plots Wren's actual score 1,1,2,2,2,2 instead of starting at 0, a documentation-vs-pairing contradiction in L2 resolved, vendor row reassigned to Dan to match the knowledge map), `org-design` (6 topics, 72 items; 180 ÷ reports and n(n−1)/2 pair counts match the demo), `management-managers` (5 topics, 60 items; "leveling guide" wording replaced by "written bar" and "rating band").
+
+Final gate: `bun run check` exits 0 (generate:roadmap, lint, format:check, typecheck, validate:content, tests, build — 273 pages). HTTP smoke test of the four new pages: each renders exactly as many Domain check pools as it has exam topics (8/9/6/5).
+
+**All 246 units are now on the three-tier exercise model with rule-9 diagram-first content.**
+
+Open items:
+- **Live browser click-through pending for 13 units** (the nine of the 2026-11-10 batches 2–3 plus these four): the Chrome bridge stopped accepting tabs this session. To run when it is back: for each unit answer every exam topic correctly and expect "Passed", count Mermaid errors (expect 0), expect "Mark as done" enabled.
+- Verify the L3 passage in `sustainable-performance/myth-linear-output` that cites a munitions-factory working-hours study (written from memory, kept vague) against the source.
+- Demo-description wording touch-ups left in `interactives.json` files (e.g. `design/visual-design-fundamentals` says 4.54:1 at 46% lightness, close to but not exactly `#767676`; `architecture/architecture-for-compliance` still mentions `enforceRetention`; `testing-quality` and others noted in earlier entries).
+- Rule-5c gap: `testing-quality/tdd-basics` has no `interactives.json` demo.
+- Saved "Mark as done" state under `progress:people-management/1` does not carry over to the renamed `one-on-one` unit.
