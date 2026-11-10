@@ -3852,3 +3852,11 @@ Migrated to the three-tier model, all quiz and no code topics: `sustainable-perf
 Checks: typecheck 0 errors, 273 pages built, every DomainCheck topic passes live (6/5/6/6), no Mermaid errors, Mark as done enabled.
 
 `sustainable-performance/` is complete: 8 of 8. Total migrated: 233 of 246. Next: `people-management` batch 2 (`delegation-levels`, `sbi-framework`, `goal-setting`, `early-signals`), then 9 more units.
+
+## 2026-11-10 — people-management batches 2–3 (9 units)
+
+Migrated to the three-tier model, all quiz and no code topics: `delegation-levels` (6 topics, 72 items), `sbi-framework` (8 topics, 96 items; the "mid-level" label removed, the decay bars reproduce the demo's 100·exp(−d/7): 100, 87, 65, 37, 14, 5), `goal-setting` (6 topics, 72 items; 8 incidents × 45 min = 360 min matches the demo), `early-signals` (5 topics, 60 items), `mediation` (8 topics, 88 items; "senior engineers" removed from the hook), `defining-role` (6 topics, 66 items; scenario aligned with the demo — 3 required signals, 2 slots cut, 2 untested — and an inconsistency between the text and its own table fixed), `onboarding-design` (7 topics, 77 items; "senior transplant" reworded, 0.35 days per page gives 2/4/7/11/14 days), `calibration` (6 topics, 72 items; the "three months old" fix contradicted the demo's 10-month default, now 86% vs 22% recall, level table replaced by descriptive scope bands), `performance-improvement-plans` (7 topics, 77 items; invented 8% bar replaced by an icon row, termination wording hedged).
+
+Checks: typecheck 0 errors, 273 pages built, validate/lint/format/tests green. **Not verified live in the browser**: the Chrome bridge stopped accepting tabs this session (tab group lost, three consecutive failures). Substitute smoke test over HTTP on the built pages: all nine render, and each renders exactly as many Domain check pools as it has exam topics (6/8/6/5/8/6/7/6/7). The live click-through of these nine (correct answers → Passed, Mermaid errors, Mark as done enabled) is still pending and should be run when the bridge is back.
+
+Total migrated: 242 of 246. Next: `people-management` last four (`termination-process`, `bus-factor`, `org-design`, `management-managers`).
