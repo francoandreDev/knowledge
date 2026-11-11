@@ -1,0 +1,3741 @@
+---
+import Layout from "../layouts/Layout.astro";
+import HubHeader from "../components/HubHeader.astro";
+import TagIcon from "../components/TagIcon.astro";
+import TrackIcon from "../components/TrackIcon.astro";
+import TrackIllustration from "../components/TrackIllustration.astro";
+import {
+  CalendarDays,
+  Timer,
+  LayoutGrid,
+  FlaskConical,
+  ArrowRight,
+} from "lucide-astro";
+import { roadmap } from "../data/roadmap";
+import { REGIONS } from "../data/regions";
+import { makeUnitHue } from "../lib/unit-theme";
+import { loadHomeData } from "../lib/home-data";
+
+const { writtenUnits, unitLookup, trackUnitSlugs } = await loadHomeData();
+
+// Study is where the reader decides what to do with the time they have: plan
+// a week, fill a spare slot, see which skills have gaps, or just play with a
+// demo. Everything that depends on progress is computed client-side from the
+// active profile; this file only ships the catalogue.
+const ALL_TAGS = Array.from(
+  new Set(roadmap.tracks.flatMap((t) => t.units.flatMap((u) => u.tags))),
+).sort();
+const unitHue = makeUnitHue(ALL_TAGS);
+const worldHue = (i: number) => Math.round((i * 137.508 + 205) % 360);
+
+const minutesByKey = new Map<string, number>();
+const demoUnits: typeof writtenUnits = [];
+for (const u of writtenUnits) {
+  const words = [u.l1, u.l2, u.l3, ...u.l3Parts].reduce(
+    (n, e) => n + (e?.body ? e.body.split(/\s+/).filter(Boolean).length : 0),
+    0,
+  );
+  minutesByKey.set(
+    `${u.track}/${u.unitSlug}`,
+    Math.max(1, Math.round(words / 200)),
+  );
+  if (u.interactives.length > 0) demoUnits.push(u);
+}
+
+// Practice questions for the quick session: up to four distinct quiz topics
+// per unit (easy practice-tier items first), each with its explanation, so a
+// session has far more to draw from than one question per unit.
+const unitProblem = new Map(
+  roadmap.tracks.flatMap((t) =>
+    t.units.map((u) => [`${t.name}/${u.slug}`, u] as const),
+  ),
+);
+const studyPool = writtenUnits.flatMap((u) => {
+  const meta = unitProblem.get(`${u.track}/${u.unitSlug}`);
+  const seen = new Set<string>();
+  return u.exercises
+    .filter((e) => e.type === "quiz")
+    .sort(
+      (a, b) =>
+        (a.tier === "practice" ? 0 : 1) - (b.tier === "practice" ? 0 : 1),
+    )
+    .filter((e) => {
+      const k = e.topicId ?? e.poolId ?? e.id;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
+    .slice(0, 4)
+    .map((e) =>
+      e.type === "quiz"
+        ? {
+            id: `${u.track}/${u.unitSlug}/${e.id}`,
+            track: u.track,
+            slug: u.unitSlug,
+            problem: meta?.problem ?? u.unitSlug,
+            prompt: e.prompt,
+            choices: e.choices,
+            correctIndex: e.correctIndex,
+            explanation: e.explanation,
+            tags: meta?.tags ?? [],
+          }
+        : null,
+    )
+    .filter((x) => x !== null);
+});
+
+const writtenKeys = new Set(unitLookup.map((u) => `${u.track}/${u.slug}`));
+const units = roadmap.tracks.flatMap((t) =>
+  t.units
+    .map((u, i) => ({
+      t: t.name,
+      s: u.slug,
+      p: u.problem,
+      tg: u.tags,
+      i,
+      m: minutesByKey.get(`${t.name}/${u.slug}`) ?? 0,
+      h: unitHue(u.tags[0] ?? "", u.slug),
+    }))
+    .filter((u) => writtenKeys.has(`${u.t}/${u.s}`)),
+);
+
+// Skills matrix: how many written units each tag has in each world.
+const worldNames = roadmap.tracks
+  .map((t) => t.name)
+  .filter((n) => (trackUnitSlugs[n]?.length ?? 0) > 0);
+const tagRows = ALL_TAGS.map((tag) => {
+  const perWorld: Record<string, number> = {};
+  const first: Record<string, string> = {};
+  for (const u of units)
+    if (u.tg.includes(tag)) {
+      perWorld[u.t] = (perWorld[u.t] ?? 0) + 1;
+      first[u.t] ??= u.s;
+    }
+  return {
+    tag,
+    perWorld,
+    first,
+    total: Object.values(perWorld).reduce((a, b) => a + b, 0),
+  };
+})
+  .filter((r) => r.total > 0)
+  .sort((a, b) => b.total - a.total || a.tag.localeCompare(b.tag));
+
+// Demo gallery: sweep each demo's chart parameter once at build time and keep
+// the first output as a small sparkline. compute is author-written repo
+// content (see CLAUDE.md "Interactive demos"), so evaluating it here is safe.
+interface Demo {
+  t: string;
+  s: string;
+  unit: string;
+  id: string;
+  title: string;
+  description: string;
+  level: number;
+  sliders: number;
+  color: string;
+  line: string;
+  area: string;
+  h: number;
+}
+const demos: Demo[] = [];
+for (const u of demoUnits) {
+  const roadmapUnit = roadmap.tracks
+    .find((t) => t.name === u.track)
+    ?.units.find((x) => x.slug === u.unitSlug);
+  for (const d of u.interactives) {
+    let line = "";
+    let area = "";
+    try {
+      const fn = new Function("params", d.compute) as (
+        p: Record<string, number>,
+      ) => Record<string, number>;
+      const base: Record<string, number> = {};
+      for (const p of d.params) base[p.name] = p.default;
+      const sweep =
+        d.params.find((p) => p.name === d.chartParam) ?? d.params[0]!;
+      const key = d.outputs[0]!.key;
+      const ys: number[] = [];
+      const N = 28;
+      for (let k = 0; k < N; k++) {
+        const v = sweep.min + ((sweep.max - sweep.min) * k) / (N - 1);
+        const out = fn({ ...base, [sweep.name]: v });
+        const y = Number(out[key]);
+        ys.push(Number.isFinite(y) ? y : NaN);
+      }
+      const finite = ys.filter((y) => !Number.isNaN(y));
+      if (finite.length > 2) {
+        const lo = Math.min(...finite);
+        const hi = Math.max(...finite);
+        const span = hi - lo || 1;
+        const pts = ys.map((y, k) => {
+          const yy = Number.isNaN(y) ? 0.5 : (y - lo) / span;
+          return [4 + (k * 112) / (N - 1), 40 - 4 - yy * 32] as const;
+        });
+        line = pts
+          .map(([x, y], k) => `${k ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`)
+          .join("");
+        area = `${line}L116 40L4 40Z`;
+      }
+    } catch {
+      // A demo whose compute throws still gets a card, just without a preview.
+    }
+    demos.push({
+      t: u.track,
+      s: u.unitSlug,
+      unit: roadmapUnit?.problem ?? u.unitSlug,
+      id: d.id,
+      title: d.title,
+      description: d.description,
+      level: d.level,
+      sliders: d.params.length,
+      color: d.outputs[0]!.color,
+      line,
+      area,
+      h: unitHue(roadmapUnit?.tags[0] ?? "", u.unitSlug),
+    });
+  }
+}
+const demoWorlds = Array.from(new Set(demos.map((d) => d.t)));
+const regionOf = (track: string) =>
+  REGIONS.find((r) => r.tracks.includes(track))?.id ?? "frontier";
+const worldIdx = (name: string) =>
+  roadmap.tracks.findIndex((t) => t.name === name);
+
+const TABS = [
+  { key: "week", label: "Week", icon: CalendarDays, hint: "Plan the week" },
+  { key: "session", label: "Session", icon: Timer, hint: "I have 20 minutes" },
+  {
+    key: "skills",
+    label: "Skills",
+    icon: LayoutGrid,
+    hint: "Where the gaps are",
+  },
+  {
+    key: "demos",
+    label: "Demos",
+    icon: FlaskConical,
+    hint: "Play with an idea",
+  },
+];
+---
+
+<Layout title="Study" wide>
+  <HubHeader
+    title="Study"
+    subtitle="Plan a week, fill a spare twenty minutes, see where the gaps are, or just play with a demo."
+  />
+
+  <!-- Arrowhead markers for the world illustrations cloned into practice cards. -->
+  <svg width="0" height="0" class="absolute" aria-hidden="true">
+    <defs>
+      <marker
+        id="arrow-accent"
+        markerWidth="8"
+        markerHeight="8"
+        refX="6"
+        refY="4"
+        orient="auto"
+      >
+        <path d="M0 0l6 4-6 4" stroke="context-stroke" fill="none"></path>
+      </marker>
+      <marker
+        id="arrow-dim"
+        markerWidth="8"
+        markerHeight="8"
+        refX="6"
+        refY="4"
+        orient="auto"
+      >
+        <path
+          d="M0 0l6 4-6 4"
+          stroke="context-stroke"
+          stroke-opacity="0.5"
+          fill="none"></path>
+      </marker>
+    </defs>
+  </svg>
+  <div hidden aria-hidden="true" data-track-ics>
+    {
+      worldNames.map((w) => (
+        <span data-ic={w}>
+          <TrackIcon track={w} class="h-full w-full" />
+        </span>
+      ))
+    }
+  </div>
+  <div hidden aria-hidden="true" data-illus>
+    {
+      worldNames.map((w) => (
+        <span data-illus-for={w}>
+          <TrackIllustration track={w} class="qart-illus" />
+        </span>
+      ))
+    }
+  </div>
+
+  <div class="study" data-study>
+    <div class="tabs" role="tablist" aria-label="Study tools">
+      {
+        TABS.map((tab, k) => (
+          <button
+            type="button"
+            role="tab"
+            id={`tab-${tab.key}`}
+            aria-controls={`panel-${tab.key}`}
+            aria-selected={k === 0 ? "true" : "false"}
+            data-tab={tab.key}
+            class="tab"
+          >
+            <tab.icon class="h-5 w-5" aria-hidden="true" />
+            <span class="tab-text">
+              <b>{tab.label}</b>
+              <i>{tab.hint}</i>
+            </span>
+          </button>
+        ))
+      }
+    </div>
+
+    <!-- ============ WEEK ============ -->
+    <section
+      id="panel-week"
+      role="tabpanel"
+      aria-labelledby="tab-week"
+      data-panel="week"
+      class="panel"
+    >
+      <div class="controls">
+        <label class="field">
+          <span>Hours per week</span>
+          <select id="plan-hours" data-plan-hours>
+            <option value="1">1 hour</option>
+            <option value="2">2 hours</option>
+            <option value="3" selected>3 hours</option>
+            <option value="5">5 hours</option>
+            <option value="8">8 hours</option>
+          </select>
+        </label>
+        <div class="field days-field">
+          <span>Study days</span>
+          <div class="day-pick" role="group" aria-label="Study days">
+            {
+              ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d, k) => (
+                <button
+                  type="button"
+                  data-day-pick={k}
+                  aria-pressed="false"
+                  aria-label={d}
+                >
+                  {d}
+                </button>
+              ))
+            }
+          </div>
+        </div>
+        <details class="interests" data-plan-interests>
+          <summary>
+            <span>Interests</span>
+            <b data-interest-count>any</b>
+          </summary>
+          <div class="chips">
+            {
+              tagRows.map((r) => (
+                <button
+                  type="button"
+                  class="chip"
+                  data-interest={r.tag}
+                  aria-pressed="false"
+                >
+                  <TagIcon tag={r.tag} class="h-3.5 w-3.5" />
+                  {r.tag}
+                </button>
+              ))
+            }
+          </div>
+        </details>
+        <button type="button" class="btn primary" data-plan-make>
+          Build my week
+        </button>
+        <button type="button" class="btn" data-plan-reset>Reset</button>
+      </div>
+
+      <div class="week-sum" data-week-sum>
+        <span class="week-sum-text" data-week-sum-text>Building your week…</span
+        >
+        <span class="bar"><i data-week-bar style="width: 0%"></i></span>
+      </div>
+      <div class="week" data-week></div>
+      <p class="fine">
+        Blocks are sized from each unit's reading time. Units you finish
+        elsewhere tick themselves; reviews tick once they are no longer due. The
+        plan is saved for this profile and rebuilt every Monday.
+      </p>
+    </section>
+
+    <!-- ============ SESSION ============ -->
+    <section
+      id="panel-session"
+      role="tabpanel"
+      aria-labelledby="tab-session"
+      data-panel="session"
+      class="panel"
+      hidden
+    >
+      <div class="controls">
+        <div class="seg" role="group" aria-label="Time available">
+          <button type="button" data-time="10" aria-pressed="false"
+            >10 min</button
+          >
+          <button type="button" data-time="20" aria-pressed="true"
+            >20 min</button
+          >
+          <button type="button" data-time="45" aria-pressed="false"
+            >45 min</button
+          >
+        </div>
+        <div class="seg" role="group" aria-label="Mode">
+          <button type="button" data-mode="learn" aria-pressed="true"
+            >Learn</button
+          >
+          <button type="button" data-mode="review" aria-pressed="false"
+            >Review</button
+          >
+          <button type="button" data-mode="practice" aria-pressed="false"
+            >Practice</button
+          >
+        </div>
+        <button type="button" class="btn" data-session-shuffle>Shuffle</button>
+      </div>
+      <div class="session-sum" data-session-sum>
+        <span data-session-sum-text>Pick a time and a mode.</span>
+        <span class="reward" data-practice-reward hidden></span>
+        <a href="/" class="btn primary" data-session-start hidden>
+          Start
+          <ArrowRight class="h-4 w-4" aria-hidden="true" />
+        </a>
+      </div>
+      <ol class="session-list" data-session-list></ol>
+    </section>
+
+    <!-- ============ SKILLS ============ -->
+    <section
+      id="panel-skills"
+      role="tabpanel"
+      aria-labelledby="tab-skills"
+      data-panel="skills"
+      class="panel"
+      hidden
+    >
+      <div class="skills-top">
+        <p class="fine">
+          Each square is the units you have done out of those available for a
+          skill in a world. Click a number to open the next unit to do there, or
+          a skill name to list all its units.
+        </p>
+        <div class="legend" aria-hidden="true">
+          <span>0%</span>
+          <i></i>
+          <span>100% done</span>
+        </div>
+      </div>
+      <div class="gaps" data-gaps aria-label="Biggest gaps"></div>
+      <div class="matrix-wrap">
+        <table class="matrix" data-matrix>
+          <thead>
+            <tr>
+              <th scope="col" class="corner">Skill</th>
+              {
+                worldNames.map((w) => (
+                  <th scope="col" title={w.replace(/-/g, " ")}>
+                    <span class="col-ic">
+                      <TrackIcon track={w} class="h-4 w-4" />
+                    </span>
+                    <span class="col-name">{w.replace(/-/g, " ")}</span>
+                  </th>
+                ))
+              }
+            </tr>
+          </thead>
+          <tbody>
+            {
+              tagRows.map((r) => (
+                <tr data-row={r.tag}>
+                  <th scope="row">
+                    <button
+                      type="button"
+                      class="row-btn"
+                      data-tag-pick={r.tag}
+                      aria-pressed="false"
+                    >
+                      <TagIcon tag={r.tag} class="h-4 w-4" />
+                      <span>{r.tag}</span>
+                      <i class="gap-flag" data-gap-flag hidden>
+                        gap
+                      </i>
+                    </button>
+                  </th>
+                  {worldNames.map((w) => {
+                    const n = r.perWorld[w] ?? 0;
+                    return n > 0 ? (
+                      <td>
+                        <a
+                          href={`/${w}/${r.first[w]}/`}
+                          class="cell"
+                          data-cell
+                          data-tag={r.tag}
+                          data-world={w}
+                          data-avail={n}
+                          style="--f: 0"
+                          aria-label={`${r.tag} in ${w}: 0 of ${n} done`}
+                        >
+                          {n}
+                        </a>
+                      </td>
+                    ) : (
+                      <td class="empty" />
+                    );
+                  })}
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+      <div class="tag-units" data-tag-units hidden>
+        <h3 data-tag-units-title></h3>
+        <ul data-tag-units-list></ul>
+      </div>
+    </section>
+
+    <!-- ============ DEMOS ============ -->
+    <section
+      id="panel-demos"
+      role="tabpanel"
+      aria-labelledby="tab-demos"
+      data-panel="demos"
+      class="panel"
+      hidden
+    >
+      <div class="chips demo-filter" role="group" aria-label="Filter by world">
+        <button
+          type="button"
+          class="chip"
+          data-demo-filter="all"
+          aria-pressed="true"
+        >
+          All {demos.length}
+        </button>
+        {
+          demoWorlds.map((w) => (
+            <button
+              type="button"
+              class="chip"
+              data-demo-filter={w}
+              aria-pressed="false"
+            >
+              <TrackIcon track={w} class="h-3.5 w-3.5" />
+              {w.replace(/-/g, " ")}
+              <b>{demos.filter((d) => d.t === w).length}</b>
+            </button>
+          ))
+        }
+      </div>
+      <ul class="demo-grid">
+        {
+          demos.map((d) => (
+            <li data-demo-card data-world={d.t}>
+              <a
+                href={`/${d.t}/${d.s}/`}
+                class="demo"
+                style={`--world-h: ${worldHue(worldIdx(d.t))}; --dc: ${d.color}`}
+              >
+                <svg viewBox="0 0 120 40" class="spark" aria-hidden="true">
+                  {d.line ? (
+                    <>
+                      <path d={d.area} fill="var(--dc)" opacity="0.16" />
+                      <path
+                        d={d.line}
+                        fill="none"
+                        stroke="var(--dc)"
+                        stroke-width="2.2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </>
+                  ) : (
+                    <path
+                      d="M4 20h112"
+                      stroke="var(--dc)"
+                      stroke-dasharray="3 4"
+                    />
+                  )}
+                </svg>
+                <span class="demo-title">{d.title}</span>
+                <span class="demo-desc">{d.description}</span>
+                <span class="demo-meta">
+                  <span class="dm world" data-region={regionOf(d.t)}>
+                    {d.t.replace(/-/g, " ")}
+                  </span>
+                  <span class="dm">
+                    {d.sliders} {d.sliders === 1 ? "slider" : "sliders"}
+                  </span>
+                  <span class="dm">L{d.level}</span>
+                </span>
+                <span class="demo-go">
+                  Open in unit{" "}
+                  <ArrowRight class="h-3.5 w-3.5" aria-hidden="true" />
+                </span>
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+      {
+        demos.length === 0 && (
+          <p class="fine">No interactive demos are published yet.</p>
+        )
+      }
+    </section>
+  </div>
+
+  <!-- unit emblems are not needed here; the catalogue below drives every tool -->
+  <script
+    type="application/json"
+    id="study-hues"
+    set:html={JSON.stringify(
+      Object.fromEntries(worldNames.map((w) => [w, worldHue(worldIdx(w))])),
+    )}
+  />
+  <script
+    type="application/json"
+    id="study-units"
+    set:html={JSON.stringify(units)}
+  />
+  <script
+    type="application/json"
+    id="study-slugs"
+    set:html={JSON.stringify(trackUnitSlugs)}
+  />
+  <script
+    type="application/json"
+    id="study-pool"
+    set:html={JSON.stringify(studyPool)}
+  />
+
+  <script>
+    import { pStorage, getActiveProfile } from "../lib/profile";
+    import { addToken } from "../lib/game/tokens";
+
+    interface U {
+      t: string;
+      s: string;
+      p: string;
+      tg: string[];
+      i: number;
+      m: number;
+      h: number;
+    }
+    interface Q {
+      id: string;
+      explanation: string;
+      track: string;
+      slug: string;
+      problem: string;
+      prompt: string;
+      choices: string[];
+      correctIndex: number;
+      tags: string[];
+    }
+    interface Progress {
+      done?: boolean;
+      doneAt?: number;
+      nextReviewAt?: number;
+    }
+    interface Block {
+      id: string;
+      kind: "unit" | "review" | "practice";
+      key?: string;
+      min: number;
+      day: number;
+      done: boolean;
+    }
+    interface Plan {
+      week: string;
+      hours: number;
+      interests: string[];
+      days: number[];
+      blocks: Block[];
+    }
+
+    const DAY = 86400000;
+    const q = <T extends Element = HTMLElement>(
+      sel: string,
+      root: ParentNode = document,
+    ) => root.querySelector<T>(sel);
+    const qa = <T extends Element = HTMLElement>(
+      sel: string,
+      root: ParentNode = document,
+    ) => Array.from(root.querySelectorAll<T>(sel));
+    const el = (tag: string, cls = "", text = "") => {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text) n.textContent = text;
+      return n;
+    };
+    const readJson = <T,>(id: string, fallback: T): T => {
+      try {
+        return JSON.parse(document.getElementById(id)?.textContent || "");
+      } catch {
+        return fallback;
+      }
+    };
+    const short = (p: string) => p.replace(/\s*\(.*$/, "").trim();
+    const pretty = (t: string) => t.replace(/-/g, " ");
+    const keyOf = (u: U) => `${u.t}/${u.s}`;
+
+    const progressOf = (key: string): Progress | null => {
+      const raw = pStorage.getItem(`progress:${key}`);
+      if (!raw) return null;
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return null;
+      }
+    };
+    const isDone = (key: string) => !!progressOf(key)?.done;
+    const isDue = (key: string) => {
+      const p = progressOf(key);
+      return !!(p?.done && p.nextReviewAt && Date.now() >= p.nextReviewAt);
+    };
+
+    let units: U[] = [];
+    let byKey = new Map<string, U>();
+    let pool: Q[] = [];
+
+    /* ---------------- tabs ---------------- */
+    function selectTab(key: string, push = true) {
+      const valid = qa("[data-tab]").some((b) => b.dataset.tab === key);
+      if (!valid) key = "week";
+      for (const b of qa("[data-tab]")) {
+        const on = b.dataset.tab === key;
+        b.setAttribute("aria-selected", String(on));
+        b.tabIndex = on ? 0 : -1;
+      }
+      for (const p of qa("[data-panel]")) p.hidden = p.dataset.panel !== key;
+      if (push && location.hash !== `#${key}`)
+        history.replaceState(null, "", `#${key}`);
+    }
+    function wireTabs() {
+      const bar = q(".tabs");
+      if (!bar || bar.dataset.wired === "true") return;
+      bar.dataset.wired = "true";
+      bar.addEventListener("click", (e) => {
+        const b = (e.target as HTMLElement).closest<HTMLElement>("[data-tab]");
+        if (b) selectTab(b.dataset.tab!);
+      });
+      bar.addEventListener("keydown", (e) => {
+        if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+        const tabs = qa("[data-tab]");
+        const at = tabs.findIndex(
+          (t) => t.getAttribute("aria-selected") === "true",
+        );
+        const next =
+          tabs[
+            (at + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length
+          ]!;
+        selectTab(next.dataset.tab!);
+        next.focus();
+      });
+      window.addEventListener("hashchange", () =>
+        selectTab(location.hash.slice(1), false),
+      );
+    }
+
+    /* ---------------- week plan ---------------- */
+    const weekStart = () => {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+      return d;
+    };
+    const dateKey = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const PLAN_KEY = "study:plan";
+    const DAYSETS: Record<number, number[]> = {
+      3: [0, 2, 4],
+      4: [0, 1, 3, 5],
+      5: [0, 1, 2, 3, 4],
+      6: [0, 1, 2, 3, 4, 5],
+      7: [0, 1, 2, 3, 4, 5, 6],
+    };
+    const daysFor = (hours: number) =>
+      DAYSETS[
+        hours <= 1 ? 3 : hours <= 2 ? 4 : hours <= 3 ? 5 : hours <= 5 ? 6 : 7
+      ]!;
+
+    function nextUndone(track: string): U[] {
+      return units
+        .filter((u) => u.t === track && !isDone(keyOf(u)))
+        .sort((a, b) => a.i - b.i);
+    }
+
+    function rankTracks(interests: string[]): string[] {
+      const tracks = Array.from(new Set(units.map((u) => u.t)));
+      const score = (t: string) =>
+        units
+          .filter((u) => u.t === t)
+          .reduce(
+            (n, u) => n + u.tg.filter((x) => interests.includes(x)).length,
+            0,
+          );
+      // The world you touched last goes first so the week continues, not restarts.
+      let last = "";
+      let lastAt = -1;
+      for (const k of pStorage.keys()) {
+        if (!k.startsWith("progress:")) continue;
+        const p = progressOf(k.slice(9));
+        const at = p?.doneAt ?? 0;
+        if (p && at >= lastAt) {
+          lastAt = at;
+          last = k.slice(9).split("/")[0]!;
+        }
+      }
+      return tracks
+        .filter((t) => nextUndone(t).length > 0)
+        .sort((a, b) => {
+          if (a === last) return -1;
+          if (b === last) return 1;
+          return interests.length ? score(b) - score(a) : 0;
+        });
+    }
+
+    function generatePlan(
+      hours: number,
+      interests: string[],
+      chosenDays: number[],
+    ): Plan {
+      const budget = hours * 60;
+      const days = chosenDays.length
+        ? [...chosenDays].sort((a, b) => a - b)
+        : daysFor(hours);
+      let n = 0;
+      const mk = (b: Omit<Block, "id" | "done">): Block => ({
+        ...b,
+        id: `b${n++}`,
+        done: false,
+      });
+
+      // Reviews first: they are the cheapest way to keep what you learned.
+      const due = units
+        .filter((u) => isDue(keyOf(u)))
+        .sort(
+          (a, b) =>
+            (progressOf(keyOf(a))!.nextReviewAt ?? 0) -
+            (progressOf(keyOf(b))!.nextReviewAt ?? 0),
+        );
+      let spent = 0;
+      const reviewCap = Math.floor(budget * 0.25);
+      const reviews: Block[] = [];
+      for (const u of due) {
+        if (spent + 10 > reviewCap) break;
+        reviews.push(mk({ kind: "review", key: keyOf(u), min: 10, day: 0 }));
+        spent += 10;
+      }
+      const practiceCount = Math.max(
+        2,
+        Math.min(days.length, Math.round((budget * 0.15) / 6)),
+      );
+      spent += practiceCount * 6;
+
+      // New units: round-robin over up to three worlds, in curriculum order.
+      const ranked = rankTracks(interests).slice(0, 3);
+      const queues = ranked.map((t) => nextUndone(t));
+      const learn: Block[] = [];
+      let guard = 0;
+      while (spent < budget && queues.some((x) => x.length) && guard++ < 60) {
+        for (const queue of queues) {
+          const u = queue.shift();
+          if (!u) continue;
+          const min = Math.min(Math.max(u.m, 5), 45);
+          if (spent + min > budget && learn.length > 0) continue;
+          learn.push(mk({ kind: "unit", key: keyOf(u), min, day: 0 }));
+          spent += min;
+          if (spent >= budget) break;
+        }
+      }
+
+      // Lay learning blocks out across the active days in order, then sprinkle
+      // reviews and one short practice block on the active days.
+      const learnTotal = learn.reduce((a, b) => a + b.min, 0);
+      const cap = Math.max(20, Math.ceil(learnTotal / days.length) + 8);
+      let at = 0;
+      const load = new Map<number, number>(days.map((d) => [d, 0]));
+      for (const b of learn) {
+        while (
+          at < days.length - 1 &&
+          (load.get(days[at]!) ?? 0) + b.min > cap &&
+          (load.get(days[at]!) ?? 0) > 0
+        )
+          at++;
+        b.day = days[at]!;
+        load.set(b.day, (load.get(b.day) ?? 0) + b.min);
+      }
+      reviews.forEach((b, k) => (b.day = days[(k * 2) % days.length]!));
+      const practice: Block[] = [];
+      for (let k = 0; k < practiceCount; k++) {
+        practice.push(
+          mk({
+            kind: "practice",
+            min: 6,
+            day: days[Math.floor((k * days.length) / practiceCount)]!,
+          }),
+        );
+      }
+      return {
+        week: dateKey(weekStart()),
+        hours,
+        interests,
+        days,
+        blocks: [...reviews, ...learn, ...practice],
+      };
+    }
+
+    let plan: Plan | null = null;
+    const loadPlan = (): Plan | null => {
+      try {
+        const p = JSON.parse(
+          pStorage.getItem(PLAN_KEY) || "null",
+        ) as Plan | null;
+        return p && Array.isArray(p.blocks) ? p : null;
+      } catch {
+        return null;
+      }
+    };
+    const savePlan = () => {
+      if (plan) pStorage.setItem(PLAN_KEY, JSON.stringify(plan));
+    };
+    const blockDone = (b: Block) => {
+      if (b.done) return true;
+      if (b.kind === "unit" && b.key) return isDone(b.key);
+      if (b.kind === "review" && b.key) return !isDue(b.key);
+      return false;
+    };
+
+    function selectedInterests(): string[] {
+      return qa("[data-interest]")
+        .filter((c) => c.getAttribute("aria-pressed") === "true")
+        .map((c) => c.dataset.interest!);
+    }
+    function syncInterestCount() {
+      const n = selectedInterests().length;
+      const out = q("[data-interest-count]");
+      if (out) out.textContent = n === 0 ? "any" : `${n} selected`;
+    }
+
+    const ICONS: Record<string, string> = {
+      unit: '<path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z"/>',
+      review:
+        '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
+      practice:
+        '<path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/>',
+      moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/>',
+    };
+    const svg = (name: string, size = 16) =>
+      `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
+
+    function renderWeek() {
+      const grid = q("[data-week]");
+      if (!grid || !plan) return;
+      grid.replaceChildren();
+      const start = weekStart();
+      const todayIdx = (new Date().getDay() + 6) % 7;
+      let totalMin = 0;
+      let doneMin = 0;
+      let totalBlocks = 0;
+      let doneBlocks = 0;
+      for (let d = 0; d < 7; d++) {
+        const date = new Date(start.getTime() + d * DAY);
+        const active = plan.days.includes(d);
+        const col = el("section", "day");
+        if (d === todayIdx) col.classList.add("is-today");
+        if (d < todayIdx) col.classList.add("is-past");
+        if (!active) col.classList.add("is-rest");
+
+        const head = el("header", "day-head");
+        const name = el("div", "day-name");
+        name.append(
+          el("b", "", date.toLocaleDateString("en", { weekday: "short" })),
+          el(
+            "i",
+            "",
+            date.toLocaleDateString("en", { month: "short", day: "numeric" }),
+          ),
+        );
+        head.append(name);
+        if (d === todayIdx) head.append(el("span", "day-today", "Today"));
+
+        const blocks = plan.blocks.filter((b) => b.day === d);
+        const mins = blocks.reduce((a, b) => a + b.min, 0);
+        const doneHere = blocks.filter(blockDone).length;
+        if (active) {
+          const meter = el("div", "day-meter");
+          const bar = el("span", "day-meter-bar");
+          const fill = el("i", "");
+          fill.style.width = `${blocks.length ? Math.round((doneHere / blocks.length) * 100) : 0}%`;
+          bar.append(fill);
+          meter.append(
+            bar,
+            el(
+              "span",
+              "day-meter-text",
+              blocks.length
+                ? `${doneHere}/${blocks.length} · ${mins} min`
+                : "nothing planned",
+            ),
+          );
+          head.append(meter);
+        }
+        col.append(head);
+
+        if (!active) {
+          const rest = el("div", "rest");
+          const icon = el("span", "rest-ic");
+          icon.innerHTML = svg("moon", 22);
+          const add = el(
+            "button",
+            "rest-add",
+            "Study this day",
+          ) as HTMLButtonElement;
+          add.type = "button";
+          add.addEventListener("click", () => toggleDay(d));
+          rest.append(icon, el("span", "rest-text", "Rest day"), add);
+          col.append(rest);
+          grid.append(col);
+          continue;
+        }
+
+        const list = el("ul", "blocks");
+        for (const b of blocks) {
+          const done = blockDone(b);
+          totalMin += b.min;
+          totalBlocks++;
+          if (done) {
+            doneMin += b.min;
+            doneBlocks++;
+          }
+          const unit = b.key ? byKey.get(b.key) : undefined;
+          const li = el("li", `block kind-${b.kind}${done ? " is-done" : ""}`);
+          if (unit) li.style.setProperty("--uh", String(unit.h));
+
+          const icon = el("span", "block-ic");
+          icon.innerHTML = svg(b.kind, 18);
+          const link = el("a", "block-link") as HTMLAnchorElement;
+          if (b.kind === "practice") {
+            link.href = "/question";
+            link.append(
+              el("span", "block-kind", "Practice"),
+              el("span", "block-title", "Quick questions"),
+            );
+          } else if (unit) {
+            link.href =
+              b.kind === "review" ? "/review" : `/${unit.t}/${unit.s}/`;
+            link.append(
+              el(
+                "span",
+                "block-kind",
+                b.kind === "review"
+                  ? `Review · ${pretty(unit.t)}`
+                  : pretty(unit.t),
+              ),
+              el("span", "block-title", short(unit.p)),
+            );
+          }
+          const foot = el("span", "block-foot");
+          foot.append(el("span", "block-min", `${b.min} min`));
+          const check = el("button", "check") as HTMLButtonElement;
+          check.type = "button";
+          check.setAttribute("aria-pressed", String(done));
+          check.setAttribute(
+            "aria-label",
+            done ? "Mark as not done" : "Mark as done",
+          );
+          check.innerHTML =
+            '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+          check.append(el("span", "check-text", done ? "Done" : "Mark done"));
+          check.addEventListener("click", () => {
+            b.done = !done;
+            savePlan();
+            renderWeek();
+          });
+          foot.append(check);
+          link.append(foot);
+          li.append(icon, link);
+          list.append(li);
+        }
+        if (blocks.length === 0)
+          list.append(el("li", "block-rest", "Nothing planned. A free day."));
+        col.append(list);
+        grid.append(col);
+      }
+      const text = q("[data-week-sum-text]");
+      if (text)
+        text.textContent = `${doneBlocks} of ${totalBlocks} blocks done · ${doneMin} of ${totalMin} minutes · ${plan.hours} h/week over ${plan.days.length} days`;
+      const bar = q<HTMLElement>("[data-week-bar]");
+      if (bar)
+        bar.style.width = `${totalMin ? Math.round((doneMin / totalMin) * 100) : 0}%`;
+    }
+
+    // Study days chosen by the reader. Until they touch the picker the days
+    // follow the hours (more hours, more days).
+    let studyDays: number[] = [];
+    let daysTouched = false;
+    const syncDayPick = () => {
+      for (const b of qa("[data-day-pick]"))
+        b.setAttribute(
+          "aria-pressed",
+          String(studyDays.includes(Number(b.dataset.dayPick))),
+        );
+    };
+    function rebuild() {
+      const hoursSel = q<HTMLSelectElement>("[data-plan-hours]");
+      if (!hoursSel) return;
+      // Keep what was already ticked when the same block survives the rebuild.
+      const kept = new Map<string, boolean>();
+      for (const b of plan?.blocks ?? [])
+        if (b.done && b.key) kept.set(`${b.kind}:${b.key}`, true);
+      plan = generatePlan(
+        Number(hoursSel.value),
+        selectedInterests(),
+        studyDays,
+      );
+      for (const b of plan.blocks)
+        if (b.key && kept.has(`${b.kind}:${b.key}`)) b.done = true;
+      savePlan();
+      renderWeek();
+    }
+    function toggleDay(d: number) {
+      daysTouched = true;
+      studyDays = studyDays.includes(d)
+        ? studyDays.filter((x) => x !== d)
+        : [...studyDays, d].sort((a, b) => a - b);
+      // A plan needs at least one day to land on.
+      if (studyDays.length === 0) studyDays = [d];
+      syncDayPick();
+      rebuild();
+    }
+
+    function wirePlan() {
+      const root = q('[data-panel="week"]');
+      if (!root || root.dataset.wired === "true") return;
+      root.dataset.wired = "true";
+      const hoursSel = q<HTMLSelectElement>("[data-plan-hours]")!;
+      const profileInterests = getActiveProfile()?.interests ?? [];
+      const saved = loadPlan();
+      const fresh = !!saved && saved.week === dateKey(weekStart());
+      const initialInterests = saved?.interests ?? profileInterests;
+      for (const c of qa("[data-interest]"))
+        c.setAttribute(
+          "aria-pressed",
+          String(initialInterests.includes(c.dataset.interest!)),
+        );
+      if (saved) hoursSel.value = String(saved.hours);
+      studyDays =
+        saved?.days && saved.days.length
+          ? saved.days
+          : daysFor(Number(hoursSel.value));
+      daysTouched = !!saved?.days?.length;
+      syncInterestCount();
+      syncDayPick();
+
+      for (const c of qa("[data-interest]"))
+        c.addEventListener("click", () => {
+          c.setAttribute(
+            "aria-pressed",
+            String(c.getAttribute("aria-pressed") !== "true"),
+          );
+          syncInterestCount();
+        });
+      for (const b of qa("[data-day-pick]"))
+        b.addEventListener("click", () => toggleDay(Number(b.dataset.dayPick)));
+      hoursSel.addEventListener("change", () => {
+        if (!daysTouched) {
+          studyDays = daysFor(Number(hoursSel.value));
+          syncDayPick();
+        }
+        rebuild();
+      });
+      q("[data-plan-make]")?.addEventListener("click", rebuild);
+      q("[data-plan-reset]")?.addEventListener("click", () => {
+        pStorage.removeItem(PLAN_KEY);
+        plan = null;
+        for (const c of qa("[data-interest]"))
+          c.setAttribute("aria-pressed", "false");
+        hoursSel.value = "3";
+        daysTouched = false;
+        studyDays = daysFor(3);
+        syncInterestCount();
+        syncDayPick();
+        rebuild();
+      });
+
+      if (fresh) {
+        plan = { ...saved!, days: studyDays };
+        renderWeek();
+      } else {
+        rebuild();
+      }
+    }
+
+    /* ---------------- quick session ---------------- */
+    const sess = {
+      time: 20,
+      mode: "learn" as "learn" | "review" | "practice",
+      // Random per visit, so practice never opens on the same questions.
+      seed: Math.floor(Math.random() * 2 ** 31),
+      shuffled: false,
+    };
+    // Small seeded generator: the same seed gives the same list, so changing
+    // the time or mode does not reshuffle; the Shuffle button draws a new seed.
+    const rng = (salt: number) => {
+      let a = (sess.seed + salt * 977) >>> 0;
+      return () => {
+        a = (a + 0x6d2b79f5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    };
+    const shuffle = <T,>(arr: T[], rand: () => number) => {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(rand() * (i + 1));
+        [a[i], a[j]] = [a[j]!, a[i]!];
+      }
+      return a;
+    };
+
+    // Practice answers: a question counts once, the first time it is answered
+    // right. Every third new right answer pays one game token, the same token
+    // a finished unit pays, so a quick session earns something too.
+    const PRACTICE_KEY = "study:practice";
+    const PER_TOKEN = 3;
+    interface PracticeState {
+      done: string[];
+      progress: number;
+    }
+    const loadPractice = (): PracticeState => {
+      try {
+        const st = JSON.parse(pStorage.getItem(PRACTICE_KEY) || "null");
+        if (st && Array.isArray(st.done))
+          return { done: st.done, progress: Number(st.progress) || 0 };
+      } catch {
+        // fall through to a fresh state
+      }
+      return { done: [], progress: 0 };
+    };
+    const savePractice = (st: PracticeState) =>
+      pStorage.setItem(PRACTICE_KEY, JSON.stringify(st));
+
+    function showReward() {
+      const out = q("[data-practice-reward]");
+      if (!out) return;
+      if (sess.mode !== "practice") {
+        out.hidden = true;
+        return;
+      }
+      const st = loadPractice();
+      out.hidden = false;
+      out.textContent = `${st.progress}/${PER_TOKEN} new right answers to your next game token · ${st.done.length} of ${pool.length} questions done`;
+    }
+
+    function toast(text: string) {
+      const t = el(
+        "div",
+        "animate-pop fixed right-4 bottom-4 z-50 flex max-w-xs items-center gap-2 rounded-2xl border border-emerald-300/60 bg-slate-900/95 px-4 py-3 text-sm font-bold text-emerald-100 shadow-xl",
+        text,
+      );
+      t.setAttribute("role", "status");
+      document.body.append(t);
+      window.setTimeout(() => {
+        t.style.transition = "opacity 0.4s";
+        t.style.opacity = "0";
+        window.setTimeout(() => t.remove(), 450);
+      }, 3500);
+    }
+
+    /* ---- practice arena: one question at a time, with feedback ---- */
+    const worldHues = () => readJson<Record<string, number>>("study-hues", {});
+    const iconOf = (w: string) =>
+      q(`[data-track-ics] [data-ic="${CSS.escape(w)}"] svg`)?.cloneNode(true) ??
+      null;
+    const illusOf = (w: string) =>
+      q(`[data-illus] [data-illus-for="${CSS.escape(w)}"] > *`)?.cloneNode(
+        true,
+      ) ?? null;
+    const reduced = () =>
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const FLAME =
+      '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>';
+    const COIN =
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h4a1.8 1.8 0 0 1 0 3.6h-3a1.8 1.8 0 0 0 0 3.6h4"/></svg>';
+
+    // A small burst of confetti (or a few red specks) from where you clicked.
+    function burst(origin: HTMLElement, host: HTMLElement, good: boolean) {
+      if (reduced()) return;
+      const r = origin.getBoundingClientRect();
+      const h = host.getBoundingClientRect();
+      const cx = r.left - h.left + r.width / 2;
+      const cy = r.top - h.top + r.height / 2;
+      const colors = good
+        ? ["#10b981", "#f59e0b", "#0ea5e9", "#8b5cf6", "#ec4899"]
+        : ["#ef4444", "#f97316"];
+      for (let k = 0; k < (good ? 20 : 7); k++) {
+        const p = el("i", "confetti");
+        const a = Math.random() * Math.PI * 2;
+        const d = 40 + Math.random() * 80;
+        p.style.cssText = `left:${cx}px;top:${cy}px;background:${colors[k % colors.length]};--dx:${Math.cos(a) * d}px;--dy:${Math.sin(a) * d - 30}px;--rot:${Math.random() * 540 - 270}deg`;
+        p.addEventListener("animationend", () => p.remove());
+        host.append(p);
+      }
+    }
+
+    function renderArena(host: HTMLElement, chosen: Q[]) {
+      host.className = "arena";
+      if (chosen.length === 0) {
+        host.append(el("p", "empty-state", "No questions are published yet."));
+        return;
+      }
+      const n = chosen.length;
+      const results: Array<"" | "right" | "wrong"> = chosen.map(() => "");
+      let at = 0;
+      let combo = 0;
+      let best = 0;
+      let fresh = 0;
+      let earned = 0;
+
+      const top = el("div", "arena-top");
+      const meter = el("div", "coin-meter");
+      meter.setAttribute("aria-label", "Progress to your next game token");
+      const coins = Array.from({ length: PER_TOKEN }, () => {
+        const c = el("i", "coin");
+        c.innerHTML = COIN;
+        return c;
+      });
+      meter.append(el("span", "coin-label", "Token"), ...coins);
+      const comboEl = el("div", "combo");
+      const countEl = el("div", "arena-count");
+      top.append(meter, comboEl, countEl);
+      const steps = el("ol", "steps");
+      const stepEls = chosen.map(() => el("li", "step"));
+      steps.append(...stepEls);
+      const stage = el("div", "arena-stage");
+      host.append(top, steps, stage);
+
+      const paint = () => {
+        const st = loadPractice();
+        coins.forEach((c, k) => c.classList.toggle("on", k < st.progress));
+        comboEl.className = `combo${combo >= 2 ? " hot" : ""}`;
+        comboEl.innerHTML =
+          combo >= 2 ? `${FLAME}<b>${combo}</b> in a row` : "";
+        countEl.textContent = `${Math.min(at + 1, n)} / ${n}`;
+        stepEls.forEach((s, k) => {
+          s.className = `step${k === at ? " current" : ""}${results[k] ? ` ${results[k]}` : ""}`;
+        });
+      };
+
+      function showCard() {
+        paint();
+        const x = chosen[at]!;
+        const hue = worldHues()[x.track] ?? 200;
+        const was = new Set(loadPractice().done).has(x.id);
+        const card = el("article", "qcard card-in");
+        card.style.setProperty("--world-h", String(hue));
+
+        const art = el("div", "qart");
+        const ill = illusOf(x.track);
+        if (ill) art.append(ill);
+        const mark = el("span", "qmark");
+        const big = iconOf(x.track);
+        if (big) mark.append(big);
+        art.append(mark);
+        const chip = el("span", "qchip");
+        const ic = iconOf(x.track);
+        if (ic) chip.append(ic);
+        chip.append(pretty(x.track));
+        art.append(chip);
+        if (was) art.append(el("span", "qdone", "Done before"));
+
+        const prompt = el("p", "qprompt", x.prompt);
+        const choices = el("div", "qchoices");
+        const after = el("div", "qafter");
+        after.hidden = true;
+        const buttons = x.choices.map((text, k) => {
+          const b = el("button", "qchoice") as HTMLButtonElement;
+          b.type = "button";
+          b.style.setProperty("--d", `${120 + k * 70}ms`);
+          b.append(
+            el("i", "", String.fromCharCode(65 + k)),
+            el("span", "", text),
+          );
+          choices.append(b);
+          return b;
+        });
+        buttons.forEach((b, k) =>
+          b.addEventListener("click", () => {
+            const right = k === x.correctIndex;
+            buttons.forEach((y, j) => {
+              y.disabled = true;
+              if (j === x.correctIndex) y.classList.add("is-right");
+            });
+            if (!right) {
+              b.classList.add("is-wrong");
+              card.classList.add("shake");
+            }
+            results[at] = right ? "right" : "wrong";
+            combo = right ? combo + 1 : 0;
+            best = Math.max(best, combo);
+            burst(b, host, right);
+
+            let reward = "";
+            if (right) {
+              const st = loadPractice();
+              if (!st.done.includes(x.id)) {
+                st.done.push(x.id);
+                st.progress += 1;
+                fresh++;
+                reward = "Marked as done";
+                if (st.progress >= PER_TOKEN) {
+                  st.progress = 0;
+                  earned++;
+                  addToken();
+                  reward = "Marked as done. +1 game token!";
+                  toast("+1 game token");
+                  host.classList.add("earned");
+                  for (const c of coins) c.classList.add("on", "flash");
+                  window.setTimeout(() => {
+                    host.classList.remove("earned");
+                    for (const c of coins) c.classList.remove("flash");
+                    paint();
+                  }, 1400);
+                }
+                savePractice(st);
+                showReward();
+              } else {
+                reward = "Already counted before";
+              }
+            }
+            const wasEarned = host.classList.contains("earned");
+            if (!wasEarned) paint();
+            else {
+              comboEl.className = `combo${combo >= 2 ? " hot" : ""}`;
+              comboEl.innerHTML =
+                combo >= 2 ? `${FLAME}<b>${combo}</b> in a row` : "";
+              stepEls[at]!.className = `step current ${results[at]}`;
+            }
+
+            after.hidden = false;
+            after.replaceChildren();
+            const head = el("p", `qverdict ${right ? "ok" : "no"}`);
+            head.textContent = right
+              ? combo >= 3
+                ? "On fire!"
+                : "Right!"
+              : "Not quite";
+            after.append(head, el("p", "qexplain", x.explanation));
+            const foot = el("div", "qfoot");
+            if (reward) foot.append(el("span", "qreward", reward));
+            const learn = el(
+              "a",
+              "qlearn",
+              `Learn it: ${short(x.problem)}`,
+            ) as HTMLAnchorElement;
+            learn.href = `/${x.track}/${x.slug}/`;
+            foot.append(learn);
+            const next = el(
+              "button",
+              "qnext",
+              at + 1 < n ? "Next question" : "See results",
+            ) as HTMLButtonElement;
+            next.type = "button";
+            next.addEventListener("click", () => {
+              if (at + 1 < n) {
+                at++;
+                showCard();
+              } else {
+                showResults();
+              }
+            });
+            foot.append(next);
+            after.append(foot);
+            next.focus({ preventScroll: true });
+          }),
+        );
+
+        card.append(art, prompt, choices, after);
+        stage.replaceChildren(card);
+      }
+
+      function showResults() {
+        at = n;
+        paint();
+        countEl.textContent = "Done";
+        const right = results.filter((r) => r === "right").length;
+        const pct = Math.round((right / n) * 100);
+        const box = el("article", "qresults card-in");
+        const ring = el("div", "qring");
+        ring.innerHTML = `<svg viewBox="0 0 36 36" aria-hidden="true"><circle class="ring-bg" cx="18" cy="18" r="15.9" pathLength="100"/><circle class="ring-fg" cx="18" cy="18" r="15.9" pathLength="100" stroke-dasharray="${pct} 100"/></svg>`;
+        ring.append(el("b", "", `${right}/${n}`));
+        const message =
+          pct === 100
+            ? "Perfect round."
+            : pct >= 60
+              ? "Solid. Keep going."
+              : "Good practice. The explanations are the useful part.";
+        const stats = el("ul", "qstats");
+        const stat = (label: string, value: string) => {
+          const li = el("li");
+          li.append(el("b", "", value), el("span", "", label));
+          stats.append(li);
+        };
+        stat("best streak", String(best));
+        stat("new questions done", String(fresh));
+        stat("tokens earned", String(earned));
+        const again = el(
+          "button",
+          "btn primary",
+          "Play another round",
+        ) as HTMLButtonElement;
+        again.type = "button";
+        again.addEventListener("click", () =>
+          q<HTMLButtonElement>("[data-session-shuffle]")?.click(),
+        );
+        box.append(
+          ring,
+          el("h3", "", message),
+          stats,
+          el(
+            "p",
+            "qnote",
+            `${loadPractice().progress}/${PER_TOKEN} new right answers to your next game token.`,
+          ),
+          again,
+        );
+        stage.replaceChildren(box);
+        if (pct >= 60 && !reduced()) {
+          const r = ring.getBoundingClientRect();
+          const h = host.getBoundingClientRect();
+          const fake = document.createElement("span");
+          fake.style.cssText = `position:absolute;left:${r.left - h.left}px;top:${r.top - h.top}px;width:${r.width}px;height:${r.height}px`;
+          host.append(fake);
+          burst(fake, host, true);
+          fake.remove();
+        }
+      }
+
+      showCard();
+    }
+
+    function renderSession() {
+      const list = q("[data-session-list]");
+      const text = q("[data-session-sum-text]");
+      const start = q<HTMLAnchorElement>("[data-session-start]");
+      if (!list || !text || !start) return;
+      list.replaceChildren();
+      start.hidden = true;
+      showReward();
+      const T = sess.time;
+      const interests = getActiveProfile()?.interests ?? [];
+
+      if (sess.mode === "practice") {
+        const n = Math.max(3, Math.min(8, Math.round(T / 3)));
+        const done = new Set(loadPractice().done);
+        // Questions you have not answered right yet come first, then ones that
+        // match your interests; within each group the order is the shuffle.
+        const score = (x: Q) =>
+          (done.has(x.id) ? 2 : 0) +
+          (interests.length && !x.tags.some((t) => interests.includes(t))
+            ? 1
+            : 0);
+        const ordered = shuffle(pool, rng(1)).sort(
+          (a, b) => score(a) - score(b),
+        );
+        const chosen: Q[] = [];
+        const units = new Set<string>();
+        // One question per unit first, then fill up from the same units.
+        for (const x of ordered) {
+          if (units.has(`${x.track}/${x.slug}`)) continue;
+          units.add(`${x.track}/${x.slug}`);
+          chosen.push(x);
+          if (chosen.length === n) break;
+        }
+        for (const x of ordered) {
+          if (chosen.length >= n) break;
+          if (!chosen.includes(x)) chosen.push(x);
+        }
+        renderArena(list.appendChild(el("li", "arena-li")), chosen);
+        text.textContent = chosen.length
+          ? `${chosen.length} questions from ${pool.length}, about ${T} minutes with thinking time.`
+          : "No questions are published yet.";
+        return;
+      }
+
+      type Item = { u: U; min: number; note?: string };
+      let items: Item[] = [];
+      let total = 0;
+      if (sess.mode === "review") {
+        let due = units
+          .filter((u) => isDue(keyOf(u)))
+          .sort(
+            (a, b) =>
+              (progressOf(keyOf(a))!.nextReviewAt ?? 0) -
+              (progressOf(keyOf(b))!.nextReviewAt ?? 0),
+          );
+        if (sess.shuffled) due = shuffle(due, rng(2));
+        for (const u of due) {
+          if (total + 8 > T && items.length > 0) break;
+          items.push({ u, min: 8 });
+          total += 8;
+        }
+      } else {
+        let ranked = rankTracks(interests);
+        if (sess.shuffled) ranked = shuffle(ranked, rng(3));
+        const queues = ranked.map((t) => nextUndone(t));
+        // Round-robin across worlds, taking only units that still fit.
+        let progress = true;
+        while (progress && total < T) {
+          progress = false;
+          for (const queue of queues) {
+            const idx = queue.findIndex((u) => total + u.m <= T * 1.1);
+            if (idx === -1) continue;
+            const [u] = queue.splice(idx, 1);
+            items.push({ u: u!, min: u!.m });
+            total += u!.m;
+            progress = true;
+            if (total >= T) break;
+          }
+        }
+        if (items.length === 0) {
+          // Nothing fits: offer the shortest next unit and say it runs over.
+          const shortest = ranked
+            .flatMap((t) => nextUndone(t).slice(0, 1))
+            .sort((a, b) => a.m - b.m)[0];
+          if (shortest) {
+            items = [
+              {
+                u: shortest,
+                min: shortest.m,
+                note: `Runs ${shortest.m - T} min over`,
+              },
+            ];
+            total = shortest.m;
+          }
+        }
+      }
+
+      if (items.length === 0) {
+        const empty = el("li", "empty-state");
+        empty.append(
+          el(
+            "b",
+            "",
+            sess.mode === "review"
+              ? "Nothing is due for review."
+              : "You have finished every published unit.",
+          ),
+          el(
+            "span",
+            "",
+            sess.mode === "review"
+              ? "Try a practice session instead."
+              : "Try review or practice.",
+          ),
+        );
+        list.append(empty);
+        text.textContent = "Nothing to schedule.";
+        return;
+      }
+      items.forEach(({ u, min, note }, k) => {
+        const li = el("li", "si");
+        li.style.setProperty("--uh", String(u.h));
+        const a = el("a", "si-link") as HTMLAnchorElement;
+        a.href = sess.mode === "review" ? "/review" : `/${u.t}/${u.s}/`;
+        a.append(
+          el("span", "si-n", String(k + 1)),
+          el("span", "si-body"),
+          el("span", "si-min", `${min} min`),
+        );
+        const body = q(".si-body", a)!;
+        body.append(
+          el("b", "", short(u.p)),
+          el("i", "", note ? `${pretty(u.t)} · ${note}` : pretty(u.t)),
+        );
+        li.append(a);
+        list.append(li);
+      });
+      text.textContent = `${items.length} ${items.length === 1 ? "item" : "items"}, about ${total} of ${T} minutes.`;
+      start.href = q<HTMLAnchorElement>(".si-link", list)!.href;
+      start.hidden = false;
+    }
+
+    function wireSession() {
+      const root = q('[data-panel="session"]');
+      if (!root || root.dataset.wired === "true") return;
+      root.dataset.wired = "true";
+      root.addEventListener("click", (e) => {
+        const t = (e.target as HTMLElement).closest<HTMLElement>(
+          "[data-time],[data-mode],[data-session-shuffle]",
+        );
+        if (!t) return;
+        if (t.dataset.time) sess.time = Number(t.dataset.time);
+        if (t.dataset.mode) sess.mode = t.dataset.mode as typeof sess.mode;
+        if (t.hasAttribute("data-session-shuffle")) {
+          sess.seed = Math.floor(Math.random() * 2 ** 31);
+          sess.shuffled = true;
+        }
+        for (const b of qa("[data-time]", root))
+          b.setAttribute(
+            "aria-pressed",
+            String(Number(b.dataset.time) === sess.time),
+          );
+        for (const b of qa("[data-mode]", root))
+          b.setAttribute("aria-pressed", String(b.dataset.mode === sess.mode));
+        renderSession();
+      });
+      renderSession();
+    }
+
+    /* ---------------- skills map ---------------- */
+    function paintSkills() {
+      const doneByTagWorld = new Map<string, number>();
+      const availByTag = new Map<string, number>();
+      for (const u of units) {
+        const done = isDone(keyOf(u));
+        for (const tag of u.tg) {
+          const k = `${tag}|${u.t}`;
+          doneByTagWorld.set(k, (doneByTagWorld.get(k) ?? 0) + (done ? 1 : 0));
+          availByTag.set(tag, (availByTag.get(tag) ?? 0) + 1);
+        }
+      }
+      const remaining = new Map<string, number>();
+      for (const cell of qa<HTMLButtonElement>("[data-cell]")) {
+        const tag = cell.dataset.tag!;
+        const avail = Number(cell.dataset.avail);
+        const done = doneByTagWorld.get(`${tag}|${cell.dataset.world}`) ?? 0;
+        cell.style.setProperty("--f", String(avail ? done / avail : 0));
+        cell.classList.toggle("is-full", done === avail);
+        cell.setAttribute(
+          "aria-label",
+          `${tag} in ${pretty(cell.dataset.world!)}: ${done} of ${avail} done`,
+        );
+        // The number is a link to the next unit still to do for this skill in
+        // this world (or the first one when everything there is done).
+        const here = units
+          .filter((u) => u.t === cell.dataset.world && u.tg.includes(tag))
+          .sort((a, b) => a.i - b.i);
+        const target = here.find((u) => !isDone(keyOf(u))) ?? here[0];
+        if (target) {
+          cell.href = `/${target.t}/${target.s}/`;
+          cell.title = `${done} of ${avail} done. ${done === avail ? "Review" : "Next"}: ${short(target.p)}`;
+        }
+        remaining.set(tag, (remaining.get(tag) ?? 0) + (avail - done));
+      }
+      // The five skills with the most units still to do are flagged as gaps.
+      const ranked = [...remaining.entries()]
+        .filter(([, n]) => n > 0)
+        .sort(
+          (a, b) =>
+            b[1] - a[1] ||
+            (availByTag.get(b[0]) ?? 0) - (availByTag.get(a[0]) ?? 0),
+        )
+        .slice(0, 5);
+      const gapSet = new Set(ranked.map(([t]) => t));
+      for (const row of qa("[data-row]")) {
+        const flag = q("[data-gap-flag]", row);
+        if (flag) flag.hidden = !gapSet.has(row.dataset.row!);
+      }
+      const gaps = q("[data-gaps]");
+      if (gaps) {
+        gaps.replaceChildren();
+        if (ranked.length)
+          gaps.append(el("span", "gaps-label", "Biggest gaps"));
+        for (const [tag, n] of ranked) {
+          const b = el("button", "gap-chip") as HTMLButtonElement;
+          b.type = "button";
+          b.append(tag, el("b", "", `${n} to do`));
+          b.addEventListener("click", () => pickTag(tag, true));
+          gaps.append(b);
+        }
+      }
+    }
+
+    function pickTag(tag: string, scroll = false) {
+      for (const b of qa("[data-tag-pick]"))
+        b.setAttribute("aria-pressed", String(b.dataset.tagPick === tag));
+      const box = q("[data-tag-units]");
+      const title = q("[data-tag-units-title]");
+      const list = q("[data-tag-units-list]");
+      if (!box || !title || !list) return;
+      const hits = units
+        .filter((u) => u.tg.includes(tag))
+        .sort((a, b) => a.t.localeCompare(b.t) || a.i - b.i);
+      const done = hits.filter((u) => isDone(keyOf(u))).length;
+      title.textContent = `${tag}: ${done} of ${hits.length} done`;
+      list.replaceChildren();
+      for (const u of hits) {
+        const li = el("li", isDone(keyOf(u)) ? "tu is-done" : "tu");
+        li.style.setProperty("--uh", String(u.h));
+        const a = el("a", "tu-link") as HTMLAnchorElement;
+        a.href = `/${u.t}/${u.s}/`;
+        a.append(
+          el("span", "tu-state", isDone(keyOf(u)) ? "Done" : "To do"),
+          el("b", "", short(u.p)),
+          el("i", "", `${pretty(u.t)} · ${u.m} min`),
+        );
+        li.append(a);
+        list.append(li);
+      }
+      box.hidden = false;
+      if (scroll) box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
+    function wireSkills() {
+      const root = q('[data-panel="skills"]');
+      if (!root || root.dataset.wired === "true") return;
+      root.dataset.wired = "true";
+      root.addEventListener("click", (e) => {
+        const t = (e.target as HTMLElement).closest<HTMLElement>(
+          "[data-tag-pick]",
+        );
+        if (!t) return;
+        pickTag(t.dataset.tagPick!);
+      });
+      paintSkills();
+    }
+
+    /* ---------------- demos ---------------- */
+    function wireDemos() {
+      const root = q('[data-panel="demos"]');
+      if (!root || root.dataset.wired === "true") return;
+      root.dataset.wired = "true";
+      root.addEventListener("click", (e) => {
+        const b = (e.target as HTMLElement).closest<HTMLElement>(
+          "[data-demo-filter]",
+        );
+        if (!b) return;
+        const w = b.dataset.demoFilter!;
+        for (const x of qa("[data-demo-filter]", root))
+          x.setAttribute("aria-pressed", String(x === b));
+        for (const c of qa("[data-demo-card]", root))
+          c.hidden = w !== "all" && c.dataset.world !== w;
+      });
+    }
+
+    function initStudy() {
+      if (!q("[data-study]")) return;
+      units = readJson<U[]>("study-units", []);
+      byKey = new Map(units.map((u) => [keyOf(u), u]));
+      pool = readJson<Q[]>("study-pool", []);
+      wireTabs();
+      selectTab(location.hash.slice(1) || "week", false);
+      wirePlan();
+      wireSession();
+      wireSkills();
+      wireDemos();
+    }
+    initStudy();
+    document.addEventListener("astro:page-load", initStudy);
+  </script>
+</Layout>
+
+<style>
+  .study {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    margin-top: 1.5rem;
+    padding-bottom: 2.5rem;
+  }
+  .tabs {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  }
+  .tab {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    border-radius: 1rem;
+    border: 2px solid #cbd5e1;
+    background: #fff;
+    padding: 0.625rem 0.875rem;
+    text-align: left;
+    color: #334155;
+    box-shadow: 0 4px 0 #cbd5e1;
+    cursor: pointer;
+    transition:
+      transform 0.08s,
+      box-shadow 0.08s,
+      border-color 0.08s;
+  }
+  :global(.dark) .tab {
+    border-color: #334155;
+    background: #0f172a;
+    color: #cbd5e1;
+    box-shadow: 0 4px 0 #334155;
+  }
+  .tab:hover {
+    border-color: #0f172a;
+  }
+  :global(.dark) .tab:hover {
+    border-color: #f1f5f9;
+  }
+  .tab:focus-visible {
+    outline: 3px solid var(--accent-text);
+    outline-offset: 3px;
+  }
+  .tab[aria-selected="true"] {
+    border-color: #0369a1;
+    background: #e0f2fe;
+    color: #0c4a6e;
+    box-shadow: 0 4px 0 #0369a1;
+  }
+  :global(.dark) .tab[aria-selected="true"] {
+    border-color: #38bdf8;
+    background: #082f49;
+    color: #e0f2fe;
+    box-shadow: 0 4px 0 #38bdf8;
+  }
+  .tab-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+  }
+  .tab-text b {
+    font-size: 1rem;
+    font-weight: 800;
+  }
+  .tab-text i {
+    font-style: normal;
+    font-size: 0.75rem;
+    font-weight: 700;
+    opacity: 0.75;
+  }
+  .panel {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .panel[hidden] {
+    display: none;
+  }
+  .fine {
+    max-width: 70ch;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #64748b;
+  }
+  :global(.dark) .fine {
+    color: #94a3b8;
+  }
+
+  /* controls */
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #64748b;
+  }
+  .field select {
+    border-radius: 0.75rem;
+    border: 2px solid #0f172a;
+    background: #fff;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9375rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
+    color: #0f172a;
+  }
+  :global(.dark) .field select {
+    border-color: #f1f5f9;
+    background: #0f172a;
+    color: #f1f5f9;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    align-self: flex-end;
+    border-radius: 0.75rem;
+    border: 2px solid #0f172a;
+    background: #fff;
+    padding: 0.5rem 1rem;
+    font-size: 0.9375rem;
+    font-weight: 800;
+    color: #0f172a;
+    box-shadow: 0 3px 0 #0f172a;
+    cursor: pointer;
+  }
+  .btn[hidden] {
+    display: none;
+  }
+  .btn.primary {
+    border-color: #082f49;
+    background: #0369a1;
+    color: #fff;
+    box-shadow: 0 3px 0 #082f49;
+  }
+  :global(.dark) .btn {
+    border-color: #f1f5f9;
+    background: #0f172a;
+    color: #f1f5f9;
+    box-shadow: 0 3px 0 #f1f5f9;
+  }
+  :global(.dark) .btn.primary {
+    border-color: #082f49;
+    background: #0369a1;
+    color: #fff;
+    box-shadow: 0 3px 0 #082f49;
+  }
+  .btn:active {
+    transform: translateY(3px);
+    box-shadow: none;
+  }
+  .btn:focus-visible {
+    outline: 3px solid var(--accent-text);
+    outline-offset: 3px;
+  }
+  .interests {
+    position: relative;
+    align-self: flex-end;
+  }
+  .interests summary {
+    display: inline-flex;
+    cursor: pointer;
+    list-style: none;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 0.75rem;
+    border: 2px solid #0f172a;
+    background: #fff;
+    padding: 0.5rem 0.875rem;
+    font-size: 0.9375rem;
+    font-weight: 800;
+    color: #0f172a;
+  }
+  .interests summary::-webkit-details-marker {
+    display: none;
+  }
+  .interests summary b {
+    border-radius: 999px;
+    background: #e2e8f0;
+    padding: 0 0.5rem;
+    font-size: 0.75rem;
+  }
+  :global(.dark) .interests summary {
+    border-color: #f1f5f9;
+    background: #0f172a;
+    color: #f1f5f9;
+  }
+  :global(.dark) .interests summary b {
+    background: #334155;
+  }
+  .interests[open] .chips {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + 0.5rem);
+    left: 0;
+    width: min(34rem, 86vw);
+    max-height: 18rem;
+    overflow-y: auto;
+    border-radius: 1rem;
+    border: 2px solid #0f172a;
+    background: #fff;
+    padding: 0.75rem;
+    box-shadow: 0 5px 0 #0f172a;
+  }
+  :global(.dark) .interests[open] .chips {
+    border-color: #f1f5f9;
+    background: #0f172a;
+    box-shadow: 0 5px 0 #f1f5f9;
+  }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 999px;
+    border: 2px solid #cbd5e1;
+    background: #fff;
+    padding: 0.125rem 0.625rem;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    text-transform: capitalize;
+    color: #334155;
+    cursor: pointer;
+  }
+  .chip b {
+    border-radius: 999px;
+    background: #e2e8f0;
+    padding: 0 0.375rem;
+    font-size: 0.6875rem;
+  }
+  :global(.dark) .chip {
+    border-color: #334155;
+    background: #0f172a;
+    color: #cbd5e1;
+  }
+  :global(.dark) .chip b {
+    background: #334155;
+  }
+  .chip[aria-pressed="true"] {
+    border-color: #0369a1;
+    background: #e0f2fe;
+    color: #0c4a6e;
+  }
+  :global(.dark) .chip[aria-pressed="true"] {
+    border-color: #38bdf8;
+    background: #082f49;
+    color: #e0f2fe;
+  }
+  .chip:focus-visible {
+    outline: 3px solid var(--accent-text);
+    outline-offset: 2px;
+  }
+  .seg {
+    display: inline-flex;
+    overflow: hidden;
+    align-self: flex-end;
+    border-radius: 0.75rem;
+    border: 2px solid #0f172a;
+  }
+  :global(.dark) .seg {
+    border-color: #f1f5f9;
+  }
+  .seg button {
+    border: 0;
+    background: #fff;
+    padding: 0.5rem 0.875rem;
+    font-size: 0.9375rem;
+    font-weight: 800;
+    color: #334155;
+    cursor: pointer;
+  }
+  :global(.dark) .seg button {
+    background: #0f172a;
+    color: #cbd5e1;
+  }
+  .seg button + button {
+    border-left: 2px solid #0f172a;
+  }
+  :global(.dark) .seg button + button {
+    border-left-color: #f1f5f9;
+  }
+  .seg button[aria-pressed="true"] {
+    background: #0369a1;
+    color: #fff;
+  }
+  .seg button:focus-visible {
+    outline: 3px solid var(--accent-text);
+    outline-offset: -3px;
+  }
+
+  /* week */
+  .week-sum,
+  .session-sum {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    font-size: 0.9375rem;
+    font-weight: 800;
+  }
+  .bar {
+    display: block;
+    height: 0.625rem;
+    min-width: 8rem;
+    flex: 1 1 10rem;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #e2e8f0;
+  }
+  :global(.dark) .bar {
+    background: #334155;
+  }
+  .bar i {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #0ea5e9, #10b981);
+    transition: width 0.5s ease-out;
+  }
+  /* day picker */
+  .days-field {
+    align-self: flex-end;
+  }
+  .day-pick {
+    display: inline-flex;
+    gap: 0.25rem;
+  }
+  .day-pick button {
+    min-width: 2.75rem;
+    border-radius: 0.75rem;
+    border: 2px solid #cbd5e1;
+    background: #fff;
+    padding: 0.4375rem 0.375rem;
+    font-size: 0.8125rem;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: none;
+    color: #64748b;
+    cursor: pointer;
+    transition:
+      transform 0.08s,
+      border-color 0.08s;
+  }
+  :global(.dark) .day-pick button {
+    border-color: #334155;
+    background: #0f172a;
+    color: #94a3b8;
+  }
+  .day-pick button[aria-pressed="true"] {
+    border-color: #082f49;
+    background: #0369a1;
+    color: #fff;
+    box-shadow: 0 3px 0 #082f49;
+  }
+  .day-pick button:hover {
+    transform: translateY(-1px);
+  }
+  .day-pick button:focus-visible {
+    outline: 3px solid var(--accent-text);
+    outline-offset: 2px;
+  }
+
+  /* week board */
+  .week {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr));
+    align-items: start;
+  }
+  @media (min-width: 1180px) {
+    .week {
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+    }
+  }
+  .week :global(.day) {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.625rem;
+    overflow: hidden;
+    border-radius: 1.125rem;
+    border: 2px solid #cbd5e1;
+    background: #fff;
+    padding: 0 0 0.625rem;
+    box-shadow: 0 4px 0 #cbd5e1;
+  }
+  :global(.dark) .week :global(.day) {
+    border-color: #334155;
+    background: #0f172a;
+    box-shadow: 0 4px 0 #334155;
+  }
+  .week :global(.day.is-today) {
+    border-color: #0369a1;
+    box-shadow: 0 5px 0 #0369a1;
+  }
+  .week :global(.day.is-past:not(.is-today)) {
+    opacity: 0.7;
+  }
+  .week :global(.day.is-rest) {
+    border-style: dashed;
+    background: transparent;
+    box-shadow: none;
+  }
+  .week :global(.day-head) {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    background: #f1f5f9;
+    padding: 0.625rem 0.75rem;
+    border-bottom: 2px solid #e2e8f0;
+  }
+  :global(.dark) .week :global(.day-head) {
+    background: #1e293b;
+    border-bottom-color: #334155;
+  }
+  .week :global(.day.is-today .day-head) {
+    background: #e0f2fe;
+    border-bottom-color: #bae6fd;
+  }
+  :global(.dark) .week :global(.day.is-today .day-head) {
+    background: #082f49;
+    border-bottom-color: #0c4a6e;
+  }
+  .week :global(.day-name) {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+  .week :global(.day-name b) {
+    font-size: 1.25rem;
+    font-weight: 800;
+    line-height: 1;
+  }
+  .week :global(.day-name i) {
+    font-style: normal;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #64748b;
+  }
+  .week :global(.day-today) {
+    align-self: flex-start;
+    border-radius: 999px;
+    background: #0369a1;
+    padding: 0 0.5rem;
+    font-size: 0.625rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #fff;
+  }
+  .week :global(.day-meter) {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .week :global(.day-meter-bar) {
+    display: block;
+    height: 0.4375rem;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #cbd5e1;
+  }
+  :global(.dark) .week :global(.day-meter-bar) {
+    background: #475569;
+  }
+  .week :global(.day-meter-bar i) {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: #10b981;
+    transition: width 0.4s ease-out;
+  }
+  .week :global(.day-meter-text) {
+    font-size: 0.6875rem;
+    font-weight: 800;
+    color: #64748b;
+  }
+  .week :global(.rest) {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 1rem 0.75rem 0.5rem;
+    color: #94a3b8;
+  }
+  .week :global(.rest-text) {
+    font-size: 0.875rem;
+    font-weight: 800;
+  }
+  .week :global(.rest-add) {
+    border-radius: 999px;
+    border: 2px solid #cbd5e1;
+    background: transparent;
+    padding: 0.125rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 800;
+    color: #475569;
+    cursor: pointer;
+  }
+  :global(.dark) .week :global(.rest-add) {
+    border-color: #475569;
+    color: #cbd5e1;
+  }
+  .week :global(.rest-add:hover) {
+    border-color: #0369a1;
+    color: #0369a1;
+  }
+  .week :global(.blocks) {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0 0.625rem;
+    list-style: none;
+  }
+  .week :global(.block-rest) {
+    padding: 0.5rem 0.25rem;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    color: #94a3b8;
+  }
+  .week :global(.block) {
+    --uc: hsl(var(--uh, 210) 65% 42%);
+    --uc-soft: hsl(var(--uh, 210) 85% 94%);
+    display: flex;
+    gap: 0.5rem;
+    border-radius: 0.875rem;
+    border: 2px solid var(--uc);
+    background: var(--uc-soft);
+    padding: 0.5rem;
+  }
+  :global(.dark) .week :global(.block) {
+    --uc: hsl(var(--uh, 210) 70% 68%);
+    --uc-soft: hsl(var(--uh, 210) 40% 14%);
+  }
+  .week :global(.block.kind-review) {
+    --uc: #c2410c;
+    --uc-soft: #fff7ed;
+  }
+  :global(.dark) .week :global(.block.kind-review) {
+    --uc: #fdba74;
+    --uc-soft: #431407;
+  }
+  .week :global(.block.kind-practice) {
+    --uc: #6d28d9;
+    --uc-soft: #f5f3ff;
+  }
+  :global(.dark) .week :global(.block.kind-practice) {
+    --uc: #c4b5fd;
+    --uc-soft: #1e1b4b;
+  }
+  .week :global(.block.is-done) {
+    border-style: dashed;
+    opacity: 0.65;
+  }
+  .week :global(.block.is-done .block-title) {
+    text-decoration: line-through;
+  }
+  .week :global(.block-ic) {
+    display: flex;
+    height: 2rem;
+    width: 2rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.625rem;
+    background: var(--uc);
+    color: #fff;
+  }
+  :global(.dark) .week :global(.block-ic) {
+    color: #0f172a;
+  }
+  .week :global(.block-link) {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 0.125rem;
+    color: inherit;
+  }
+  .week :global(.block-kind) {
+    font-size: 0.625rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--uc);
+  }
+  .week :global(.block-title) {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 0.8125rem;
+    font-weight: 800;
+    line-height: 1.25;
+  }
+  .week :global(.block-foot) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.375rem;
+    margin-top: 0.25rem;
+  }
+  .week :global(.block-min) {
+    border-radius: 999px;
+    background: #fff;
+    border: 1.5px solid var(--uc);
+    padding: 0 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    color: var(--uc);
+  }
+  :global(.dark) .week :global(.block-min) {
+    background: #0f172a;
+  }
+  .week :global(.check) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-radius: 999px;
+    border: 2px solid var(--uc);
+    background: #fff;
+    padding: 0.0625rem 0.5rem 0.0625rem 0.3125rem;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    color: var(--uc);
+    cursor: pointer;
+  }
+  :global(.dark) .week :global(.check) {
+    background: #0f172a;
+  }
+  .week :global(.check svg) {
+    opacity: 0.35;
+  }
+  .week :global(.check[aria-pressed="true"]) {
+    background: var(--uc);
+    color: #fff;
+  }
+  :global(.dark) .week :global(.check[aria-pressed="true"]) {
+    color: #0f172a;
+  }
+  .week :global(.check[aria-pressed="true"] svg) {
+    opacity: 1;
+  }
+  .week :global(.check:focus-visible),
+  .week :global(.block-link:focus-visible) {
+    outline: 3px solid var(--uc);
+    outline-offset: 2px;
+  }
+
+  /* session */
+  .session-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .session-list :global(.si) {
+    --uc: hsl(var(--uh, 210) 65% 42%);
+    --uc-soft: hsl(var(--uh, 210) 85% 94%);
+  }
+  :global(.dark) .session-list :global(.si) {
+    --uc: hsl(var(--uh, 210) 70% 68%);
+    --uc-soft: hsl(var(--uh, 210) 40% 14%);
+  }
+  .session-list :global(.si-link) {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    border-radius: 1rem;
+    border: 2px solid #cbd5e1;
+    border-left: 6px solid var(--uc);
+    background: var(--uc-soft);
+    padding: 0.625rem 0.875rem;
+    color: inherit;
+    box-shadow: 0 3px 0 #cbd5e1;
+  }
+  :global(.dark) .session-list :global(.si-link) {
+    border-color: #334155;
+    border-left-color: var(--uc);
+    box-shadow: 0 3px 0 #334155;
+  }
+  .session-list :global(.si-link:hover) {
+    border-color: var(--uc);
+  }
+  .session-list :global(.si-n) {
+    display: flex;
+    height: 2rem;
+    width: 2rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background: var(--uc);
+    font-weight: 800;
+    color: #fff;
+  }
+  :global(.dark) .session-list :global(.si-n) {
+    color: #0f172a;
+  }
+  .session-list :global(.si-body) {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+  }
+  .session-list :global(.si-body b) {
+    font-size: 0.9375rem;
+    font-weight: 800;
+  }
+  .session-list :global(.si-body i) {
+    font-style: normal;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: capitalize;
+    color: #64748b;
+  }
+  .session-list :global(.si-min) {
+    border-radius: 999px;
+    background: #fff;
+    border: 1.5px solid var(--uc);
+    padding: 0 0.625rem;
+    font-size: 0.75rem;
+    font-weight: 800;
+    color: var(--uc);
+  }
+  :global(.dark) .session-list :global(.si-min) {
+    background: #0f172a;
+  }
+  .session-list :global(.empty-state) {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    border-radius: 1rem;
+    border: 2px dashed #cbd5e1;
+    padding: 1rem;
+    font-weight: 700;
+    color: #64748b;
+  }
+  .session-list :global(.sq) {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    border-radius: 1rem;
+    border: 2px solid #c4b5fd;
+    background: #f5f3ff;
+    padding: 0.75rem 0.875rem;
+  }
+  :global(.dark) .session-list :global(.sq) {
+    border-color: #4c1d95;
+    background: #1e1b4b;
+  }
+  .session-list :global(.sq-prompt) {
+    font-size: 0.9375rem;
+    font-weight: 800;
+  }
+  .session-list :global(.sq-choices) {
+    display: grid;
+    gap: 0.375rem;
+  }
+  .session-list :global(.sq-choice) {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    border-radius: 0.75rem;
+    border: 2px solid #c4b5fd;
+    background: #fff;
+    padding: 0.375rem 0.625rem;
+    text-align: left;
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: #0f172a;
+    cursor: pointer;
+  }
+  :global(.dark) .session-list :global(.sq-choice) {
+    border-color: #4c1d95;
+    background: #0f172a;
+    color: #f1f5f9;
+  }
+  .session-list :global(.sq-choice i) {
+    display: flex;
+    height: 1.5rem;
+    width: 1.5rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background: #ede9fe;
+    font-style: normal;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    color: #5b21b6;
+  }
+  .session-list :global(.sq-choice:disabled) {
+    cursor: default;
+  }
+  .session-list :global(.sq-choice.is-right) {
+    border-color: #059669;
+    background: #d1fae5;
+    color: #064e3b;
+  }
+  .session-list :global(.sq-choice.is-wrong) {
+    border-color: #dc2626;
+    background: #fee2e2;
+    color: #7f1d1d;
+  }
+  .session-list :global(.sq-after) {
+    font-size: 0.8125rem;
+    font-weight: 800;
+  }
+  .session-list :global(.sq-after a) {
+    color: #5b21b6;
+    text-decoration: underline;
+  }
+  :global(.dark) .session-list :global(.sq-after a) {
+    color: #c4b5fd;
+  }
+
+  /* skills */
+  .skills-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  .legend {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 800;
+    color: #64748b;
+  }
+  .legend i {
+    display: block;
+    height: 0.75rem;
+    width: 8rem;
+    border-radius: 999px;
+    border: 1.5px solid #cbd5e1;
+    background: linear-gradient(90deg, #fef3c7, #059669);
+  }
+  .gaps {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.375rem;
+  }
+  .gaps :global(.gaps-label) {
+    font-size: 0.6875rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #b45309;
+  }
+  .gaps :global(.gap-chip) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 999px;
+    border: 2px solid #fcd34d;
+    background: #fffbeb;
+    padding: 0.125rem 0.625rem;
+    font-size: 0.8125rem;
+    font-weight: 800;
+    text-transform: capitalize;
+    color: #92400e;
+    cursor: pointer;
+  }
+  .gaps :global(.gap-chip b) {
+    border-radius: 999px;
+    background: #fde68a;
+    padding: 0 0.375rem;
+    font-size: 0.6875rem;
+  }
+  :global(.dark) .gaps :global(.gap-chip) {
+    border-color: #92400e;
+    background: #451a03;
+    color: #fcd34d;
+  }
+  :global(.dark) .gaps :global(.gap-chip b) {
+    background: #78350f;
+  }
+  .matrix-wrap {
+    max-height: 34rem;
+    overflow: auto;
+    border-radius: 1rem;
+    border: 2px solid #cbd5e1;
+    background: #fff;
+  }
+  :global(.dark) .matrix-wrap {
+    border-color: #334155;
+    background: #0f172a;
+  }
+  .matrix {
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.8125rem;
+  }
+  .matrix thead th {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: inherit;
+    padding: 0.5rem 0.125rem 0.375rem;
+    text-align: center;
+    font-weight: 800;
+    color: #475569;
+    background-color: #fff;
+  }
+  :global(.dark) .matrix thead th {
+    background-color: #0f172a;
+    color: #cbd5e1;
+  }
+  .matrix .corner {
+    left: 0;
+    z-index: 4;
+    min-width: 9.5rem;
+    text-align: left;
+    padding-left: 0.75rem;
+  }
+  .col-ic {
+    display: flex;
+    justify-content: center;
+  }
+  .col-name {
+    display: block;
+    max-height: 5.5rem;
+    overflow: hidden;
+    margin-top: 0.25rem;
+    font-size: 0.6875rem;
+    text-transform: capitalize;
+    writing-mode: vertical-rl;
+    white-space: nowrap;
+    margin-inline: auto;
+  }
+  .matrix tbody th {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background-color: #fff;
+    padding: 0.125rem 0.5rem 0.125rem 0.5rem;
+    text-align: left;
+  }
+  :global(.dark) .matrix tbody th {
+    background-color: #0f172a;
+  }
+  .matrix td {
+    padding: 0.125rem;
+    text-align: center;
+  }
+  .row-btn {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 0.5rem;
+    border: 2px solid transparent;
+    background: transparent;
+    padding: 0.125rem 0.375rem;
+    text-align: left;
+    font-weight: 700;
+    text-transform: capitalize;
+    color: #334155;
+    cursor: pointer;
+  }
+  :global(.dark) .row-btn {
+    color: #cbd5e1;
+  }
+  .row-btn:hover,
+  .row-btn[aria-pressed="true"] {
+    border-color: #0369a1;
+    background: #e0f2fe;
+    color: #0c4a6e;
+  }
+  :global(.dark) .row-btn:hover,
+  :global(.dark) .row-btn[aria-pressed="true"] {
+    border-color: #38bdf8;
+    background: #082f49;
+    color: #e0f2fe;
+  }
+  .row-btn:focus-visible {
+    outline: 3px solid var(--accent-text);
+    outline-offset: 1px;
+  }
+  .gap-flag {
+    margin-left: auto;
+    border-radius: 999px;
+    background: #fde68a;
+    padding: 0 0.375rem;
+    font-style: normal;
+    font-size: 0.625rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #92400e;
+  }
+  .gap-flag[hidden] {
+    display: none;
+  }
+  .cell {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    height: 1.75rem;
+    width: 1.75rem;
+    border-radius: 0.5rem;
+    border: 2px solid #fcd34d;
+    background: color-mix(in srgb, #059669 calc(var(--f) * 100%), #fef3c7);
+    font-size: 0.6875rem;
+    font-weight: 800;
+    color: #78350f;
+    cursor: pointer;
+  }
+  .cell.is-full {
+    border-color: #047857;
+    color: #fff;
+  }
+  :global(.dark) .cell {
+    border-color: #92400e;
+    background: color-mix(in srgb, #10b981 calc(var(--f) * 100%), #3b1d06);
+    color: #fde68a;
+  }
+  :global(.dark) .cell.is-full {
+    border-color: #34d399;
+    color: #052e16;
+  }
+  .cell:hover {
+    transform: scale(1.12);
+  }
+  .cell:focus-visible {
+    outline: 3px solid var(--accent-text);
+    outline-offset: 1px;
+  }
+  .tag-units {
+    border-radius: 1rem;
+    border: 2px solid #0369a1;
+    background: #f0f9ff;
+    padding: 0.875rem 1rem;
+    box-shadow: 0 4px 0 #0369a1;
+  }
+  .tag-units[hidden] {
+    display: none;
+  }
+  :global(.dark) .tag-units {
+    border-color: #38bdf8;
+    background: #082f49;
+    box-shadow: 0 4px 0 #38bdf8;
+  }
+  .tag-units h3 {
+    margin-bottom: 0.625rem;
+    font-size: 1rem;
+    font-weight: 800;
+    text-transform: capitalize;
+  }
+  .tag-units ul {
+    display: grid;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+  }
+  .tag-units :global(.tu) {
+    --uc: hsl(var(--uh, 210) 65% 42%);
+  }
+  :global(.dark) .tag-units :global(.tu) {
+    --uc: hsl(var(--uh, 210) 70% 68%);
+  }
+  .tag-units :global(.tu-link) {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    height: 100%;
+    border-radius: 0.75rem;
+    border: 2px solid #e2e8f0;
+    border-left: 5px solid var(--uc);
+    background: #fff;
+    padding: 0.375rem 0.625rem;
+    color: #0f172a;
+  }
+  :global(.dark) .tag-units :global(.tu-link) {
+    border-color: #1e293b;
+    border-left-color: var(--uc);
+    background: #0f172a;
+    color: #f1f5f9;
+  }
+  .tag-units :global(.tu-link b) {
+    font-size: 0.8125rem;
+    font-weight: 800;
+    line-height: 1.25;
+  }
+  .tag-units :global(.tu-link i) {
+    font-style: normal;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: capitalize;
+    color: #64748b;
+  }
+  .tag-units :global(.tu-state) {
+    align-self: flex-start;
+    border-radius: 999px;
+    background: #fef3c7;
+    padding: 0 0.5rem;
+    font-size: 0.625rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #92400e;
+  }
+  .tag-units :global(.tu.is-done .tu-state) {
+    background: #d1fae5;
+    color: #047857;
+  }
+
+  /* demos */
+  .demo-grid {
+    display: grid;
+    gap: 1rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+  }
+  .demo-grid li[hidden] {
+    display: none;
+  }
+  .demo {
+    --wc: hsl(var(--world-h) 72% 38%);
+    --wc-soft: hsl(var(--world-h) 80% 95%);
+    display: flex;
+    height: 100%;
+    flex-direction: column;
+    gap: 0.375rem;
+    overflow: hidden;
+    border-radius: 1.125rem;
+    border: 2px solid #cbd5e1;
+    background: #fff;
+    padding: 0 0 0.75rem;
+    color: #0f172a;
+    box-shadow: 0 4px 0 #cbd5e1;
+    transition:
+      transform 0.1s,
+      border-color 0.1s,
+      box-shadow 0.1s;
+  }
+  :global(.dark) .demo {
+    --wc: hsl(var(--world-h) 80% 62%);
+    --wc-soft: hsl(var(--world-h) 45% 14%);
+    border-color: #334155;
+    background: #0f172a;
+    color: #f1f5f9;
+    box-shadow: 0 4px 0 #334155;
+  }
+  .demo:hover {
+    transform: translateY(-3px);
+    border-color: var(--wc);
+    box-shadow: 0 7px 0 var(--wc);
+  }
+  .demo:focus-visible {
+    outline: 3px solid var(--wc);
+    outline-offset: 3px;
+  }
+  .spark {
+    display: block;
+    width: 100%;
+    height: 5.5rem;
+    background:
+      linear-gradient(#cbd5e155 1px, transparent 1px) 0 0 / 100% 25%,
+      var(--wc-soft);
+  }
+  .demo-title {
+    padding: 0.25rem 0.875rem 0;
+    font-size: 1rem;
+    font-weight: 800;
+    line-height: 1.25;
+  }
+  .demo-desc {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    padding: 0 0.875rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #64748b;
+  }
+  .demo-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: auto;
+    padding: 0.25rem 0.875rem 0;
+  }
+  .dm {
+    border-radius: 999px;
+    background: #e2e8f0;
+    padding: 0 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    text-transform: capitalize;
+    color: #334155;
+  }
+  :global(.dark) .dm {
+    background: #334155;
+    color: #e2e8f0;
+  }
+  .dm.world {
+    background: var(--wc-soft);
+    color: var(--wc);
+  }
+  .demo-go {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.125rem 0.875rem 0;
+    font-size: 0.8125rem;
+    font-weight: 800;
+    color: var(--wc);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tab,
+    .demo,
+    .cell,
+    .bar i {
+      transition: none;
+    }
+    .demo:hover,
+    .cell:hover {
+      transform: none;
+    }
+  }
+
+  .session-sum .reward {
+    border-radius: 999px;
+    border: 2px solid #fcd34d;
+    background: #fffbeb;
+    padding: 0.125rem 0.75rem;
+    font-size: 0.8125rem;
+    font-weight: 800;
+    color: #92400e;
+  }
+  .session-sum .reward[hidden] {
+    display: none;
+  }
+  :global(.dark) .session-sum .reward {
+    border-color: #92400e;
+    background: #451a03;
+    color: #fcd34d;
+  }
+  .session-list :global(.sq-head) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .session-list :global(.sq-world) {
+    font-size: 0.6875rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #6d28d9;
+  }
+  :global(.dark) .session-list :global(.sq-world) {
+    color: #c4b5fd;
+  }
+  .session-list :global(.sq-done) {
+    border-radius: 999px;
+    background: #d1fae5;
+    padding: 0 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    color: #047857;
+  }
+  .session-list :global(.sq.is-new-done) {
+    border-color: #059669;
+  }
+  .session-list :global(.sq-after) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.25rem;
+    line-height: 1.4;
+  }
+  .session-list :global(.sq-after b.ok) {
+    color: #047857;
+  }
+  .session-list :global(.sq-after b.no) {
+    color: #b91c1c;
+  }
+  .session-list :global(.sq-reward) {
+    border-radius: 999px;
+    background: #fef3c7;
+    padding: 0 0.5rem;
+    color: #92400e;
+  }
+
+  /* practice arena */
+  .session-list :global(.arena-li) {
+    list-style: none;
+  }
+  .session-list :global(.arena) {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+    overflow: hidden;
+    border-radius: 1.5rem;
+    border: 2px solid #6d28d9;
+    background:
+      radial-gradient(circle, rgb(124 58 237 / 0.14) 1px, transparent 1.6px) 0
+        0 / 14px 14px,
+      linear-gradient(160deg, #f5f3ff, #ede9fe 55%, #e0f2fe);
+    padding: 1rem;
+    box-shadow: 0 5px 0 #6d28d9;
+  }
+  :global(.dark) .session-list :global(.arena) {
+    border-color: #a78bfa;
+    background:
+      radial-gradient(circle, rgb(167 139 250 / 0.16) 1px, transparent 1.6px) 0
+        0 / 14px 14px,
+      linear-gradient(160deg, #1e1b4b, #17143a 60%, #082f49);
+    box-shadow: 0 5px 0 #a78bfa;
+  }
+  .session-list :global(.arena-top) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+  }
+  .session-list :global(.coin-meter) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 999px;
+    border: 2px solid #fcd34d;
+    background: #fffbeb;
+    padding: 0.125rem 0.625rem 0.125rem 0.75rem;
+  }
+  :global(.dark) .session-list :global(.coin-meter) {
+    border-color: #92400e;
+    background: #451a03;
+  }
+  .session-list :global(.coin-label) {
+    margin-right: 0.125rem;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #92400e;
+  }
+  :global(.dark) .session-list :global(.coin-label) {
+    color: #fcd34d;
+  }
+  .session-list :global(.coin) {
+    display: flex;
+    height: 1.625rem;
+    width: 1.625rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    border: 2px dashed #fcd34d;
+    color: #fcd34d;
+    transition:
+      background 0.25s,
+      color 0.25s,
+      transform 0.25s;
+  }
+  .session-list :global(.coin.on) {
+    border-style: solid;
+    border-color: #d97706;
+    background: #fbbf24;
+    color: #78350f;
+    transform: scale(1.08);
+  }
+  .session-list :global(.coin.flash) {
+    animation: coin-flip 0.7s ease-in-out 2;
+  }
+  .session-list :global(.combo) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.875rem;
+    font-weight: 800;
+    color: #c2410c;
+  }
+  .session-list :global(.combo.hot svg) {
+    animation: flicker 0.9s ease-in-out infinite;
+    transform-origin: 50% 90%;
+  }
+  .session-list :global(.combo b) {
+    font-size: 1.25rem;
+  }
+  .session-list :global(.arena-count) {
+    margin-left: auto;
+    border-radius: 999px;
+    background: #6d28d9;
+    padding: 0.0625rem 0.75rem;
+    font-size: 0.8125rem;
+    font-weight: 800;
+    color: #fff;
+  }
+  :global(.dark) .session-list :global(.arena-count) {
+    background: #a78bfa;
+    color: #1e1b4b;
+  }
+  .session-list :global(.steps) {
+    display: flex;
+    gap: 0.375rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .session-list :global(.step) {
+    height: 0.5rem;
+    flex: 1;
+    border-radius: 999px;
+    background: rgb(100 116 139 / 0.3);
+    transition:
+      background 0.3s,
+      transform 0.3s;
+  }
+  .session-list :global(.step.current) {
+    background: #6d28d9;
+    transform: scaleY(1.5);
+  }
+  .session-list :global(.step.right) {
+    background: #10b981;
+  }
+  .session-list :global(.step.wrong) {
+    background: #ef4444;
+  }
+  .session-list :global(.arena-stage) {
+    position: relative;
+  }
+  .session-list :global(.qcard),
+  .session-list :global(.qresults) {
+    --wc: hsl(var(--world-h, 260) 72% 38%);
+    --wc-deep: hsl(var(--world-h, 260) 72% 18%);
+    --wc-soft: hsl(var(--world-h, 260) 80% 95%);
+    --wc-text: hsl(var(--world-h, 260) 70% 22%);
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    overflow: hidden;
+    border-radius: 1.25rem;
+    border: 2px solid var(--wc);
+    background: #fff;
+    padding: 0 0 1rem;
+    box-shadow: 0 5px 0 var(--wc);
+  }
+  :global(.dark) .session-list :global(.qcard),
+  :global(.dark) .session-list :global(.qresults) {
+    --wc: hsl(var(--world-h, 260) 80% 62%);
+    --wc-deep: hsl(var(--world-h, 260) 68% 16%);
+    --wc-soft: hsl(var(--world-h, 260) 45% 14%);
+    --wc-text: hsl(var(--world-h, 260) 85% 74%);
+    background: #0f172a;
+  }
+  .session-list :global(.card-in) {
+    animation: card-in 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  }
+  .session-list :global(.qcard.shake) {
+    animation: shake 0.4s ease-out;
+  }
+  .session-list :global(.qart) {
+    position: relative;
+    display: flex;
+    min-height: 6.5rem;
+    align-items: center;
+    overflow: hidden;
+    background:
+      radial-gradient(
+          circle,
+          hsl(var(--world-h, 260) 60% 55% / 0.22) 1px,
+          transparent 1.6px
+        )
+        0 0 / 12px 12px,
+      var(--wc-soft);
+    padding: 0.5rem 1rem;
+  }
+  .session-list :global(.qart .qart-illus) {
+    --accent: var(--wc);
+    --accent-text: var(--wc-text);
+    width: min(14rem, 55%);
+    border: 0;
+    background: transparent;
+    padding: 0;
+    margin-left: auto;
+    animation: float-y 5s ease-in-out infinite;
+  }
+  .session-list :global(.qart .qart-illus svg) {
+    color: var(--wc-text);
+  }
+  .session-list :global(.qmark) {
+    position: absolute;
+    left: -1rem;
+    bottom: -1.5rem;
+    height: 7rem;
+    width: 7rem;
+    color: var(--wc);
+    opacity: 0.14;
+    transform: rotate(-12deg);
+  }
+  .session-list :global(.qmark svg) {
+    height: 100%;
+    width: 100%;
+  }
+  .session-list :global(.qchip) {
+    position: absolute;
+    top: 0.625rem;
+    left: 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 999px;
+    background: var(--wc);
+    padding: 0.125rem 0.625rem 0.125rem 0.375rem;
+    font-size: 0.75rem;
+    font-weight: 800;
+    text-transform: capitalize;
+    color: #fff;
+  }
+  :global(.dark) .session-list :global(.qchip) {
+    color: #0f172a;
+  }
+  .session-list :global(.qchip svg) {
+    height: 1rem;
+    width: 1rem;
+  }
+  .session-list :global(.qdone) {
+    position: absolute;
+    bottom: 0.5rem;
+    left: 0.75rem;
+    border-radius: 999px;
+    background: #d1fae5;
+    padding: 0 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    color: #047857;
+  }
+  .session-list :global(.qprompt) {
+    padding: 0 1rem;
+    font-size: clamp(1.0625rem, 2.2vw, 1.3125rem);
+    font-weight: 800;
+    line-height: 1.3;
+  }
+  .session-list :global(.qchoices) {
+    display: grid;
+    gap: 0.5rem;
+    padding: 0 1rem;
+  }
+  .session-list :global(.qchoice) {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    border-radius: 0.875rem;
+    border: 2px solid hsl(var(--world-h, 260) 40% 80%);
+    background: #fff;
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    font-size: 0.9375rem;
+    font-weight: 700;
+    color: #0f172a;
+    cursor: pointer;
+    animation: choice-in 0.35s ease-out backwards;
+    animation-delay: var(--d, 0ms);
+    transition:
+      transform 0.1s,
+      border-color 0.1s,
+      background 0.1s;
+  }
+  :global(.dark) .session-list :global(.qchoice) {
+    border-color: hsl(var(--world-h, 260) 30% 30%);
+    background: #0f172a;
+    color: #f1f5f9;
+  }
+  .session-list :global(.qchoice:hover:not(:disabled)) {
+    border-color: var(--wc);
+    background: var(--wc-soft);
+    transform: translateX(6px);
+  }
+  .session-list :global(.qchoice:focus-visible) {
+    outline: 3px solid var(--wc);
+    outline-offset: 2px;
+  }
+  .session-list :global(.qchoice i) {
+    display: flex;
+    height: 1.75rem;
+    width: 1.75rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background: var(--wc-soft);
+    font-style: normal;
+    font-size: 0.8125rem;
+    font-weight: 800;
+    color: var(--wc);
+  }
+  .session-list :global(.qchoice:disabled) {
+    cursor: default;
+  }
+  .session-list :global(.qchoice.is-right) {
+    border-color: #059669;
+    background: #d1fae5;
+    color: #064e3b;
+    animation: pop 0.35s ease-out;
+  }
+  .session-list :global(.qchoice.is-right i) {
+    background: #059669;
+    color: #fff;
+  }
+  .session-list :global(.qchoice.is-wrong) {
+    border-color: #dc2626;
+    background: #fee2e2;
+    color: #7f1d1d;
+  }
+  .session-list :global(.qchoice.is-wrong i) {
+    background: #dc2626;
+    color: #fff;
+  }
+  .session-list :global(.qafter) {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin: 0 1rem;
+    border-radius: 0.875rem;
+    border: 2px solid var(--wc);
+    background: var(--wc-soft);
+    padding: 0.75rem 0.875rem;
+    animation: card-in 0.3s ease-out;
+  }
+  .session-list :global(.qafter[hidden]) {
+    display: none;
+  }
+  .session-list :global(.qverdict) {
+    font-size: 1.125rem;
+    font-weight: 800;
+  }
+  .session-list :global(.qverdict.ok) {
+    color: #047857;
+  }
+  .session-list :global(.qverdict.no) {
+    color: #b91c1c;
+  }
+  .session-list :global(.qexplain) {
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.45;
+  }
+  .session-list :global(.qfoot) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+  }
+  .session-list :global(.qreward) {
+    border-radius: 999px;
+    background: #fef3c7;
+    padding: 0.0625rem 0.625rem;
+    font-size: 0.75rem;
+    font-weight: 800;
+    color: #92400e;
+    animation: pop 0.4s ease-out;
+  }
+  .session-list :global(.qlearn) {
+    font-size: 0.8125rem;
+    font-weight: 800;
+    text-decoration: underline;
+    color: var(--wc-text);
+  }
+  .session-list :global(.qnext) {
+    margin-left: auto;
+    border-radius: 0.75rem;
+    border: 2px solid var(--wc-deep);
+    background: var(--wc);
+    padding: 0.375rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 800;
+    color: #fff;
+    box-shadow: 0 3px 0 var(--wc-deep);
+    cursor: pointer;
+  }
+  :global(.dark) .session-list :global(.qnext) {
+    color: #0f172a;
+  }
+  .session-list :global(.qnext:active) {
+    transform: translateY(3px);
+    box-shadow: none;
+  }
+  .session-list :global(.qnext:focus-visible) {
+    outline: 3px solid var(--wc);
+    outline-offset: 3px;
+  }
+  .session-list :global(.qresults) {
+    align-items: center;
+    gap: 0.625rem;
+    padding: 1.25rem 1rem;
+    text-align: center;
+  }
+  .session-list :global(.qresults h3) {
+    font-size: 1.25rem;
+    font-weight: 800;
+  }
+  .session-list :global(.qring) {
+    position: relative;
+    height: 7rem;
+    width: 7rem;
+  }
+  .session-list :global(.qring svg) {
+    height: 100%;
+    width: 100%;
+  }
+  .session-list :global(.qring .ring-bg),
+  .session-list :global(.qring .ring-fg) {
+    fill: none;
+    stroke-width: 3.4;
+  }
+  .session-list :global(.qring .ring-bg) {
+    stroke: #e2e8f0;
+  }
+  :global(.dark) .session-list :global(.qring .ring-bg) {
+    stroke: #334155;
+  }
+  .session-list :global(.qring .ring-fg) {
+    stroke: var(--wc);
+    stroke-linecap: round;
+    transform: rotate(-90deg);
+    transform-origin: 50% 50%;
+    animation: ringfill 0.9s ease-out backwards;
+  }
+  .session-list :global(.qring b) {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    font-weight: 800;
+  }
+  .session-list :global(.qstats) {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .session-list :global(.qstats li) {
+    display: flex;
+    min-width: 6rem;
+    flex-direction: column;
+    border-radius: 0.875rem;
+    background: var(--wc-soft);
+    padding: 0.375rem 0.75rem;
+  }
+  .session-list :global(.qstats b) {
+    font-size: 1.5rem;
+    font-weight: 800;
+    line-height: 1.1;
+    color: var(--wc);
+  }
+  .session-list :global(.qstats span) {
+    font-size: 0.6875rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;
+  }
+  .session-list :global(.qnote) {
+    font-size: 0.8125rem;
+    font-weight: 700;
+    color: #92400e;
+  }
+  :global(.dark) .session-list :global(.qnote) {
+    color: #fcd34d;
+  }
+  .session-list :global(.confetti) {
+    position: absolute;
+    z-index: 5;
+    height: 0.5rem;
+    width: 0.3125rem;
+    border-radius: 0.125rem;
+    pointer-events: none;
+    animation: confetti 0.85s ease-out forwards;
+  }
+  .session-list :global(.arena.earned) {
+    animation: earned-glow 1.4s ease-out;
+  }
+  @keyframes card-in {
+    from {
+      opacity: 0;
+      transform: translateX(24px) scale(0.98);
+    }
+  }
+  @keyframes choice-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+  @keyframes float-y {
+    50% {
+      transform: translateY(-5px);
+    }
+  }
+  @keyframes confetti {
+    to {
+      opacity: 0;
+      transform: translate(var(--dx), var(--dy)) rotate(var(--rot));
+    }
+  }
+  @keyframes coin-flip {
+    50% {
+      transform: scale(1.3) rotateY(180deg);
+    }
+  }
+  @keyframes earned-glow {
+    30% {
+      box-shadow:
+        0 5px 0 #6d28d9,
+        0 0 0 6px rgb(251 191 36 / 0.6);
+    }
+  }
+  @keyframes shake {
+    25% {
+      transform: translateX(-6px);
+    }
+    75% {
+      transform: translateX(6px);
+    }
+  }
+  @keyframes pop {
+    50% {
+      transform: scale(1.04);
+    }
+  }
+  @keyframes flicker {
+    0%,
+    100% {
+      transform: scale(1) rotate(0);
+    }
+    40% {
+      transform: scale(1.15) rotate(-5deg);
+    }
+    70% {
+      transform: scale(0.95) rotate(4deg);
+    }
+  }
+  @keyframes ringfill {
+    from {
+      stroke-dasharray: 0 100;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .session-list :global(.card-in),
+    .session-list :global(.qcard.shake),
+    .session-list :global(.qart .qart-illus),
+    .session-list :global(.qchoice),
+    .session-list :global(.qafter),
+    .session-list :global(.qreward),
+    .session-list :global(.combo.hot svg),
+    .session-list :global(.coin.flash),
+    .session-list :global(.arena.earned),
+    .session-list :global(.qring .ring-fg) {
+      animation: none;
+    }
+  }
+</style>

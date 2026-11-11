@@ -2,6 +2,12 @@
 import Layout from "../layouts/Layout.astro";
 import TrackIcon from "../components/TrackIcon.astro";
 import TopicMythModal from "../components/TopicMythModal.astro";
+import TagIcon from "../components/TagIcon.astro";
+import UnitEmblem from "../components/UnitEmblem.astro";
+import { REGIONS } from "../data/regions";
+import { makeUnitHue, unitPattern } from "../lib/unit-theme";
+import TrackIllustration from "../components/TrackIllustration.astro";
+import { TRACK_TEASERS } from "../data/track-teasers";
 import {
   Search,
   HelpCircle,
@@ -11,6 +17,16 @@ import {
   Play,
   Lock,
   Flag,
+  Route,
+  List,
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
+  X,
+  Clock,
+  Target,
+  Sparkles,
+  Layers,
 } from "lucide-astro";
 import { roadmap } from "../data/roadmap";
 import { loadHomeData } from "../lib/home-data";
@@ -20,12 +36,34 @@ const writtenKeys = new Set(
   writtenUnits.map((u) => `${u.track}/${u.unitSlug}`),
 );
 
+// Reading time and exercise-topic count per written unit, from the real
+// content (about 200 words a minute), so the chips never invent numbers.
+const unitMeta = new Map<
+  string,
+  { minutes: number; topics: number; names: string[]; demo: boolean }
+>();
+for (const u of writtenUnits) {
+  const words = [u.l1, u.l2, u.l3, ...u.l3Parts].reduce(
+    (n, e) => n + (e?.body ? e.body.split(/\s+/).filter(Boolean).length : 0),
+    0,
+  );
+  const topics = new Set(u.exercises.map((e) => e.topicId ?? e.poolId ?? e.id));
+  unitMeta.set(`${u.track}/${u.unitSlug}`, {
+    minutes: Math.max(1, Math.round(words / 200)),
+    topics: topics.size,
+    names: [...topics].map((t) => String(t)),
+    demo: u.interactives.length > 0,
+  });
+}
+
 const PER_ROW = 5;
 const CHECKPOINT_EVERY = 5;
 
 const ALL_TAGS = Array.from(
   new Set(roadmap.tracks.flatMap((t) => t.units.flatMap((u) => u.tags))),
 ).sort();
+
+const unitHue = makeUnitHue(ALL_TAGS);
 
 const STATUS_FILTERS = [
   { key: "done", label: "Done" },
@@ -48,10 +86,16 @@ const worlds = roadmap.tracks.map((track) => {
         short: string;
         tags: string[];
         written: boolean;
+        minutes: number;
+        topics: number;
+        names: string[];
+        demo: boolean;
+        len: number;
       }
-    | { kind: "check"; label: string; group: string[] }
+    | { kind: "check"; label: string; group: string[]; members: string[] }
   > = [];
   let group: string[] = [];
+  let members: string[] = [];
   track.units.forEach((u, i) => {
     const written = writtenKeys.has(`${track.name}/${u.slug}`);
     nodes.push({
@@ -62,8 +106,14 @@ const worlds = roadmap.tracks.map((track) => {
       short: u.problem.replace(/\s*\(.*$/, "").trim(),
       tags: u.tags,
       written,
+      minutes: unitMeta.get(`${track.name}/${u.slug}`)?.minutes ?? 0,
+      topics: unitMeta.get(`${track.name}/${u.slug}`)?.topics ?? 0,
+      names: unitMeta.get(`${track.name}/${u.slug}`)?.names ?? [],
+      demo: unitMeta.get(`${track.name}/${u.slug}`)?.demo ?? false,
+      len: 0,
     });
     if (written) group.push(u.slug);
+    members.push(u.slug);
     const isLast = i === track.units.length - 1;
     if ((i + 1) % CHECKPOINT_EVERY === 0 || isLast) {
       nodes.push({
@@ -72,17 +122,90 @@ const worlds = roadmap.tracks.map((track) => {
           ? "Final checkpoint"
           : `Checkpoint ${(i + 1) / CHECKPOINT_EVERY}`,
         group: [...group],
+        members: [...members],
       });
       group = [];
+      members = [];
     }
   });
   const rows: (typeof nodes)[] = [];
   for (let i = 0; i < nodes.length; i += PER_ROW) {
     rows.push(nodes.slice(i, i + PER_ROW));
   }
-  return { name: track.name, total: track.units.length, rows };
+  const unitNodes = nodes.filter((n) => n.kind === "unit");
+  // Each unit's reading time as a share of the world's longest unit, so a
+  // bar can show "short or long" without anyone reading the minutes.
+  const maxMinutes = Math.max(0, ...unitNodes.map((u) => u.minutes));
+  for (const u of unitNodes)
+    u.len = maxMinutes ? Math.round((u.minutes / maxMinutes) * 100) : 0;
+  const tagCount = new Map<string, number>();
+  for (const u of track.units)
+    for (const t of u.tags) tagCount.set(t, (tagCount.get(t) ?? 0) + 1);
+  const topTags = [...tagCount]
+    .sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]))
+    .slice(0, 4)
+    .map(([t]) => t);
+  return {
+    name: track.name,
+    topTags,
+    total: track.units.length,
+    rows,
+    units: unitNodes,
+    writtenCount: unitNodes.filter((n) => n.written).length,
+    minutes: unitNodes.reduce((n, u) => n + u.minutes, 0),
+    topics: unitNodes.reduce((n, u) => n + u.topics, 0),
+    demos: unitNodes.filter((u) => u.demo).length,
+  };
 });
+
+// Faint scenery behind each world's trail: its own icon and the icons of its
+// most common tags, scattered down the margins. A number picks that rank in
+// the world's top tags; "track" is the world's own icon.
+const SCENE_SLOTS = [
+  { x: "2%", y: "3%", s: "7rem", r: "-12deg" },
+  { x: "85%", y: "8%", s: "5rem", r: "14deg" },
+  { x: "90%", y: "30%", s: "6.5rem", r: "-8deg" },
+  { x: "1%", y: "42%", s: "5.5rem", r: "10deg" },
+  { x: "87%", y: "58%", s: "5rem", r: "-16deg" },
+  { x: "3%", y: "74%", s: "6.5rem", r: "8deg" },
+  { x: "82%", y: "88%", s: "7rem", r: "-10deg" },
+];
+const SCENE_PLAN: Array<"track" | number> = [
+  "track",
+  0,
+  "track",
+  1,
+  2,
+  "track",
+  3,
+];
+
+const fmtDuration = (min: number) =>
+  min >= 90 ? `${Math.round(min / 60)} h` : `${min} min`;
+
+// One hue per world, spread by the golden angle so neighbours in the rail
+// never land on similar colours. The CSS turns it into light/dark tokens.
+const worldHue = (i: number) => Math.round((i * 137.508 + 205) % 360);
 const totalWritten = writtenUnits.length;
+const totalUnits = worlds.reduce((n, w) => n + w.total, 0);
+
+const regions = REGIONS.map((r) => ({
+  ...r,
+  worlds: worlds.filter((w) => r.tracks.includes(w.name)),
+}));
+const unplaced = worlds.filter(
+  (w) => !REGIONS.some((r) => r.tracks.includes(w.name)),
+);
+if (unplaced.length > 0)
+  regions.push({
+    id: "frontier",
+    title: "The Frontier",
+    tagline: "Newer worlds, still being charted.",
+    tracks: [],
+    worlds: unplaced,
+  });
+const regionOf = (name: string) =>
+  regions.find((r) => r.worlds.some((w) => w.name === name))?.id ?? "frontier";
 ---
 
 <Layout title="Roadmap" wide>
@@ -211,68 +334,648 @@ const totalWritten = writtenUnits.length;
       Reset
     </button>
   </div>
+  <div
+    data-active-chips
+    class="mt-3 hidden flex-wrap items-center gap-2"
+    aria-label="Active filters"
+  >
+  </div>
   <p
     data-match-summary
     class="mt-3 hidden text-sm font-medium text-slate-500 dark:text-slate-400"
   >
   </p>
 
-  <div class="mt-8 flex flex-col gap-8 lg:flex-row lg:items-start">
-    <!-- World rail: one button per track. Doubles as the track filter. -->
-    <nav aria-label="Worlds" class="lg:w-60 lg:shrink-0">
-      <p
-        class="mb-3 text-xs font-extrabold tracking-wider text-slate-500 uppercase dark:text-slate-400"
-      >
-        Worlds
-      </p>
-      <div
-        data-rail
-        class="no-scrollbar flex gap-4 overflow-x-auto pb-3 lg:grid lg:grid-cols-3 lg:gap-x-2 lg:gap-y-5 lg:overflow-visible lg:pb-0"
-      >
-        {
-          worlds.map((w) => (
-            <button
-              type="button"
-              data-world={w.name}
-              aria-pressed="false"
-              title={`${w.name}/`}
-              aria-label={`${w.name}, ${w.total} units`}
-              class="world-btn group flex shrink-0 flex-col items-center gap-1.5 lg:shrink"
-            >
-              <span class="world-ring" data-ring style="--p: 0">
-                <span class="world-core">
-                  <TrackIcon track={w.name} class="h-6 w-6" />
-                </span>
-                <span
-                  data-world-badge
-                  class="absolute -top-1 -right-1 hidden h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-extrabold text-white ring-2 ring-white dark:ring-slate-950"
-                  style="background: var(--gauge-warn)"
-                />
-              </span>
-              <span class="w-16 truncate text-center text-[11px] font-bold text-slate-600 dark:text-slate-400">
-                {w.name}
-              </span>
-            </button>
-          ))
-        }
-      </div>
-    </nav>
+  <p
+    data-empty-state
+    class="mt-6 hidden text-center text-sm text-slate-500 dark:text-slate-400"
+  >
+    No units match these filters.
+  </p>
 
-    <div class="min-w-0 flex-1">
+  <!-- Arrowhead markers for the world illustrations. Each TrackIllustration
+       defines its own, but those sit inside hidden world panels, where some
+       browsers won't resolve url(#id); this copy is always rendered. -->
+  <svg width="0" height="0" class="absolute" aria-hidden="true">
+    <defs>
+      <marker
+        id="arrow-accent"
+        markerWidth="8"
+        markerHeight="8"
+        refX="6"
+        refY="4"
+        orient="auto"
+      >
+        <path d="M0 0l6 4-6 4" stroke="context-stroke" fill="none"></path>
+      </marker>
+      <marker
+        id="arrow-dim"
+        markerWidth="8"
+        markerHeight="8"
+        refX="6"
+        refY="4"
+        orient="auto"
+      >
+        <path
+          d="M0 0l6 4-6 4"
+          stroke="context-stroke"
+          stroke-opacity="0.5"
+          fill="none"></path>
+      </marker>
+    </defs>
+  </svg>
+
+  <!-- Overview: global progress, a stacked bar of every unit by state, and one
+       "island" per world with a dot per unit. Filled in by the client script. -->
+  <!-- Step 1: the map. A sea with clouds and waves, three regions of
+       illustrated islands, and the global progress on top. Choosing an island
+       opens that world's trail in the modal below. -->
+  <section class="stage mt-6" aria-label="World map">
+    <div class="sea-deco" aria-hidden="true">
+      <svg class="cloud cloud-1" viewBox="0 0 80 32" fill="currentColor">
+        <circle cx="24" cy="20" r="10"></circle><circle cx="38" cy="14" r="13"
+        ></circle><circle cx="54" cy="19" r="11"></circle><rect
+          x="14"
+          y="20"
+          width="50"
+          height="10"
+          rx="5"></rect>
+      </svg>
+      <svg class="cloud cloud-2" viewBox="0 0 80 32" fill="currentColor">
+        <circle cx="24" cy="20" r="10"></circle><circle cx="38" cy="14" r="13"
+        ></circle><circle cx="54" cy="19" r="11"></circle><rect
+          x="14"
+          y="20"
+          width="50"
+          height="10"
+          rx="5"></rect>
+      </svg>
+      <svg class="cloud cloud-3" viewBox="0 0 80 32" fill="currentColor">
+        <circle cx="24" cy="20" r="10"></circle><circle cx="38" cy="14" r="13"
+        ></circle><circle cx="54" cy="19" r="11"></circle><rect
+          x="14"
+          y="20"
+          width="50"
+          height="10"
+          rx="5"></rect>
+      </svg>
+      <svg
+        class="compass"
+        viewBox="0 0 100 100"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linejoin="round"
+      >
+        <circle cx="50" cy="50" r="44"></circle><circle
+          cx="50"
+          cy="50"
+          r="35"
+          stroke-dasharray="2 4"></circle>
+        <path d="M50 6l8 36 36 8-36 8-8 36-8-36-36-8 36-8z"></path>
+        <path d="M50 6v88M6 50h88" opacity="0.4"></path>
+      </svg>
+      <svg class="waves" width="100%" height="64" fill="none">
+        <defs>
+          <pattern
+            id="wave-pat"
+            width="80"
+            height="22"
+            patternUnits="userSpaceOnUse"
+          >
+            <path
+              d="M0 11q10-9 20 0t20 0t20 0t20 0"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"></path>
+          </pattern>
+        </defs>
+        <rect width="100%" height="64" fill="url(#wave-pat)"></rect>
+      </svg>
+    </div>
+
+    <div data-islands class="stage-inner">
+      <div class="stats game-panel">
+        <div class="ring-wrap">
+          <svg
+            viewBox="0 0 100 100"
+            class="h-full w-full -rotate-90"
+            aria-hidden="true"
+          >
+            <circle
+              cx="50"
+              cy="50"
+              r="42"
+              fill="none"
+              stroke-width="12"
+              class="ring-track"></circle>
+            <circle
+              data-ov-ring
+              cx="50"
+              cy="50"
+              r="42"
+              fill="none"
+              stroke-width="12"
+              stroke-linecap="round"
+              stroke-dasharray="0 263.9"
+              class="ring-fill"></circle>
+          </svg>
+          <span data-ov-pct class="ring-pct">0%</span>
+        </div>
+        <div class="min-w-0 flex-1 basis-64">
+          <p class="text-lg font-extrabold">
+            <span data-ov-done>0</span> of {totalWritten} written units done
+          </p>
+          <div
+            data-ov-stack
+            role="img"
+            aria-label="Units by state"
+            class="stack mt-3"
+          >
+            <span data-seg="done" class="seg seg-done" style="width: 0%"></span>
+            <span data-seg="next" class="seg seg-next" style="width: 0%"></span>
+            <span
+              data-seg="locked"
+              class="seg seg-locked"
+              style={`width: ${(totalWritten / totalUnits) * 100}%`}></span>
+            <span
+              data-seg="planned"
+              class="seg seg-planned"
+              style={`width: ${((totalUnits - totalWritten) / totalUnits) * 100}%`}
+            ></span>
+          </div>
+          <ul class="legend mt-3">
+            <li>
+              <i class="sw sw-done"></i>Done <b data-ov-count="done">0</b>
+            </li>
+            <li>
+              <i class="sw sw-next"></i>Up next <b data-ov-count="next">0</b>
+            </li>
+            <li>
+              <i class="sw sw-locked"></i>Locked <b data-ov-count="locked"
+                >{totalWritten}</b
+              >
+            </li>
+            <li>
+              <i class="sw sw-planned"></i>Planned <b data-ov-count="planned"
+                >{totalUnits - totalWritten}</b
+              >
+            </li>
+          </ul>
+        </div>
+      </div>
+
       {
-        worlds.map((w) => (
+        regions.map((r) => (
+          <section
+            class="region"
+            data-region={r.id}
+            aria-labelledby={`region-${r.id}`}
+          >
+            <svg
+              class="region-deco"
+              viewBox="0 0 240 140"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="3"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              {r.id === "workshop" && (
+                <>
+                  <circle cx="190" cy="50" r="22" />
+                  <circle cx="190" cy="50" r="8" />
+                  <circle
+                    cx="190"
+                    cy="50"
+                    r="30"
+                    stroke-width="9"
+                    stroke-dasharray="6.5 5.9"
+                    opacity="0.6"
+                  />
+                  <circle cx="138" cy="94" r="13" />
+                  <circle cx="138" cy="94" r="4.5" />
+                  <circle
+                    cx="138"
+                    cy="94"
+                    r="18.5"
+                    stroke-width="6"
+                    stroke-dasharray="4.5 4.2"
+                    opacity="0.6"
+                  />
+                  <path d="M92 30l22 22M88 34l8-8M108 56l8-8" />
+                  <circle cx="224" cy="112" r="7" />
+                </>
+              )}
+              {r.id === "observatory" && (
+                <>
+                  <path
+                    d="M200 14A32 32 0 1 0 200 78A24 24 0 1 1 200 14Z"
+                    fill="currentColor"
+                    stroke="none"
+                  />
+                  <path
+                    d="M120 24v10M115 29h10M160 78v8M156 82h8M90 62v6M87 65h6M226 96v8M222 100h8"
+                    stroke-width="2"
+                  />
+                  <circle
+                    cx="142"
+                    cy="44"
+                    r="2"
+                    fill="currentColor"
+                    stroke="none"
+                  />
+                  <circle
+                    cx="104"
+                    cy="92"
+                    r="1.6"
+                    fill="currentColor"
+                    stroke="none"
+                  />
+                </>
+              )}
+              {r.id === "harbor" && (
+                <>
+                  <path d="M112 30q8-9 16 0q8-9 16 0M164 54q6-7 12 0q6-7 12 0" />
+                  <path d="M200 134l5-52h22l5 52z" />
+                  <path d="M205 82h22l-3-12h-16z" />
+                  <path d="M209 70v-6h14v6" />
+                  <path
+                    d="M206 62L130 38M226 62L240 50"
+                    stroke-dasharray="4 4"
+                    opacity="0.6"
+                  />
+                  <path d="M96 118h22l-4 8H100z" />
+                  <path d="M107 118V100l10 18" />
+                </>
+              )}
+              {r.id === "frontier" && (
+                <>
+                  <circle cx="190" cy="60" r="34" />
+                  <path d="M190 26l8 34-8 34-8-34z" />
+                  <path d="M156 60h68" opacity="0.5" />
+                </>
+              )}
+            </svg>
+            <header class="region-head">
+              <svg
+                class="region-art"
+                viewBox="0 0 120 64"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                {r.id === "workshop" && (
+                  <>
+                    <circle cx="40" cy="34" r="11" />
+                    <circle cx="40" cy="34" r="4" />
+                    <circle
+                      cx="40"
+                      cy="34"
+                      r="16"
+                      stroke-dasharray="5 4.2"
+                      stroke-width="5"
+                      opacity="0.55"
+                    />
+                    <circle cx="82" cy="22" r="7" />
+                    <circle cx="82" cy="22" r="2.5" />
+                    <circle
+                      cx="82"
+                      cy="22"
+                      r="10.5"
+                      stroke-dasharray="3.5 3"
+                      stroke-width="3.5"
+                      opacity="0.55"
+                    />
+                    <path d="M92 52l16-16" />
+                    <circle cx="110" cy="34" r="5" />
+                    <path d="M8 58h104" opacity="0.4" />
+                  </>
+                )}
+                {r.id === "observatory" && (
+                  <>
+                    <path d="M26 54V40a24 24 0 0 1 48 0v14z" />
+                    <path d="M46 18l8 22" />
+                    <path d="M52 34l28-20" stroke-width="4" />
+                    <path d="M92 14v8M88 18h8" />
+                    <path d="M104 34v6M101 37h6" opacity="0.6" />
+                    <circle cx="14" cy="18" r="1.5" fill="currentColor" />
+                    <path d="M100 56a8 8 0 1 1-8-12 6 6 0 0 0 8 12z" />
+                    <path d="M8 58h104" opacity="0.4" />
+                  </>
+                )}
+                {r.id === "harbor" && (
+                  <>
+                    <path d="M52 56l4-30h12l4 30z" />
+                    <path d="M56 40h12M54 48h16" />
+                    <path d="M54 26h16l-2-8H56z" />
+                    <path d="M58 18v-5h8v5" />
+                    <path
+                      d="M52 20L22 12M72 20l30-8"
+                      opacity="0.5"
+                      stroke-dasharray="3 3"
+                    />
+                    <path d="M96 48h16l-3 6H99z" />
+                    <path d="M104 48V36l8 12" />
+                    <path d="M4 60q8-6 16 0t16 0t16 0" opacity="0.6" />
+                  </>
+                )}
+                {r.id === "frontier" && (
+                  <>
+                    <circle cx="60" cy="32" r="22" />
+                    <path d="M60 14l6 18-6 18-6-18z" />
+                    <path d="M60 14v36M38 32h44" opacity="0.4" />
+                  </>
+                )}
+              </svg>
+              <div class="min-w-0 flex-1">
+                <h2 id={`region-${r.id}`} class="region-title">
+                  {r.title}
+                </h2>
+                <p class="region-sub">{r.tagline}</p>
+              </div>
+              <span class="region-count" data-region-count>
+                0/{r.worlds.reduce((n, w) => n + w.total, 0)} units
+              </span>
+            </header>
+            <div class="islands">
+              {r.worlds.map((w) => (
+                <button
+                  type="button"
+                  data-island={w.name}
+                  aria-pressed="false"
+                  aria-label={`Open ${w.name}, ${w.total} units`}
+                  style={`--world-h: ${worldHue(worlds.indexOf(w))}`}
+                  class="island"
+                >
+                  <span class="island-art" aria-hidden="true">
+                    <TrackIllustration track={w.name} class="island-illus" />
+                    <span class="island-ribbon">Continue here</span>
+                    <span class="island-badge" data-island-badge hidden />
+                  </span>
+                  <span class="flex items-center gap-2.5">
+                    <span class="world-ring" data-island-ring style="--p: 0">
+                      <span class="world-core">
+                        <TrackIcon track={w.name} class="h-5 w-5" />
+                      </span>
+                      <span class="complete-badge" aria-hidden="true">
+                        <Check class="h-3 w-3" stroke-width="4" />
+                      </span>
+                    </span>
+                    <span class="min-w-0">
+                      <span class="island-name">{w.name}</span>
+                      <span class="island-count" data-island-count>
+                        0/{w.total}
+                      </span>
+                    </span>
+                    <span class="island-tags" aria-hidden="true">
+                      {w.topTags.slice(0, 3).map((t) => (
+                        <span class="island-tag">
+                          <TagIcon tag={t} class="h-3.5 w-3.5" />
+                        </span>
+                      ))}
+                    </span>
+                  </span>
+                  <span class="island-dots" aria-hidden="true">
+                    {w.units.map((u) => (
+                      <i
+                        class="dot"
+                        data-slug={u.kind === "unit" ? u.slug : ""}
+                        data-state={
+                          u.kind === "unit" && u.written ? "locked" : "planned"
+                        }
+                      />
+                    ))}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+        ))
+      }
+    </div>
+  </section>
+
+  <!-- Step 2: one world at a time, in a modal with its own scenery. -->
+  <dialog data-world-modal class="world-modal" aria-label="World trail">
+    <div class="modal-bar">
+      <button
+        type="button"
+        data-modal-prev
+        class="modal-nav"
+        aria-label="Previous world"
+      >
+        <ChevronLeft class="h-4 w-4" aria-hidden="true" />
+        <span data-modal-prev-name></span>
+      </button>
+      <span class="modal-where"
+        ><span data-modal-index>1</span> / {worlds.length}</span
+      >
+      <button
+        type="button"
+        data-modal-next
+        class="modal-nav"
+        aria-label="Next world"
+      >
+        <span data-modal-next-name></span>
+        <ChevronRight class="h-4 w-4" aria-hidden="true" />
+      </button>
+      <span class="flex-1"></span>
+      <div class="view-toggle" role="group" aria-label="Map view">
+        <button
+          type="button"
+          data-view-btn="trail"
+          aria-pressed="true"
+          title="Trail view"
+        >
+          <Route class="h-4 w-4" aria-hidden="true" />
+          <span>Trail</span>
+        </button>
+        <button
+          type="button"
+          data-view-btn="list"
+          aria-pressed="false"
+          title="List view"
+        >
+          <List class="h-4 w-4" aria-hidden="true" />
+          <span>List</span>
+        </button>
+      </div>
+      <button
+        type="button"
+        data-modal-close
+        class="modal-close"
+        aria-label="Close world"
+        autofocus
+      >
+        <X class="h-5 w-5" aria-hidden="true" />
+      </button>
+    </div>
+    <div class="modal-body">
+      {
+        worlds.map((w, wi) => (
           <section
             data-world-panel={w.name}
             data-total={w.total}
+            data-region={regionOf(w.name)}
+            style={`--world-h: ${worldHue(wi)}`}
             class="hidden"
           >
-            <div class="game-panel flex flex-wrap items-center gap-4 !py-4">
+            <div class="world-scene" aria-hidden="true">
+              {SCENE_SLOTS.map((slot, k) => {
+                const plan = SCENE_PLAN[k];
+                const tag =
+                  typeof plan === "number" ? w.topTags[plan] : undefined;
+                return (
+                  <span
+                    class="scene-item"
+                    style={`--x: ${slot.x}; --y: ${slot.y}; --s: ${slot.s}; --r: ${slot.r}`}
+                  >
+                    {tag ? (
+                      <TagIcon tag={tag} class="h-full w-full" />
+                    ) : (
+                      <TrackIcon track={w.name} class="h-full w-full" />
+                    )}
+                  </span>
+                );
+              })}
+            </div>
+            <div class="world-hero">
+              <TrackIcon track={w.name} class="hero-watermark" />
+              <TrackIllustration
+                track={w.name}
+                class="world-art hidden w-56 shrink-0 sm:block"
+              />
+              <div class="min-w-0 flex-1 basis-60">
+                <p class="world-kicker">
+                  World {wi + 1} of {worlds.length}
+                </p>
+                <h2 class="world-title">{w.name}/</h2>
+                {TRACK_TEASERS[w.name] && (
+                  <p class="world-sub">{TRACK_TEASERS[w.name].reality}</p>
+                )}
+                <ul class="hero-tags" aria-label="Main topics">
+                  {w.topTags.map((t) => (
+                    <li>
+                      <span class="hero-tag-ic">
+                        <TagIcon tag={t} class="h-4 w-4" />
+                      </span>
+                      {t}
+                    </li>
+                  ))}
+                </ul>
+                <div class="hero-stats">
+                  <div class="hstat">
+                    <Layers class="h-5 w-5" aria-hidden="true" />
+                    <b>{w.total}</b>
+                    <span>units</span>
+                  </div>
+                  {w.minutes > 0 && (
+                    <div class="hstat">
+                      <Clock class="h-5 w-5" aria-hidden="true" />
+                      <b>{fmtDuration(w.minutes)}</b>
+                      <span>to read</span>
+                    </div>
+                  )}
+                  {w.topics > 0 && (
+                    <div class="hstat">
+                      <Target class="h-5 w-5" aria-hidden="true" />
+                      <b>{w.topics}</b>
+                      <span>exercise topics</span>
+                    </div>
+                  )}
+                  {w.demos > 0 && (
+                    <div class="hstat">
+                      <Sparkles class="h-5 w-5" aria-hidden="true" />
+                      <b>{w.demos}</b>
+                      <span>live demos</span>
+                    </div>
+                  )}
+                  {w.writtenCount < w.total && (
+                    <div class="hstat hstat-soon">
+                      <Flag class="h-5 w-5" aria-hidden="true" />
+                      <b>{w.total - w.writtenCount}</b>
+                      <span>coming soon</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div class="hero-ring" aria-hidden="true">
+                <svg viewBox="0 0 100 100" class="h-full w-full -rotate-90">
+                  <circle
+                    cx="50"
+                    cy="50"
+                    r="42"
+                    fill="none"
+                    stroke-width="11"
+                    class="hero-ring-track"
+                  />
+                  <circle
+                    data-hero-ring
+                    cx="50"
+                    cy="50"
+                    r="42"
+                    fill="none"
+                    stroke-width="11"
+                    stroke-linecap="round"
+                    stroke-dasharray="0 263.9"
+                    class="hero-ring-fill"
+                  />
+                </svg>
+                <span class="hero-ring-text">
+                  <b data-hero-pct>0%</b>
+                  <span>done</span>
+                </span>
+              </div>
+              <div
+                class="journey"
+                aria-label={`The ${w.name} path, ${w.total} units`}
+              >
+                {w.rows.flat().map((n) =>
+                  n.kind === "unit" ? (
+                    <button
+                      type="button"
+                      class="jn"
+                      data-jslug={n.slug}
+                      data-state={n.written ? "locked" : "planned"}
+                      aria-label={`Unit ${n.index + 1}: ${n.short}`}
+                    >
+                      <TagIcon tag={n.tags[0] ?? ""} class="h-3.5 w-3.5" />
+                    </button>
+                  ) : (
+                    <span
+                      class="jn jn-flag"
+                      data-jcheck={n.label}
+                      data-state="locked"
+                      aria-hidden="true"
+                    >
+                      <Flag class="h-3.5 w-3.5" />
+                    </span>
+                  ),
+                )}
+              </div>
+            </div>
+            <div data-continue class="continue-card mb-5 hidden">
+              <div class="min-w-0 flex-1">
+                <p class="continue-kicker">Continue</p>
+                <p data-continue-title class="continue-title" />
+              </div>
+              <a data-continue-link href="#" class="continue-btn">
+                Open unit
+                <ArrowRight class="h-4 w-4" aria-hidden="true" />
+              </a>
+            </div>
+            <div class="world-head game-panel flex flex-wrap items-center gap-4 !py-4">
               <span class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900">
                 <TrackIcon track={w.name} class="h-6 w-6" />
               </span>
               <div class="min-w-0 flex-1 basis-48">
                 <div class="flex items-baseline gap-3">
-                  <h2 class="text-xl font-extrabold">{w.name}/</h2>
+                  <p class="text-xl font-extrabold">{w.name}/</p>
                   <span
                     data-world-count
                     class="text-sm font-bold text-slate-500 dark:text-slate-400"
@@ -284,7 +987,7 @@ const totalWritten = writtenUnits.length;
                   <div
                     data-world-fill
                     class="h-full rounded-full transition-[width] duration-700"
-                    style="width: 0%; background: var(--gauge-accent)"
+                    style="width: 0%; background: var(--wc)"
                   />
                 </div>
               </div>
@@ -299,15 +1002,19 @@ const totalWritten = writtenUnits.length;
               </button>
             </div>
 
-            <ol class="mt-10 flex flex-col gap-16 px-1 pb-6 sm:px-4">
+            <ol
+              data-trail
+              data-view="trail"
+              style={`--per: ${PER_ROW}`}
+              class="trail mt-10 flex flex-col gap-16 px-1 pb-6 sm:px-4"
+            >
               {w.rows.map((row, r) => (
                 <li
-                  class={`trail-row relative flex justify-between ${r % 2 ? "flex-row-reverse" : "flex-row"}`}
+                  class={`trail-row relative flex justify-between ${r % 2 ? "flex-row-reverse is-flipped" : "flex-row"}`}
+                  style={`--n: ${row.length}`}
                 >
-                  <div
-                    aria-hidden="true"
-                    class="trail-line absolute top-[calc(var(--disc)/2)] right-[10%] left-[10%] h-0 border-t-[6px] border-dotted border-slate-300 dark:border-slate-700"
-                  />
+                  <div aria-hidden="true" class="trail-line" />
+                  <div aria-hidden="true" class="trail-fill" />
                   {row.map((node) =>
                     node.kind === "unit" ? (
                       <div
@@ -315,7 +1022,14 @@ const totalWritten = writtenUnits.length;
                         data-kind="unit"
                         data-track={w.name}
                         data-slug={node.slug}
+                        data-index={node.index + 1}
+                        data-problem={node.problem}
                         data-written={String(node.written)}
+                        data-minutes={node.minutes}
+                        data-len={node.len}
+                        data-topics={node.topics}
+                        data-topic-names={node.names.join("|")}
+                        data-demo={String(node.demo)}
                         data-state={
                           !node.written
                             ? "planned"
@@ -325,8 +1039,21 @@ const totalWritten = writtenUnits.length;
                         }
                         data-search={`${node.problem} ${node.slug} ${w.name}`.toLowerCase()}
                         data-tags={node.tags.join(" ")}
-                        class="node relative z-10 flex w-[20%] flex-col items-center"
+                        style={`--uh: ${unitHue(node.tags[0] ?? "", node.slug)}`}
+                        data-pat={unitPattern(node.slug)}
+                        class="node relative z-10 flex flex-col items-center"
                       >
+                        <span class="unit-deco" aria-hidden="true">
+                          <span class="unit-num">{node.index + 1}</span>
+                          <UnitEmblem
+                            text={`${node.problem} ${node.slug}`}
+                            tag={node.tags[0] ?? ""}
+                            class="deco deco-0"
+                          />
+                          {node.tags.slice(0, 3).map((t, k) => (
+                            <TagIcon tag={t} class={`deco deco-${k + 1}`} />
+                          ))}
+                        </span>
                         <span data-start-tag class="start-tag">
                           START HERE
                         </span>
@@ -334,7 +1061,6 @@ const totalWritten = writtenUnits.length;
                           <a
                             href={`/${w.name}/${node.slug}/`}
                             data-disc
-                            title={node.problem}
                             aria-label={`Unit ${node.index + 1}: ${node.problem}`}
                             class="disc"
                           >
@@ -358,12 +1084,56 @@ const totalWritten = writtenUnits.length;
                             />
                           </a>
                         ) : (
-                          <span data-disc class="disc" title={node.problem}>
+                          <span
+                            data-disc
+                            class="disc"
+                            aria-label={`Unit ${node.index + 1}, coming soon: ${node.problem}`}
+                          >
                             {node.index + 1}
                           </span>
                         )}
-                        <span class="node-label" title={node.problem}>
-                          {node.short}
+                        {node.tags[0] && (
+                          <span class="tag-badge" aria-hidden="true">
+                            <TagIcon tag={node.tags[0]} class="h-3.5 w-3.5" />
+                          </span>
+                        )}
+                        <span class="node-label">{node.short}</span>
+                        {!node.written && (
+                          <span class="soon-tag">Coming soon</span>
+                        )}
+                        <span class="node-detail">
+                          <span class="node-full">{node.problem}</span>
+                          {node.written && (
+                            <span class="len-bar" aria-hidden="true">
+                              <i style={`width: ${Math.max(node.len, 6)}%`} />
+                            </span>
+                          )}
+                          <span class="node-tags">
+                            {node.written && (
+                              <span class="node-chip">
+                                <Clock class="h-3 w-3" aria-hidden="true" />
+                                {node.minutes} min
+                              </span>
+                            )}
+                            {node.topics > 0 && (
+                              <span class="node-chip">
+                                <Target class="h-3 w-3" aria-hidden="true" />
+                                {node.topics}
+                              </span>
+                            )}
+                            {node.demo && (
+                              <span class="node-chip">
+                                <Sparkles class="h-3 w-3" aria-hidden="true" />
+                                demo
+                              </span>
+                            )}
+                            {node.tags.slice(0, 4).map((t) => (
+                              <span class="node-tag">
+                                <TagIcon tag={t} class="h-3 w-3" />
+                                {t}
+                              </span>
+                            ))}
+                          </span>
                         </span>
                       </div>
                     ) : (
@@ -372,10 +1142,23 @@ const totalWritten = writtenUnits.length;
                         data-kind="check"
                         data-track={w.name}
                         data-group={node.group.join(" ")}
+                        data-members={node.members.join(" ")}
+                        data-label={node.label}
                         data-state="locked"
-                        class="node relative z-10 flex w-[20%] flex-col items-center"
+                        class="node relative z-10 flex flex-col items-center"
                       >
-                        <span data-disc class="disc check" aria-hidden="true">
+                        <span
+                          data-disc
+                          class="disc check"
+                          aria-label={`${node.label}, covers ${node.members.length} units`}
+                        >
+                          {[0, 1, 2, 3, 4, 5].map((k) => (
+                            <span
+                              class="spark"
+                              aria-hidden="true"
+                              style={`--a: ${k * 60}deg`}
+                            />
+                          ))}
                           <Flag
                             data-ic="done"
                             class="h-[40%] w-[40%]"
@@ -390,6 +1173,17 @@ const totalWritten = writtenUnits.length;
                           />
                         </span>
                         <span class="node-label">{node.label}</span>
+                        <span class="check-pips" aria-hidden="true">
+                          {node.members.map((m) => (
+                            <i class="pip" data-pip={m} />
+                          ))}
+                        </span>
+                        <span data-check-sum class="check-sum" />
+                        <span class="node-detail">
+                          <span class="node-full">
+                            {node.label} · covers {node.members.length} units
+                          </span>
+                        </span>
                       </div>
                     ),
                   )}
@@ -399,14 +1193,22 @@ const totalWritten = writtenUnits.length;
           </section>
         ))
       }
-      <p
-        data-empty-state
-        class="mt-10 hidden text-center text-sm text-slate-500 dark:text-slate-400"
-      >
-        No units match these filters.
-      </p>
     </div>
-  </div>
+
+    <!-- One shared card, moved next to whichever node is hovered or focused.
+         It lives inside the dialog so it shares the modal's top layer. -->
+    <div hidden aria-hidden="true" data-tag-icons>
+      {
+        ALL_TAGS.map((t) => (
+          <span data-tag={t}>
+            <TagIcon tag={t} class="h-3.5 w-3.5" />
+          </span>
+        ))
+      }
+    </div>
+    <div data-node-card role="tooltip" id="node-card" class="node-card" hidden>
+    </div>
+  </dialog>
 
   <TopicMythModal />
 
@@ -418,8 +1220,27 @@ const totalWritten = writtenUnits.length;
 
   <script>
     import { unitStates, lastTouchedTrack } from "../lib/unlock";
+    import { pStorage } from "../lib/profile";
 
-    const WORLD_KEY = "roadmap:world";
+    const VIEW_KEY = "roadmap:view";
+    const CELEBRATED_KEY = "roadmap:celebrated";
+    const STATE_LABEL: Record<string, string> = {
+      done: "Completed",
+      next: "Up next",
+      locked: "Locked",
+      planned: "Coming soon",
+    };
+    const STATE_HINT: Record<string, string> = {
+      done: "You've finished this one.",
+      next: "Open it to start.",
+      locked: "Finish the previous unit to unlock it.",
+      planned: "Not written yet.",
+    };
+    const STATUS_LABEL: Record<string, string> = {
+      done: "Done",
+      next: "Up next",
+      locked: "Locked",
+    };
     const q = <T extends HTMLElement>(
       sel: string,
       root: ParentNode = document,
@@ -428,6 +1249,232 @@ const totalWritten = writtenUnits.length;
       sel: string,
       root: ParentNode = document,
     ) => Array.from(root.querySelectorAll<T>(sel));
+
+    // ---- trail layout: 5 / 4 / 3 nodes per row by viewport -----------------
+    // The server renders rows of 5. On narrower screens the same node elements
+    // are re-chunked into shorter rows (moved, not cloned, so listeners,
+    // state and focus targets survive).
+    const mqDesktop = matchMedia("(min-width: 1024px)");
+    const mqTablet = matchMedia("(min-width: 640px)");
+    const perRowNow = () => (mqDesktop.matches ? 5 : mqTablet.matches ? 4 : 3);
+
+    function layoutTrails() {
+      const per = perRowNow();
+      for (const ol of qa<HTMLElement>("[data-trail]")) {
+        const nodes = qa<HTMLElement>("[data-node]", ol);
+        nodes.forEach((n, i) => n.style.setProperty("--i", String(i)));
+        if (ol.style.getPropertyValue("--per").trim() === String(per)) continue;
+        const firstRow = q<HTMLElement>(".trail-row", ol);
+        const line = q<HTMLElement>(".trail-line", ol);
+        const fill = q<HTMLElement>(".trail-fill", ol);
+        if (!firstRow || !line || !fill) continue;
+        const rowProto = firstRow.cloneNode(false) as HTMLElement;
+        const lineProto = line.cloneNode(false) as HTMLElement;
+        const fillProto = fill.cloneNode(false) as HTMLElement;
+        const rows: HTMLElement[] = [];
+        for (let i = 0; i < nodes.length; i += per) {
+          const chunk = nodes.slice(i, i + per);
+          const flipped = (i / per) % 2 === 1;
+          const li = rowProto.cloneNode(false) as HTMLElement;
+          li.className = `trail-row relative flex justify-between ${flipped ? "flex-row-reverse is-flipped" : "flex-row"}`;
+          li.style.setProperty("--n", String(chunk.length));
+          li.append(
+            lineProto.cloneNode(false),
+            fillProto.cloneNode(false),
+            ...chunk,
+          );
+          rows.push(li);
+        }
+        ol.style.setProperty("--per", String(per));
+        ol.replaceChildren(...rows);
+      }
+      paintTrails();
+    }
+
+    // Completed stretches of the trail turn solid green. A segment is green
+    // when the node before it (in walking order) is done; the elbow to the
+    // next row is green when the row's last node is done.
+    function paintTrails() {
+      for (const ol of qa<HTMLElement>("[data-trail]")) {
+        const per = Number(ol.style.getPropertyValue("--per")) || 5;
+        for (const li of qa<HTMLElement>(".trail-row", ol)) {
+          const nodes = qa<HTMLElement>("[data-node]", li);
+          let lead = 0;
+          while (lead < nodes.length && nodes[lead].dataset.state === "done")
+            lead++;
+          li.style.setProperty("--m", String(Math.min(lead, nodes.length - 1)));
+          const full = nodes.length === per;
+          if (full && lead === nodes.length) li.dataset.elbow = "done";
+          else delete li.dataset.elbow;
+        }
+      }
+    }
+
+    // ---- celebrations: checkpoints pop once, the first time they're seen done
+    function readCelebrated(): Set<string> {
+      try {
+        const raw = pStorage.getItem(CELEBRATED_KEY);
+        const arr = raw ? JSON.parse(raw) : [];
+        return new Set(Array.isArray(arr) ? arr : []);
+      } catch {
+        return new Set();
+      }
+    }
+    function playCelebrations(panel: HTMLElement) {
+      const pending = qa<HTMLElement>('[data-celebrate="pending"]', panel);
+      if (pending.length === 0) return;
+      const seen = readCelebrated();
+      for (const c of pending) {
+        const disc = q<HTMLElement>("[data-disc]", c);
+        disc?.classList.remove("celebrate");
+        void disc?.offsetWidth;
+        disc?.classList.add("celebrate");
+        seen.add(`${panel.dataset.worldPanel}:${c.dataset.label}`);
+        delete c.dataset.celebrate;
+      }
+      try {
+        pStorage.setItem(CELEBRATED_KEY, JSON.stringify([...seen]));
+      } catch {
+        // Storage full or blocked — the animation may just replay next visit.
+      }
+    }
+
+    // ---- "Continue" banner ------------------------------------------------
+    function updateContinue() {
+      for (const panel of qa("[data-world-panel]")) {
+        const card = q("[data-continue]", panel);
+        if (!card) continue;
+        const next = q('[data-kind="unit"][data-state="next"]', panel);
+        const written = qa('[data-kind="unit"][data-written="true"]', panel);
+        const allDone =
+          written.length > 0 &&
+          written.every((n) => n.dataset.state === "done");
+        const title = q("[data-continue-title]", card)!;
+        const kicker = q(".continue-kicker", card)!;
+        const link = q<HTMLAnchorElement>("[data-continue-link]", card)!;
+        if (next) {
+          const label = q(".node-label", next)?.textContent ?? "";
+          kicker.textContent = "Continue";
+          title.textContent = `Unit ${next.dataset.index}: ${label}`;
+          link.href = q<HTMLAnchorElement>("a.disc", next)?.href ?? "#";
+          link.classList.remove("hidden");
+          card.classList.remove("hidden");
+        } else if (allDone) {
+          kicker.textContent = "Nice work";
+          title.textContent = `Every written unit in ${panel.dataset.worldPanel}/ is done.`;
+          link.classList.add("hidden");
+          card.classList.remove("hidden");
+        } else {
+          card.classList.add("hidden");
+        }
+      }
+    }
+
+    // ---- overview: global ring, stacked bar and the island map ---------------
+    const RING_LEN = 2 * Math.PI * 42;
+    function updateOverview() {
+      const count: Record<string, number> = {
+        done: 0,
+        next: 0,
+        locked: 0,
+        planned: 0,
+      };
+      const units = qa('[data-kind="unit"]');
+      for (const n of units) {
+        const st = n.dataset.state ?? "locked";
+        count[st] = (count[st] ?? 0) + 1;
+      }
+      const total = units.length || 1;
+      const written = count.done + count.next + count.locked;
+      for (const key of Object.keys(count)) {
+        const seg = q(`[data-seg="${key}"]`);
+        if (seg) seg.style.width = `${(count[key] / total) * 100}%`;
+        const c = q(`[data-ov-count="${key}"]`);
+        if (c) c.textContent = String(count[key]);
+      }
+      const pct = written ? count.done / written : 0;
+      q("[data-ov-ring]")?.setAttribute(
+        "stroke-dasharray",
+        `${pct * RING_LEN} ${RING_LEN}`,
+      );
+      const pctEl = q("[data-ov-pct]");
+      if (pctEl) pctEl.textContent = `${Math.round(pct * 100)}%`;
+      const doneEl = q("[data-ov-done]");
+      if (doneEl) doneEl.textContent = String(count.done);
+      q("[data-ov-stack]")?.setAttribute(
+        "aria-label",
+        `${count.done} done, ${count.next} up next, ${count.locked} locked, ${count.planned} planned`,
+      );
+    }
+
+    // Each island mirrors its world: ring, done/total and one dot per unit,
+    // copied from the node's state so the two can never disagree.
+    function syncIslands() {
+      for (const isl of qa("[data-island]")) {
+        const panel = q(
+          `[data-world-panel="${CSS.escape(isl.dataset.island!)}"]`,
+        );
+        if (!panel) continue;
+        const dots = qa(".dot", isl);
+        let done = 0;
+        for (const d of dots) {
+          const node = q(
+            `[data-kind="unit"][data-slug="${CSS.escape(d.dataset.slug!)}"]`,
+            panel,
+          );
+          const st = node?.dataset.state ?? "planned";
+          d.dataset.state = st;
+          if (st === "done") done++;
+        }
+        const count = q("[data-island-count]", isl);
+        if (count) count.textContent = `${done}/${dots.length}`;
+        q("[data-island-ring]", isl)?.style.setProperty(
+          "--p",
+          String(dots.length ? done / dots.length : 0),
+        );
+        isl.dataset.complete = String(dots.length > 0 && done === dots.length);
+        isl.dataset.done = String(done);
+        isl.dataset.total = String(dots.length);
+      }
+      for (const reg of qa("section.region")) {
+        const isl = qa("[data-island]", reg);
+        const done = isl.reduce((n, i) => n + Number(i.dataset.done ?? 0), 0);
+        const total = isl.reduce((n, i) => n + Number(i.dataset.total ?? 0), 0);
+        const out = q("[data-region-count]", reg);
+        if (out) out.textContent = `${done}/${total} units`;
+      }
+    }
+
+    // The hero's path strip mirrors each node's state, same as the islands.
+    function syncJourney() {
+      for (const panel of qa("[data-world-panel]")) {
+        for (const j of qa("[data-jslug]", panel)) {
+          const node = q(
+            `[data-kind="unit"][data-slug="${CSS.escape(j.dataset.jslug!)}"]`,
+            panel,
+          );
+          j.dataset.state = node?.dataset.state ?? "planned";
+        }
+        const checks = qa('[data-kind="check"]', panel);
+        for (const j of qa("[data-jcheck]", panel)) {
+          j.dataset.state =
+            checks.find((c) => c.dataset.label === j.dataset.jcheck)?.dataset
+              .state ?? "locked";
+        }
+      }
+    }
+
+    function wireOverview() {
+      const stage = q("[data-islands]");
+      if (!stage || stage.dataset.wired === "true") return;
+      stage.dataset.wired = "true";
+      stage.addEventListener("click", (e) => {
+        const b = (e.target as HTMLElement).closest<HTMLElement>(
+          "[data-island]",
+        );
+        if (b) openWorld(b.dataset.island!);
+      });
+    }
 
     // ---- state: stamp every node from the active profile's progress -----
     function stampStates() {
@@ -453,12 +1500,26 @@ const totalWritten = writtenUnits.length;
         );
         firstNext?.setAttribute("data-start", "true");
 
+        const celebrated = readCelebrated();
         for (const c of qa<HTMLElement>('[data-kind="check"]', panel)) {
           const group = (c.dataset.group ?? "").split(" ").filter(Boolean);
+          const members = (c.dataset.members ?? "").split(" ").filter(Boolean);
           const allDone =
             group.length > 0 &&
             group.every((s) => stateBySlug.get(s) === "done");
           c.dataset.state = allDone ? "done" : "locked";
+          const doneInGroup = members.filter(
+            (s) => stateBySlug.get(s) === "done",
+          ).length;
+          for (const pip of qa("[data-pip]", c))
+            pip.classList.toggle(
+              "on",
+              stateBySlug.get(pip.dataset.pip!) === "done",
+            );
+          const sum = q("[data-check-sum]", c);
+          if (sum) sum.textContent = `${doneInGroup}/${members.length} done`;
+          const key = `${track}:${c.dataset.label}`;
+          if (allDone && !celebrated.has(key)) c.dataset.celebrate = "pending";
         }
 
         const done = states.filter((s) => s === "done").length;
@@ -468,36 +1529,117 @@ const totalWritten = writtenUnits.length;
         if (count) count.textContent = `${done} of ${total} units`;
         const fill = q("[data-world-fill]", panel);
         if (fill) fill.style.width = `${total ? (done / total) * 100 : 0}%`;
-        const ring = q(`[data-world="${CSS.escape(track)}"] [data-ring]`);
-        ring?.style.setProperty("--p", String(total ? done / total : 0));
+        const share = total ? done / total : 0;
+        q("[data-hero-ring]", panel)?.setAttribute(
+          "stroke-dasharray",
+          `${share * RING_LEN} ${RING_LEN}`,
+        );
+        const heroPct = q("[data-hero-pct]", panel);
+        if (heroPct) heroPct.textContent = `${Math.round(share * 100)}%`;
       }
+      paintTrails();
+      updateContinue();
+      updateOverview();
+      syncIslands();
+      syncJourney();
+      syncRoving();
       const pill = q("[data-done-pill]");
       const totalWritten = qa('[data-kind="unit"][data-written="true"]').length;
       if (pill) pill.textContent = `${doneTotal} of ${totalWritten} done`;
     }
 
-    // ---- world selection ------------------------------------------------
+    // ---- world selection: the map picks, the modal shows --------------------
+    let order: string[] = [];
+    function loadOrder() {
+      try {
+        order = JSON.parse(q("#world-order")?.textContent || "[]");
+      } catch {
+        order = [];
+      }
+    }
+    const modalEl = () => q<HTMLDialogElement>("[data-world-modal]");
+
+    let shownWorld: string | null = null;
     function selectWorld(name: string) {
+      hideCard();
       for (const p of qa("[data-world-panel]")) {
         p.classList.toggle("hidden", p.dataset.worldPanel !== name);
       }
-      for (const b of qa("[data-world]")) {
-        b.setAttribute("aria-pressed", String(b.dataset.world === name));
+      for (const i of qa("[data-island]")) {
+        i.setAttribute("aria-pressed", String(i.dataset.island === name));
       }
-      try {
-        localStorage.setItem(WORLD_KEY, name);
-      } catch {
-        // Private mode — selection just isn't remembered.
+      const panel = q(`[data-world-panel="${CSS.escape(name)}"]`);
+      const modal = modalEl();
+      if (panel && modal) {
+        // The dialog's own scenery and accent follow the world on show.
+        modal.dataset.region = panel.dataset.region ?? "";
+        modal.style.setProperty(
+          "--world-h",
+          panel.style.getPropertyValue("--world-h"),
+        );
+        modal.scrollTo({ top: 0 });
       }
-      history.replaceState(null, "", `#${name}`);
-      q(`[data-world="${CSS.escape(name)}"]`)?.scrollIntoView({
-        block: "nearest",
-        inline: "center",
-      });
+      const i = order.indexOf(name);
+      if (i >= 0) {
+        const prev = order[(i - 1 + order.length) % order.length];
+        const next = order[(i + 1) % order.length];
+        const set = (sel: string, text: string) => {
+          const el = q(sel);
+          if (el) el.textContent = text;
+        };
+        set("[data-modal-index]", String(i + 1));
+        set("[data-modal-prev-name]", prev);
+        set("[data-modal-next-name]", next);
+      }
+      if (panel && shownWorld !== name) {
+        const trail = q("[data-trail]", panel);
+        trail?.classList.remove("is-entering");
+        void trail?.offsetWidth;
+        trail?.classList.add("is-entering");
+      }
+      shownWorld = name;
+      if (panel) playCelebrations(panel);
     }
 
-    function currentWorld(): string | null {
-      return q("[data-world][aria-pressed='true']")?.dataset.world ?? null;
+    function openWorld(name: string) {
+      selectWorld(name);
+      const modal = modalEl();
+      if (modal && !modal.open) modal.showModal();
+      history.replaceState(null, "", `#${name}`);
+    }
+
+    function wireModal() {
+      const modal = modalEl();
+      if (!modal || modal.dataset.wired === "true") return;
+      modal.dataset.wired = "true";
+      const step = (d: number) => {
+        const cur = shownWorld ? order.indexOf(shownWorld) : 0;
+        openWorld(order[(cur + d + order.length) % order.length]);
+      };
+      q("[data-modal-prev]")?.addEventListener("click", () => step(-1));
+      q("[data-modal-next]")?.addEventListener("click", () => step(1));
+      q("[data-modal-close]")?.addEventListener("click", () => modal.close());
+      // A click on the dim backdrop lands on the <dialog> itself.
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) {
+          modal.close();
+          return;
+        }
+        const j = (e.target as HTMLElement).closest<HTMLElement>(
+          "[data-jslug]",
+        );
+        if (!j) return;
+        const node = q(
+          `[data-kind="unit"][data-slug="${CSS.escape(j.dataset.jslug!)}"]`,
+          modal,
+        );
+        q("[data-disc]", node ?? modal)?.focus();
+      });
+      modal.addEventListener("close", () => {
+        hideCard();
+        shownWorld = null;
+        history.replaceState(null, "", location.pathname + location.search);
+      });
     }
 
     // ---- filters --------------------------------------------------------
@@ -539,13 +1681,13 @@ const totalWritten = writtenUnits.length;
           total++;
         }
       }
-      for (const b of qa("[data-world]")) {
-        const badge = q("[data-world-badge]", b);
-        const count = perWorld.get(b.dataset.world!) ?? 0;
+      for (const i of qa("[data-island]")) {
+        const count = perWorld.get(i.dataset.island!) ?? 0;
+        i.classList.toggle("is-dim", active && count === 0);
+        const badge = q("[data-island-badge]", i);
         if (!badge) continue;
-        badge.textContent = String(count);
-        badge.classList.toggle("hidden", !(active && count > 0));
-        badge.classList.toggle("flex", active && count > 0);
+        badge.textContent = `${count} ${count === 1 ? "match" : "matches"}`;
+        badge.hidden = !(active && count > 0);
       }
       const summary = q("[data-match-summary]");
       if (summary) {
@@ -556,6 +1698,7 @@ const totalWritten = writtenUnits.length;
         "hidden",
         !(active && total === 0),
       );
+      renderChips();
       q("[data-clear-filters]")?.classList.toggle("hidden", !active);
       q("[data-clear-filters]")?.classList.toggle("inline-flex", active);
       for (const kind of ["tags", "status"] as const) {
@@ -565,20 +1708,66 @@ const totalWritten = writtenUnits.length;
         el.textContent = String(n);
         el.classList.toggle("hidden", n === 0);
       }
-      // Don't leave the reader on a world with nothing lit up.
-      const cur = currentWorld();
-      if (active && cur && (perWorld.get(cur) ?? 0) === 0) {
-        const first = qa("[data-world]").find(
-          (b) => (perWorld.get(b.dataset.world!) ?? 0) > 0,
-        );
-        if (first) selectWorld(first.dataset.world!);
-      }
+    }
+
+    // Active filters as removable chips under the bar. Built with DOM calls
+    // (not innerHTML) because the search text is whatever the reader typed.
+    const X_ICON =
+      '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+    function renderChips() {
+      const box = q("[data-active-chips]");
+      if (!box) return;
+      const make = (kind: string, value: string, text: string) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.dataset.chipKind = kind;
+        b.dataset.chipValue = value;
+        b.className =
+          "inline-flex items-center gap-1.5 rounded-full border-2 border-slate-300 px-3 py-1 text-xs font-bold transition hover:border-slate-900 dark:border-slate-700 dark:hover:border-slate-100";
+        b.setAttribute("aria-label", `Remove filter: ${text}`);
+        const span = document.createElement("span");
+        span.textContent = text;
+        b.append(span);
+        b.insertAdjacentHTML("beforeend", X_ICON);
+        return b;
+      };
+      const chips: HTMLElement[] = [];
+      if (filters.query) chips.push(make("query", "", `“${filters.query}”`));
+      for (const t of filters.tags) chips.push(make("tag", t, t));
+      for (const s of filters.statuses)
+        chips.push(make("status", s, STATUS_LABEL[s] ?? s));
+      box.replaceChildren(...chips);
+      box.classList.toggle("hidden", chips.length === 0);
+      box.classList.toggle("flex", chips.length > 0);
     }
 
     function wireFilters() {
       const search = q<HTMLInputElement>("[data-roadmap-search]");
       if (!search || search.dataset.wired === "true") return;
       search.dataset.wired = "true";
+
+      q("[data-active-chips]")?.addEventListener("click", (e) => {
+        const b = (e.target as HTMLElement).closest<HTMLElement>(
+          "[data-chip-kind]",
+        );
+        if (!b) return;
+        const value = b.dataset.chipValue ?? "";
+        if (b.dataset.chipKind === "query") {
+          filters.query = "";
+          search.value = "";
+        } else if (b.dataset.chipKind === "tag") {
+          filters.tags.delete(value);
+          qa("[data-tag-chip]")
+            .find((c) => c.dataset.tagChip === value)
+            ?.setAttribute("aria-pressed", "false");
+        } else {
+          filters.statuses.delete(value);
+          qa("[data-status-chip]")
+            .find((c) => c.dataset.statusChip === value)
+            ?.setAttribute("aria-pressed", "false");
+        }
+        applyFilters();
+      });
 
       search.addEventListener("input", () => {
         filters.query = search.value.trim().toLowerCase();
@@ -662,40 +1851,397 @@ const totalWritten = writtenUnits.length;
       });
     }
 
-    function wireRail() {
-      const rail = q("[data-rail]");
-      if (!rail || rail.dataset.wired === "true") return;
-      rail.dataset.wired = "true";
-      for (const b of qa("[data-world]", rail)) {
-        b.addEventListener("click", () => selectWorld(b.dataset.world!));
+    // ---- floating card for the hovered / focused node ----------------------
+    const cardEl = () => q("[data-node-card]");
+    let cardNode: HTMLElement | null = null;
+    function el(tag: string, cls: string, text?: string) {
+      const n = document.createElement(tag);
+      n.className = cls;
+      if (text !== undefined) n.textContent = text;
+      return n;
+    }
+    function hideCard() {
+      const card = cardEl();
+      if (card) card.hidden = true;
+      q("[data-disc][aria-describedby]")?.removeAttribute("aria-describedby");
+      cardNode = null;
+    }
+    // Small stroke icons for the card, built once as markup strings.
+    const ico = (paths: string) =>
+      `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+    const ICON = {
+      clock: ico('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+      target: ico(
+        '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/>',
+      ),
+      spark: ico(
+        '<path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z"/>',
+      ),
+      play: ico('<path d="M7 5l12 7-12 7z" fill="currentColor"/>'),
+      lock: ico(
+        '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>',
+      ),
+      check: ico('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
+      flag: ico('<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>'),
+      soon: ico('<circle cx="12" cy="12" r="9" stroke-dasharray="3 3.5"/>'),
+    };
+    const STATE_ICON: Record<string, string> = {
+      done: ICON.check,
+      next: ICON.play,
+      locked: ICON.lock,
+      planned: ICON.soon,
+    };
+    const tagIcon = (tag: string) =>
+      q(`[data-tag-icons] [data-tag="${CSS.escape(tag)}"] svg`)?.cloneNode(
+        true,
+      ) ?? null;
+    function statePill(state: string, label?: string) {
+      const p = el("span", `nc-pill nc-${state}`);
+      p.insertAdjacentHTML("beforeend", STATE_ICON[state] ?? "");
+      p.append(label ?? STATE_LABEL[state] ?? state);
+      return p;
+    }
+    function fact(icon: string, value: string, label: string) {
+      const t = el("span", "nc-fact");
+      t.insertAdjacentHTML("beforeend", icon);
+      t.append(el("b", "", value), el("span", "", label));
+      return t;
+    }
+
+    function showCard(node: HTMLElement) {
+      const card = cardEl();
+      if (!card) return;
+      const kind = node.dataset.kind;
+      const state = node.dataset.state ?? "locked";
+      card.replaceChildren();
+      card.style.removeProperty("--uh");
+      if (kind === "unit") {
+        const uh = node.style.getPropertyValue("--uh");
+        if (uh) card.style.setProperty("--uh", uh);
+        card.dataset.pat = node.dataset.pat ?? "dots";
+        // A tall themed header (emblem with pulsing rings, drifting topic
+        // icons, giant numeral), then the title, icon facts, the unit's place
+        // in its world, a length gauge, tags and a footer line.
+        const panel = node.closest<HTMLElement>("[data-world-panel]");
+        const units = qa<HTMLElement>('[data-kind="unit"]', panel ?? document);
+        const at = units.indexOf(node);
+        const hero = el("div", "nc-hero nc-hero-big");
+        const orb = el("span", "nc-orb");
+        const primary = (node.dataset.tags ?? "").split(" ")[0] ?? "";
+        const orbIcon =
+          q(".unit-deco .deco-0", node)?.cloneNode(true) ?? tagIcon(primary);
+        if (orbIcon) orb.append(orbIcon);
+        const emblem = el("span", "nc-emblem");
+        emblem.append(
+          el("i", "nc-ring nc-ring-1"),
+          el("i", "nc-ring nc-ring-2"),
+        );
+        emblem.append(orb);
+        const head = el("div", "nc-head");
+        head.append(
+          el("span", "nc-kicker", `Unit ${node.dataset.index}`),
+          el("span", "nc-rank", `${at + 1} of ${units.length}`),
+          statePill(state),
+        );
+        const scatter = el("span", "nc-scatter");
+        const themeTags = (node.dataset.tags ?? "").split(" ").filter(Boolean);
+        for (let k = 0; k < 7; k++) {
+          const ic =
+            k === 0
+              ? q(".unit-deco .deco-0", node)?.cloneNode(true)
+              : tagIcon(themeTags[k % Math.max(themeTags.length, 1)] ?? "");
+          if (!ic) continue;
+          const holder = el("i", `nc-sc nc-sc-${k}`);
+          holder.append(ic);
+          scatter.append(holder);
+        }
+        const num = el("span", "nc-num", node.dataset.index ?? "");
+        hero.append(scatter, num, emblem, head);
+        card.append(hero, el("p", "nc-title", node.dataset.problem ?? ""));
+
+        const facts = el("div", "nc-facts");
+        if (node.dataset.written === "true")
+          facts.append(fact(ICON.clock, node.dataset.minutes ?? "", "min"));
+        if (Number(node.dataset.topics) > 0)
+          facts.append(fact(ICON.target, node.dataset.topics ?? "", "topics"));
+        if (node.dataset.demo === "true")
+          facts.append(fact(ICON.spark, "Demo", "live"));
+        if (facts.childElementCount) card.append(facts);
+
+        // Where this unit sits in its world: one dot per unit.
+        const way = el("div", "nc-way");
+        const dots = el("div", "nc-way-dots");
+        units.forEach((u, k) => {
+          dots.append(
+            el(
+              "i",
+              `nc-wd nc-wd-${u.dataset.state ?? "planned"}${k === at ? " here" : ""}`,
+            ),
+          );
+        });
+        way.append(el("span", "nc-way-label", "Your path"), dots);
+        card.append(way);
+
+        if (node.dataset.written === "true") {
+          const gauge = el("div", "nc-gauge");
+          const len = el("div", "nc-len");
+          const bar = el("i", "");
+          bar.style.width = `${Math.max(Number(node.dataset.len), 6)}%`;
+          len.append(bar);
+          len.title =
+            "Reading time compared with the longest unit in this world";
+          gauge.append(el("span", "", "Quick"), len, el("span", "", "Long"));
+          card.append(gauge);
+        }
+        // What the unit's exercises actually practise, from its topic ids.
+        const names = (node.dataset.topicNames ?? "")
+          .split("|")
+          .filter(Boolean);
+        if (names.length) {
+          const learn = el("div", "nc-learn");
+          learn.append(el("span", "nc-way-label", "You will practise"));
+          const list = el("div", "nc-learn-list");
+          for (const n of names.slice(0, 4)) {
+            const pretty = n.replace(/[-_]+/g, " ");
+            const li = el("span", "nc-learn-item");
+            li.append(
+              el("i", ""),
+              pretty.charAt(0).toUpperCase() + pretty.slice(1),
+            );
+            list.append(li);
+          }
+          if (names.length > 4)
+            list.append(
+              el("span", "nc-learn-more", `+${names.length - 4} more`),
+            );
+          learn.append(list);
+          card.append(learn);
+        }
+        const tags = themeTags;
+        if (tags.length) {
+          const row = el("div", "nc-tags");
+          for (const t of tags.slice(0, 5)) {
+            const chip = el("span", "nc-tag");
+            const ic = tagIcon(t);
+            if (ic) chip.append(ic);
+            chip.append(t);
+            row.append(chip);
+          }
+          card.append(row);
+        }
+        const foot = el("div", "nc-foot");
+        const prev = units[at - 1];
+        foot.append(
+          state === "locked" && prev
+            ? `After: ${q(".node-label", prev)?.textContent ?? "the previous unit"}`
+            : (STATE_HINT[state] ?? ""),
+        );
+        card.append(foot);
+      } else {
+        const panel = node.closest<HTMLElement>("[data-world-panel]");
+        const members = (node.dataset.members ?? "").split(" ").filter(Boolean);
+        const bySlug = new Map<string, HTMLElement>();
+        for (const n of qa<HTMLElement>(
+          '[data-kind="unit"]',
+          panel ?? document,
+        ))
+          bySlug.set(n.dataset.slug!, n);
+        const doneCount = members.filter(
+          (s) => bySlug.get(s)?.dataset.state === "done",
+        ).length;
+        const cleared = state === "done";
+        const hero = el("div", "nc-hero nc-hero-check");
+        const orb = el("span", "nc-orb");
+        orb.insertAdjacentHTML("beforeend", ICON.flag);
+        const head = el("div", "nc-head");
+        head.append(
+          el("span", "nc-kicker", node.dataset.label ?? "Checkpoint"),
+          statePill(cleared ? "done" : "locked", cleared ? "Cleared" : "Open"),
+        );
+        hero.append(orb, head);
+        card.append(hero);
+
+        const big = el("div", "nc-big");
+        big.append(el("b", "", `${doneCount}/${members.length}`), "units done");
+        card.append(big);
+        const pips = el("div", "nc-pips");
+        for (const s of members)
+          pips.append(
+            el("i", bySlug.get(s)?.dataset.state === "done" ? "on" : ""),
+          );
+        card.append(pips);
+
+        // One icon per unit in the group, coloured by its state.
+        const grid = el("div", "nc-mems");
+        for (const s of members) {
+          const u = bySlug.get(s);
+          const m = el(
+            "span",
+            `nc-mem nc-mem-${u?.dataset.state ?? "planned"}`,
+          );
+          const ic = q(".tag-badge svg", u ?? node)?.cloneNode(true);
+          if (ic) m.append(ic);
+          grid.append(m);
+        }
+        card.append(grid);
+      }
+      card.hidden = false;
+      const disc = q("[data-disc]", node);
+      disc?.setAttribute("aria-describedby", "node-card");
+      // Centred in the viewport like a modal, so it always opens in the same
+      // place whatever node is hovered. It ignores the pointer, so the node
+      // underneath keeps its hover.
+      const w = card.offsetWidth;
+      const h = card.offsetHeight;
+      const left = Math.max(8, (window.innerWidth - w) / 2);
+      const top2 = Math.max(8, (window.innerHeight - h) / 2);
+      card.style.left = `${left}px`;
+      card.style.top = `${top2}px`;
+      cardNode = node;
+    }
+
+    function wireCard() {
+      const card = cardEl();
+      if (!card || card.dataset.wired === "true") return;
+      card.dataset.wired = "true";
+      let lastPointer = "mouse";
+      const nodeOf = (t: EventTarget | null) =>
+        (t as HTMLElement | null)?.closest?.<HTMLElement>("[data-node]") ??
+        null;
+      document.addEventListener(
+        "pointerdown",
+        (e) => {
+          lastPointer = e.pointerType;
+          if (e.pointerType === "touch" && !nodeOf(e.target)) hideCard();
+        },
+        true,
+      );
+      document.addEventListener("pointerover", (e) => {
+        if (e.pointerType === "touch") return;
+        const n = nodeOf(e.target);
+        if (n && n !== cardNode) showCard(n);
+      });
+      document.addEventListener("pointerout", (e) => {
+        if (e.pointerType === "touch") return;
+        const n = nodeOf(e.target);
+        if (n && !n.contains(e.relatedTarget as Node | null)) hideCard();
+      });
+      document.addEventListener("focusin", (e) => {
+        const n = nodeOf(e.target);
+        if (n) showCard(n);
+      });
+      document.addEventListener("focusout", (e) => {
+        if (nodeOf(e.target)) hideCard();
+      });
+      // First tap on a node shows its card; a second tap follows the link.
+      document.addEventListener("click", (e) => {
+        if (lastPointer !== "touch") return;
+        const n = nodeOf(e.target);
+        if (n && n !== cardNode) {
+          e.preventDefault();
+          showCard(n);
+        }
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") hideCard();
+      });
+      // Capture, so scrolling inside the modal (not just the page) hides it.
+      document.addEventListener("scroll", hideCard, {
+        passive: true,
+        capture: true,
+      });
+      window.addEventListener("resize", hideCard);
+    }
+
+    // ---- keyboard: roving tabindex, arrows walk the trail in order ---------
+    function syncRoving() {
+      for (const panel of qa("[data-world-panel]")) {
+        const discs = qa("[data-disc]", panel);
+        const target =
+          q('[data-start="true"] [data-disc]', panel) ?? discs[0] ?? null;
+        for (const d of discs) d.tabIndex = d === target ? 0 : -1;
+      }
+    }
+    function wireKeyboard() {
+      for (const ol of qa("[data-trail]")) {
+        if (ol.dataset.wired === "true") continue;
+        ol.dataset.wired = "true";
+        ol.addEventListener("focusin", (e) => {
+          const d = (e.target as HTMLElement).closest<HTMLElement>(
+            "[data-disc]",
+          );
+          if (!d) return;
+          for (const o of qa("[data-disc]", ol)) o.tabIndex = o === d ? 0 : -1;
+        });
+        ol.addEventListener("keydown", (e) => {
+          const cur = (e.target as HTMLElement).closest<HTMLElement>(
+            "[data-disc]",
+          );
+          if (!cur) return;
+          const discs = qa("[data-disc]", ol);
+          const i = discs.indexOf(cur);
+          let to = -1;
+          if (e.key === "ArrowRight" || e.key === "ArrowDown") to = i + 1;
+          else if (e.key === "ArrowLeft" || e.key === "ArrowUp") to = i - 1;
+          else if (e.key === "Home") to = 0;
+          else if (e.key === "End") to = discs.length - 1;
+          else if (e.key === "Enter" && !(cur instanceof HTMLAnchorElement)) {
+            const n = cur.closest<HTMLElement>("[data-node]");
+            if (n) showCard(n);
+            return;
+          }
+          if (to < 0 || to >= discs.length) return;
+          e.preventDefault();
+          discs[to].focus();
+        });
       }
     }
 
-    function initRoadmap() {
-      if (!q("[data-rail]")) return;
-      wireRail();
-      wireFilters();
-      stampStates();
-
-      let order: string[] = [];
+    // ---- trail / list view ---------------------------------------------------
+    function setView(view: string) {
+      for (const ol of qa("[data-trail]")) ol.dataset.view = view;
+      for (const b of qa("[data-view-btn]"))
+        b.setAttribute("aria-pressed", String(b.dataset.viewBtn === view));
+      hideCard();
       try {
-        order = JSON.parse(q("#world-order")?.textContent || "[]");
+        localStorage.setItem(VIEW_KEY, view);
       } catch {
-        order = [];
+        // Not remembered in private mode.
       }
+    }
+    function wireView() {
+      const group = q("[data-view-btn]")?.parentElement;
+      if (!group || group.dataset.wired === "true") return;
+      group.dataset.wired = "true";
+      for (const b of qa("[data-view-btn]", group))
+        b.addEventListener("click", () => setView(b.dataset.viewBtn!));
+      mqDesktop.addEventListener("change", layoutTrails);
+      mqTablet.addEventListener("change", layoutTrails);
+    }
+
+    function initRoadmap() {
+      if (!q("[data-islands]")) return;
+      loadOrder();
+      wireModal();
+      wireFilters();
+      wireOverview();
+      wireView();
+      wireCard();
+      layoutTrails();
+      wireKeyboard();
+      stampStates();
+      try {
+        setView(localStorage.getItem(VIEW_KEY) === "list" ? "list" : "trail");
+      } catch {
+        setView("trail");
+      }
+
+      // Mark where the reader last made progress, then honour a #world link.
+      const last = lastTouchedTrack(order);
+      for (const i of qa("[data-island]"))
+        i.dataset.last = String(i.dataset.island === last);
       const fromHash = decodeURIComponent(location.hash.slice(1));
-      const saved = (() => {
-        try {
-          return localStorage.getItem(WORLD_KEY);
-        } catch {
-          return null;
-        }
-      })();
-      const start =
-        [fromHash, lastTouchedTrack(order), saved, order[0]].find(
-          (t): t is string => !!t && order.includes(t),
-        ) ?? order[0];
-      if (start) selectWorld(start);
+      if (order.includes(fromHash)) openWorld(fromHash);
       applyFilters();
     }
     initRoadmap();
@@ -756,7 +2302,52 @@ const totalWritten = writtenUnits.length;
     box-shadow: 0 6px 0 #f1f5f9;
   }
 
-  /* world rail */
+  /* Per-world colour tokens, derived from the --world-h hue set in markup.
+     --wc          accents: ring, progress bar, focus
+     --wc-solid    fills that carry white content (the "next" node, buttons)
+     --wc-deep     borders and hard shadows under those fills
+     --wc-soft     tinted backgrounds
+     --wc-text     small text on the tinted background */
+  .island,
+  .world-modal,
+  [data-world-panel] {
+    --wc: hsl(var(--world-h) 72% 38%);
+    --wc-solid: hsl(var(--world-h) 72% 32%);
+    --wc-deep: hsl(var(--world-h) 72% 16%);
+    --wc-soft: hsl(var(--world-h) 80% 95%);
+    --wc-text: hsl(var(--world-h) 70% 22%);
+  }
+  :global(.dark) .island,
+  :global(.dark) .world-modal,
+  :global(.dark) [data-world-panel] {
+    --wc: hsl(var(--world-h) 80% 62%);
+    --wc-solid: hsl(var(--world-h) 68% 40%);
+    --wc-deep: hsl(var(--world-h) 68% 16%);
+    --wc-soft: hsl(var(--world-h) 45% 14%);
+    --wc-text: hsl(var(--world-h) 85% 74%);
+  }
+
+  /* progress rings (islands) */
+  .complete-badge {
+    display: none;
+    position: absolute;
+    right: -0.125rem;
+    bottom: -0.125rem;
+    height: 1.25rem;
+    width: 1.25rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background: #059669;
+    color: #fff;
+    box-shadow: 0 0 0 2px #fff;
+  }
+  :global(.dark) .complete-badge {
+    box-shadow: 0 0 0 2px #020617;
+  }
+  .island[data-complete="true"] .complete-badge {
+    display: flex;
+  }
   .world-ring {
     position: relative;
     display: flex;
@@ -765,16 +2356,10 @@ const totalWritten = writtenUnits.length;
     align-items: center;
     justify-content: center;
     border-radius: 9999px;
-    background: conic-gradient(
-      var(--gauge-accent) calc(var(--p, 0) * 1turn),
-      #e2e8f0 0
-    );
+    background: conic-gradient(var(--wc) calc(var(--p, 0) * 1turn), #e2e8f0 0);
   }
   :global(.dark) .world-ring {
-    background: conic-gradient(
-      var(--gauge-accent) calc(var(--p, 0) * 1turn),
-      #334155 0
-    );
+    background: conic-gradient(var(--wc) calc(var(--p, 0) * 1turn), #334155 0);
   }
   .world-core {
     display: flex;
@@ -790,34 +2375,326 @@ const totalWritten = writtenUnits.length;
     background: #0f172a;
     color: #f1f5f9;
   }
-  .world-btn[aria-pressed="true"] .world-ring {
-    box-shadow:
-      0 0 0 4px #fff,
-      0 0 0 7px #0f172a;
+  /* view toggle (trail / list) */
+  .view-toggle {
+    display: inline-flex;
+    height: 3rem;
+    overflow: hidden;
+    border-radius: 0.875rem;
+    border: 2px solid #cbd5e1;
+    background: #fff;
+    box-shadow: 0 4px 0 #cbd5e1;
   }
-  :global(.dark) .world-btn[aria-pressed="true"] .world-ring {
-    box-shadow:
-      0 0 0 4px #020617,
-      0 0 0 7px #f1f5f9;
+  .view-toggle button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0 0.875rem;
+    font-size: 0.875rem;
+    font-weight: 800;
+    color: #475569;
   }
-  .world-btn[aria-pressed="true"] .world-core {
+  .view-toggle button[aria-pressed="true"] {
     background: #0f172a;
     color: #fff;
   }
-  :global(.dark) .world-btn[aria-pressed="true"] .world-core {
+  .view-toggle button:focus-visible {
+    outline: 3px solid var(--accent-text);
+    outline-offset: -3px;
+  }
+  :global(.dark) .view-toggle {
+    border-color: #334155;
+    background: #0f172a;
+    box-shadow: 0 4px 0 #334155;
+  }
+  :global(.dark) .view-toggle button {
+    color: #94a3b8;
+  }
+  :global(.dark) .view-toggle button[aria-pressed="true"] {
     background: #f1f5f9;
     color: #0f172a;
   }
-  .world-btn:focus-visible {
-    outline: 3px solid var(--accent-text);
-    outline-offset: 4px;
-    border-radius: 0.75rem;
+
+  /* continue banner */
+  .continue-card {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+    border-radius: 1.125rem;
+    border: 2px solid var(--wc);
+    background: var(--wc-soft);
+    box-shadow: 0 6px 0 var(--wc);
+    padding: 0.875rem 1.125rem;
+    color: #0f172a;
+  }
+  .continue-card.hidden {
+    display: none;
+  }
+  :global(.dark) .continue-card {
+    color: #f1f5f9;
+  }
+  .continue-kicker {
+    font-size: 0.6875rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--wc-text);
+  }
+  .continue-title {
+    margin-top: 0.125rem;
+    font-size: 1.0625rem;
+    font-weight: 800;
+    line-height: 1.3;
+  }
+  .continue-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    height: 2.75rem;
+    padding: 0 1.125rem;
+    border-radius: 0.875rem;
+    border: 2px solid var(--wc-deep);
+    background: var(--wc-solid);
+    color: #fff;
+    font-size: 0.9375rem;
+    font-weight: 800;
+    box-shadow: 0 4px 0 var(--wc-deep);
+    transition:
+      transform 0.08s,
+      box-shadow 0.08s;
+  }
+  .continue-btn.hidden {
+    display: none;
+  }
+  .continue-btn:active {
+    transform: translateY(4px);
+    box-shadow: 0 0 0 var(--wc-deep);
+  }
+  .continue-btn:focus-visible {
+    outline: 3px solid var(--wc);
+    outline-offset: 3px;
+  }
+
+  /* sticky world header: sits just under the modal bar */
+  .world-head {
+    position: sticky;
+    top: calc(var(--bar-h) + 0.5rem);
+    z-index: 9;
   }
 
   /* level nodes */
+  .trail {
+    isolation: isolate; /* keep node z-indexes below the sticky headers */
+  }
   .trail-row {
     --disc: clamp(3.25rem, 8vw, 4.5rem);
+    --gap: 4rem; /* matches the gap-16 between rows on the <ol> */
   }
+  .node {
+    width: calc(100% / var(--per, 5));
+  }
+  /* The path itself. --per (nodes per row) comes from the <ol>, --n (nodes in
+     this row) and --m (leading done nodes) from each row. */
+  .trail-line,
+  .trail-fill {
+    position: absolute;
+    top: calc(var(--disc) / 2);
+    left: calc(50% / var(--per));
+    height: 0;
+    border-top: 6px dotted #cbd5e1;
+  }
+  .trail-line {
+    width: calc(100% * (var(--n) - 1) / var(--per));
+  }
+  .trail-fill {
+    width: calc(100% * var(--m, 0) / var(--per));
+    border-top-style: solid;
+    border-top-color: #059669;
+    border-radius: 3px;
+    transition: width 0.6s ease;
+  }
+  .trail-row.is-flipped .trail-line,
+  .trail-row.is-flipped .trail-fill {
+    left: auto;
+    right: calc(50% / var(--per));
+  }
+  :global(.dark) .trail-line {
+    border-top-color: #334155;
+  }
+  /* Elbow joining a row's last node to the next row's first node, so the
+     trail reads as one continuous snake instead of stacked strips. It leaves
+     the end node's centre line, bulges out into the side padding, and comes
+     back in at the next row's centre line. The extra 6px is the border, so
+     the bottom stroke lands exactly on the next row's line. */
+  .trail-row:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    top: calc(var(--disc) / 2);
+    right: -0.75rem;
+    width: calc(50% / var(--per) + 0.75rem);
+    height: calc(100% + var(--gap) + 6px);
+    border: 6px dotted #cbd5e1;
+    border-left: 0;
+    border-radius: 0 2rem 2rem 0;
+    pointer-events: none;
+  }
+  .trail-row.is-flipped:not(:last-child)::after {
+    right: auto;
+    left: -0.75rem;
+    border: 6px dotted #cbd5e1;
+    border-right: 0;
+    border-radius: 2rem 0 0 2rem;
+  }
+  :global(.dark) .trail-row:not(:last-child)::after,
+  :global(.dark) .trail-row.is-flipped:not(:last-child)::after {
+    border-color: #334155;
+  }
+  .trail-row[data-elbow="done"]:not(:last-child)::after,
+  .trail-row.is-flipped[data-elbow="done"]:not(:last-child)::after,
+  :global(.dark) .trail-row[data-elbow="done"]:not(:last-child)::after,
+  :global(.dark)
+    .trail-row.is-flipped[data-elbow="done"]:not(:last-child)::after {
+    border-style: solid;
+    border-color: #059669;
+  }
+
+  /* list view: same nodes, laid out as rows with the full title and tags */
+  .node-detail,
+  .check-sum,
+  .soon-tag {
+    display: none;
+  }
+  .check-sum {
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    color: #c2410c;
+  }
+  :global(.dark) .check-sum {
+    color: #fdba74;
+  }
+  .soon-tag {
+    display: block;
+    margin-top: 0.375rem;
+    border-radius: 9999px;
+    border: 1.5px dashed #94a3b8;
+    padding: 0 0.5rem;
+    font-size: 0.625rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #64748b;
+  }
+  :global(.dark) .soon-tag {
+    border-color: #64748b;
+    color: #94a3b8;
+  }
+  .trail[data-view="list"] {
+    gap: 0.5rem;
+    margin-top: 1.5rem;
+    padding-inline: 0;
+  }
+  .trail[data-view="list"] .trail-row {
+    --disc: 2.5rem;
+    display: contents;
+  }
+  .trail[data-view="list"] .trail-line,
+  .trail[data-view="list"] .trail-fill,
+  .trail[data-view="list"] .trail-row:not(:last-child)::after {
+    display: none;
+  }
+  .trail[data-view="list"] .node {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.875rem;
+    border-radius: 1rem;
+    border: 2px solid #e2e8f0;
+    background: #fff;
+    padding: 0.625rem 0.875rem;
+  }
+  :global(.dark) .trail[data-view="list"] .node {
+    border-color: #1e293b;
+    background: #0f172a;
+  }
+  .trail[data-view="list"] .disc {
+    flex-shrink: 0;
+  }
+  .trail[data-view="list"] .node-label {
+    display: none;
+  }
+  .trail[data-view="list"] .node-detail {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+  .trail[data-view="list"] .soon-tag,
+  .trail[data-view="list"] .check-sum {
+    order: 3;
+    margin-top: 0;
+    flex-shrink: 0;
+  }
+  .trail[data-view="list"] .start-tag {
+    position: static;
+    order: 4;
+  }
+  .node-full {
+    font-size: 0.875rem;
+    font-weight: 700;
+    line-height: 1.3;
+    color: #0f172a;
+  }
+  :global(.dark) .node-full {
+    color: #f1f5f9;
+  }
+  .node[data-state="locked"] .node-full,
+  .node[data-state="planned"] .node-full {
+    color: #64748b;
+  }
+  :global(.dark) .node[data-state="locked"] .node-full,
+  :global(.dark) .node[data-state="planned"] .node-full {
+    color: #94a3b8;
+  }
+  .node-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+  .node-tag {
+    border-radius: 9999px;
+    background: rgb(100 116 139 / 0.12);
+    padding: 0.0625rem 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: #64748b;
+  }
+  :global(.dark) .node-tag {
+    color: #94a3b8;
+  }
+
+  /* entrance: nodes drop in one after another when a world is shown.
+     `backwards` (not `both`) so the end state is the normal style and the
+     filter's is-dim opacity still wins afterwards. */
+  .trail.is-entering .node {
+    animation: node-in 0.35s ease-out backwards;
+    animation-delay: calc(min(var(--i, 0), 24) * 35ms);
+  }
+  @keyframes node-in {
+    from {
+      opacity: 0;
+      transform: translateY(0.75rem) scale(0.9);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
   .disc {
     position: relative;
     display: flex;
@@ -842,8 +2719,11 @@ const totalWritten = writtenUnits.length;
     transform: translateY(5px);
     box-shadow: 0 0 0 #cbd5e1;
   }
-  a.disc:focus-visible {
-    outline: 3px solid var(--accent-text);
+  .disc {
+    scroll-margin-block: 8rem 3rem;
+  }
+  .disc:focus-visible {
+    outline: 3px solid var(--wc);
     outline-offset: 4px;
   }
   .disc :global([data-ic]) {
@@ -861,17 +2741,18 @@ const totalWritten = writtenUnits.length;
     display: block;
   }
   .node[data-state="next"] .disc {
-    background: #0369a1;
-    border-color: #082f49;
-    box-shadow: 0 5px 0 #082f49;
+    background: var(--wc-solid);
+    border-color: var(--wc-deep);
+    box-shadow: 0 5px 0 var(--wc-deep);
     color: #fff;
     animation: node-pulse 1.8s infinite;
   }
+  /* Planned = no content yet: a firm dashed outline, no fill, no shadow. */
   .node[data-state="planned"] .disc {
-    border-style: dashed;
+    border: 3px dashed #94a3b8;
     background: transparent;
     box-shadow: none;
-    color: #94a3b8;
+    color: #64748b;
   }
   :global(.dark) .disc {
     border-color: #475569;
@@ -886,15 +2767,16 @@ const totalWritten = writtenUnits.length;
     color: #fff;
   }
   :global(.dark) .node[data-state="next"] .disc {
-    background: #0369a1;
-    border-color: #082f49;
-    box-shadow: 0 5px 0 #082f49;
+    background: var(--wc-solid);
+    border-color: var(--wc-deep);
+    box-shadow: 0 5px 0 var(--wc-deep);
     color: #fff;
   }
   :global(.dark) .node[data-state="planned"] .disc {
+    border-color: #64748b;
     background: transparent;
     box-shadow: none;
-    color: #64748b;
+    color: #94a3b8;
   }
 
   /* checkpoints */
@@ -921,15 +2803,16 @@ const totalWritten = writtenUnits.length;
 
   .node-label {
     margin-top: 1rem;
-    max-width: 7rem;
+    max-width: 100%;
+    padding: 0 0.25rem;
     text-align: center;
     font-size: 0.75rem;
     font-weight: 700;
     line-height: 1.25;
     color: #0f172a;
     display: -webkit-box;
-    -webkit-line-clamp: 3;
-    line-clamp: 3;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
@@ -951,7 +2834,7 @@ const totalWritten = writtenUnits.length;
     top: -1.75rem;
     white-space: nowrap;
     border-radius: 9999px;
-    background: #0369a1;
+    background: var(--wc-solid);
     color: #fff;
     font-size: 0.6875rem;
     font-weight: 800;
@@ -972,16 +2855,1463 @@ const totalWritten = writtenUnits.length;
   @keyframes node-pulse {
     0% {
       box-shadow:
-        0 5px 0 #082f49,
-        0 0 0 0 rgb(3 105 161 / 0.45);
+        0 5px 0 var(--wc-deep),
+        0 0 0 0 color-mix(in srgb, var(--wc) 45%, transparent);
     }
     100% {
       box-shadow:
-        0 5px 0 #082f49,
-        0 0 0 16px rgb(3 105 161 / 0);
+        0 5px 0 var(--wc-deep),
+        0 0 0 16px color-mix(in srgb, var(--wc) 0%, transparent);
     }
   }
+  /* checkpoint celebration: the disc pops and six sparks fly outward */
+  .spark {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0.5rem;
+    height: 0.5rem;
+    margin: -0.25rem 0 0 -0.25rem;
+    border-radius: 9999px;
+    background: #f59e0b;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .disc.check.celebrate {
+    animation: check-pop 0.6s ease-out;
+  }
+  .disc.check.celebrate .spark {
+    animation: spark-burst 0.8s ease-out both;
+  }
+  @keyframes check-pop {
+    0% {
+      transform: scale(0.7);
+    }
+    50% {
+      transform: scale(1.18);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+  @keyframes spark-burst {
+    0% {
+      opacity: 1;
+      transform: rotate(var(--a)) translateY(0) scale(0.6);
+    }
+    100% {
+      opacity: 0;
+      transform: rotate(var(--a)) translateY(-3.2rem) scale(1);
+    }
+  }
+
+  /* floating card (children are built in JS, hence :global) */
+  .node-card {
+    position: fixed;
+    max-height: calc(100vh - 1rem);
+    overflow: hidden;
+    z-index: 40;
+    width: min(20rem, calc(100vw - 1rem));
+    border-radius: 1rem;
+    border: 2px solid #0f172a;
+    background: #fff;
+    color: #0f172a;
+    box-shadow: 0 5px 0 #0f172a;
+    padding: 0.75rem 0.875rem;
+    pointer-events: none;
+  }
+  .node-card[hidden] {
+    display: none;
+  }
+  :global(.dark) .node-card {
+    border-color: #f1f5f9;
+    background: #0f172a;
+    color: #f1f5f9;
+    box-shadow: 0 5px 0 #f1f5f9;
+  }
+  :global(.node-card .nc-kicker) {
+    font-size: 0.6875rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #64748b;
+  }
+  :global(.node-card .nc-pill) {
+    border-radius: 9999px;
+    padding: 0.0625rem 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 800;
+  }
+  :global(.node-card .nc-done) {
+    background: #d1fae5;
+    color: #065f46;
+  }
+  :global(.node-card .nc-next) {
+    background: #e0f2fe;
+    color: #075985;
+  }
+  :global(.node-card .nc-locked) {
+    background: #e2e8f0;
+    color: #475569;
+  }
+  :global(.node-card .nc-planned) {
+    border: 1.5px dashed #94a3b8;
+    color: #475569;
+  }
+  :global(.dark .node-card .nc-done) {
+    background: #064e3b;
+    color: #a7f3d0;
+  }
+  :global(.dark .node-card .nc-next) {
+    background: #0c4a6e;
+    color: #bae6fd;
+  }
+  :global(.dark .node-card .nc-locked) {
+    background: #1e293b;
+    color: #cbd5e1;
+  }
+  :global(.dark .node-card .nc-planned) {
+    color: #cbd5e1;
+  }
+  :global(.node-card .nc-title) {
+    font-size: 0.9375rem;
+    font-weight: 800;
+    line-height: 1.3;
+  }
+  :global(.node-card .nc-tags) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.5rem;
+  }
+  :global(.node-card .nc-tag) {
+    border-radius: 9999px;
+    background: rgb(100 116 139 / 0.15);
+    padding: 0.0625rem 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: #64748b;
+  }
+  :global(.dark .node-card .nc-tag) {
+    color: #94a3b8;
+  }
+  :global(.node-card .nc-hint) {
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #64748b;
+  }
+  :global(.dark .node-card .nc-hint) {
+    color: #94a3b8;
+  }
+
+  /* global progress */
+  .ring-wrap {
+    position: relative;
+    height: 7.5rem;
+    width: 7.5rem;
+    flex-shrink: 0;
+  }
+  .ring-track {
+    stroke: #e2e8f0;
+  }
+  :global(.dark) .ring-track {
+    stroke: #334155;
+  }
+  .ring-fill {
+    stroke: #059669;
+    transition: stroke-dasharray 0.8s ease;
+  }
+  .ring-pct {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    font-weight: 900;
+  }
+  .stack {
+    display: flex;
+    height: 0.875rem;
+    overflow: hidden;
+    border-radius: 9999px;
+    background: rgb(100 116 139 / 0.15);
+  }
+  .seg {
+    display: block;
+    height: 100%;
+    transition: width 0.7s ease;
+  }
+  .seg-done,
+  .sw-done {
+    background: #059669;
+  }
+  .seg-next,
+  .sw-next {
+    background: #0369a1;
+  }
+  .seg-locked,
+  .sw-locked {
+    background: #94a3b8;
+  }
+  .seg-planned,
+  .sw-planned {
+    background: repeating-linear-gradient(
+      45deg,
+      #cbd5e1 0 3px,
+      transparent 3px 6px
+    );
+  }
+  :global(.dark) .seg-next,
+  :global(.dark) .sw-next {
+    background: #38bdf8;
+  }
+  :global(.dark) .seg-locked,
+  :global(.dark) .sw-locked {
+    background: #64748b;
+  }
+  :global(.dark) .seg-planned,
+  :global(.dark) .sw-planned {
+    background: repeating-linear-gradient(
+      45deg,
+      #475569 0 3px,
+      transparent 3px 6px
+    );
+  }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem 1.25rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    color: #475569;
+  }
+  :global(.dark) .legend {
+    color: #cbd5e1;
+  }
+  .legend li {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+  }
+  .legend b {
+    font-weight: 900;
+    color: #0f172a;
+  }
+  :global(.dark) .legend b {
+    color: #f1f5f9;
+  }
+  .sw {
+    display: inline-block;
+    height: 0.75rem;
+    width: 0.75rem;
+    border-radius: 9999px;
+  }
+
+  /* ---- step 1: the map ---- */
+  .stage {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    border-radius: 1.75rem;
+    border: 2px solid #bae6fd;
+    background: linear-gradient(#e0f2fe, #f0f9ff 40%, #ecfeff);
+    padding: 1.25rem;
+  }
+  :global(.dark) .stage {
+    border-color: #0c4a6e;
+    background: linear-gradient(#0b1224, #0f172a 50%, #082f49);
+  }
+  @media (min-width: 640px) {
+    .stage {
+      padding: 1.75rem;
+    }
+  }
+  .stage-inner {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    gap: 1.75rem;
+  }
+  .sea-deco {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    color: #7dd3fc;
+  }
+  :global(.dark) .sea-deco {
+    color: #1e3a5f;
+  }
+  .cloud {
+    position: absolute;
+    color: #fff;
+    opacity: 0.8;
+  }
+  :global(.dark) .cloud {
+    color: #1e293b;
+    opacity: 0.7;
+  }
+  .cloud-1 {
+    top: 1.25rem;
+    left: 5%;
+    width: 7rem;
+  }
+  .cloud-2 {
+    top: 10rem;
+    right: 6%;
+    width: 5.5rem;
+    opacity: 0.55;
+  }
+  .cloud-3 {
+    top: 40%;
+    left: 46%;
+    width: 6rem;
+    opacity: 0.45;
+  }
+  .compass {
+    position: absolute;
+    top: -1.75rem;
+    right: -1.75rem;
+    width: 9.5rem;
+    color: #0369a1;
+    opacity: 0.3;
+  }
+  :global(.dark) .compass {
+    color: #38bdf8;
+    opacity: 0.18;
+  }
+  .waves {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    opacity: 0.6;
+  }
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1.5rem;
+  }
+
+  /* a region is a patch of land holding a few islands */
+  .region {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    border-radius: 1.5rem;
+    border: 2px dashed rgb(14 116 144 / 0.35);
+    background: rgb(255 255 255 / 0.55);
+    padding: 1rem;
+  }
+  :global(.dark) .region {
+    border-color: rgb(125 211 252 / 0.25);
+    background: rgb(15 23 42 / 0.55);
+  }
+  .region-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .region-art {
+    height: 3.5rem;
+    width: 6.5rem;
+    flex-shrink: 0;
+    color: #0369a1;
+  }
+  :global(.dark) .region-art {
+    color: #7dd3fc;
+  }
+  .region-title {
+    font-size: 1.25rem;
+    font-weight: 900;
+    letter-spacing: -0.01em;
+  }
+  .region-sub {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #475569;
+  }
+  :global(.dark) .region-sub {
+    color: #cbd5e1;
+  }
+  .region-count {
+    border-radius: 9999px;
+    border: 2px solid #bae6fd;
+    background: #fff;
+    padding: 0.125rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 800;
+    color: #0369a1;
+  }
+  :global(.dark) .region-count {
+    border-color: #0c4a6e;
+    background: #0f172a;
+    color: #7dd3fc;
+  }
+
+  /* Each region is a different terrain: a drafting table, a night sky, a
+     harbour. The island cards stay light/dark on top, so only the land, its
+     header text and its decoration change. */
+  .region-deco {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: -1;
+    width: min(17rem, 55%);
+    height: auto;
+    opacity: 0.4;
+    pointer-events: none;
+  }
+
+  .region[data-region="workshop"] {
+    border-color: rgb(180 83 9 / 0.4);
+    background-color: #fffbeb;
+    background-image:
+      linear-gradient(rgb(180 83 9 / 0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(180 83 9 / 0.08) 1px, transparent 1px);
+    background-size: 26px 26px;
+  }
+  .region[data-region="workshop"] .region-deco,
+  .region[data-region="workshop"] .region-art {
+    color: #b45309;
+  }
+  .region[data-region="workshop"] .region-count {
+    border-color: rgb(180 83 9 / 0.4);
+    color: #92400e;
+  }
+  :global(.dark) .region[data-region="workshop"] {
+    border-color: rgb(251 191 36 / 0.3);
+    background-color: #1c1917;
+    background-image:
+      linear-gradient(rgb(251 191 36 / 0.07) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(251 191 36 / 0.07) 1px, transparent 1px);
+  }
+  :global(.dark) .region[data-region="workshop"] .region-deco,
+  :global(.dark) .region[data-region="workshop"] .region-art {
+    color: #fbbf24;
+  }
+  :global(.dark) .region[data-region="workshop"] .region-count {
+    border-color: rgb(251 191 36 / 0.35);
+    color: #fcd34d;
+  }
+
+  .region[data-region="observatory"] {
+    border-color: rgb(165 180 252 / 0.55);
+    background-color: #1e1b4b;
+    background-image:
+      radial-gradient(circle, rgb(255 255 255 / 0.9) 0.8px, transparent 1.4px),
+      radial-gradient(circle, rgb(199 210 254 / 0.6) 0.7px, transparent 1.3px),
+      linear-gradient(160deg, #1e1b4b, #312e81 65%, #3730a3);
+    background-size:
+      60px 60px,
+      97px 97px,
+      auto;
+    background-position:
+      12px 20px,
+      40px 55px,
+      0 0;
+  }
+  :global(.dark) .region[data-region="observatory"] {
+    background-image:
+      radial-gradient(circle, rgb(255 255 255 / 0.85) 0.8px, transparent 1.4px),
+      radial-gradient(circle, rgb(199 210 254 / 0.5) 0.7px, transparent 1.3px),
+      linear-gradient(160deg, #0b0820, #1e1b4b 70%);
+  }
+  .region[data-region="observatory"] .region-deco {
+    color: #fde68a;
+    opacity: 0.75;
+  }
+  .region[data-region="observatory"] .region-art {
+    color: #c7d2fe;
+  }
+  .region[data-region="observatory"] .region-title {
+    color: #fff;
+  }
+  .region[data-region="observatory"] .region-sub {
+    color: #c7d2fe;
+  }
+  .region[data-region="observatory"] .region-count {
+    border-color: rgb(199 210 254 / 0.45);
+    background: rgb(255 255 255 / 0.12);
+    color: #e0e7ff;
+  }
+
+  .region[data-region="harbor"] {
+    border-color: rgb(13 148 136 / 0.45);
+    background-color: #f0fdfa;
+    background-image:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='22'%3E%3Cpath d='M0 11q10-9 20 0t20 0t20 0t20 0' fill='none' stroke='%230d9488' stroke-opacity='.3' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E"),
+      linear-gradient(180deg, #f0fdfa, #ccfbf1);
+    background-repeat: repeat-x, no-repeat;
+    background-position:
+      left bottom,
+      0 0;
+    background-size:
+      80px 22px,
+      auto;
+  }
+  :global(.dark) .region[data-region="harbor"] {
+    border-color: rgb(94 234 212 / 0.3);
+    background-color: #042f2e;
+    background-image:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='22'%3E%3Cpath d='M0 11q10-9 20 0t20 0t20 0t20 0' fill='none' stroke='%232dd4bf' stroke-opacity='.25' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E"),
+      linear-gradient(180deg, #042f2e, #0f3d3a);
+  }
+  .region[data-region="harbor"] .region-deco,
+  .region[data-region="harbor"] .region-art {
+    color: #0f766e;
+  }
+  .region[data-region="harbor"] .region-count {
+    border-color: rgb(13 148 136 / 0.45);
+    color: #0f766e;
+  }
+  :global(.dark) .region[data-region="harbor"] .region-deco,
+  :global(.dark) .region[data-region="harbor"] .region-art {
+    color: #5eead4;
+  }
+  :global(.dark) .region[data-region="harbor"] .region-count {
+    border-color: rgb(94 234 212 / 0.35);
+    color: #5eead4;
+  }
+
+  /* islands: one per world, with its illustration and a dot per unit */
+  .islands {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr));
+    gap: 1.25rem;
+  }
+  .island {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-width: 0;
+    padding: 0.625rem 0.625rem 0.875rem;
+    text-align: left;
+    color: #0f172a;
+    border: 2px solid #e2e8f0;
+    border-radius: 1.75rem 1.25rem 2rem 1.25rem;
+    background: #fff;
+    box-shadow: 0 4px 0 #e2e8f0;
+    transition:
+      transform 0.08s,
+      box-shadow 0.08s,
+      border-color 0.08s,
+      opacity 0.2s;
+  }
+  .island:hover {
+    border-color: var(--wc);
+    box-shadow: 0 4px 0 var(--wc);
+  }
+  .island:active {
+    transform: translateY(3px);
+    box-shadow: 0 1px 0 var(--wc);
+  }
+  .island:focus-visible {
+    outline: 3px solid var(--wc);
+    outline-offset: 3px;
+  }
+  .island[aria-pressed="true"] {
+    border-color: var(--wc);
+    background: var(--wc-soft);
+    box-shadow: 0 4px 0 var(--wc);
+  }
+  .island.is-dim {
+    opacity: 0.35;
+  }
+  :global(.dark) .island {
+    color: #f1f5f9;
+    border-color: #1e293b;
+    background: #0f172a;
+    box-shadow: 0 4px 0 #1e293b;
+  }
+  :global(.dark) .island[aria-pressed="true"] {
+    background: var(--wc-soft);
+  }
+  .island > :not(.island-art) {
+    padding-inline: 0.375rem;
+  }
+  .island-art {
+    position: relative;
+    display: block;
+  }
+  .island-art :global(.track-illustration) {
+    --accent: var(--wc);
+    --accent-text: var(--wc-text);
+    border: 0;
+    border-radius: 1.25rem 0.875rem 1.5rem 0.875rem;
+    background: var(--wc-soft);
+  }
+  .island-art :global(.track-illustration svg) {
+    color: var(--wc-text);
+  }
+  .island-ribbon {
+    display: none;
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
+    border-radius: 9999px;
+    background: var(--wc-solid);
+    padding: 0.125rem 0.625rem;
+    font-size: 0.625rem;
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #fff;
+  }
+  .island[data-last="true"] .island-ribbon {
+    display: block;
+  }
+  .island-badge {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    border-radius: 9999px;
+    background: #b45309;
+    padding: 0.125rem 0.625rem;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    color: #fff;
+  }
+  .island-badge[hidden] {
+    display: none;
+  }
+  .island .world-ring {
+    height: 3rem;
+    width: 3rem;
+    flex-shrink: 0;
+  }
+  .island .world-core {
+    height: 2.25rem;
+    width: 2.25rem;
+  }
+  .island-name {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 800;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+  }
+  .island-count {
+    display: block;
+    margin-top: 0.125rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: #64748b;
+  }
+  :global(.dark) .island-count {
+    color: #94a3b8;
+  }
+  .island-dots {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+  .dot {
+    display: block;
+    height: 0.625rem;
+    width: 0.625rem;
+    border-radius: 9999px;
+    background: #cbd5e1;
+  }
+  .dot[data-state="done"] {
+    background: #059669;
+  }
+  .dot[data-state="next"] {
+    background: var(--wc-solid);
+    box-shadow: 0 0 0 2px var(--wc-soft);
+  }
+  .dot[data-state="planned"] {
+    background: transparent;
+    border: 1.5px dashed #94a3b8;
+  }
+  :global(.dark) .dot[data-state="locked"] {
+    background: #475569;
+  }
+  :global(.dark) .dot[data-state="planned"] {
+    border-color: #64748b;
+  }
+
+  /* ---- step 2: the world modal ---- */
+  :global(html:has(.world-modal[open])) {
+    overflow: hidden;
+  }
+  .world-modal {
+    --bar-h: 3.5rem;
+    width: min(1100px, calc(100vw - 1.5rem));
+    max-height: calc(100dvh - 1.5rem);
+    margin: auto;
+    padding: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    border: 2px solid #0f172a;
+    border-radius: 1.75rem;
+    background: #fff;
+    color: #0f172a;
+    box-shadow: 0 10px 0 #0f172a;
+  }
+  :global(.dark) .world-modal {
+    border-color: #f1f5f9;
+    background: #020617;
+    color: #f1f5f9;
+    box-shadow: 0 10px 0 #f1f5f9;
+  }
+  .world-modal[open] {
+    animation: modal-in 0.25s ease-out;
+  }
+  .world-modal::backdrop {
+    background: rgb(2 6 23 / 0.65);
+    backdrop-filter: blur(3px);
+  }
+  @keyframes modal-in {
+    from {
+      opacity: 0;
+      transform: translateY(1rem) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .modal-bar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    min-height: var(--bar-h);
+    padding: 0.5rem 0.875rem;
+    border-bottom: 2px solid var(--wc);
+    background: var(--wc-soft);
+  }
+  .modal-bar .view-toggle {
+    height: 2.25rem;
+    box-shadow: none;
+    border-radius: 0.75rem;
+  }
+  .modal-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    height: 2.25rem;
+    max-width: 9.5rem;
+    padding: 0 0.625rem;
+    border-radius: 0.75rem;
+    border: 2px solid var(--wc);
+    background: #fff;
+    font-size: 0.75rem;
+    font-weight: 800;
+    color: var(--wc-text);
+  }
+  .modal-nav span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .modal-nav:hover {
+    box-shadow: 0 3px 0 var(--wc);
+  }
+  :global(.dark) .modal-nav {
+    background: #0f172a;
+  }
+  .modal-where {
+    font-size: 0.75rem;
+    font-weight: 800;
+    color: var(--wc-text);
+  }
+  .modal-close {
+    display: inline-flex;
+    height: 2.25rem;
+    width: 2.25rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    border: 2px solid #0f172a;
+    background: #fff;
+    color: #0f172a;
+  }
+  :global(.dark) .modal-close {
+    border-color: #f1f5f9;
+    background: #0f172a;
+    color: #f1f5f9;
+  }
+  .modal-nav:focus-visible,
+  .modal-close:focus-visible {
+    outline: 3px solid var(--wc);
+    outline-offset: 2px;
+  }
+  @media (max-width: 639px) {
+    .modal-nav span,
+    .modal-bar .view-toggle button span {
+      display: none;
+    }
+  }
+
+  /* the modal's backdrop scenery follows the world's region */
+  .modal-body {
+    position: relative;
+    padding: 1.25rem;
+  }
+  @media (min-width: 640px) {
+    .modal-body {
+      padding: 1.75rem;
+    }
+  }
+  .modal-body::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    height: 18rem;
+    background: linear-gradient(var(--wc-soft), transparent);
+    pointer-events: none;
+  }
+  [data-world-panel] {
+    position: relative;
+    z-index: 1;
+  }
+  /* per-world scenery: the world's own icon and its top tags' icons,
+     scattered faintly behind the trail */
+  .world-scene {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .scene-item {
+    position: absolute;
+    top: var(--y);
+    left: var(--x);
+    height: var(--s);
+    width: var(--s);
+    color: var(--wc);
+    opacity: 0.11;
+    transform: rotate(var(--r));
+  }
+  .scene-item :global(svg) {
+    stroke-width: 1.25;
+  }
+  .world-modal[data-region="workshop"] .modal-body {
+    background-image:
+      linear-gradient(rgb(100 116 139 / 0.12) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(100 116 139 / 0.12) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+  .world-modal[data-region="observatory"] .modal-body {
+    background-image:
+      radial-gradient(circle, rgb(100 116 139 / 0.35) 1px, transparent 1.6px),
+      radial-gradient(circle, rgb(100 116 139 / 0.22) 1px, transparent 1.4px);
+    background-size:
+      44px 44px,
+      70px 70px;
+    background-position:
+      0 0,
+      22px 31px;
+  }
+  .world-modal[data-region="harbor"] .modal-body {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='22'%3E%3Cpath d='M0 11q10-9 20 0t20 0t20 0t20 0' fill='none' stroke='%2364748b' stroke-opacity='.2' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-size: 80px 44px;
+  }
+  .world-modal[data-region="frontier"] .modal-body {
+    background-image: radial-gradient(
+      circle,
+      rgb(100 116 139 / 0.3) 1.2px,
+      transparent 1.6px
+    );
+    background-size: 24px 24px;
+  }
+
+  /* world hero: a banner with the world's illustration, recoloured to its
+     accent, and its icon as a faint watermark */
+  .world-hero {
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+    padding: 1.25rem;
+    border-radius: 1.5rem;
+    border: 2px solid var(--wc);
+    background: linear-gradient(135deg, var(--wc-soft), transparent 75%), #fff;
+    box-shadow: 0 6px 0 var(--wc);
+  }
+  :global(.dark) .world-hero {
+    background:
+      linear-gradient(135deg, var(--wc-soft), transparent 75%), #0f172a;
+  }
+  :global(.hero-watermark) {
+    position: absolute;
+    right: -1.5rem;
+    bottom: -2rem;
+    height: 12rem;
+    width: 12rem;
+    color: var(--wc);
+    opacity: 0.09;
+    transform: rotate(-12deg);
+    pointer-events: none;
+  }
+  .world-hero :global(.track-illustration) {
+    --accent: var(--wc);
+    --accent-text: var(--wc-text);
+    border-color: var(--wc);
+    background: var(--wc-soft);
+  }
+  .world-hero :global(.track-illustration svg) {
+    color: var(--wc-text);
+  }
+  .world-kicker {
+    font-size: 0.6875rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--wc-text);
+  }
+  .world-title {
+    margin-top: 0.125rem;
+    font-size: clamp(1.75rem, 4vw, 2.5rem);
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+  .world-sub {
+    margin-top: 0.5rem;
+    max-width: 60ch;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: #475569;
+  }
+  :global(.dark) .world-sub {
+    color: #cbd5e1;
+  }
+  /* primary-tag badge on each unit's disc */
+  .tag-badge {
+    position: absolute;
+    top: -0.375rem;
+    left: calc(50% + var(--disc) / 2 - 1rem);
+    z-index: 2;
+    display: flex;
+    height: 1.625rem;
+    width: 1.625rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    border: 2px solid #cbd5e1;
+    background: #fff;
+    color: var(--wc-text);
+  }
+  :global(.dark) .tag-badge {
+    border-color: #475569;
+    background: #0f172a;
+  }
+  .node[data-state="planned"] .tag-badge {
+    border-style: dashed;
+    color: #94a3b8;
+  }
+  .trail[data-view="list"] .tag-badge {
+    position: static;
+    flex-shrink: 0;
+  }
+  .node-chip {
+    border-radius: 9999px;
+    background: var(--wc-soft);
+    padding: 0.0625rem 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    color: var(--wc-text);
+  }
+
+  /* checkpoint progress pips */
+  .check-pips {
+    display: flex;
+    gap: 0.1875rem;
+    margin-top: 0.375rem;
+  }
+  .pip {
+    display: block;
+    height: 0.375rem;
+    width: 0.625rem;
+    border-radius: 9999px;
+    background: #fed7aa;
+  }
+  .pip.on {
+    background: #c2410c;
+  }
+  :global(.dark) .pip {
+    background: #7c2d12;
+  }
+  :global(.dark) .pip.on {
+    background: #fdba74;
+  }
+  .trail[data-view="list"] .check-pips {
+    order: 3;
+    margin-top: 0;
+  }
+  :global(.node-card .nc-kicker) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+  }
+  :global(.node-card .nc-kicker svg) {
+    height: 0.875rem;
+    width: 0.875rem;
+  }
+
+  /* ---- hero: icon tiles, progress ring and the whole path at a glance ---- */
+  .hero-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0.875rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .hero-tags li {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 9999px;
+    background: var(--wc-soft);
+    padding: 0.125rem 0.75rem 0.125rem 0.125rem;
+    font-size: 0.75rem;
+    font-weight: 800;
+    color: var(--wc-text);
+  }
+  .hero-tag-ic {
+    display: flex;
+    height: 1.5rem;
+    width: 1.5rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background: var(--wc-solid);
+    color: #fff;
+  }
+  .hero-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
+    gap: 0.625rem;
+    max-width: 36rem;
+    margin-top: 1rem;
+  }
+  .hstat {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.125rem;
+    border-radius: 1rem;
+    border: 2px solid var(--wc);
+    background: #fff;
+    padding: 0.625rem 0.75rem;
+  }
+  :global(.dark) .hstat {
+    background: #0f172a;
+  }
+  .hstat :global(svg) {
+    color: var(--wc);
+  }
+  .hstat b {
+    font-size: 1.5rem;
+    font-weight: 900;
+    line-height: 1.1;
+    color: #0f172a;
+  }
+  :global(.dark) .hstat b {
+    color: #f1f5f9;
+  }
+  .hstat span {
+    font-size: 0.6875rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--wc-text);
+  }
+  .hstat-soon {
+    border-style: dashed;
+  }
+  .hero-ring {
+    position: relative;
+    display: none;
+    height: 7.5rem;
+    width: 7.5rem;
+    flex-shrink: 0;
+  }
+  @media (min-width: 768px) {
+    .hero-ring {
+      display: block;
+    }
+  }
+  .hero-ring-track {
+    stroke: rgb(100 116 139 / 0.2);
+  }
+  .hero-ring-fill {
+    stroke: var(--wc);
+    transition: stroke-dasharray 0.8s ease;
+  }
+  .hero-ring-text {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  .hero-ring-text b {
+    font-size: 1.5rem;
+    font-weight: 900;
+    line-height: 1;
+  }
+  .hero-ring-text span {
+    font-size: 0.625rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--wc-text);
+  }
+  .journey {
+    display: flex;
+    flex: 1 0 100%;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    border-top: 2px dashed rgb(100 116 139 / 0.3);
+    padding-top: 1rem;
+  }
+  .jn {
+    display: grid;
+    height: 1.875rem;
+    width: 1.875rem;
+    place-items: center;
+    border-radius: 9999px;
+    border: 2px solid #cbd5e1;
+    background: #fff;
+    color: #94a3b8;
+    cursor: pointer;
+    transition: transform 0.08s;
+  }
+  .jn:hover {
+    transform: translateY(-2px);
+  }
+  .jn:focus-visible {
+    outline: 3px solid var(--wc);
+    outline-offset: 2px;
+  }
+  .jn[data-state="done"] {
+    border-color: #064e3b;
+    background: #059669;
+    color: #fff;
+  }
+  .jn[data-state="next"] {
+    border-color: var(--wc-deep);
+    background: var(--wc-solid);
+    color: #fff;
+    box-shadow:
+      0 0 0 3px var(--wc-soft),
+      0 0 0 5px var(--wc);
+  }
+  .jn[data-state="planned"] {
+    border-style: dashed;
+    background: transparent;
+  }
+  .jn-flag {
+    border-radius: 0.5rem;
+    border-color: #fdba74;
+    background: #fff7ed;
+    color: #c2410c;
+    cursor: default;
+  }
+  .jn-flag:hover {
+    transform: none;
+  }
+  .jn-flag[data-state="done"] {
+    border-color: #7c2d12;
+    background: #c2410c;
+    color: #fff;
+  }
+  :global(.dark) .jn {
+    border-color: #475569;
+    background: #0f172a;
+    color: #94a3b8;
+  }
+  :global(.dark) .jn[data-state="done"] {
+    border-color: #064e3b;
+    background: #059669;
+    color: #fff;
+  }
+  :global(.dark) .jn[data-state="next"] {
+    border-color: var(--wc-deep);
+    background: var(--wc-solid);
+    color: #fff;
+  }
+  :global(.dark) .jn[data-state="planned"] {
+    background: transparent;
+  }
+  :global(.dark) .jn-flag {
+    border-color: #9a3412;
+    background: #431407;
+    color: #fdba74;
+  }
+  :global(.dark) .jn-flag[data-state="done"] {
+    border-color: #7c2d12;
+    background: #c2410c;
+    color: #fff;
+  }
+
+  /* islands: the world's top topics as overlapping icon badges */
+  .island-tags {
+    display: flex;
+    margin-left: auto;
+    flex-shrink: 0;
+    padding-left: 0.375rem;
+  }
+  .island-tag {
+    display: flex;
+    height: 1.5rem;
+    width: 1.5rem;
+    align-items: center;
+    justify-content: center;
+    margin-left: -0.375rem;
+    border-radius: 9999px;
+    border: 2px solid #fff;
+    background: var(--wc-soft);
+    color: var(--wc-text);
+  }
+  :global(.dark) .island-tag {
+    border-color: #0f172a;
+  }
+
+  /* list rows: icon chips and a reading-length bar */
+  .len-bar {
+    display: none;
+  }
+  .trail[data-view="list"] .len-bar {
+    display: block;
+    height: 0.375rem;
+    width: 6rem;
+    overflow: hidden;
+    border-radius: 9999px;
+    background: rgb(100 116 139 / 0.18);
+  }
+  .len-bar i {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--wc);
+  }
+  .node-chip,
+  .node-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  /* preview card: a tinted header with the topic icon, icon facts, meters */
+  :global(.node-card .nc-hero) {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    margin: -0.75rem -0.875rem 0.625rem;
+    border-bottom: 2px solid var(--wc);
+    border-radius: 0.875rem 0.875rem 0 0;
+    background: var(--wc-soft);
+    padding: 0.625rem 0.875rem;
+  }
+  :global(.node-card .nc-hero-check) {
+    border-bottom-color: #fdba74;
+    background: #fff7ed;
+  }
+  :global(.dark .node-card .nc-hero-check) {
+    border-bottom-color: #9a3412;
+    background: #431407;
+  }
+  :global(.node-card .nc-orb) {
+    display: flex;
+    height: 2.5rem;
+    width: 2.5rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background: var(--wc-solid);
+    color: #fff;
+    box-shadow: 0 3px 0 var(--wc-deep);
+  }
+  :global(.node-card .nc-hero-check .nc-orb) {
+    background: #c2410c;
+    box-shadow: 0 3px 0 #7c2d12;
+  }
+  :global(.node-card .nc-orb svg) {
+    height: 1.25rem;
+    width: 1.25rem;
+  }
+  :global(.node-card .nc-head) {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+  :global(.node-card .nc-pill) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  :global(.node-card .nc-pill svg) {
+    height: 0.75rem;
+    width: 0.75rem;
+  }
+  :global(.node-card .nc-facts) {
+    display: flex;
+    gap: 0.375rem;
+    margin-top: 0.625rem;
+  }
+  :global(.node-card .nc-fact) {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.0625rem;
+    border-radius: 0.75rem;
+    background: var(--wc-soft);
+    padding: 0.375rem 0.25rem;
+    color: var(--wc-text);
+  }
+  :global(.node-card .nc-fact b) {
+    font-size: 0.9375rem;
+    font-weight: 900;
+    line-height: 1.1;
+    color: #0f172a;
+  }
+  :global(.dark .node-card .nc-fact b) {
+    color: #f1f5f9;
+  }
+  :global(.node-card .nc-fact span) {
+    font-size: 0.625rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  :global(.node-card .nc-len) {
+    height: 0.375rem;
+    margin-top: 0.5rem;
+    overflow: hidden;
+    border-radius: 9999px;
+    background: rgb(100 116 139 / 0.18);
+  }
+  :global(.node-card .nc-len i) {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--wc);
+  }
+  :global(.node-card .nc-tag) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  :global(.node-card .nc-big) {
+    display: flex;
+    align-items: baseline;
+    gap: 0.375rem;
+    font-size: 0.75rem;
+    font-weight: 800;
+    color: #64748b;
+  }
+  :global(.node-card .nc-big b) {
+    font-size: 1.75rem;
+    font-weight: 900;
+    line-height: 1;
+    color: #0f172a;
+  }
+  :global(.dark .node-card .nc-big b) {
+    color: #f1f5f9;
+  }
+  :global(.node-card .nc-pips) {
+    display: flex;
+    gap: 0.1875rem;
+    margin-top: 0.375rem;
+  }
+  :global(.node-card .nc-pips i) {
+    height: 0.5rem;
+    flex: 1;
+    border-radius: 9999px;
+    background: #fed7aa;
+  }
+  :global(.node-card .nc-pips i.on) {
+    background: #c2410c;
+  }
+  :global(.dark .node-card .nc-pips i) {
+    background: #7c2d12;
+  }
+  :global(.dark .node-card .nc-pips i.on) {
+    background: #fdba74;
+  }
+  :global(.node-card .nc-mems) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    margin-top: 0.625rem;
+  }
+  :global(.node-card .nc-mem) {
+    display: flex;
+    height: 1.75rem;
+    width: 1.75rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    border: 2px solid #cbd5e1;
+    background: #fff;
+    color: #94a3b8;
+  }
+  :global(.dark .node-card .nc-mem) {
+    border-color: #475569;
+    background: #0f172a;
+  }
+  :global(.node-card .nc-mem-done) {
+    border-color: #064e3b;
+    background: #059669;
+    color: #fff;
+  }
+  :global(.node-card .nc-mem-next) {
+    border-color: var(--wc-deep);
+    background: var(--wc-solid);
+    color: #fff;
+  }
+  :global(.node-card .nc-mem-planned) {
+    border-style: dashed;
+    background: transparent;
+  }
+
   @media (prefers-reduced-motion: reduce) {
+    .world-modal[open] {
+      animation: none;
+    }
+    .ring-fill,
+    .hero-ring-fill,
+    .jn,
+    .seg {
+      transition: none;
+    }
+    .disc.check.celebrate,
+    .disc.check.celebrate .spark,
+    .trail.is-entering .node {
+      animation: none;
+    }
+    .trail-fill {
+      transition: none;
+    }
     .node[data-state="next"] .disc {
       animation: none;
     }
@@ -991,5 +4321,572 @@ const totalWritten = writtenUnits.length;
       transition: none;
       transform: none;
     }
+  }
+
+  /* per-unit theme: a colour from the unit's main tag, with scattered topic
+     icons behind list rows and the preview-card header */
+  .node[data-kind="unit"],
+  :global(.node-card) {
+    --uc: hsl(var(--uh, 150) 65% 42%);
+    --uc-deep: hsl(var(--uh, 150) 65% 28%);
+    --uc-soft: hsl(var(--uh, 150) 85% 94%);
+    --uc-mid: hsl(var(--uh, 150) 70% 86%);
+    --uc-dot: hsl(var(--uh, 150) 60% 55% / 0.28);
+  }
+  :global(.dark) .node[data-kind="unit"],
+  :global(.dark .node-card) {
+    --uc: hsl(var(--uh, 150) 70% 68%);
+    --uc-deep: hsl(var(--uh, 150) 60% 40%);
+    --uc-soft: hsl(var(--uh, 150) 40% 14%);
+    --uc-mid: hsl(var(--uh, 150) 40% 22%);
+    --uc-dot: hsl(var(--uh, 150) 70% 65% / 0.25);
+  }
+  .node[data-kind="unit"] .tag-badge {
+    border-color: var(--uc);
+    color: var(--uc-deep);
+    background: var(--uc-soft);
+  }
+  :global(.dark) .node[data-kind="unit"] .tag-badge {
+    color: var(--uc);
+  }
+  .node[data-state="planned"] .tag-badge {
+    border-color: #cbd5e1;
+    color: #94a3b8;
+    background: #fff;
+  }
+  .unit-deco {
+    display: none;
+    pointer-events: none;
+  }
+  .trail[data-view="list"] .node[data-kind="unit"] {
+    position: relative;
+    overflow: hidden;
+    border-left: 6px solid var(--uc);
+    background:
+      radial-gradient(circle, var(--uc-dot) 1px, transparent 1.6px) 0 0 / 12px
+        12px,
+      linear-gradient(100deg, #fff 45%, var(--uc-soft));
+  }
+  :global(.dark) .trail[data-view="list"] .node[data-kind="unit"] {
+    background:
+      radial-gradient(circle, var(--uc-dot) 1px, transparent 1.6px) 0 0 / 12px
+        12px,
+      linear-gradient(100deg, #0f172a 45%, var(--uc-soft));
+  }
+  .trail[data-view="list"] .node[data-kind="unit"][data-state="planned"] {
+    border-left-color: #cbd5e1;
+  }
+  .trail[data-view="list"] .node[data-kind="unit"] .unit-deco {
+    position: absolute;
+    inset: 0;
+    display: block;
+    color: var(--uc);
+  }
+  .unit-deco :global(.deco) {
+    position: absolute;
+    opacity: 0.3;
+  }
+  .unit-deco :global(.deco-0) {
+    top: 50%;
+    right: -0.5rem;
+    height: 5.5rem;
+    width: 5.5rem;
+    opacity: 0.16;
+    transform: translateY(-50%) rotate(-12deg);
+  }
+  .unit-deco :global(.deco-1) {
+    top: 0.5rem;
+    right: 6.5rem;
+    height: 1.5rem;
+    width: 1.5rem;
+    transform: rotate(14deg);
+  }
+  .unit-deco :global(.deco-2) {
+    right: 4.25rem;
+    bottom: 0.5rem;
+    height: 1.125rem;
+    width: 1.125rem;
+    transform: rotate(-16deg);
+  }
+  .unit-deco :global(.deco-3) {
+    top: 0.625rem;
+    right: 9.25rem;
+    height: 0.875rem;
+    width: 0.875rem;
+    opacity: 0.22;
+  }
+  .trail[data-view="list"] .node[data-state="planned"] .unit-deco {
+    filter: grayscale(1);
+    opacity: 0.6;
+  }
+  .trail[data-view="list"] .node[data-kind="unit"] .node-detail,
+  .trail[data-view="list"] .node[data-kind="unit"] .disc,
+  .trail[data-view="list"] .node[data-kind="unit"] .tag-badge {
+    position: relative;
+    z-index: 1;
+  }
+  .trail[data-view="list"] .node-chip {
+    background: var(--uc-mid);
+    color: var(--uc-deep);
+  }
+  :global(.dark) .trail[data-view="list"] .node-chip {
+    color: var(--uc);
+  }
+
+  /* preview card header: themed gradient, dot pattern, scattered icons */
+  :global(.node-card .nc-hero) {
+    position: relative;
+    overflow: hidden;
+    border-bottom-color: var(--uc, var(--wc));
+    background:
+      radial-gradient(circle, var(--uc-dot, transparent) 1px, transparent 1.6px)
+        0 0 / 10px 10px,
+      linear-gradient(
+        110deg,
+        var(--uc-soft, var(--wc-soft)),
+        var(--uc-mid, var(--wc-soft))
+      );
+  }
+  :global(.node-card .nc-hero-check) {
+    border-bottom-color: #fdba74;
+    background: #fff7ed;
+  }
+  :global(.dark .node-card .nc-hero-check) {
+    border-bottom-color: #9a3412;
+    background: #431407;
+  }
+  :global(.node-card .nc-hero:not(.nc-hero-check) .nc-orb) {
+    background: var(--uc);
+    box-shadow: 0 3px 0 var(--uc-deep);
+  }
+  :global(.dark .node-card .nc-hero:not(.nc-hero-check) .nc-orb) {
+    color: #0f172a;
+  }
+  :global(.node-card .nc-orb),
+  :global(.node-card .nc-head) {
+    position: relative;
+    z-index: 1;
+  }
+  :global(.node-card .nc-scatter) {
+    position: absolute;
+    inset: 0;
+    color: var(--uc);
+    pointer-events: none;
+  }
+  :global(.node-card .nc-sc) {
+    position: absolute;
+    display: block;
+    opacity: 0.3;
+  }
+  :global(.node-card .nc-sc svg) {
+    height: 100%;
+    width: 100%;
+  }
+  :global(.node-card .nc-sc-0) {
+    top: -0.25rem;
+    right: -0.25rem;
+    height: 4.25rem;
+    width: 4.25rem;
+    opacity: 0.2;
+    transform: rotate(-14deg);
+  }
+  :global(.node-card .nc-sc-1) {
+    top: 0.375rem;
+    right: 4.25rem;
+    height: 1.125rem;
+    width: 1.125rem;
+    transform: rotate(16deg);
+  }
+  :global(.node-card .nc-sc-2) {
+    right: 3.5rem;
+    bottom: 0.375rem;
+    height: 0.875rem;
+    width: 0.875rem;
+    transform: rotate(-20deg);
+  }
+  :global(.node-card .nc-sc-3) {
+    right: 6rem;
+    bottom: 0.25rem;
+    height: 0.75rem;
+    width: 0.75rem;
+    opacity: 0.22;
+  }
+  :global(.node-card .nc-sc-4) {
+    top: 0.25rem;
+    right: 7rem;
+    height: 0.625rem;
+    width: 0.625rem;
+    opacity: 0.2;
+  }
+  :global(.node-card .nc-len i) {
+    background: var(--uc, var(--wc-solid));
+  }
+  :global(.node-card .nc-fact) {
+    border-color: var(--uc-mid, var(--wc));
+    background: var(--uc-soft, var(--wc-soft));
+  }
+
+  /* per-unit personality: a big numeral and one of four background patterns */
+  .unit-num {
+    position: absolute;
+    right: 1rem;
+    bottom: -1.25rem;
+    font-size: 5.5rem;
+    font-weight: 900;
+    line-height: 1;
+    color: var(--uc);
+    opacity: 0.09;
+    letter-spacing: -0.04em;
+  }
+  .node[data-pat="dots"] {
+    --pat: radial-gradient(circle, var(--uc-dot) 1px, transparent 1.6px) 0 0 /
+      12px 12px;
+  }
+  .node[data-pat="lines"] {
+    --pat: repeating-linear-gradient(
+      135deg,
+      var(--uc-dot) 0 1px,
+      transparent 1px 9px
+    );
+  }
+  .node[data-pat="grid"] {
+    --pat:
+      linear-gradient(var(--uc-dot) 1px, transparent 1px) 0 0 / 14px 14px,
+      linear-gradient(90deg, var(--uc-dot) 1px, transparent 1px) 0 0 / 14px 14px;
+  }
+  .node[data-pat="rings"] {
+    --pat: repeating-radial-gradient(
+      circle at 100% 50%,
+      transparent 0 1.4rem,
+      var(--uc-dot) 1.4rem calc(1.4rem + 1px),
+      transparent calc(1.4rem + 1px) 2.6rem
+    );
+  }
+  .trail[data-view="list"] .node[data-kind="unit"] {
+    background: var(--pat), linear-gradient(100deg, #fff 45%, var(--uc-soft));
+  }
+  :global(.dark) .trail[data-view="list"] .node[data-kind="unit"] {
+    background:
+      var(--pat), linear-gradient(100deg, #0f172a 45%, var(--uc-soft));
+  }
+  :global(.node-card[data-pat="dots"]) {
+    --pat: radial-gradient(circle, var(--uc-dot) 1px, transparent 1.6px) 0 0 /
+      10px 10px;
+  }
+  :global(.node-card[data-pat="lines"]) {
+    --pat: repeating-linear-gradient(
+      135deg,
+      var(--uc-dot) 0 1px,
+      transparent 1px 8px
+    );
+  }
+  :global(.node-card[data-pat="grid"]) {
+    --pat:
+      linear-gradient(var(--uc-dot) 1px, transparent 1px) 0 0 / 12px 12px,
+      linear-gradient(90deg, var(--uc-dot) 1px, transparent 1px) 0 0 / 12px 12px;
+  }
+  :global(.node-card[data-pat="rings"]) {
+    --pat: repeating-radial-gradient(
+      circle at 100% 50%,
+      transparent 0 1rem,
+      var(--uc-dot) 1rem calc(1rem + 1px),
+      transparent calc(1rem + 1px) 2rem
+    );
+  }
+  :global(.node-card .nc-hero:not(.nc-hero-check)) {
+    background:
+      var(--pat, none),
+      linear-gradient(
+        110deg,
+        var(--uc-soft, var(--wc-soft)),
+        var(--uc-mid, var(--wc-soft))
+      );
+  }
+  :global(.node-card .nc-num) {
+    position: absolute;
+    right: 0.5rem;
+    bottom: -0.875rem;
+    font-size: 3.75rem;
+    font-weight: 900;
+    line-height: 1;
+    color: var(--uc);
+    opacity: 0.1;
+    letter-spacing: -0.04em;
+    pointer-events: none;
+  }
+
+  /* bigger, livelier unit preview */
+  :global(.node-card:has(.nc-hero-big)) {
+    width: min(26rem, calc(100vw - 1rem));
+    padding: 0.875rem 1rem 0;
+    border-radius: 1.25rem;
+    box-shadow:
+      0 6px 0 var(--uc-deep),
+      0 18px 36px -12px hsl(var(--uh, 150) 60% 30% / 0.45);
+    border-color: var(--uc-deep);
+    animation: nc-pop 0.22s ease-out both;
+  }
+  :global(.node-card .nc-hero-big) {
+    min-height: 6.5rem;
+    margin: -0.875rem -1rem 0.75rem;
+    padding: 0.875rem 1rem;
+    gap: 0.875rem;
+    border-radius: 1.1rem 1.1rem 0 0;
+    border-bottom-width: 3px;
+  }
+  :global(.node-card .nc-emblem) {
+    position: relative;
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    height: 4.75rem;
+    width: 4.75rem;
+  }
+  :global(.node-card .nc-emblem .nc-orb) {
+    height: 3.5rem;
+    width: 3.5rem;
+    border: 3px solid #fff;
+    box-shadow: 0 4px 0 var(--uc-deep);
+    animation: nc-bob 2.6s ease-in-out infinite;
+  }
+  :global(.dark .node-card .nc-emblem .nc-orb) {
+    border-color: #0f172a;
+  }
+  :global(.node-card .nc-emblem .nc-orb svg) {
+    height: 1.75rem;
+    width: 1.75rem;
+  }
+  :global(.node-card .nc-ring) {
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    border: 2px solid var(--uc);
+    opacity: 0;
+    animation: nc-ring 2.4s ease-out infinite;
+  }
+  :global(.node-card .nc-ring-2) {
+    animation-delay: 1.2s;
+  }
+  :global(.node-card .nc-rank) {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: var(--uc-deep);
+    opacity: 0.8;
+  }
+  :global(.dark .node-card .nc-rank) {
+    color: var(--uc);
+  }
+  :global(.node-card .nc-hero-big .nc-num) {
+    font-size: 6.5rem;
+    right: 0.75rem;
+    bottom: -1.5rem;
+    opacity: 0.12;
+  }
+  :global(.node-card .nc-hero-big .nc-sc) {
+    animation: nc-drift 4s ease-in-out infinite;
+  }
+  :global(.node-card .nc-hero-big .nc-sc-2) {
+    animation-delay: -1.3s;
+  }
+  :global(.node-card .nc-hero-big .nc-sc-3) {
+    animation-delay: -2.2s;
+  }
+  :global(.node-card .nc-hero-big .nc-sc-5) {
+    top: 2.75rem;
+    right: 8.5rem;
+    height: 0.875rem;
+    width: 0.875rem;
+    animation-delay: -0.7s;
+  }
+  :global(.node-card .nc-hero-big .nc-sc-6) {
+    bottom: 0.5rem;
+    right: 9.75rem;
+    height: 0.625rem;
+    width: 0.625rem;
+    animation-delay: -3s;
+  }
+  :global(.node-card:has(.nc-hero-big) .nc-title) {
+    font-size: 1.0625rem;
+    line-height: 1.3;
+  }
+  :global(.node-card .nc-way) {
+    margin-top: 0.75rem;
+  }
+  :global(.node-card .nc-way-label) {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.625rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #64748b;
+  }
+  :global(.node-card .nc-way-dots) {
+    display: flex;
+    align-items: center;
+    gap: 0.1875rem;
+    height: 1rem;
+  }
+  :global(.node-card .nc-wd) {
+    display: block;
+    flex: 1;
+    height: 0.375rem;
+    border-radius: 9999px;
+    background: #e2e8f0;
+  }
+  :global(.dark .node-card .nc-wd) {
+    background: #334155;
+  }
+  :global(.node-card .nc-wd-done) {
+    background: #059669;
+  }
+  :global(.node-card .nc-wd.here) {
+    height: 0.875rem;
+    flex: 2.2;
+    background: var(--uc);
+    box-shadow: 0 0 0 3px var(--uc-mid);
+  }
+  :global(.node-card .nc-gauge) {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.625rem;
+    font-size: 0.625rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #64748b;
+  }
+  :global(.node-card .nc-gauge .nc-len) {
+    flex: 1;
+    margin-top: 0;
+  }
+  :global(.node-card .nc-foot) {
+    display: flex;
+    align-items: center;
+    margin: 0.75rem -1rem 0;
+    border-top: 2px solid var(--uc-mid);
+    border-radius: 0 0 1.1rem 1.1rem;
+    background: var(--pat, none), var(--uc-soft);
+    padding: 0.625rem 1rem;
+    font-size: 0.75rem;
+    font-weight: 800;
+    color: var(--uc-deep);
+  }
+  :global(.dark .node-card .nc-foot) {
+    color: var(--uc);
+  }
+  :global(.node-card:has(.nc-hero-big) .nc-fact) {
+    padding: 0.5rem 0.25rem;
+  }
+  :global(.node-card:has(.nc-hero-big) .nc-fact b) {
+    font-size: 1.25rem;
+  }
+  .trail[data-view="list"] .node[data-kind="unit"] .tag-badge {
+    left: 0;
+    top: 0;
+  }
+  @keyframes nc-pop {
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.96);
+    }
+  }
+  @keyframes nc-bob {
+    50% {
+      transform: translateY(-3px);
+    }
+  }
+  @keyframes nc-ring {
+    0% {
+      opacity: 0.7;
+      transform: scale(0.75);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(1.25);
+    }
+  }
+  @keyframes nc-drift {
+    50% {
+      translate: 0 -4px;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :global(.node-card),
+    :global(.node-card .nc-orb),
+    :global(.node-card .nc-ring),
+    :global(.node-card .nc-sc) {
+      animation: none !important;
+    }
+  }
+
+  /* practised topics + a colour per fact tile */
+  :global(.node-card .nc-learn) {
+    margin-top: 0.75rem;
+  }
+  :global(.node-card .nc-learn-list) {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  :global(.node-card .nc-learn-item) {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #334155;
+  }
+  :global(.dark .node-card .nc-learn-item) {
+    color: #e2e8f0;
+  }
+  :global(.node-card .nc-learn-item i) {
+    flex-shrink: 0;
+    height: 0.5rem;
+    width: 0.5rem;
+    border-radius: 0.15rem;
+    background: var(--uc);
+    transform: rotate(45deg);
+  }
+  :global(.node-card .nc-learn-more) {
+    padding-left: 1rem;
+    font-size: 0.7rem;
+    font-weight: 800;
+    color: #64748b;
+  }
+  :global(.node-card:has(.nc-hero-big) .nc-fact:nth-child(1)) {
+    border-color: #bae6fd;
+    background: #f0f9ff;
+    color: #0369a1;
+  }
+  :global(.node-card:has(.nc-hero-big) .nc-fact:nth-child(2)) {
+    border-color: #fde68a;
+    background: #fffbeb;
+    color: #b45309;
+  }
+  :global(.node-card:has(.nc-hero-big) .nc-fact:nth-child(3)) {
+    border-color: #ddd6fe;
+    background: #f5f3ff;
+    color: #6d28d9;
+  }
+  :global(.dark .node-card:has(.nc-hero-big) .nc-fact:nth-child(1)) {
+    border-color: #0c4a6e;
+    background: #082f49;
+    color: #7dd3fc;
+  }
+  :global(.dark .node-card:has(.nc-hero-big) .nc-fact:nth-child(2)) {
+    border-color: #78350f;
+    background: #451a03;
+    color: #fcd34d;
+  }
+  :global(.dark .node-card:has(.nc-hero-big) .nc-fact:nth-child(3)) {
+    border-color: #4c1d95;
+    background: #2e1065;
+    color: #c4b5fd;
+  }
+  :global(.node-card:has(.nc-hero-big) .nc-fact b) {
+    color: inherit;
   }
 </style>

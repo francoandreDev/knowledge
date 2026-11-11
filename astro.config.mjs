@@ -10,6 +10,12 @@ import remarkGraphviz from "./plugins/remark-graphviz.mjs";
 
 // https://astro.build/config
 export default defineConfig({
+  // /tracks was a second copy of the worlds already on the home page and the
+  // roadmap; the nav slot now belongs to /study.
+  redirects: {
+    "/tracks": { status: 301, destination: "/study" },
+  },
+
   vite: {
     plugins: [tailwindcss()],
   },
