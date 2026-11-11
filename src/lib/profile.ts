@@ -18,7 +18,24 @@ export interface Profile {
   // Missing on profiles created before this field existed; callers fall
   // back to `createdAt` in that case rather than treating it as required.
   lastActiveAt?: number;
+  // Cap and tunic colour of this profile's hero in /game, shown wherever the
+  // profile is (header button, profile picker). Missing means the game's
+  // default hero colour, so older profiles look exactly as before.
+  avatarColor?: string;
 }
+
+/** Colours a hero can wear. The first is the game's original hero colour. */
+export const AVATAR_COLORS: ReadonlyArray<{ name: string; hex: string }> = [
+  { name: "Sky", hex: "#38bdf8" },
+  { name: "Mint", hex: "#34d399" },
+  { name: "Sun", hex: "#fbbf24" },
+  { name: "Coral", hex: "#fb923c" },
+  { name: "Violet", hex: "#a78bfa" },
+  { name: "Lime", hex: "#a3e635" },
+  { name: "Aqua", hex: "#22d3ee" },
+  { name: "Slate", hex: "#94a3b8" },
+];
+export const DEFAULT_AVATAR_COLOR = AVATAR_COLORS[0]!.hex;
 
 const PROFILES_KEY = "profiles";
 const ACTIVE_PROFILE_KEY = "activeProfileId";
@@ -55,13 +72,27 @@ export function getActiveProfile(): Profile | null {
   return readProfiles().find((p) => p.id === id) ?? null;
 }
 
-export function createProfile(name: string): Profile {
+/** The active profile's hero colour (the game's default when none is set). */
+export function getAvatarColor(): string {
+  return getActiveProfile()?.avatarColor ?? DEFAULT_AVATAR_COLOR;
+}
+
+export function setProfileAvatar(id: string, color: string): void {
+  const profiles = readProfiles();
+  const profile = profiles.find((p) => p.id === id);
+  if (!profile) return;
+  profile.avatarColor = color;
+  writeProfiles(profiles);
+}
+
+export function createProfile(name: string, avatarColor?: string): Profile {
   const now = Date.now();
   const profile: Profile = {
     id: generateId(),
     name: name.trim(),
     createdAt: now,
     lastActiveAt: now,
+    ...(avatarColor ? { avatarColor } : {}),
   };
   writeProfiles([...readProfiles(), profile]);
   localStorage.setItem(ACTIVE_PROFILE_KEY, profile.id);
@@ -103,6 +134,44 @@ export function countProfileDone(
     }
   }
   return done;
+}
+
+export interface ProfileGameStats {
+  coins: number;
+  tokens: number;
+  /** Total shop upgrade levels bought: a rough measure of hero power. */
+  upgrades: number;
+  /** Unopened chests across every tier. */
+  chests: number;
+}
+
+/**
+ * The /game numbers of any profile (not only the active one), read straight
+ * from its namespace like `countProfileDone`, so the profile picker can show
+ * each hero's coins, tokens and upgrades beside its learning progress.
+ */
+export function readProfileGameStats(id: string): ProfileGameStats {
+  const prefix = dataPrefix(id);
+  const int = (raw: string | null) => {
+    const n = parseInt(raw ?? "", 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  let upgrades = 0;
+  let chests = 0;
+  for (const key of Object.keys(localStorage)) {
+    if (!key.startsWith(prefix)) continue;
+    const bare = key.slice(prefix.length);
+    if (bare.startsWith("game:upgrade:"))
+      upgrades += int(localStorage.getItem(key));
+    else if (bare.startsWith("game:chest:"))
+      chests += int(localStorage.getItem(key));
+  }
+  return {
+    coins: int(localStorage.getItem(`${prefix}game:coins`)),
+    tokens: int(localStorage.getItem(`${prefix}game:tokens`)),
+    upgrades,
+    chests,
+  };
 }
 
 export function updateProfileInterests(id: string, interests: string[]): void {
