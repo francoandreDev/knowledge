@@ -18,6 +18,11 @@ export default defineConfig({
 
   vite: {
     plugins: [tailwindcss()],
+    build: {
+      // the ELK layout engine (~1.9 MB, mermaid) and other viz libs are large and load
+      // client-side on demand; the default 500 kB limit only produces noise.
+      chunkSizeWarningLimit: 2100,
+    },
   },
 
   markdown: {
