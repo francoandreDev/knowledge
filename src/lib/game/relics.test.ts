@@ -3,6 +3,7 @@ import {
   RELICS,
   RELIC_MAX_LEVEL,
   noEffects,
+  relicBonusLines,
   relicEffects,
   rollChest,
 } from "./relics";
@@ -101,5 +102,30 @@ describe("daily free run", () => {
   test("counts down to local midnight", () => {
     const ms = msUntilReset(new Date(2026, 9, 27, 23, 0));
     expect(ms).toBe(60 * 60 * 1000);
+  });
+});
+
+describe("relicBonusLines", () => {
+  test("is empty with no relics", () => {
+    expect(relicBonusLines({})).toEqual([]);
+  });
+
+  test("shows a single relic's effect at its level", () => {
+    expect(relicBonusLines({ whetstone: 3 })).toEqual([
+      { key: "damage", text: "+12% damage" },
+    ]);
+  });
+
+  test("folds several relics into one line per stat", () => {
+    const lines = relicBonusLines({ whetstone: 2, crownOfAges: 1 });
+    const damage = lines.find((l) => l.key === "damage");
+    expect(damage?.text).toBe("+12% damage");
+    expect(lines.map((l) => l.key)).toContain("maxHp");
+  });
+
+  test("describes the revive", () => {
+    expect(relicBonusLines({ phoenixFeather: 1 })).toEqual([
+      { key: "revive", text: "revive once at 30% HP" },
+    ]);
   });
 });

@@ -2,6 +2,7 @@
 // stored counters and payouts live in missionStore.ts. Every run (not
 // training) is scored against today's three missions and the achievement
 // list, so there is always a small goal beyond "survive longer".
+import { dayKey } from "./daily";
 import { hashString } from "./hash";
 
 export interface RunStats {
@@ -19,64 +20,83 @@ export interface MissionDef {
   text: string;
   coins: number;
   check: (r: RunStats) => boolean;
+  /** How far `r` gets toward the goal: current and target, current capped at
+   * the target. Drives the progress bar and the best-attempt memory. */
+  measure: (r: RunStats) => [number, number];
+}
+
+/** A run mission as a target on one number from the run. `gate` zeroes the
+ * progress when the run is not the kind the mission asks for. */
+function runMission(
+  id: string,
+  text: string,
+  coins: number,
+  target: number,
+  pick: (r: RunStats) => number,
+  gate: (r: RunStats) => boolean = () => true,
+): MissionDef {
+  return {
+    id,
+    text,
+    coins,
+    check: (r) => gate(r) && pick(r) >= target,
+    measure: (r) => [gate(r) ? Math.min(pick(r), target) : 0, target],
+  };
 }
 
 export const MISSION_POOL: MissionDef[] = [
-  {
-    id: "kills-250",
-    text: "Defeat 250 enemies in one run",
-    coins: 50,
-    check: (r) => r.kills >= 250,
-  },
-  {
-    id: "kills-600",
-    text: "Defeat 600 enemies in one run",
-    coins: 90,
-    check: (r) => r.kills >= 600,
-  },
-  {
-    id: "survive-3m",
-    text: "Survive 3 minutes in one run",
-    coins: 60,
-    check: (r) => r.survivedS >= 180,
-  },
-  {
-    id: "level-10",
-    text: "Reach level 10 in one run",
-    coins: 60,
-    check: (r) => r.level >= 10,
-  },
-  {
-    id: "level-15",
-    text: "Reach level 15 in one run",
-    coins: 100,
-    check: (r) => r.level >= 15,
-  },
-  {
-    id: "coins-120",
-    text: "Earn 120 coins in one run",
-    coins: 50,
-    check: (r) => r.coinsEarned >= 120,
-  },
-  {
-    id: "win-run",
-    text: "Survive a whole timed run",
-    coins: 80,
-    check: (r) => r.won,
-  },
-  {
-    id: "boss-down",
-    text: "Defeat a boss",
-    coins: 100,
-    check: (r) => r.bossDefeated,
-  },
-  {
-    id: "endless-4m",
-    text: "Survive 4 minutes in Endless",
-    coins: 90,
-    check: (r) => r.endless && r.survivedS >= 240,
-  },
+  runMission(
+    "kills-250",
+    "Defeat 250 enemies in one run",
+    50,
+    250,
+    (r) => r.kills,
+  ),
+  runMission(
+    "kills-600",
+    "Defeat 600 enemies in one run",
+    90,
+    600,
+    (r) => r.kills,
+  ),
+  runMission(
+    "survive-3m",
+    "Survive 3 minutes in one run",
+    60,
+    180,
+    (r) => r.survivedS,
+  ),
+  runMission("level-10", "Reach level 10 in one run", 60, 10, (r) => r.level),
+  runMission("level-15", "Reach level 15 in one run", 100, 15, (r) => r.level),
+  runMission(
+    "coins-120",
+    "Earn 120 coins in one run",
+    50,
+    120,
+    (r) => r.coinsEarned,
+  ),
+  runMission("win-run", "Survive a whole timed run", 80, 1, (r) =>
+    r.won ? 1 : 0,
+  ),
+  runMission("boss-down", "Defeat a boss", 100, 1, (r) =>
+    r.bossDefeated ? 1 : 0,
+  ),
+  runMission(
+    "endless-4m",
+    "Survive 4 minutes in Endless",
+    90,
+    240,
+    (r) => r.survivedS,
+    (r) => r.endless,
+  ),
 ];
+
+export type MissionTier = "easy" | "medium" | "hard";
+
+/** How demanding a mission is, read off its payout. */
+export function missionTier(def: MissionDef): MissionTier {
+  return def.coins <= 60 ? "easy" : def.coins <= 90 ? "medium" : "hard";
+}
 
 export const MISSIONS_PER_DAY = 3;
 
@@ -257,4 +277,57 @@ export const ACHIEVEMENTS: AchievementDef[] = [
 export function isAchieved(a: AchievementDef, l: Lifetime): boolean {
   const [cur, target] = a.progress(l);
   return cur >= target;
+}
+
+// --- The daily sweep and the streak -----------------------------------------
+
+/** Paid once a day, when all of that day's run missions are done. */
+export const SWEEP_BONUS = { coins: 120, chest: "wooden" as const };
+
+export interface Streak {
+  /** Consecutive days with a mission won. */
+  days: number;
+  /** The last day (dayKey) that counted; null before the first. */
+  last: string | null;
+}
+
+/** The day before `day` ("YYYY-MM-DD"). */
+export function previousDay(day: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  return dayKey(new Date(y, m - 1, d - 1));
+}
+
+/** The streak after a mission is won on `today`: unchanged if today already
+ * counted, one longer if yesterday did, otherwise back to 1. */
+export function advanceStreak(prev: Streak, today: string): Streak {
+  if (prev.last === today) return prev;
+  if (prev.last === previousDay(today))
+    return { days: prev.days + 1, last: today };
+  return { days: 1, last: today };
+}
+
+/** The streak as it stands on `today`: a streak whose last day is older than
+ * yesterday has lapsed. */
+export function currentStreakDays(prev: Streak, today: string): number {
+  if (prev.last === today || prev.last === previousDay(today)) return prev.days;
+  return 0;
+}
+
+export const STREAK_BONUSES: { days: number; coins: number }[] = [
+  { days: 3, coins: 60 },
+  { days: 7, coins: 150 },
+  { days: 14, coins: 300 },
+  { days: 30, coins: 600 },
+];
+
+/** Coins for reaching exactly `days` in a row; 0 for any other length. */
+export function streakBonus(days: number): number {
+  return STREAK_BONUSES.find((b) => b.days === days)?.coins ?? 0;
+}
+
+/** The next milestone after `days`, or null past the last one. */
+export function nextStreakBonus(
+  days: number,
+): { days: number; coins: number } | null {
+  return STREAK_BONUSES.find((b) => b.days > days) ?? null;
 }

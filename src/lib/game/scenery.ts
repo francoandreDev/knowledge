@@ -69,7 +69,99 @@ function makeCanvas(w: number, h: number): HTMLCanvasElement | null {
   return O ? (new O(w, h) as HTMLCanvasElement) : null;
 }
 
-function floor(ctx: Ctx, w: number, h: number, p: Palette, rnd: () => number) {
+/** Soft tonal patches: the floor is never one flat colour, it is worn,
+ * stained and lit unevenly. */
+function blotches(
+  ctx: Ctx,
+  w: number,
+  h: number,
+  colors: string[],
+  n: number,
+  rnd: () => number,
+) {
+  for (let i = 0; i < n; i++) {
+    const r = 60 + rnd() * 150;
+    const x = rnd() * w;
+    const y = rnd() * h;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, colors[Math.floor(rnd() * colors.length)]);
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+}
+
+/** Dressed stone: every slab its own shade, a lit top-left edge and a dark
+ * bottom-right edge, grout between. */
+function slabs(
+  ctx: Ctx,
+  w: number,
+  h: number,
+  p: Palette,
+  rnd: () => number,
+  rowH: number,
+  colW: number,
+) {
+  for (let row = 0, y = 0; y < h + rowH; row++, y += rowH) {
+    const off = row % 2 ? colW / 2 : 0;
+    for (let x = -off; x < w; x += colW) {
+      const t = rnd();
+      ctx.fillStyle =
+        t < 0.33
+          ? "rgba(255,255,255,0.035)"
+          : t < 0.66
+            ? "rgba(0,0,0,0.1)"
+            : "rgba(0,0,0,0)";
+      ctx.fillRect(x + 1, y + 1, colW - 2, rowH - 2);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "rgba(255,255,255,0.07)";
+      ctx.beginPath();
+      ctx.moveTo(x + 2, y + rowH - 2);
+      ctx.lineTo(x + 2, y + 2);
+      ctx.lineTo(x + colW - 2, y + 2);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(0,0,0,0.3)";
+      ctx.beginPath();
+      ctx.moveTo(x + colW - 1, y + 2);
+      ctx.lineTo(x + colW - 1, y + rowH - 1);
+      ctx.lineTo(x + 2, y + rowH - 1);
+      ctx.stroke();
+    }
+  }
+  ctx.strokeStyle = p.line;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let y = 0; y < h + rowH; y += rowH) {
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+  }
+  ctx.stroke();
+}
+
+function speckle(
+  ctx: Ctx,
+  w: number,
+  h: number,
+  color: string,
+  n: number,
+  size: number,
+  rnd: () => number,
+) {
+  ctx.fillStyle = color;
+  for (let i = 0; i < n; i++) {
+    const s = 0.6 + rnd() * size;
+    ctx.fillRect(rnd() * w, rnd() * h, s, s);
+  }
+}
+
+function floor(
+  ctx: Ctx,
+  w: number,
+  h: number,
+  p: Palette,
+  rnd: () => number,
+  biome: Biome,
+) {
   const g = ctx.createRadialGradient(
     w / 2,
     h / 2,
@@ -82,32 +174,142 @@ function floor(ctx: Ctx, w: number, h: number, p: Palette, rnd: () => number) {
   g.addColorStop(1, p.base);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
-  // Flagstones laid in brick courses.
-  ctx.strokeStyle = p.line;
-  ctx.lineWidth = 1.5;
-  const rowH = 46;
-  const colW = 70;
-  for (let row = 0, y = 0; y < h + rowH; row++, y += rowH) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(w, y);
-    ctx.stroke();
-    const off = row % 2 ? colW / 2 : 0;
-    ctx.beginPath();
-    for (let x = -off; x < w; x += colW) {
-      ctx.moveTo(x, y);
-      ctx.lineTo(x, y + rowH);
+  switch (biome) {
+    case "crypt":
+      blotches(
+        ctx,
+        w,
+        h,
+        ["rgba(99,102,241,0.07)", "rgba(0,0,0,0.25)"],
+        16,
+        rnd,
+      );
+      slabs(ctx, w, h, p, rnd, 46, 70);
+      speckle(ctx, w, h, "rgba(226,232,240,0.12)", 260, 1.6, rnd);
+      break;
+    case "swamp":
+      blotches(
+        ctx,
+        w,
+        h,
+        ["rgba(34,197,94,0.09)", "rgba(120,53,15,0.12)", "rgba(0,0,0,0.3)"],
+        26,
+        rnd,
+      );
+      speckle(ctx, w, h, "rgba(74,222,128,0.2)", 420, 2, rnd);
+      speckle(ctx, w, h, "rgba(0,0,0,0.25)", 260, 2.4, rnd);
+      break;
+    case "ember":
+      blotches(
+        ctx,
+        w,
+        h,
+        ["rgba(249,115,22,0.07)", "rgba(0,0,0,0.3)", "rgba(127,29,29,0.12)"],
+        22,
+        rnd,
+      );
+      slabs(ctx, w, h, p, rnd, 58, 84);
+      speckle(ctx, w, h, "rgba(251,146,60,0.18)", 200, 1.8, rnd);
+      break;
+    case "frost":
+      blotches(
+        ctx,
+        w,
+        h,
+        ["rgba(224,242,254,0.1)", "rgba(56,189,248,0.07)", "rgba(0,0,0,0.2)"],
+        22,
+        rnd,
+      );
+      // Sheet ice: long fracture lines running across the whole field.
+      ctx.strokeStyle = "rgba(186,230,253,0.1)";
+      ctx.lineWidth = 1.2;
+      for (let i = 0; i < 16; i++) {
+        let x = rnd() * w;
+        let y = rnd() * h;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        for (let k = 0; k < 6; k++) {
+          x += 30 + rnd() * 50;
+          y += (rnd() - 0.5) * 60;
+          ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+      speckle(ctx, w, h, "rgba(255,255,255,0.35)", 220, 1.6, rnd);
+      break;
+  }
+}
+
+/** Light and weight at the borders: a dark rim all round and a lit spot in
+ * each corner (torches, lava seeps, witch-light, aurora), so the arena has
+ * walls even though nothing collides with them. */
+function frame(ctx: Ctx, w: number, h: number, p: Palette) {
+  const band = 46;
+  for (const [x0, y0, x1, y1] of [
+    [0, 0, 0, band],
+    [0, h, 0, h - band],
+    [0, 0, band, 0],
+    [w, 0, w - band, 0],
+  ]) {
+    const g = ctx.createLinearGradient(x0, y0, x1, y1);
+    g.addColorStop(0, "rgba(0,0,0,0.55)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  }
+  for (const [x, y] of [
+    [0, 0],
+    [w, 0],
+    [0, h],
+    [w, h],
+  ]) {
+    glow(ctx, x, y, 150, p.accent, 0.2);
+  }
+  ctx.strokeStyle = p.accent;
+  ctx.globalAlpha = 0.18;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(5, 5, w - 10, h - 10);
+  ctx.globalAlpha = 1;
+}
+
+/** Glowing seams (lava in the pit, cold light in the ice). */
+function veins(
+  ctx: Ctx,
+  w: number,
+  h: number,
+  rgb: string,
+  n: number,
+  rnd: () => number,
+) {
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (let i = 0; i < n; i++) {
+    let x = rnd() * w;
+    let y = rnd() * h;
+    let a = rnd() * Math.PI * 2;
+    const pts: [number, number][] = [[x, y]];
+    for (let k = 0; k < 6; k++) {
+      a += (rnd() - 0.5) * 1.6;
+      x += Math.cos(a) * (16 + rnd() * 26);
+      y += Math.sin(a) * (16 + rnd() * 26);
+      pts.push([x, y]);
     }
-    ctx.stroke();
+    for (const [lw, al] of [
+      [7, 0.07],
+      [3.5, 0.16],
+      [1.4, 0.55],
+    ]) {
+      ctx.strokeStyle = `rgba(${rgb},${al})`;
+      ctx.lineWidth = lw;
+      ctx.beginPath();
+      pts.forEach(([px, py], j) =>
+        j ? ctx.lineTo(px, py) : ctx.moveTo(px, py),
+      );
+      ctx.stroke();
+    }
   }
-  // A few stones a shade lighter or darker, so the floor is not a grid.
-  for (let i = 0; i < 38; i++) {
-    const x = Math.floor(rnd() * (w / colW)) * colW;
-    const y = Math.floor(rnd() * (h / rowH)) * rowH;
-    ctx.fillStyle =
-      rnd() < 0.5 ? "rgba(255,255,255,0.025)" : "rgba(0,0,0,0.12)";
-    ctx.fillRect(x + 1, y + 1, colW - 2, rowH - 2);
-  }
+  ctx.restore();
 }
 
 function cracks(
@@ -325,7 +527,7 @@ export function createBackdrop(
   const p = PALETTE[biome];
   const rnd = rngFrom(seed);
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
-  floor(ctx, w, h, p, rnd);
+  floor(ctx, w, h, p, rnd, biome);
   cracks(
     ctx,
     w,
@@ -338,7 +540,10 @@ export function createBackdrop(
     12,
     rnd,
   );
+  if (biome === "ember") veins(ctx, w, h, "251,113,36", 9, rnd);
+  if (biome === "frost") veins(ctx, w, h, "125,211,252", 5, rnd);
   props(ctx, w, h, biome, rnd);
+  frame(ctx, w, h, p);
   if (arena) {
     // Spawn pads and a centre emblem, so the duel ground reads as an arena.
     for (const fx of [0.2, 0.8]) {

@@ -1128,6 +1128,9 @@ export interface GameHudState {
   lowHp: boolean;
   /** The special move held, and how recharged it is (1 = ready). */
   special: { id: SpecialId; charge: number } | null;
+  /** How many times each relic's effect has fired this run, keyed by its
+   * cue kind (see RELIC_CUE). The HUD pulses a relic when its count grows. */
+  relicActivity: Record<string, number>;
 }
 
 export interface GameCallbacks {
@@ -1145,6 +1148,8 @@ export interface GameCallbacks {
     won: boolean;
     /** The boss fell during the run: a golden chest instead of a wooden one. */
     bossDefeated: boolean;
+    /** How many times each relic's effect fired, keyed by cue kind. */
+    relicActivity: Record<string, number>;
   }) => void;
   onLevelUp: (
     cards: LevelUpCard[],
@@ -1919,9 +1924,16 @@ export function startGame(
   // Effect cues (cueView.ts): a short animation where a relic or power acts.
   const cues: Cue[] = [];
   const cueGap: Record<string, number> = {};
+  // How often each relic's effect fired, for the HUD and the results screen.
+  // Counted before the gap check below: the gap only stops a crowd of
+  // identical events burying the screen, not the tally.
+  const relicCueKinds = new Set<string>(Object.values(RELIC_CUE));
+  const relicActivity: Record<string, number> = {};
   /** Fires a cue, at most once per `gapMs` of its kind, so a crowd of
    * identical events cannot bury the screen. */
   function addCue(cue: Omit<Cue, "at">, gapMs = 0) {
+    if (relicCueKinds.has(cue.kind))
+      relicActivity[cue.kind] = (relicActivity[cue.kind] ?? 0) + 1;
     const last = cueGap[cue.kind] ?? -Infinity;
     if (elapsedMs - last < gapMs) return;
     cueGap[cue.kind] = elapsedMs;
@@ -2062,6 +2074,7 @@ export function startGame(
       elapsedS: elapsedMs / 1000,
       regenPerS: hpRegenPerS + upgradeEffects.regenPerS,
       threatTier: computeThreatTier(elapsedMs / 1000),
+      relicActivity: { ...relicActivity },
       lowHp: player.hp > 0 && player.hp / effectiveMaxHp() <= LOW_HP_THRESHOLD,
       special: special
         ? {
@@ -4969,6 +4982,7 @@ export function startGame(
       cause,
       won: earnedChest,
       bossDefeated,
+      relicActivity: { ...relicActivity },
     });
   }
 

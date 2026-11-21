@@ -6,17 +6,24 @@ import { dayKey } from "./daily";
 import { grantChest } from "./meta";
 import {
   ACHIEVEMENTS,
+  advanceStreak,
   applyRun,
+  currentStreakDays,
   EMPTY_LIFETIME,
   isAchieved,
   missionsForDay,
+  MISSIONS_PER_DAY,
   newlyCompletedStudy,
+  nextStreakBonus,
+  streakBonus,
+  SWEEP_BONUS,
   STUDY_MISSIONS,
   isStudyDone,
   type AchievementDef,
   type Lifetime,
   type MissionDef,
   type RunStats,
+  type Streak,
   type StudyMissionDef,
   type StudyStats,
 } from "./missions";
@@ -25,6 +32,9 @@ import { addCoins } from "./shop";
 const LIFETIME_KEY = "game:lifetime";
 const MISSIONS_KEY_PREFIX = "game:missions:";
 const ACHIEVED_KEY = "game:achieved";
+const BEST_KEY_PREFIX = "game:mbest:";
+const SWEEP_KEY_PREFIX = "game:sweep:";
+const STREAK_KEY = "game:streak";
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -53,6 +63,8 @@ function achievedIds(): string[] {
 export interface MissionRow {
   def: MissionDef;
   done: boolean;
+  /** The best attempt so far today, as current and target. */
+  progress: [number, number];
 }
 
 export interface AchievementRow {
@@ -64,7 +76,70 @@ export interface AchievementRow {
 export function getTodaysMissions(now: Date = new Date()): MissionRow[] {
   const day = dayKey(now);
   const done = new Set(doneMissionIds(day));
-  return missionsForDay(day).map((def) => ({ def, done: done.has(def.id) }));
+  const best = readJson<Record<string, number>>(BEST_KEY_PREFIX + day, {});
+  return missionsForDay(day).map((def) => {
+    const target = def.measure({
+      survivedS: 0,
+      kills: 0,
+      level: 0,
+      coinsEarned: 0,
+      won: false,
+      bossDefeated: false,
+      endless: false,
+    })[1];
+    const isDone = done.has(def.id);
+    return {
+      def,
+      done: isDone,
+      progress: [isDone ? target : Math.min(best[def.id] ?? 0, target), target],
+    };
+  });
+}
+
+export interface SweepState {
+  done: number;
+  total: number;
+  claimed: boolean;
+}
+
+/** How close today's run missions are to the all-done bonus. */
+export function getSweepState(now: Date = new Date()): SweepState {
+  const day = dayKey(now);
+  const done = new Set(doneMissionIds(day));
+  return {
+    done: missionsForDay(day).filter((m) => done.has(m.id)).length,
+    total: MISSIONS_PER_DAY,
+    claimed: pStorage.getItem(SWEEP_KEY_PREFIX + day) === "1",
+  };
+}
+
+export interface StreakState {
+  /** Days in a row, 0 once it has lapsed. */
+  days: number;
+  /** A mission already counted today. */
+  activeToday: boolean;
+  next: { days: number; coins: number } | null;
+}
+
+export function getStreak(now: Date = new Date()): StreakState {
+  const stored = readJson<Streak>(STREAK_KEY, { days: 0, last: null });
+  const day = dayKey(now);
+  const days = currentStreakDays(stored, day);
+  return {
+    days,
+    activeToday: stored.last === day,
+    next: nextStreakBonus(days),
+  };
+}
+
+/** Counts today toward the streak and pays a milestone if it was just hit.
+ * Returns the new length and the bonus paid (0 when none). */
+function bumpStreak(now: Date): { days: number; bonus: number } {
+  const stored = readJson<Streak>(STREAK_KEY, { days: 0, last: null });
+  const next = advanceStreak(stored, dayKey(now));
+  if (next === stored) return { days: stored.days, bonus: 0 };
+  pStorage.setItem(STREAK_KEY, JSON.stringify(next));
+  return { days: next.days, bonus: streakBonus(next.days) };
 }
 
 export function getAchievementRows(): AchievementRow[] {
@@ -83,6 +158,10 @@ export function getAchievementRows(): AchievementRow[] {
 export interface RunRewards {
   missions: MissionDef[];
   achievements: AchievementDef[];
+  /** The all-three-done bonus, when this run earned it. */
+  sweep: typeof SWEEP_BONUS | null;
+  /** The streak after this run, and a milestone bonus if it hit one. */
+  streak: { days: number; bonus: number } | null;
   coins: number;
 }
 
@@ -103,6 +182,22 @@ export function recordRunForMissions(
   if (missions.length > 0) {
     pStorage.setItem(MISSIONS_KEY_PREFIX + day, JSON.stringify([...done]));
   }
+  // Remember the best attempt at each unfinished mission, so the panel can
+  // show how close a run came rather than only done / not done.
+  const best = readJson<Record<string, number>>(BEST_KEY_PREFIX + day, {});
+  for (const m of missionsForDay(day)) {
+    const [cur] = m.measure(stats);
+    if (cur > (best[m.id] ?? 0)) best[m.id] = cur;
+  }
+  pStorage.setItem(BEST_KEY_PREFIX + day, JSON.stringify(best));
+
+  const todays = missionsForDay(day);
+  const sweepEarned =
+    missions.length > 0 &&
+    todays.every((m) => done.has(m.id)) &&
+    pStorage.getItem(SWEEP_KEY_PREFIX + day) !== "1";
+  if (sweepEarned) pStorage.setItem(SWEEP_KEY_PREFIX + day, "1");
+  const streak = missions.length > 0 ? bumpStreak(now) : null;
 
   const got = new Set(achievedIds());
   const achievements = ACHIEVEMENTS.filter(
@@ -115,11 +210,20 @@ export function recordRunForMissions(
 
   const coins =
     missions.reduce((n, m) => n + m.coins, 0) +
-    achievements.reduce((n, a) => n + a.coins, 0);
+    achievements.reduce((n, a) => n + a.coins, 0) +
+    (sweepEarned ? SWEEP_BONUS.coins : 0) +
+    (streak?.bonus ?? 0);
   addCoins(coins);
   for (const a of achievements) if (a.chest) grantChest(a.chest);
+  if (sweepEarned) grantChest(SWEEP_BONUS.chest);
   document.dispatchEvent(new CustomEvent("game:missions-changed"));
-  return { missions, achievements, coins };
+  return {
+    missions,
+    achievements,
+    sweep: sweepEarned ? SWEEP_BONUS : null,
+    streak,
+    coins,
+  };
 }
 
 // --- Study missions --------------------------------------------------------
@@ -203,7 +307,8 @@ export function recordStudyEvent(
   for (const m of won) d.claimed.push(m.id);
   pStorage.setItem(STUDY_KEY_PREFIX + day, JSON.stringify(d));
   if (won.length > 0) {
-    addCoins(won.reduce((n, m) => n + m.coins, 0));
+    const streak = bumpStreak(now);
+    addCoins(won.reduce((n, m) => n + m.coins, 0) + streak.bonus);
     for (const m of won) if (m.chest) grantChest(m.chest);
   }
   document.dispatchEvent(new CustomEvent("game:missions-changed"));

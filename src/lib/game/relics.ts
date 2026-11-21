@@ -309,3 +309,44 @@ export function rollChest(
   }
   return { coins, finds };
 }
+
+// --- What the collection adds up to ---------------------------------------
+
+export interface BonusLine {
+  /** Stable key, for styling and tests. */
+  key: string;
+  /** Ready to show: "+12% damage". */
+  text: string;
+}
+
+const pct = (n: number) => `${Math.round(n * 100)}%`;
+const oneDecimal = (n: number) => `${Math.round(n * 100) / 100}`;
+
+/** The effects a set of relic levels grants, as short readable lines — only
+ * the ones that are active. Drives the collection summary and each relic's
+ * "now / next level" lines. */
+export function relicBonusLines(levels: Record<string, number>): BonusLine[] {
+  const fx = relicEffects(levels);
+  const out: BonusLine[] = [];
+  const mult = (key: string, v: number, label: string) => {
+    if (v > 1.0001) out.push({ key, text: `+${pct(v - 1)} ${label}` });
+  };
+  const flat = (key: string, v: number, text: (v: number) => string) => {
+    if (v > 0.0001) out.push({ key, text: text(v) });
+  };
+  mult("damage", fx.damageMult, "damage");
+  mult("maxHp", fx.maxHpMult, "max HP");
+  mult("speed", fx.speedMult, "move speed");
+  mult("pickup", fx.pickupRadiusMult, "pickup radius");
+  mult("coins", fx.coinMult, "coins");
+  mult("xp", fx.xpMult, "XP");
+  flat("regen", fx.regenPerS, (v) => `+${oneDecimal(v)} HP/s regen`);
+  flat("armor", fx.armor, (v) => `${pct(v)} damage ignored`);
+  flat("haste", fx.haste, (v) => `weapons ${pct(v)} faster`);
+  flat("crit", fx.critChance, (v) => `${pct(v)} double-damage hits`);
+  flat("killHeal", fx.killHeal, (v) => `+${oneDecimal(v)} HP per kill`);
+  flat("thorns", fx.thorns, (v) => `${pct(v)} contact damage reflected`);
+  flat("slow", fx.enemySlow, (v) => `enemies ${pct(v)} slower`);
+  flat("revive", fx.reviveHpFrac, (v) => `revive once at ${pct(v)} HP`);
+  return out;
+}

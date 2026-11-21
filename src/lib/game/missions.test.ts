@@ -1,12 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import {
   ACHIEVEMENTS,
+  advanceStreak,
   applyRun,
+  currentStreakDays,
   EMPTY_LIFETIME,
   isAchieved,
   MISSION_POOL,
   missionsForDay,
   MISSIONS_PER_DAY,
+  missionTier,
+  nextStreakBonus,
+  previousDay,
+  streakBonus,
   type RunStats,
 } from "./missions";
 
@@ -84,5 +90,86 @@ describe("achievements", () => {
   test("ids are unique", () => {
     const ids = ACHIEVEMENTS.map((a) => a.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe("mission progress", () => {
+  test("measure caps at the target and agrees with check", () => {
+    const partial = run({ kills: 100 });
+    const kills = MISSION_POOL.find((m) => m.id === "kills-250")!;
+    expect(kills.measure(partial)).toEqual([100, 250]);
+    expect(kills.measure(run({ kills: 900 }))).toEqual([250, 250]);
+    for (const m of MISSION_POOL) {
+      const [cur, target] = m.measure(
+        run({
+          kills: 900,
+          survivedS: 900,
+          level: 30,
+          coinsEarned: 500,
+          won: true,
+          bossDefeated: true,
+          endless: true,
+        }),
+      );
+      expect(cur).toBe(target);
+    }
+  });
+
+  test("an Endless mission shows no progress in a normal run", () => {
+    const endless = MISSION_POOL.find((m) => m.id === "endless-4m")!;
+    expect(endless.measure(run({ survivedS: 300, endless: false }))[0]).toBe(0);
+    expect(endless.measure(run({ survivedS: 120, endless: true }))[0]).toBe(
+      120,
+    );
+  });
+
+  test("tiers follow the payout", () => {
+    expect(missionTier(MISSION_POOL.find((m) => m.id === "kills-250")!)).toBe(
+      "easy",
+    );
+    expect(missionTier(MISSION_POOL.find((m) => m.id === "kills-600")!)).toBe(
+      "medium",
+    );
+    expect(missionTier(MISSION_POOL.find((m) => m.id === "boss-down")!)).toBe(
+      "hard",
+    );
+  });
+});
+
+describe("streak", () => {
+  test("starts, continues, repeats and breaks", () => {
+    const none = { days: 0, last: null };
+    const one = advanceStreak(none, "2026-11-20");
+    expect(one).toEqual({ days: 1, last: "2026-11-20" });
+    expect(advanceStreak(one, "2026-11-20")).toBe(one);
+    expect(advanceStreak(one, "2026-11-21")).toEqual({
+      days: 2,
+      last: "2026-11-21",
+    });
+    expect(advanceStreak(one, "2026-11-23")).toEqual({
+      days: 1,
+      last: "2026-11-23",
+    });
+  });
+
+  test("steps across month and year ends", () => {
+    expect(previousDay("2026-12-01")).toBe("2026-11-30");
+    expect(previousDay("2027-01-01")).toBe("2026-12-31");
+  });
+
+  test("a lapsed streak reads as zero", () => {
+    expect(
+      currentStreakDays({ days: 5, last: "2026-11-20" }, "2026-11-21"),
+    ).toBe(5);
+    expect(
+      currentStreakDays({ days: 5, last: "2026-11-20" }, "2026-11-22"),
+    ).toBe(0);
+  });
+
+  test("milestone bonuses", () => {
+    expect(streakBonus(3)).toBe(60);
+    expect(streakBonus(4)).toBe(0);
+    expect(nextStreakBonus(3)?.days).toBe(7);
+    expect(nextStreakBonus(30)).toBeNull();
   });
 });
